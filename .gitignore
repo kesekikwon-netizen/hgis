@@ -128,3 +128,8 @@ docs/vendor/qgis-manual-3.44/QGIS-*-DesktopUserGuide-*.pdf
 # 내부 개발 계획·실행 로그는 공개 저장소에 올리지 않는다.
 plans/
 logs/
+
+# 토큰 등 로컬 환경 파일. 예시 템플릿만 추적한다.
+.env
+*.env
+!.env.example
