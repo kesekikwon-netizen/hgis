@@ -123,6 +123,7 @@ private:
   void showLayerAreaSummary(QgsVectorLayer* layer, bool showRatio);
 
 private slots:
+  void exportMapGeoTiff();
   void newSurvey();
   void openVectorLayer();
   void importSoilShapefile();
@@ -197,6 +198,9 @@ private slots:
   void addBasemapVworld();
   void addBasemapVworldSat();
   void addBasemapVworldCadastral();
+  void downloadCadastral();
+  void configureCadastralAccount();
+  void configureCadastralStyle();
   void addBasemapOsm();
   void addBasemapGoogle();
   void removeSelectedLayers();
@@ -297,7 +301,7 @@ private:
   void scheduleMapDisplayRefresh();
   void bindMapDisplayScreen();
   void setWorkCrs(const QString& authId);
-  void searchLocation(const QString& query);
+  void searchLocation(const QString& query, bool parcel = false);
   void applySurfaceSurveyFieldMap(const QString& sido, const QString& city, const QString& dong);
   void onAdminBoundaryFetched(const AdminBoundaryParse& parsed);
   void onAdminBoundaryFailed(const QString& message);
@@ -492,6 +496,7 @@ private:
   KaSectionDrawingStudio* m_sectionStudio = nullptr;
   KaTerrain3dStudio* m_terrain3dStudio = nullptr;
   KaTerrain3dLayoutStudio* m_terrain3dLayoutStudio = nullptr;
+  QAction* m_actMapGeoTiff = nullptr;
   QTabWidget* m_viewTabs = nullptr;
   KaStartPage* m_startPage = nullptr;
   QWidget* m_mapPage = nullptr;

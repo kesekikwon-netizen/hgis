@@ -15,7 +15,7 @@ class QgsVectorLayer;
 // 주변유적은 **유적명과 정보가 붙어 있어야** 클릭해 읽고 보고서에 쓴다.
 // 자료 종류별로 레이어를 나누고, 종류마다 고정 색과 유적명 범례를 건다.
 //
-// 받은 자료는 조사폴더 안에만 둔다. 포터블·제출물에 실리지 않는다.
+// 받은 자료와 UTF-8 작업 사본은 로컬 캐시에 둔다. 포터블·제출물에 실리지 않는다.
 namespace HeritageImport {
 
 struct Result {
@@ -32,7 +32,8 @@ struct Result {
 QString chooseNameField(const QgsVectorLayer* layer);
 
 // 받은 파일(ZIP 또는 SHP 세트)을 풀어 한 종류의 레이어로 올린다.
-// archiveRoot 아래에 원본을 보관하고, 그 사본을 연다. 원본은 바꾸지 않는다.
+// 원본 인코딩으로 해석한 UTF-8 GeoPackage 작업 사본을 archiveRoot 아래에 보관해 연다.
+// 원본 ZIP/SHP와 .cpg는 바꾸지 않으며 한국어 필드명·속성·좌표계를 보존한다.
 Result loadDataset(QgsProject* project, HeritageDataset dataset,
                    const QStringList& downloadedFiles, const QString& archiveRoot);
 

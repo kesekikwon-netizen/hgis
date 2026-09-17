@@ -1,4 +1,5 @@
 #pragma once
+#include "core/HeritageLayoutNumbers.h"
 #include <QMainWindow>
 #include <QPoint>
 #include <QPointer>
@@ -61,6 +62,7 @@ public:
   void refreshMapFromProject();
   void updateLayerOpacityControl();
   void repaintMapLayers();
+  double drawingScale() const;
   // 입체지형 3D 그림을 맵 칸에 올리고, 축척·방위는 DEM 범위에 맞춘다.
   void placeTerrain3dPicture(const QString& pngPath, const QgsRectangle& groundExtent,
                              const QgsCoordinateReferenceSystem& crs);
@@ -71,6 +73,7 @@ public:
   bool eventFilter(QObject* watched, QEvent* event) override;
 
 public slots:
+  void setDrawingScale(double denominator);
   void beginActivateMap();
   void endActivateMap();
   void centerSurveyInMap();
@@ -87,6 +90,9 @@ public slots:
   void removeSelectedLayers();
   void undoLastChange();
 
+signals:
+  void drawingScaleChanged(double denominator);
+
 private slots:
   void beginDrawMapFrame();
   void useSelectTool();
@@ -95,6 +101,7 @@ private slots:
   void zoomPaperVisible();
   void onRectDrawn(const QRectF& layoutRect);
   void syncMapFromLayers();
+  void flushLayerSync();
   void toggleAllLayersChecked();
   void refreshLayerCheckAllButton();
   void savePdf();
@@ -123,6 +130,7 @@ private:
   void applyLayersToMap(QgsLayoutItemMap* map, bool includeLiveBasemap, bool refitExtent);
   // 라벨 위에 위 레이어를 한 번 더 그리는 덧지도를 본 지도에 맞춘다.
   void syncAboveLabelsMap(QgsLayoutItemMap* base);
+  bool syncHeritageNumbers(bool force = false);
   QgsVectorLayer* blankMapLayer();
   static void ensureLayoutGuiRegistered(QgsMapCanvas* mapCanvas);
   void startPlace(PlaceKind kind);
@@ -146,6 +154,7 @@ private:
   void finishPlace();
   void selectPlacedItem();
   void updateInspector(QgsLayoutItem* item);
+  void resizeSelectedDecoration(double percent);
   void setDrawerCardActive(QFrame* card);
   void syncScaleChips();
   void applyCrsGrid(QgsLayoutItemMap* map);
@@ -194,6 +203,7 @@ private:
   QCheckBox* m_legendBold = nullptr;
   QCheckBox* m_legendItalic = nullptr;
   QDoubleSpinBox* m_northSize = nullptr;
+  QDoubleSpinBox* m_decorationSize = nullptr;
   QSpinBox* m_scaleSpin = nullptr;
   QWidget* m_inspector = nullptr;
   QLabel* m_inspectorCap = nullptr;
@@ -217,6 +227,10 @@ private:
   QPoint m_mmbLast;
   QSize m_lastFitViewport;
   bool m_syncingMapFromLayers = false;
+  bool m_syncingHeritageNumbers = false;
+  HeritageLayoutNumbers m_heritageNumbers;
+  QTimer* m_layerSyncTimer = nullptr;
+  bool m_layerSyncPending = false;
   QTimer* m_scaleSyncTimer = nullptr;
   double m_savedLayoutDpi = 0.0;
   QVector<QPointF> m_coordMapPts;

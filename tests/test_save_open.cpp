@@ -1,9 +1,14 @@
 #include <QtTest>
+#include <cmath>
 #include <QComboBox>
+#include <QCheckBox>
+#include <QHeaderView>
 #include <QLineEdit>
 #include <QImage>
+#include <QPainter>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QDirIterator>
 #include <QFontDatabase>
 #include <QFontMetrics>
 #include <QSettings>
@@ -29,11 +34,13 @@
 #include <memory>
 
 #include "app/MainWindow.h"
+#include "app/KaWindowGeometry.h"
 #include "app/KaCaptureMapTool.h"
 #include "app/KaAttributeMapTool.h"
 #include "app/KaFeatureSelectTool.h"
 #include "app/KaVertexEditTool.h"
 #include "app/KaDrawingStudio.h"
+#include "app/KaLayerInformation.h"
 #include "app/KaTheme.h"
 #include "app/KaRegionLocator.h"
 #include "app/KaTopographicBrowser.h"
@@ -48,7 +55,10 @@
 #include "core/SurveyStorage.h"
 #include "core/DemPresentation.h"
 #include "core/DemColorRampLegend.h"
+#include "core/HeritageStyle.h"
+#include "core/HeritageLayoutNumbers.h"
 #include <qgsapplication.h>
+#include <qgscategorizedsymbolrenderer.h>
 #include <qgsfeature.h>
 #include <qgsexpression.h>
 #include <qgsexpressioncontext.h>
@@ -63,11 +73,19 @@
 #include <qgslayertreeview.h>
 #include <qgslayout.h>
 #include <qgslayoutitemmap.h>
+#include <qgslabelingresults.h>
+#include <qgslayoutitemlabel.h>
+#include <qgslayoutitemlegend.h>
+#include <qgslayoutitemscalebar.h>
+#include <qgslayoutexporter.h>
+#include <QDoubleSpinBox>
 #include <qgslayoutview.h>
 #include <qgsmapcanvas.h>
+#include <qgsmaplayerstyle.h>
 #include <qgsmaptopixel.h>
 #include <qgsmessagebar.h>
 #include <qgsmessagebaritem.h>
+#include <qgsmarkersymbollayer.h>
 #include <qgsnetworkaccessmanager.h>
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
@@ -80,6 +98,7 @@
 #include <qgsvectorfilewriter.h>
 #include <qgsvectorlayerlabeling.h>
 #include <qgspallabeling.h>
+#include <qgstextbackgroundsettings.h>
 
 static QString s_testSettingsPath;
 
@@ -276,6 +295,295 @@ private:
     return QgsProject::instance()->addMapLayer(layer.release());
   }
 private slots:
+  void compactLayerListKeepsHierarchyAndMapLabelSize() {
+    QgsProject project;
+    auto* group=project.layerTreeRoot()->addGroup(QStringLiteral("참조 지도"));
+    auto* layersGroup=group->addGroup(QStringLiteral("수치지형도"));
+    QgsVectorLayer* first=nullptr;
+    for(int i=0;i<18;++i) {
+      auto* layer=new QgsVectorLayer(QStringLiteral("LineString?crs=EPSG:5187&field=name:string"),
+          QStringLiteral("%1 · %2").arg(i+1).arg(i%2?QStringLiteral("지형 등고선"):QStringLiteral("조사 주변 경계")),QStringLiteral("memory"));
+      QVERIFY(layer->isValid());
+      LayerOps::applyNameAttributeLabels(layer,QStringLiteral("name"),8.,false);
+      project.addMapLayer(layer,false);
+      auto* node=layersGroup->addLayer(layer);
+      if(i==0) first=layer;
+      if(i==2) node->setItemVisibilityChecked(false);
+    }
+    const auto labelSize=LayerOps::labelFontSize(first,8.);
+    QgsLayerTreeModel baselineModel(project.layerTreeRoot());
+    QgsLayerTreeView baseline;
+    baseline.setModel(&baselineModel); baseline.resize(420,460); baseline.show(); baseline.expandAll();
+    KaLayerInformationModel model(&project,false);
+    model.setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility);
+    KaLayerInformationView tree;
+    tree.setModel(&model); KaLayerInformationModel::configureView(&tree);
+    tree.resize(420,460); tree.show(); tree.expandAll();
+    QTest::qWait(50);
+    const auto groupItem=tree.node2index(group);
+    const auto layerItem=tree.node2index(project.layerTreeRoot()->findLayer(first->id()));
+    const int oldHeight=baseline.visualRect(baseline.node2index(group)).height();
+    const int newHeight=tree.visualRect(groupItem).height();
+    qInfo()<<"LAYER_ROW_HEIGHT"<<oldHeight<<newHeight<<"FONT_PX"<<baseline.font().pixelSize()<<tree.font().pixelSize();
+    QCOMPARE(tree.font().pixelSize(),10);
+    QVERIFY(newHeight>0 && newHeight<=24 && newHeight<oldHeight);
+    QVERIFY(tree.alternatingRowColors());
+    const auto baseGroup=model.node2index(group);
+    const auto baseLayer=model.node2index(project.layerTreeRoot()->findLayer(first->id()));
+    QVERIFY(model.data(baseGroup,Qt::FontRole).value<QFont>().bold());
+    QVERIFY(!model.data(baseLayer,Qt::FontRole).value<QFont>().bold());
+    QVERIFY(model.data(baseGroup,Qt::ForegroundRole)!=model.data(baseLayer,Qt::ForegroundRole));
+    const auto visibleColor=model.data(baseLayer,Qt::ForegroundRole);
+    group->setItemVisibilityChecked(false);
+    QCoreApplication::processEvents();
+    QVERIFY(model.data(baseLayer,Qt::ForegroundRole)!=visibleColor);
+    QVERIFY(model.data(baseLayer,Qt::FontRole).value<QFont>().italic());
+    group->setItemVisibilityChecked(true);
+    QCoreApplication::processEvents();
+    QCOMPARE(model.data(baseLayer,Qt::ForegroundRole),visibleColor);
+    QCOMPARE(LayerOps::labelFontSize(first,8.),labelSize);
+    // Click the compact row's native visibility control, preserving label settings.
+    const QRect row=tree.visualRect(layerItem);
+    QTest::mouseClick(tree.viewport(),Qt::LeftButton,Qt::NoModifier,QPoint(row.left()+10,row.center().y()));
+    QTRY_VERIFY(!project.layerTreeRoot()->findLayer(first->id())->isVisible());
+    QCOMPARE(LayerOps::labelFontSize(first,8.),labelSize);
+    tree.clearSelection();
+    const auto output=qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if(!output.isEmpty()) {
+      QVERIFY(QDir().mkpath(output));
+      QVERIFY(tree.grab().save(QDir(output).filePath(QStringLiteral("compact-layer-list.png"))));
+    }
+  }
+
+  void layerInformationControlsIntegrateWithMapAndDrawingStudio_data() {
+    QTest::addColumn<QSize>("requestedSize");
+    QTest::addColumn<bool>("maximized");
+    if (qEnvironmentVariableIsEmpty("KA_HGIS_SMALL_SCREEN_QA")) {
+      QTest::newRow("default") << QSize(1280, 900) << false;
+      return;
+    }
+    const qreal factor = qEnvironmentVariable("QT_SCALE_FACTOR", "1").toDouble();
+    QTest::newRow("1920-maximized") << QSize(qRound(1920 / factor), qRound(1080 / factor)) << true;
+    QTest::newRow("1920-restored") << QSize(qRound(1600 / factor), qRound(900 / factor)) << false;
+    if (qFuzzyCompare(factor, 1.0))
+      QTest::newRow("1366-client") << QSize(1366, 768) << false;
+  }
+
+  void layerInformationControlsIntegrateWithMapAndDrawingStudio() {
+    QFETCH(QSize, requestedSize);
+    QFETCH(bool, maximized);
+    const QString path = makeSurvey(QStringLiteral("글자 체크 합성 조사"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    if (qEnvironmentVariableIsEmpty("KA_HGIS_SMALL_SCREEN_QA")) window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.resize(requestedSize);
+    if (maximized) window.showMaximized(); else window.show();
+    auto* project = QgsProject::instance();
+    auto* canvas = window.findChild<QgsMapCanvas*>(QStringLiteral("mapCanvas"));
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
+    auto* panel = window.findChild<KaLayerInformationPanel*>();
+    auto* model = tree ? qobject_cast<KaLayerInformationModel*>(tree->layerTreeModel()) : nullptr;
+    QVERIFY(canvas && tree && panel && model);
+    QVERIFY(!model->layoutMode());
+    QCOMPARE(model->columnCount(), 2);
+    auto* layer = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187&field=nm:string(80)"),
+                                      QStringLiteral("합성 주변유적"), QStringLiteral("memory"));
+    QVERIFY(layer->isValid());
+    QVERIFY(layer->startEditing());
+    QgsFeature feature(layer->fields());
+    feature.setAttribute(QStringLiteral("nm"), QStringLiteral("체크로 표시하는 유적"));
+    feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(190020., 560020., 190060., 560060.)));
+    QVERIFY(layer->addFeature(feature));
+    QVERIFY(layer->commitChanges());
+    QVERIFY(layer->getFeatures().nextFeature(feature));
+    QVERIFY(HeritageStyle::apply(layer, HeritageDataset::SurfaceSurveyArea, QStringLiteral("nm")).ok);
+    QgsPalLayerSettings labels;
+    labels.fieldName = QStringLiteral("nm");
+    layer->setLabeling(new QgsVectorLayerSimpleLabeling(labels));
+    layer->setLabelsEnabled(true);
+    LayerOps::markReferenceLayer(layer);
+    project->addMapLayer(layer, false);
+    auto* reference = project->layerTreeRoot()->findGroup(QStringLiteral("참조 지도"));
+    if (!reference) reference = project->layerTreeRoot()->addGroup(QStringLiteral("참조 지도"));
+    auto* node = reference->addGroup(HeritageStyle::layerName(HeritageDataset::SurfaceSurveyArea))->addLayer(layer);
+    const auto originalGeometry = layer->getFeature(feature.id()).geometry().asWkb();
+    tree->setFixedWidth(220);
+    tree->expandAll();
+    tree->setCurrentLayer(layer);
+    const auto item = tree->node2index(node).siblingAtColumn(1);
+    QVERIFY(item.isValid());
+    tree->scrollTo(item);
+    QCoreApplication::processEvents();
+    QVERIFY(tree->isVisible() && panel->isVisible());
+    QVERIFY(!tree->isHeaderHidden());
+    QTRY_VERIFY(tree->header()->sectionViewportPosition(1) + tree->header()->sectionSize(1) <= tree->viewport()->width());
+    QVERIFY(tree->header()->sectionSize(0) > 0);
+    QVERIFY(tree->header()->sectionSize(1) >= 70);
+    auto* checkbox = panel->findChild<QCheckBox*>(QStringLiteral("layerLabelVisible"));
+    QVERIFY(checkbox);
+    QTRY_VERIFY(checkbox->isChecked());
+    const QRect cell = tree->visualRect(item);
+    qInfo()<<"LAYER_INFORMATION_VIEWPORT"<<tree->viewport()->rect()<<"CELL"<<cell;
+    if(!qEnvironmentVariableIsEmpty("KA_HGIS_QA_OUTPUT_DIR")) {
+      const auto diagnosticDirectory=qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+      QDir().mkpath(diagnosticDirectory);
+      window.grab().save(QDir(diagnosticDirectory).filePath(QStringLiteral("layer-list-integration-before-click.png")));
+    }
+    QVERIFY(tree->viewport()->rect().contains(cell.center()));
+    QVERIFY2(tree->viewport()->height() >= 4 * 22, "four layer rows remain available");
+    QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, QPoint(cell.left() + 10, cell.center().y()));
+    QTRY_VERIFY(!layer->labelsEnabled());
+    QVERIFY(node->isVisible());
+    QCOMPARE(layer->featureCount(), 1);
+    QCOMPARE(layer->getFeature(feature.id()).geometry().asWkb(), originalGeometry);
+    QTRY_VERIFY(!checkbox->isChecked());
+    auto* settingsToggle = panel->findChild<QToolButton*>(QStringLiteral("layerInformationToggle"));
+    QVERIFY(settingsToggle);
+    QTest::mouseClick(settingsToggle, Qt::LeftButton);
+    QTRY_VERIFY(checkbox->isVisible());
+    auto* settingsScroll = panel->findChild<QScrollArea*>(QStringLiteral("layerInformationScroll"));
+    QVERIFY(settingsScroll);
+    settingsScroll->ensureWidgetVisible(checkbox);
+    QCoreApplication::processEvents();
+    QVERIFY(settingsScroll->viewport()->rect().contains(checkbox->mapTo(settingsScroll->viewport(), checkbox->rect().center())));
+    QTest::mouseClick(checkbox, Qt::LeftButton, Qt::NoModifier, QPoint(8, checkbox->height() / 2));
+    QTRY_VERIFY(layer->labelsEnabled());
+    QCOMPARE(layer->labeling()->settings().fieldName, QStringLiteral("nm"));
+
+    canvas->setDestinationCrs(project->crs());
+    canvas->setLayers({layer});
+    canvas->setExtent(QgsRectangle(189900., 559900., 190200., 560200.));
+    const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if (!output.isEmpty()) {
+      QVERIFY(QDir().mkpath(output));
+      QSignalSpy rendered(canvas, &QgsMapCanvas::mapCanvasRefreshed);
+      canvas->setRenderFlag(true);
+      canvas->refresh();
+      QTRY_VERIFY_WITH_TIMEOUT(!rendered.isEmpty(), 5000);
+      tree->setMaximumWidth(QWIDGETSIZE_MAX);
+      tree->setMinimumWidth(300);
+      QCoreApplication::processEvents();
+      QVERIFY(window.grab().save(QDir(output).filePath(QStringLiteral("layer-information-map.png"))));
+      QVERIFY(panel->parentWidget()->grab().save(QDir(output).filePath(QStringLiteral("layer-information-controls.png"))));
+      canvas->setRenderFlag(false);
+    }
+
+    KaDrawingStudio studio(project, canvas, 297., 210.);
+    if (qEnvironmentVariableIsEmpty("KA_HGIS_SMALL_SCREEN_QA")) studio.setAttribute(Qt::WA_DontShowOnScreen);
+    studio.resize(requestedSize);
+    if (maximized) studio.showMaximized(); else studio.show();
+    studio.centerOnMapCanvas();
+    auto* layoutTree = studio.findChild<QgsLayerTreeView*>(QStringLiteral("layoutLayerTree"));
+    auto* layoutPanel = studio.findChild<KaLayerInformationPanel*>();
+    auto* layoutModel = layoutTree ? qobject_cast<KaLayerInformationModel*>(layoutTree->layerTreeModel()) : nullptr;
+    auto* view = studio.findChild<QgsLayoutView*>();
+    QVERIFY(layoutTree && layoutPanel && layoutModel && view && view->currentLayout());
+    QVERIFY(layoutModel->layoutMode());
+    layoutTree->setFixedWidth(220);
+    layoutTree->expandAll();
+    layoutTree->setCurrentLayer(layer);
+    const auto layoutItem = layoutTree->node2index(node).siblingAtColumn(1);
+    QVERIFY(layoutItem.isValid());
+    layoutTree->scrollTo(layoutItem);
+    layoutTree->setCurrentIndex(layoutItem);
+    layoutTree->setFocus();
+    QTRY_VERIFY(layoutPanel->isVisible());
+    QTRY_VERIFY(layoutTree->header()->sectionViewportPosition(1) + layoutTree->header()->sectionSize(1) <= layoutTree->viewport()->width());
+    auto* map = dynamic_cast<QgsLayoutItemMap*>(view->currentLayout()->itemById(QStringLiteral("ka_map")));
+    QVERIFY(map);
+    QTRY_VERIFY_WITH_TIMEOUT(map->layerStyleOverrides().contains(layer->id()), 5000);
+    auto* numbers = HeritageLayoutNumbers::forMap(map);
+    QVERIFY(numbers);
+    QTRY_COMPARE_WITH_TIMEOUT(numbers->entries().size(), 1, 5000);
+    auto* layoutCheckbox = layoutPanel->findChild<QCheckBox*>(QStringLiteral("layerLabelVisible"));
+    QVERIFY(layoutCheckbox);
+    QTRY_VERIFY(layoutCheckbox->text().contains(QStringLiteral("번호")));
+    QTest::keyClick(layoutTree, Qt::Key_Space);
+    QTRY_VERIFY(!layer->customProperty(QStringLiteral("ka_hgis/layout_numbers_visible"), true).toBool());
+    QTRY_VERIFY_WITH_TIMEOUT(numbers->entries().isEmpty(), 5000);
+    QVERIFY(layer->labelsEnabled());
+    QVERIFY(node->isVisible());
+    QCOMPARE(layer->getFeature(feature.id()).geometry().asWkb(), originalGeometry);
+    std::unique_ptr<QgsVectorLayer> drawing(layer->clone());
+    QgsMapLayerStyle(map->layerStyleOverrides().value(layer->id())).writeToLayer(drawing.get());
+    QVERIFY(!drawing->labelsEnabled());
+    auto* layoutSettingsToggle = layoutPanel->findChild<QToolButton*>(QStringLiteral("layerInformationToggle"));
+    QVERIFY(layoutSettingsToggle);
+    QTest::mouseClick(layoutSettingsToggle, Qt::LeftButton);
+    QTRY_VERIFY(layoutCheckbox->isVisible());
+    auto* layoutSettingsScroll = layoutPanel->findChild<QScrollArea*>(QStringLiteral("layerInformationScroll"));
+    QVERIFY(layoutSettingsScroll);
+    layoutSettingsScroll->ensureWidgetVisible(layoutCheckbox);
+    QCoreApplication::processEvents();
+    QVERIFY(layoutSettingsScroll->viewport()->rect().contains(layoutCheckbox->mapTo(layoutSettingsScroll->viewport(), layoutCheckbox->rect().center())));
+    QTest::mouseClick(layoutCheckbox, Qt::LeftButton, Qt::NoModifier, QPoint(8, layoutCheckbox->height() / 2));
+    QTRY_VERIFY(layer->customProperty(QStringLiteral("ka_hgis/layout_numbers_visible"), true).toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(numbers->entries().size(), 1, 5000);
+    QCOMPARE(numbers->entries().first().number, 1);
+    if (!output.isEmpty()) {
+      QSignalSpy rendered(map, &QgsLayoutItemMap::previewRefreshed);
+      map->refresh();
+      view->viewport()->update();
+      QTRY_VERIFY_WITH_TIMEOUT(!rendered.isEmpty(), 5000);
+      layoutTree->setMaximumWidth(QWIDGETSIZE_MAX);
+      layoutTree->setMinimumWidth(300);
+      QCoreApplication::processEvents();
+      QVERIFY(studio.grab().save(QDir(output).filePath(QStringLiteral("layer-information-studio.png"))));
+    }
+    project->setDirty(false);
+  }
+
+  void geoTiffButtonOnlyEnabledOnMapTab() {
+    MainWindow window;
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("viewTabs"));
+    auto* button = window.findChild<QToolButton*>(QStringLiteral("btnMapGeoTiff"));
+    QVERIFY(tabs && button);
+    QVERIFY(!button->isEnabled());
+    int mapIndex = -1;
+    for (int i = 0; i < tabs->count(); ++i)
+      if (tabs->tabText(i) == QStringLiteral("지도")) mapIndex = i;
+    QVERIFY(mapIndex >= 0);
+    tabs->setCurrentIndex(mapIndex);
+    QVERIFY(button->isEnabled());
+    QVERIFY(button->defaultAction());
+    QCOMPARE(button->defaultAction()->objectName(), QStringLiteral("actionMapGeoTiff"));
+    tabs->setCurrentIndex(0);
+    QVERIFY(!button->isEnabled());
+  }
+  void windowGeometryFitsLogicalMonitors_data() {
+    QTest::addColumn<QRect>("available");
+    QTest::newRow("1024x768") << QRect(0, 0, 1024, 728);
+    QTest::newRow("1366x768") << QRect(0, 0, 1366, 728);
+    QTest::newRow("1920x1080") << QRect(0, 0, 1920, 1040);
+    QTest::newRow("150-percent") << QRect(0, 0, 910, 472);
+    QTest::newRow("200-percent") << QRect(0, 0, 960, 500);
+    QTest::newRow("negative-monitor") << QRect(-1920, -1080, 1920, 1040);
+  }
+  void windowGeometryFitsLogicalMonitors() {
+    QFETCH(QRect, available);
+    const QMargins frame(8, 32, 8, 8);
+    for (const QRect& requested : {QRect(3000, 1600, 1280, 900), QRect(-3000, -1800, 980, 720)}) {
+      const QRect fitted = KaWindowGeometry::fittedClientRect(requested, available, frame);
+      QVERIFY(available.contains(fitted.marginsAdded(frame)));
+      QCOMPARE(KaWindowGeometry::fittedClientRect(fitted, available, frame), fitted);
+    }
+  }
+  void mainWindowFitsAvailableScreenOnShow() {
+    MainWindow window;
+    disableRendering(window);
+    window.resize(1920, 1080);
+    window.show();
+    QCoreApplication::processEvents();
+    const QRect available = window.screen()->availableGeometry();
+    QVERIFY2(available.contains(window.frameGeometry()), qPrintable(
+        QStringLiteral("screen %1x%2, window %3x%4")
+            .arg(available.width()).arg(available.height())
+            .arg(window.frameGeometry().width()).arg(window.frameGeometry().height())));
+    QgsProject::instance()->setDirty(false);
+  }
   void topographicActualWindowRemainsStableAfterCompletion() {
     const QDir cache(qEnvironmentVariable("KA_HGIS_QA_TOPOGRAPHIC_SHP"));
     if(qEnvironmentVariableIsEmpty("KA_HGIS_QA_TOPOGRAPHIC_SHP")) QSKIP("Opt-in real SHP rendering/idle diagnostic");
@@ -428,17 +736,32 @@ private slots:
     QVERIFY(tabs);
     QWidget* map=tabs->currentWidget();
     QVERIFY(!window.findChild<KaTopographicBrowser*>());
-    QVERIFY(QMetaObject::invokeMethod(&window, "openTopographicDownload", Qt::DirectConnection));
+    auto* downloadButton=window.findChild<QToolButton*>(QStringLiteral("btnTopographic"));
+    QVERIFY(downloadButton);
+    downloadButton->click();
     auto* browser = window.findChild<KaTopographicBrowser*>();
     QVERIFY(browser);
     browser->stopAutomatic();
     browser->navigate(QUrl(QStringLiteral("about:blank")));
     QCOMPARE(browser->parentWidget(),&window);
     QCOMPARE(browser->windowModality(),Qt::NonModal);
+    QCOMPARE(browser->windowType(),Qt::Dialog);
+    QVERIFY(browser->property("kaDownloadWindow").toBool());
+    auto* title=browser->findChild<QLabel*>(QStringLiteral("downloadTitle"));
+    auto* stage=browser->findChild<QLabel*>(QStringLiteral("topographicCurrentStage"));
+    auto* trail=browser->findChild<QLabel*>(QStringLiteral("topographicStageTrail"));
+    QVERIFY(title && title->isVisible());
+    QVERIFY(stage && stage->isVisible());
+    QVERIFY(trail && !trail->isVisible());
     QCOMPARE(tabs->currentWidget(),map);
     QCOMPARE(tabs->indexOf(browser),-1);
     auto* details=browser->findChild<QWidget*>(QStringLiteral("topographicOfficialDetails"));
     QVERIFY(details && details->isHidden());
+    const auto downloadQa=qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if(!downloadQa.isEmpty()) {
+      QVERIFY(QDir().mkpath(downloadQa));
+      QVERIFY(browser->grab().save(QDir(downloadQa).filePath(QStringLiteral("topographic-from-ribbon.png"))));
+    }
     browser->hide();
     QVERIFY(QMetaObject::invokeMethod(&window, "openTopographicDownload", Qt::DirectConnection));
     browser->stopAutomatic();
@@ -511,6 +834,515 @@ private slots:
     }
     QgsProject::instance()->setDirty(false);
   }
+  void drawingStudio_decorationsMoveAndShrink() {
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+    QgsMapCanvas canvas;
+    canvas.setRenderFlag(false);
+    canvas.setDestinationCrs(project.crs());
+    canvas.setExtent(QgsRectangle(190000, 560000, 191000, 561000));
+    KaDrawingStudio studio(&project, &canvas, 297., 210.);
+    studio.setAttribute(Qt::WA_DontShowOnScreen);
+    studio.show();
+    QCoreApplication::processEvents();
+    auto* view = studio.findChild<QgsLayoutView*>();
+    QVERIFY(view && view->currentLayout());
+    auto* ly = view->currentLayout();
+    auto* map = dynamic_cast<QgsLayoutItemMap*>(ly->itemById(QStringLiteral("ka_map")));
+    QVERIFY(map);
+    auto* size = studio.findChild<QDoubleSpinBox*>(QStringLiteral("decorationSize"));
+    QVERIFY(QMetaObject::invokeMethod(&studio, "useSelectTool"));
+    QMap<QString, QPointF> positions;
+    for (const QString& id : {QStringLiteral("ka_scalebar"), QStringLiteral("ka_scale"),
+                              QStringLiteral("ka_crs"), QStringLiteral("ka_north")}) {
+      auto* item = ly->itemById(id);
+      QVERIFY2(item, qPrintable(id));
+      QVERIFY2(!item->isLocked(), qPrintable(id + QStringLiteral(" is locked")));
+      QVERIFY(size);
+      // Zoom in so the small compass's rotation handles do not cover its body.
+      view->setZoomLevel(2.);
+      view->centerOn(item);
+      ly->setSelectedItem(item);
+      QCoreApplication::processEvents();
+      QVERIFY(size->isEnabled());
+      const QRectF before(item->pos(), item->rect().size());
+      const QPoint from = view->mapFromScene(item->mapToScene(item->rect().center()));
+      const QPoint to = from + QPoint(18, -24);
+      QMouseEvent hover(QEvent::MouseMove, QPointF(from), view->viewport()->mapToGlobal(from),
+                        Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+      QApplication::sendEvent(view->viewport(), &hover);
+      QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, from);
+      QMouseEvent drag(QEvent::MouseMove, QPointF(to), view->viewport()->mapToGlobal(to),
+                       Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+      QApplication::sendEvent(view->viewport(), &drag);
+      // QGIS mouse handles use lastScenePos(), so supply consecutive movement events
+      // as a real pointer does before releasing the button.
+      QApplication::sendEvent(view->viewport(), &drag);
+      QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, to);
+      const QPointF moved = item->pos();
+      qInfo() << "decoration drag" << id << before << from << to << moved << item->rect().size();
+      const QString dragOutput = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+      if (!dragOutput.isEmpty() && QLineF(before.topLeft(), moved).length() <= 3.)
+        studio.grab().save(QDir(dragOutput).filePath(QStringLiteral("decoration-drag-failure.png")));
+      QVERIFY2(QLineF(before.topLeft(), moved).length() > 3., qPrintable(id + QStringLiteral(" did not drag")));
+      QVERIFY(qAbs(item->itemRotation()) < .001);
+      positions.insert(id, moved);
+      const auto* bar = dynamic_cast<QgsLayoutItemScaleBar*>(item);
+      const double distance = bar ? bar->unitsPerSegment() : 0.;
+      const auto* label = dynamic_cast<QgsLayoutItemLabel*>(item);
+      const double fontSize = label ? label->font().pointSizeF() : 0.;
+      size->setValue(50.);
+      QVERIFY(item->rect().width() < before.width() * .8);
+      QVERIFY(item->rect().height() < before.height());
+      QVERIFY(QLineF(item->pos(), moved).length() < .01);
+      if (bar) QVERIFY(qAbs(bar->unitsPerSegment() / distance - .5) < .001);
+      if (label) QVERIFY(qAbs(label->font().pointSizeF() / fontSize - .5) < .001);
+      view->setFocus();
+      studio.undoLastChange();
+      item = ly->itemById(id); // QGIS undo may replace the layout item.
+      QVERIFY(item);
+      QCOMPARE(size->value(), 100.);
+      QVERIFY(qAbs(item->rect().width() - before.width()) < .01);
+      size->setValue(50.);
+      const QSizeF shrunk = item->rect().size();
+      // A normal scale refresh used to reset and lock every decoration.
+      QVERIFY(QMetaObject::invokeMethod(&studio, "flushHeavyScaleSync"));
+      QVERIFY(QLineF(item->pos(), moved).length() < .01);
+      QVERIFY(qAbs(item->rect().width() - shrunk.width()) < .01);
+      QVERIFY(!item->isLocked());
+    }
+    auto* bar = dynamic_cast<QgsLayoutItemScaleBar*>(ly->itemById(QStringLiteral("ka_scalebar")));
+    QVERIFY(bar);
+    const QPointF barPosition = bar->pos();
+    const double oldDistance = bar->unitsPerSegment();
+    map->setScale(map->scale() * 2.);
+    QVERIFY(QMetaObject::invokeMethod(&studio, "flushHeavyScaleSync"));
+    QVERIFY(bar->unitsPerSegment() > oldDistance);
+    QCOMPARE(bar->linkedMap(), map);
+    QVERIFY(QLineF(bar->pos(), barPosition).length() < .01);
+    studio.refreshMapFromProject();
+    QVERIFY(QLineF(bar->pos(), barPosition).length() < .01);
+    ly->setSelectedItem(bar);
+    QCOMPARE(size->value(), 50.);
+    for (auto it = positions.cbegin(); it != positions.cend(); ++it)
+      QVERIFY(QLineF(ly->itemById(it.key())->pos(), it.value()).length() < .01);
+    // The lower bound must shrink the rendered bar and distance again.
+    ly->setSelectedItem(bar);
+    const double halfDistance = bar->unitsPerSegment();
+    const double halfWidth = bar->rect().width();
+    size->setValue(25.);
+    QVERIFY(qAbs(bar->unitsPerSegment() / halfDistance - .5) < .001);
+    QVERIFY(bar->rect().width() < halfWidth * .8);
+    size->setValue(50.);
+    // Exercise style switches after shrinking: these used to recreate/reset items.
+    QVERIFY(QMetaObject::invokeMethod(&studio, "beginPlaceNorth", Q_ARG(QString, QStringLiteral("arrows/NorthArrow_04.svg"))));
+    QVERIFY(QMetaObject::invokeMethod(&studio, "beginPlaceScaleBar", Q_ARG(QString, QStringLiteral("Line Ticks Up"))));
+    QVERIFY(QMetaObject::invokeMethod(&studio, "beginPlaceScaleLabel"));
+    QCoreApplication::processEvents();
+    studio.refreshMapFromProject();
+    for (auto it = positions.cbegin(); it != positions.cend(); ++it)
+      QVERIFY(QLineF(ly->itemById(it.key())->pos(), it.value()).length() < .01);
+    QgsLayoutExporter exporter(ly);
+    const QImage page = exporter.renderPageToImage(0, QSize(), 150.);
+    QVERIFY(!page.isNull());
+    const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    QTemporaryDir temp;
+    const QString pdf = QDir(output.isEmpty() ? temp.path() : output).filePath(QStringLiteral("decoration-resized.pdf"));
+    QgsLayoutExporter::PdfExportSettings settings;
+    QCOMPARE(exporter.exportToPdf(pdf, settings), QgsLayoutExporter::Success);
+    QVERIFY(QFileInfo(pdf).size() > 1000);
+    if (!output.isEmpty()) {
+      QVERIFY(QMetaObject::invokeMethod(&studio, "zoomPaperVisible"));
+      QVERIFY(page.save(QDir(output).filePath(QStringLiteral("decoration-resized.png"))));
+      QVERIFY(studio.grab().save(QDir(output).filePath(QStringLiteral("decoration-editor.png"))));
+    }
+  }
+  void drawingStudio_heritageRefreshRequestsCoalesceAndReuseOnRevisit() {
+    constexpr int categoryCount = 200;
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+    auto* layer = new QgsVectorLayer(
+        QStringLiteral("Polygon?crs=EPSG:5187&field=nm:string(80)"),
+        QStringLiteral("합성 지표 자료"), QStringLiteral("memory"));
+    QVERIFY(layer->isValid());
+    QVERIFY(layer->startEditing());
+    for (int i = 0; i < categoryCount; ++i) {
+      const double x = 190050. + (i % 20) * 80.;
+      const double y = 560050. + (i / 20) * 80.;
+      QgsFeature feature(layer->fields());
+      feature.setAttribute(QStringLiteral("nm"), QStringLiteral("합성 유적 %1").arg(i, 3, 10, QLatin1Char('0')));
+      feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(x, y, x + 30., y + 30.)));
+      QVERIFY(layer->addFeature(feature));
+    }
+    QVERIFY(layer->commitChanges());
+    QVERIFY(HeritageStyle::apply(layer, HeritageDataset::SurfaceSurveyArea, QStringLiteral("nm")).ok);
+    LayerOps::markReferenceLayer(layer);
+    project.addMapLayer(layer, false);
+    project.layerTreeRoot()->addGroup(QStringLiteral("참조 지도"))
+        ->addGroup(HeritageStyle::layerName(HeritageDataset::SurfaceSurveyArea))->addLayer(layer);
+    QgsMapCanvas canvas;
+    canvas.setRenderFlag(false);
+    canvas.setDestinationCrs(project.crs());
+    canvas.setLayers({layer});
+    canvas.setExtent(QgsRectangle(190000., 560000., 192000., 562000.));
+    QElapsedTimer elapsed;
+    elapsed.start();
+    KaDrawingStudio studio(&project, &canvas, 297., 210.);
+    studio.setAttribute(Qt::WA_DontShowOnScreen);
+    studio.resize(1400, 900);
+    studio.show();
+    auto* view = studio.findChild<QgsLayoutView*>();
+    QVERIFY(view && view->currentLayout());
+    auto* layout = view->currentLayout();
+    QTRY_VERIFY_WITH_TIMEOUT(layout->itemById(QStringLiteral("ka_map")), 5000);
+    auto* map = dynamic_cast<QgsLayoutItemMap*>(layout->itemById(QStringLiteral("ka_map")));
+    QVERIFY(map);
+    // Match MainWindow's real first-entry centering before measuring revisits.
+    studio.centerOnMapCanvas();
+    QTRY_VERIFY_WITH_TIMEOUT(map->layerStyleOverrides().contains(layer->id()), 5000);
+    const qint64 firstReadyMs = elapsed.elapsed();
+    QVERIFY(QMetaObject::invokeMethod(&studio, "beginPlaceLegend"));
+    auto* legend = dynamic_cast<QgsLayoutItemLegend*>(layout->itemById(QStringLiteral("ka_legend")));
+    QVERIFY(legend);
+    QSignalSpy overridesChanged(map, &QgsLayoutItemMap::layerStyleOverridesChanged);
+    QSignalSpy previewRendered(map, &QgsLayoutItemMap::previewRefreshed);
+    map->invalidateCache();
+    map->refresh();
+    view->viewport()->update();
+    QTRY_VERIFY_WITH_TIMEOUT(previewRendered.count() > 0, 5000);
+    // Let the 80 ms layer and 280 ms scale timers settle after first paint.
+    QTest::qWait(450);
+    QTRY_VERIFY_WITH_TIMEOUT(legend->model()->rootGroup()->findLayer(layer->id()), 5000);
+    overridesChanged.clear();
+    auto* legendLayer = legend->model()->rootGroup()->findLayer(layer->id());
+    QVERIFY(legendLayer);
+    const auto legendNodes = legend->model()->layerLegendNodes(legendLayer);
+    QVERIFY(!legendNodes.isEmpty());
+    QPointer<QgsLayerTreeModelLegendNode> retainedLegendNode(legendNodes.first());
+    for (int i = 0; i < 10; ++i) {
+      studio.centerOnMapCanvas();
+      studio.refreshMapFromProject();
+    }
+    QTest::qWait(450);
+    QCOMPARE(overridesChanged.count(), 0);
+    QVERIFY(!retainedLegendNode.isNull());
+    QCOMPARE(legend->model()->layerLegendNodes(legendLayer).first(), retainedLegendNode.data());
+
+    studio.hide();
+    for (int i = 0; i < 10; ++i) studio.refreshMapFromProject();
+    QTest::qWait(450);
+    QCOMPARE(overridesChanged.count(), 0);
+    elapsed.restart();
+    studio.show();
+    studio.centerOnMapCanvas();
+    studio.refreshMapFromProject();
+    QCoreApplication::processEvents();
+    const qint64 revisitShowMs = elapsed.elapsed();
+    QTest::qWait(450);
+    QCOMPARE(overridesChanged.count(), 0);
+    QVERIFY(!retainedLegendNode.isNull());
+
+    auto recolorSource = [&](const QColor& color) {
+      auto* renderer = dynamic_cast<QgsCategorizedSymbolRenderer*>(layer->renderer()->clone());
+      if (!renderer) return false;
+      for (int i = 0; i < renderer->categories().size(); ++i) {
+        auto* symbol = renderer->categories().at(i).symbol()->clone();
+        symbol->setColor(color);
+        renderer->updateCategorySymbol(i, symbol);
+      }
+      layer->setRenderer(renderer);
+      return true;
+    };
+    auto overrideFill = [&]() {
+      std::unique_ptr<QgsVectorLayer> drawing(layer->clone());
+      QgsMapLayerStyle(map->layerStyleOverrides().value(layer->id())).writeToLayer(drawing.get());
+      return drawing->labeling() ? drawing->labeling()->settings().format().background().fillColor() : QColor();
+    };
+    const QColor visibleColor(QStringLiteral("#3178cc"));
+    auto* numberOwner = HeritageLayoutNumbers::forMap(map);
+    QVERIFY(numberOwner);
+    quint64 candidateRevision = numberOwner->revision();
+    QVERIFY(recolorSource(visibleColor));
+    for (int i = 0; i < 10; ++i) studio.refreshMapFromProject();
+    QTRY_COMPARE_WITH_TIMEOUT(numberOwner->revision(), candidateRevision + 1, 5000);
+    QTest::qWait(450);
+    QCOMPARE(numberOwner->revision(), candidateRevision + 1);
+    QCOMPARE(overrideFill(), visibleColor);
+
+    overridesChanged.clear();
+    studio.hide();
+    candidateRevision = numberOwner->revision();
+    const QColor hiddenColor(QStringLiteral("#a43b92"));
+    QVERIFY(recolorSource(hiddenColor));
+    for (int i = 0; i < 10; ++i) studio.refreshMapFromProject();
+    QTest::qWait(450);
+    QCOMPARE(overridesChanged.count(), 0);
+    studio.show();
+    QTRY_COMPARE_WITH_TIMEOUT(numberOwner->revision(), candidateRevision + 1, 5000);
+    QTest::qWait(450);
+    QCOMPARE(numberOwner->revision(), candidateRevision + 1);
+    QCOMPARE(overrideFill(), hiddenColor);
+
+    // Editing only the legend's presentation must retain numbered nodes.
+    QTRY_VERIFY_WITH_TIMEOUT(legend->model()->rootGroup()->findLayer(layer->id()), 5000);
+    legendLayer = legend->model()->rootGroup()->findLayer(layer->id());
+    QVERIFY(legendLayer);
+    retainedLegendNode = legend->model()->layerLegendNodes(legendLayer).first();
+    QLineEdit* legendTitle = nullptr;
+    QSpinBox* legendFont = nullptr;
+    for (auto* edit : studio.findChildren<QLineEdit*>())
+      if (edit->placeholderText() == QStringLiteral("제목을 입력하세요")) legendTitle = edit;
+    for (auto* spin : studio.findChildren<QSpinBox*>())
+      if (spin->suffix() == QStringLiteral(" pt") && spin->maximum() == 24) legendFont = spin;
+    QVERIFY(legendTitle && legendFont);
+    overridesChanged.clear();
+    legendTitle->setText(QStringLiteral("합성 범례 조절"));
+    legendFont->setValue(11);
+    QCoreApplication::processEvents();
+    QCOMPARE(legend->title(), QStringLiteral("합성 범례 조절"));
+    QVERIFY(!retainedLegendNode.isNull());
+    QCOMPARE(legend->model()->layerLegendNodes(legendLayer).first(), retainedLegendNode.data());
+    QCOMPARE(overridesChanged.count(), 0);
+    QCOMPARE(legend->cacheMode(), QGraphicsItem::DeviceCoordinateCache);
+
+    legend->attemptResize(QgsLayoutSize(70., legend->rect().height()));
+    QTRY_COMPARE_WITH_TIMEOUT(legend->columnCount(), 1, 5000);
+    QTest::qWait(450);
+    overridesChanged.clear();
+    candidateRevision = numberOwner->revision();
+    QVERIFY(QMetaObject::invokeMethod(&studio, "useSelectTool"));
+    const QPoint pressAt(3, 3);
+    QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, pressAt);
+    QVERIFY(studio.property("ka_interacting").toBool());
+    QVERIFY(legend->property("ka_interacting").toBool());
+    const double originalScale = studio.drawingScale();
+    const double finalScale = std::round(originalScale * 1.4);
+    for (int i = 1; i <= 4; ++i) {
+      studio.setDrawingScale(originalScale * (1. + i * .1));
+      studio.refreshMapFromProject();
+    }
+    legend->attemptResize(QgsLayoutSize(190., legend->rect().height()));
+    // Longer than both the scale and legend debounce intervals: held input
+    // must keep deferring feature/legend work instead of merely delaying it once.
+    QTest::qWait(400);
+    QVERIFY(studio.property("ka_interacting").toBool());
+    QCOMPARE(overridesChanged.count(), 0);
+    QCOMPARE(legend->columnCount(), 1);
+    QVERIFY(qAbs(studio.drawingScale() - finalScale) < .5);
+    QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, pressAt);
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.property("ka_interacting").toBool(), 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(numberOwner->revision(), candidateRevision + 1, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(legend->columnCount() > 1, 5000);
+    QTest::qWait(450);
+    QCOMPARE(numberOwner->revision(), candidateRevision + 1);
+    QVERIFY(qAbs(legend->rect().width() - 190.) < .1);
+    auto* paperScale = dynamic_cast<QgsLayoutItemLabel*>(layout->itemById(QStringLiteral("ka_scale")));
+    QVERIFY(paperScale);
+    QCOMPARE(paperScale->text(), QStringLiteral("축척 1 : %1").arg(finalScale, 0, 'f', 0));
+    QTRY_VERIFY_WITH_TIMEOUT(legend->model()->rootGroup()->findLayer(layer->id()), 5000);
+    legendLayer = legend->model()->rootGroup()->findLayer(layer->id());
+    QVERIFY(legendLayer);
+    auto placedNumbers = [&]() {
+      QSet<QString> result;
+      if (auto* labels = map->previewLabelingResults())
+        for (const auto& label : labels->allLabels())
+          if (!label.isUnplaced && !label.isDiagram && label.layerID == layer->id())
+            result.insert(label.labelText);
+      return result;
+    };
+    auto legendNumbers = [&]() {
+      QSet<QString> result;
+      if (auto* tree = legend->model()->rootGroup()->findLayer(layer->id()))
+        for (auto* node : legend->model()->layerLegendNodes(tree)) {
+          auto* symbol = dynamic_cast<QgsSymbolLegendNode*>(node);
+          if (!symbol || !symbol->customSymbol()) continue;
+          for (int i = 0; i < symbol->customSymbol()->symbolLayerCount(); ++i)
+            if (auto* glyph = dynamic_cast<QgsFontMarkerSymbolLayer*>(symbol->customSymbol()->symbolLayer(i)))
+              result.insert(glyph->character());
+        }
+      return result;
+    };
+    QVERIFY(!placedNumbers().isEmpty());
+    QTRY_COMPARE_WITH_TIMEOUT(legendNumbers(), placedNumbers(), 5000);
+    legendLayer = legend->model()->rootGroup()->findLayer(layer->id());
+    QVERIFY(legendLayer);
+    const auto finalNodes = legend->model()->layerLegendNodes(legendLayer);
+    QVERIFY(finalNodes.size() <= categoryCount);
+    auto* sourceRenderer = dynamic_cast<QgsCategorizedSymbolRenderer*>(layer->renderer());
+    QVERIFY(sourceRenderer);
+    QMap<QString, int> displayedNumbers;
+    int nextNumber = 0;
+    for (auto* node : finalNodes) {
+      auto* symbolNode = dynamic_cast<QgsSymbolLegendNode*>(node);
+      QVERIFY(symbolNode && symbolNode->customSymbol());
+      QString badge;
+      for (int i = 0; i < symbolNode->customSymbol()->symbolLayerCount(); ++i)
+        if (auto* font = dynamic_cast<QgsFontMarkerSymbolLayer*>(symbolNode->customSymbol()->symbolLayer(i)))
+          badge = font->character();
+      const QString name = node->data(Qt::DisplayRole).toString();
+      const int category = sourceRenderer->categoryIndexForValue(name);
+      QVERIFY(category >= 0);
+      QCOMPARE(badge, QString::number(++nextNumber));
+      displayedNumbers.insert(name, nextNumber);
+    }
+    std::unique_ptr<QgsVectorLayer> drawing(layer->clone());
+    QgsMapLayerStyle(map->layerStyleOverrides().value(layer->id())).writeToLayer(drawing.get());
+    QVERIFY(drawing->labeling());
+    QgsExpression labelExpression(drawing->labeling()->settings().fieldName);
+    QVERIFY(!labelExpression.hasParserError());
+    auto expressionContext = drawing->createExpressionContext();
+    QgsFeature firstFeature;
+    QVERIFY(drawing->getFeatures().nextFeature(firstFeature));
+    expressionContext.setFeature(firstFeature);
+    QCOMPARE(labelExpression.evaluate(&expressionContext).toInt(),
+             displayedNumbers.value(firstFeature.attribute(QStringLiteral("nm")).toString()));
+    QVERIFY(!labelExpression.hasEvalError());
+
+    // Record repeated scene paints while moving the same cached legend. These
+    // timings are diagnostic observations, not a machine-dependent pass limit.
+    const QPointF legendPosition = legend->pos();
+    QImage sceneImage(640, 480, QImage::Format_ARGB32_Premultiplied);
+    elapsed.restart();
+    for (int i = 0; i < 4; ++i) {
+      legend->attemptMove(QgsLayoutPoint(legendPosition + QPointF(i, 0.)));
+      sceneImage.fill(Qt::white);
+      QPainter painter(&sceneImage);
+      layout->render(&painter, QRectF(0., 0., 640., 480.), legend->sceneBoundingRect());
+    }
+    const qint64 legendMovePaintMs = elapsed.elapsed();
+    legend->attemptMove(QgsLayoutPoint(legendPosition));
+    qInfo() << "LAYOUT_INTERACTION held_ms=400 held_overrides=0 released_candidate_updates=1"
+            << "legend_columns=" << legend->columnCount()
+            << "legend_move_scene_paints=4 elapsed_ms=" << legendMovePaintMs;
+    qInfo().noquote() << QStringLiteral(
+        "LAYOUT_STUDIO_PERF categories=%1 first_ready_ms=%2 revisit_show_ms=%3 unchanged_refreshes=10 unchanged_overrides=0 visible_candidate_updates=1 hidden_candidate_updates=1")
+        .arg(categoryCount).arg(firstReadyMs).arg(revisitShowMs);
+    // A parent checkbox hides its descendants without erasing their own choices.
+    auto* references = project.layerTreeRoot()->findGroup(QStringLiteral("참조 지도"));
+    QVERIFY(references);
+    auto* sourceNode = references->findLayer(layer->id());
+    QVERIFY(sourceNode && sourceNode->itemVisibilityChecked());
+    references->setItemVisibilityChecked(false);
+    QTRY_VERIFY_WITH_TIMEOUT(!map->layers().contains(layer), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!map->layerStyleOverrides().contains(layer->id()), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!legend->model()->rootGroup()->findLayer(layer->id()), 5000);
+    QVERIFY(sourceNode->itemVisibilityChecked());
+    references->setItemVisibilityChecked(true);
+    QTRY_VERIFY_WITH_TIMEOUT(map->layers().contains(layer), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(legend->model()->rootGroup()->findLayer(layer->id()), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!placedNumbers().isEmpty(), 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(legendNumbers(), placedNumbers(), 5000);
+    // Moving the geographic map partly off paper changes the numbered subset
+    // without changing its extent. Compact that subset, then restore all source
+    // candidates when the map is brought back onto the page.
+    const QPointF beforeMove = map->pos();
+    const int beforeMoveCount = legendNumbers().size();
+    map->attemptMove(QgsLayoutPoint(-map->rect().width() * .5, beforeMove.y()));
+    view->viewport()->update();
+    auto compactedSubset = [&]() {
+      const auto& entries = numberOwner->entries();
+      return std::any_of(entries.cbegin(), entries.cend(), [](const auto& entry) { return entry.number == 0; });
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(compactedSubset(), 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(!legendNumbers().isEmpty() && legendNumbers().size() < beforeMoveCount, 10000);
+    QTRY_COMPARE_WITH_TIMEOUT(legendNumbers(), placedNumbers(), 10000);
+    const auto compacted = legendNumbers();
+    for (int n = 1; n <= compacted.size(); ++n) QVERIFY(compacted.contains(QString::number(n)));
+    map->attemptMove(QgsLayoutPoint(beforeMove));
+    view->viewport()->update();
+    QTRY_COMPARE_WITH_TIMEOUT(legendNumbers().size(), beforeMoveCount, 10000);
+    QTRY_COMPARE_WITH_TIMEOUT(legendNumbers(), placedNumbers(), 10000);
+  }
+  void drawingStudioAboveLabelsMapDrawsGeometryWithoutDuplicateNumberLabels() {
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+    QVector<QgsVectorLayer*> sources;
+    const QList<HeritageDataset> datasets = {
+        HeritageDataset::DesignatedHeritage, HeritageDataset::SurfaceSurveyArea};
+    auto* references = project.layerTreeRoot()->addGroup(QStringLiteral("참조 지도"));
+    for (int i = 0; i < datasets.size(); ++i) {
+      auto* layer = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187&field=nm:string(80)"),
+          QStringLiteral("합성 원본 %1").arg(i + 1), QStringLiteral("memory"));
+      QVERIFY(layer->isValid());
+      QVERIFY(layer->startEditing());
+      QgsFeature feature(layer->fields());
+      feature.setAttribute(QStringLiteral("nm"), QStringLiteral("원본 유적명 %1").arg(i + 1));
+      const double offset = i * 30.;
+      feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(
+          190020. + offset, 560020. + offset, 190140. + offset, 560140. + offset)));
+      QVERIFY(layer->addFeature(feature));
+      QVERIFY(layer->commitChanges());
+      QVERIFY(HeritageStyle::apply(layer, datasets[i], QStringLiteral("nm")).ok);
+      QVERIFY(LayerOps::applyNameAttributeLabels(layer, QStringLiteral("nm"), 5., false));
+      LayerOps::markReferenceLayer(layer);
+      project.addMapLayer(layer, false);
+      references->addGroup(HeritageStyle::layerName(datasets[i]))->addLayer(layer);
+      sources.append(layer);
+    }
+    // Establish the existing map's label-order properties before capturing the
+    // source baseline; the drawing must not change those styles or labels.
+    LayerOps::applyLayerOrderToLabels(&project, nullptr);
+    QCOMPARE(LayerOps::layersDrawnAboveLabels(&project), QList<QgsMapLayer*>({sources[0]}));
+    QMap<QString, QString> sourceStyles;
+    QMap<QString, QString> sourceUris;
+    for (auto* source : sources) {
+      QgsMapLayerStyle style;
+      style.readFromLayer(source);
+      sourceStyles.insert(source->id(), style.xmlData());
+      sourceUris.insert(source->id(), source->source());
+      QVERIFY(source->labelsEnabled());
+    }
+    QgsMapCanvas canvas;
+    canvas.setRenderFlag(false);
+    canvas.setDestinationCrs(project.crs());
+    canvas.setLayers({sources[0], sources[1]});
+    canvas.setExtent(QgsRectangle(189950., 559950., 190250., 560250.));
+    KaDrawingStudio studio(&project, &canvas, 297., 210.);
+    studio.setAttribute(Qt::WA_DontShowOnScreen);
+    studio.show();
+    auto* view = studio.findChild<QgsLayoutView*>();
+    QVERIFY(view && view->currentLayout());
+    auto* layout = view->currentLayout();
+    QTRY_VERIFY_WITH_TIMEOUT(layout->itemById(QStringLiteral("ka_map")), 5000);
+    auto* base = dynamic_cast<QgsLayoutItemMap*>(layout->itemById(QStringLiteral("ka_map")));
+    QVERIFY(base);
+    QTRY_VERIFY_WITH_TIMEOUT(base->layerStyleOverrides().contains(sources[1]->id()), 5000);
+    auto* above = dynamic_cast<QgsLayoutItemMap*>(layout->itemById(QStringLiteral("ka_map_above")));
+    QVERIFY(above);
+    QCOMPARE(above->layers(), QList<QgsMapLayer*>({sources[0]}));
+    QVERIFY(above->keepLayerStyles());
+    QVERIFY(above->layerStyleOverrides().contains(sources[0]->id()));
+    for (auto* source : sources) {
+      std::unique_ptr<QgsVectorLayer> drawing(source->clone());
+      QgsMapLayerStyle(base->layerStyleOverrides().value(source->id())).writeToLayer(drawing.get());
+      QVERIFY(drawing->labelsEnabled());
+      QVERIFY(drawing->labeling());
+      const auto settings = drawing->labeling()->settings();
+      QVERIFY(settings.isExpression);
+      QgsExpression number(settings.fieldName);
+      QVERIFY(!number.hasParserError());
+      QgsFeature feature;
+      QVERIFY(drawing->getFeatures().nextFeature(feature));
+      auto context = drawing->createExpressionContext();
+      context.setFeature(feature);
+      QCOMPARE(number.evaluate(&context).toInt(), 1); // Each dataset starts at 1.
+      QVERIFY(!number.hasEvalError());
+      if (above->layers().contains(source)) {
+        std::unique_ptr<QgsVectorLayer> geometryOnly(source->clone());
+        QgsMapLayerStyle(above->layerStyleOverrides().value(source->id())).writeToLayer(geometryOnly.get());
+        QVERIFY(!geometryOnly->labelsEnabled());
+        QVERIFY(geometryOnly->renderer());
+        QCOMPARE(geometryOnly->renderer()->type(), drawing->renderer()->type());
+      }
+      QgsMapLayerStyle unchanged;
+      unchanged.readFromLayer(source);
+      QCOMPARE(unchanged.xmlData(), sourceStyles.value(source->id()));
+      QCOMPARE(source->source(), sourceUris.value(source->id()));
+      QCOMPARE(source->featureCount(), 1LL);
+      QVERIFY(source->labelsEnabled());
+    }
+  }
+
   void drawingStudio_largeScaleChipsApplyToMapAndInput() {
     QgsProject project;
     project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
@@ -1505,6 +2337,90 @@ private slots:
   }
   // 축척 칸은 하나뿐이어야 한다. 예전에는 자유 입력 QLineEdit 과 프리셋 QComboBox 가
   // 따로 있어서 같은 축척인데도 어느 쪽으로 넣었느냐에 따라 화면이 달랐다.
+  void scaleControlFollowsActiveDrawingWithoutChangingMapCanvas() {
+    MainWindow window;
+    disableRendering(window);
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("viewTabs"));
+    auto* canvas = window.findChild<QgsMapCanvas*>(QStringLiteral("mapCanvas"));
+    auto* combo = window.findChild<QComboBox*>(QStringLiteral("scaleCombo"));
+    QVERIFY(tabs && canvas && combo && combo->lineEdit());
+    QWidget* mapPage = nullptr;
+    for (int i = 0; i < tabs->count(); ++i)
+      if (tabs->tabText(i) == QStringLiteral("지도")) mapPage = tabs->widget(i);
+    QVERIFY(mapPage);
+    tabs->setCurrentWidget(mapPage);
+    QCoreApplication::processEvents();
+    canvas->setDestinationCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+    canvas->setExtent(QgsRectangle(190000., 560000., 191000., 561000.));
+    canvas->zoomScale(25000.);
+
+    QTimer acceptPaper;
+    acceptPaper.setInterval(10);
+    connect(&acceptPaper, &QTimer::timeout, &window, [&] {
+      auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+      if (dialog && dialog->windowTitle() == QStringLiteral("용지 설정")) {
+        acceptPaper.stop();
+        dialog->accept();
+      }
+    });
+    acceptPaper.start();
+    QVERIFY(QMetaObject::invokeMethod(&window, "openLayoutDesigner"));
+    acceptPaper.stop();
+    QCoreApplication::processEvents();
+    auto* studio = window.findChild<KaDrawingStudio*>();
+    QVERIFY(studio && tabs->currentWidget() == studio);
+    auto* view = studio->findChild<QgsLayoutView*>();
+    QVERIFY(view && view->currentLayout());
+    auto* map = dynamic_cast<QgsLayoutItemMap*>(view->currentLayout()->itemById(QStringLiteral("ka_map")));
+    auto* paperScale = dynamic_cast<QgsLayoutItemLabel*>(view->currentLayout()->itemById(QStringLiteral("ka_scale")));
+    auto* drawingScale = studio->findChild<QSpinBox*>(QStringLiteral("drawingScale"));
+    auto* apply = studio->findChild<QPushButton*>(QStringLiteral("scaleApply"));
+    QVERIFY(map && paperScale && drawingScale && apply);
+    const QgsRectangle canvasExtent = canvas->extent();
+    const double canvasScale = canvas->scale();
+    const auto bottomScale = [&] { return MainWindow::scaleDenominatorFromUi(combo->lineEdit()->text()); };
+
+    // The drawing's existing Apply control must update the shared bottom field.
+    drawingScale->setValue(10000);
+    apply->click();
+    QVERIFY(qAbs(map->scale() - 10000.) < .5);
+    QCOMPARE(bottomScale(), 10000.);
+    QCOMPARE(canvas->extent(), canvasExtent);
+    QCOMPARE(canvas->scale(), canvasScale);
+
+    // Enter in that bottom field now targets the active drawing, not the hidden map.
+    combo->lineEdit()->setText(QStringLiteral("1:5000"));
+    QTest::keyClick(combo->lineEdit(), Qt::Key_Return);
+    QVERIFY(qAbs(map->scale() - 5000.) < .5);
+    QCOMPARE(drawingScale->value(), 5000);
+    QCOMPARE(paperScale->text(), QStringLiteral("축척 1 : 5000"));
+    QCOMPARE(bottomScale(), 5000.);
+    QCOMPARE(canvas->extent(), canvasExtent);
+    QCOMPARE(canvas->scale(), canvasScale);
+
+    // A canvas notification while its tab is hidden must not overwrite drawing scale.
+    QVERIFY(QMetaObject::invokeMethod(&window, "onCanvasScaleChanged", Q_ARG(double, canvasScale)));
+    QCOMPARE(bottomScale(), 5000.);
+    // Frame resizing reports the actual map scale to both labels.
+    map->attemptResize(QgsLayoutSize(map->rect().width() * .8, map->rect().height()));
+    QCoreApplication::processEvents();
+    const double resizedScale = std::round(map->scale());
+    QCOMPARE(bottomScale(), resizedScale);
+    QCOMPARE(drawingScale->value(), static_cast<int>(resizedScale));
+    QCOMPARE(paperScale->text(), QStringLiteral("축척 1 : %1").arg(resizedScale, 0, 'f', 0));
+
+    tabs->setCurrentWidget(mapPage);
+    QCoreApplication::processEvents();
+    QCOMPARE(bottomScale(), std::round(canvas->scale()));
+    tabs->setCurrentWidget(studio);
+    QCoreApplication::processEvents();
+    QCOMPARE(bottomScale(), resizedScale);
+    QVERIFY(qAbs(studio->drawingScale() - resizedScale) < .5);
+    QgsProject::instance()->setDirty(false);
+  }
+
   void scaleControl_isSingleWidgetAcceptingBothForms() {
     MainWindow window;
     disableRendering(window);
@@ -1569,6 +2485,109 @@ private slots:
     QCOMPARE(layer->getFeature(*layer->allFeatureIds().constBegin())
              .attribute(QStringLiteral("survey_name")).toString(), QStringLiteral("다음조사"));
   }
+  void partialCommit_preservesRemainingBufferAndCreatesIndependentRecovery() {
+    const QString path = makeSurvey(QStringLiteral("뒤레이어커밋실패"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    auto* project = QgsProject::instance();
+    QString error;
+    auto* line = LayerOps::ensureDomainLayer(project, path, QStringLiteral("feature_line"),
+                                             QStringLiteral("실패검사 선"), &error);
+    QVERIFY2(line, qPrintable(error));
+    QVERIFY(line->startEditing());
+    QgsFeature feature(line->fields());
+    feature.setAttribute(QStringLiteral("note"), QStringLiteral("기존 선"));
+    feature.setGeometry(QgsGeometry::fromWkt(QStringLiteral("LineString (190000 560000, 190010 560010)")));
+    QVERIFY(line->addFeature(feature));
+    QVERIFY(saveNow(window));
+    QList<QgsVectorLayer*> order;
+    for (auto* item : project->mapLayers())
+      if (auto* vector = qobject_cast<QgsVectorLayer*>(item)) order.append(vector);
+    QCOMPARE(order.size(), 2);
+    QMap<QString, QgsFeatureId> ids;
+    QStringList keys;
+    for (auto* layer : order) keys.append(LayerOps::layerKeyOf(layer));
+    for (int i = 0; i < order.size(); ++i) {
+      auto* layer = order.at(i);
+      if (!layer->isEditable()) QVERIFY(layer->startEditing());
+      const QgsFeatureId id = *layer->allFeatureIds().constBegin();
+      ids.insert(layer->id(), id);
+      QVERIFY(layer->changeAttributeValue(id, layer->fields().indexOf(QStringLiteral("note")),
+                                          QStringLiteral("미저장 변경 %1").arg(i)));
+    }
+    auto* first = order.first();
+    auto* failed = order.last();
+    failed->setAllowCommit(false);
+    project->setTitle(QStringLiteral("전체 저장은 아직 실패"));
+    const QString companion = QFileInfo(path).dir().filePath(
+        QFileInfo(path).completeBaseName() + QStringLiteral(".qgz"));
+    const QByteArray companionBefore = contents(companion);
+    const auto gpkgFiles = [&]() {
+      QSet<QString> files;
+      QDirIterator iterator(m_files.path(), {QStringLiteral("*.gpkg")}, QDir::Files,
+                            QDirIterator::Subdirectories);
+      while (iterator.hasNext()) files.insert(iterator.next());
+      return files;
+    };
+    const QSet<QString> beforeFiles = gpkgFiles();
+    QVERIFY(!saveNow(window));
+    QVERIFY(project->isDirty());
+    QVERIFY(!first->isModified());
+    QVERIFY(failed->isEditable() && failed->isModified());
+    QCOMPARE(contents(companion), companionBefore);
+    for (int i = 0; i < order.size(); ++i) {
+      auto* layer = order.at(i);
+      QCOMPARE(layer->getFeature(ids.value(layer->id())).attribute(QStringLiteral("note")).toString(),
+               QStringLiteral("미저장 변경 %1").arg(i));
+      QgsVectorLayer disk(layer->source(), QStringLiteral("디스크 확인"), QStringLiteral("ogr"));
+      QVERIFY(disk.isValid());
+      const QString saved = disk.getFeature(ids.value(layer->id())).attribute(QStringLiteral("note")).toString();
+      if (i == 0) QCOMPARE(saved, QStringLiteral("미저장 변경 0"));
+      else QVERIFY(saved != QStringLiteral("미저장 변경 1"));
+    }
+    const QSet<QString> created = gpkgFiles() - beforeFiles;
+    QCOMPARE(created.size(), 1);
+    const QString recovery = *created.constBegin();
+    const QByteArray recoveryBefore = contents(recovery);
+    QVERIFY(!recoveryBefore.isEmpty());
+    QgsProject recovered;
+    QVERIFY(recovered.read(SurveyStorage::projectUri(recovery)));
+    for (int i = 0; i < order.size(); ++i) {
+      auto* copied = LayerOps::findByLayerKey(&recovered, LayerOps::layerKeyOf(order.at(i)));
+      QVERIFY(copied && copied->isValid());
+      QCOMPARE(copied->featureCount(), 1LL);
+      QgsFeature value;
+      QVERIFY(copied->getFeatures().nextFeature(value));
+      QCOMPARE(value.attribute(QStringLiteral("note")).toString(), QStringLiteral("미저장 변경 %1").arg(i));
+    }
+    recovered.clear();
+    auto* bar = window.findChild<QgsMessageBar*>();
+    QVERIFY(bar);
+    bool recoveryWarning = false;
+    for (auto* item : bar->items())
+      if (item->level() == Qgis::MessageLevel::Warning &&
+          item->text().contains(QStringLiteral("복구"))) recoveryWarning = true;
+    QVERIFY(recoveryWarning);
+    QVERIFY(!saveNow(window)); // Persistent failure creates another snapshot, never overwrites.
+    QCOMPARE((gpkgFiles() - beforeFiles).size(), 2);
+    QCOMPARE(contents(recovery), recoveryBefore);
+    QVERIFY(failed->isModified());
+    failed->setAllowCommit(true);
+    QVERIFY(saveNow(window));
+    QVERIFY(window.openSurveyGpkg(path));
+    for (int i = 0; i < order.size(); ++i) {
+      auto* reopened = LayerOps::findByLayerKey(project, keys.at(i));
+      QVERIFY(reopened && reopened->isValid());
+      QCOMPARE(reopened->featureCount(), 1LL);
+      QgsFeature value;
+      QVERIFY(reopened->getFeatures().nextFeature(value));
+      QCOMPARE(value.attribute(QStringLiteral("note")).toString(), QStringLiteral("미저장 변경 %1").arg(i));
+    }
+  }
+
+
   void failedCommit_doesNotOverwriteSavedWorkspace() {
     const QString path = makeSurvey(QStringLiteral("커밋실패"));
     QVERIFY(!path.isEmpty());
@@ -2198,3 +3217,4 @@ int main(int argc, char** argv) {
 }
 
 #include "test_save_open.moc"
+

@@ -121,6 +121,10 @@ private slots:
   void atomicProjectWrite_keepsOneBackupGeneration();
   void fullWorkflowSurveyToPackage();
   void exportSubmissionPackage_pdfIsUserSheetOnly();
+  void exportSubmissionPackage_preservesPreviousPackage();
+  void exportManifestFailurePreservesPreviousFile();
+  void exportSubmissionPackage_finalizationFailure_data();
+  void exportSubmissionPackage_finalizationFailure();
   void exportSubmissionPackage_excludesPrivateHeritage_data();
   void exportSubmissionPackage_excludesPrivateHeritage();
   void exportLayoutPdf_userSheetMissing_doesNotSeedFiveTemplates();
@@ -477,6 +481,173 @@ void TestWorkflow::exportSubmissionPackage_pdfIsUserSheetOnly() {
   QVERIFY(QFileInfo(sheetPdf).size() > 500);
   QVERIFY(!QFile::exists(QDir(pkg).filePath(QStringLiteral("유적위치도.pdf"))));
   QVERIFY(!QFile::exists(QDir(pkg).filePath(QStringLiteral("유구배치도.pdf"))));
+}
+
+void TestWorkflow::exportSubmissionPackage_preservesPreviousPackage() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QgsProject project;
+  project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* layer = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5186&field=name:string"),
+                                 QStringLiteral("control_points"), QStringLiteral("memory"));
+  QVERIFY(layer->isValid());
+  layer->setCustomProperty(QString::fromUtf8(LayerOps::kPropLayerKey), QStringLiteral("control_points"));
+  project.addMapLayer(layer);
+  QgsFeature feature(layer->fields());
+  feature.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(200000, 450000)));
+  feature.setAttribute(QStringLiteral("name"), QStringLiteral("기준점"));
+  QgsFeatureList packageFeatures{feature};
+  QVERIFY(layer->dataProvider()->addFeatures(packageFeatures));
+  QVERIFY(addComposedUserSheet(&project, layer));
+  const QString first = temporary.filePath(QStringLiteral("첫 제출"));
+  QString error;
+  QCOMPARE(ExportService::exportSubmissionPackage(&project, first, QStringLiteral("UTF-8"),
+                                                QStringLiteral("OK"), true, false, &error), first);
+  {
+    QgsVectorLayer shp(QDir(first).filePath(QStringLiteral("control_points.shp")),
+                       QStringLiteral("submitted"), QStringLiteral("ogr"));
+    QVERIFY(shp.isValid());
+    QCOMPARE(shp.featureCount(), 1LL);
+    QCOMPARE(shp.crs().authid(), QStringLiteral("EPSG:5179"));
+    QgsFeature submitted;
+    QVERIFY(shp.getFeatures().nextFeature(submitted));
+    QCOMPARE(submitted.attribute(QStringLiteral("name")).toString(), QStringLiteral("기준점"));
+    QFile pdf(QDir(first).filePath(QStringLiteral("조사도면.pdf")));
+    QVERIFY(pdf.open(QIODevice::ReadOnly));
+    const QByteArray pdfBytes = pdf.readAll();
+    QVERIFY(pdfBytes.startsWith("%PDF-"));
+    QVERIFY(pdfBytes.contains("%%EOF"));
+  }
+  QMap<QString, QByteArray> previous;
+  for (const QString& name : QDir(first).entryList(QDir::Files)) {
+    QFile file(QDir(first).filePath(name));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    previous.insert(name, file.readAll());
+  }
+  project.removeMapLayer(layer);
+  project.layoutManager()->clear();
+  QVERIFY2(ExportService::exportSubmissionPackage(&project, first, QStringLiteral("UTF-8"),
+               QStringLiteral("changed"), true, false, &error).isEmpty(),
+           "A previous package must not be reused when current layers change");
+  QVERIFY(!error.isEmpty());
+  QStringList previousNames = QDir(first).entryList(QDir::Files);
+  previousNames.sort();
+  QCOMPARE(previousNames, previous.keys());
+  for (auto it = previous.cbegin(); it != previous.cend(); ++it) {
+    QFile file(QDir(first).filePath(it.key()));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), it.value());
+  }
+  const QString second = temporary.filePath(QStringLiteral("두 번째 제출"));
+  QCOMPARE(ExportService::exportSubmissionPackage(&project, second, QStringLiteral("CP949"),
+                                                QStringLiteral("OK"), true, false, &error), second);
+  QVERIFY(!QFile::exists(QDir(second).filePath(QStringLiteral("control_points.shp"))));
+  QVERIFY(!QFile::exists(QDir(second).filePath(QStringLiteral("조사도면.pdf"))));
+  QFile manifest(QDir(second).filePath(QStringLiteral("MANIFEST.sha256")));
+  QVERIFY(manifest.open(QIODevice::ReadOnly));
+  const QByteArray contents = manifest.readAll();
+  QStringList listed;
+  for (const QByteArray& line : contents.split('\n')) {
+    if (line.trimmed().isEmpty()) continue;
+    const QString name = QString::fromUtf8(line.mid(66).trimmed());
+    QFile file(QDir(second).filePath(name));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(line.left(64), QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256).toHex());
+    listed << name;
+  }
+  QStringList actual = QDir(second).entryList(QDir::Files);
+  actual.removeOne(QStringLiteral("MANIFEST.sha256"));
+  listed.sort(); actual.sort();
+  QCOMPARE(listed, actual);
+}
+
+void TestWorkflow::exportManifestFailurePreservesPreviousFile() {
+#ifdef _WIN32
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  const QString path = temporary.filePath(QStringLiteral("MANIFEST.sha256"));
+  QFile previous(path);
+  QVERIFY(previous.open(QIODevice::WriteOnly));
+  const QByteArray contents("previous manifest\n");
+  QCOMPARE(previous.write(contents), contents.size());
+  previous.close();
+  const QString lockedPath = temporary.filePath(QStringLiteral("locked.txt"));
+  HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(lockedPath.utf16()), GENERIC_WRITE,
+                             0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  QVERIFY(handle != INVALID_HANDLE_VALUE);
+  QString error;
+  const bool result = ExportService::writeSha256Manifest(temporary.path(), &error);
+  CloseHandle(handle);
+  QVERIFY(!result);
+  QVERIFY(!error.isEmpty());
+  QVERIFY(previous.open(QIODevice::ReadOnly));
+  QCOMPARE(previous.readAll(), contents);
+#else
+  QSKIP("Windows exclusive file lock regression");
+#endif
+}
+
+void TestWorkflow::exportSubmissionPackage_finalizationFailure_data() {
+  QTest::addColumn<QString>("failure");
+  QTest::newRow("late-folder-collision") << QStringLiteral("collision");
+  QTest::newRow("readme-write-denied") << QStringLiteral("README_submit.txt");
+  QTest::newRow("manifest-write-denied") << QStringLiteral("MANIFEST.sha256");
+}
+
+void TestWorkflow::exportSubmissionPackage_finalizationFailure() {
+  QFETCH(QString, failure);
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QgsProject project;
+  project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* layer = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5186"),
+                                 QStringLiteral("control_points"), QStringLiteral("memory"));
+  project.addMapLayer(layer);
+  QgsFeature feature(layer->fields());
+  feature.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(200050, 450050)));
+  QgsFeatureList features{feature};
+  QVERIFY(layer->dataProvider()->addFeatures(features));
+  QVERIFY(addComposedUserSheet(&project, layer));
+  QVERIFY(LayoutService::isComposedStudioSheet(&project));
+  auto* layout = dynamic_cast<QgsPrintLayout*>(project.layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  QVERIFY(layout);
+  // The synchronous render-context signal injects a filesystem failure after
+  // staging starts, without production test hooks or timing-dependent threads.
+  layout->renderContext().setDpi(96);
+  const QString output = temporary.filePath(QStringLiteral("result"));
+  bool injected = false;
+  bool injectionOk = false;
+  connect(&layout->renderContext(), &QgsLayoutRenderContext::dpiChanged, &project, [&] {
+    if (injected) return;
+    injected = true;
+    if (failure == QLatin1String("collision")) {
+      injectionOk = QDir().mkpath(output);
+      QFile sentinel(QDir(output).filePath(QStringLiteral("other-user.txt")));
+      injectionOk = injectionOk && sentinel.open(QIODevice::WriteOnly) && sentinel.write("keep") == 4;
+    } else {
+      const auto staging = QDir(temporary.path()).entryList(
+          {QStringLiteral(".ka-hgis-export-*")}, QDir::Dirs | QDir::Hidden | QDir::NoDotAndDotDot);
+      if (staging.size() == 1)
+        injectionOk = QDir(temporary.filePath(staging.first())).mkdir(failure);
+    }
+  });
+  QString error;
+  const QString result = ExportService::exportSubmissionPackage(&project, output, QStringLiteral("UTF-8"),
+                                                               QStringLiteral("OK"), true, false, &error);
+  QVERIFY(injected);
+  QVERIFY(injectionOk);
+  QVERIFY(result.isEmpty());
+  QVERIFY(!error.isEmpty());
+  QVERIFY(!QFile::exists(QDir(output).filePath(QStringLiteral("MANIFEST.sha256"))));
+  if (failure == QLatin1String("collision")) {
+    QFile sentinel(QDir(output).filePath(QStringLiteral("other-user.txt")));
+    QVERIFY(sentinel.open(QIODevice::ReadOnly));
+    QCOMPARE(sentinel.readAll(), QByteArray("keep"));
+  } else {
+    QVERIFY(!QFileInfo::exists(output));
+  }
+  QVERIFY(QDir(temporary.path()).entryList({QStringLiteral(".ka-hgis-export-*")},
+          QDir::Dirs | QDir::Hidden | QDir::NoDotAndDotDot).isEmpty());
 }
 
 void TestWorkflow::exportSubmissionPackage_excludesPrivateHeritage_data() {
@@ -7111,7 +7282,7 @@ void TestWorkflow::test_challenge_pdf_failure_readonly_and_locked() {
 
     QVERIFY2(res.isEmpty(), "exportSubmissionPackage must abort when section PDF export fails");
     QVERIFY2(!err.isEmpty(), "Error output must report section failure");
-    QVERIFY2(err.contains(QStringLiteral("단면도.pdf")), "Error must mention 단면도.pdf");
+    QVERIFY2(err.contains(QStringLiteral("비어 있지")), "Existing package files must be rejected before any writes");
 
     const QString manifestPath = QDir(outDir).filePath(QStringLiteral("MANIFEST.sha256"));
     QVERIFY2(!QFile::exists(manifestPath), "MANIFEST.sha256 must NOT be written when section PDF export fails");

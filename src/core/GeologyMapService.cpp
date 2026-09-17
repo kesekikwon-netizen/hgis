@@ -5,6 +5,8 @@
 #include <QDomDocument>
 #include <QFile>
 #include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRegularExpression>
 #include <QUrl>
 #include <algorithm>
@@ -726,6 +728,36 @@ PreparedReferenceMap GeologyMapService::prepare(const QgsRectangle& extent5186,
     return result;
   }
 
+  const QgsCoordinateReferenceSystem outputCrs(QStringLiteral("EPSG:5186"));
+  const QgsCoordinateReferenceSystem sourceCrs = src.crs();
+  // OGR falls back to WGS84 for an unknown named GeoJSON CRS. Reject that
+  // explicit declaration instead of treating projected coordinates as degrees.
+  QFile responseFile(jsonPath);
+  if (!responseFile.open(QIODevice::ReadOnly)) {
+    result.error = QStringLiteral("지질도 좌표계를 읽지 못했습니다. 기존 지도는 유지됩니다.");
+    return result;
+  }
+  const QJsonObject response = QJsonDocument::fromJson(responseFile.readAll()).object();
+  responseFile.close();
+  if (response.contains(QStringLiteral("crs"))) {
+    const QJsonObject definition = response.value(QStringLiteral("crs")).toObject();
+    const QJsonObject properties = definition.value(QStringLiteral("properties")).toObject();
+    QString auth;
+    if (definition.value(QStringLiteral("type")).toString() == QLatin1String("name"))
+      auth = properties.value(QStringLiteral("name")).toString();
+    else if (definition.value(QStringLiteral("type")).toString() == QLatin1String("EPSG"))
+      auth = QStringLiteral("EPSG:%1").arg(properties.value(QStringLiteral("code")).toInt());
+    if (!QgsCoordinateReferenceSystem::fromOgcWmsCrs(auth).isValid()) {
+      result.error = QStringLiteral("받은 지질도의 좌표계를 확인할 수 없습니다. 기존 지도는 유지됩니다.");
+      return result;
+    }
+  }
+  if (!sourceCrs.isValid() || !outputCrs.isValid()) {
+    result.error = QStringLiteral("받은 지질도의 좌표계를 확인할 수 없습니다. 기존 지도는 유지됩니다.");
+    return result;
+  }
+  const QgsCoordinateTransform to5186(sourceCrs, outputCrs, transformContext);
+
   // 메모리 레이어로 복사하며 era_class 파생 필드를 채우고 속성의 HTML 링크를 걷어낸다.
   auto merged = std::make_unique<QgsVectorLayer>(QStringLiteral("MultiPolygon?crs=EPSG:5186"),
                                     QStringLiteral("merge"), QStringLiteral("memory"));
@@ -769,6 +801,17 @@ PreparedReferenceMap GeologyMapService::prepare(const QgsRectangle& extent5186,
       nf.setAttribute(eraDstIdx,
                       eraClass(eraSrcIdx >= 0 ? f.attribute(eraSrcIdx).toString() : QString()));
     QgsGeometry g = f.geometry();
+    if (sourceCrs != outputCrs) {
+      try {
+        if (g.transform(to5186) != Qgis::GeometryOperationResult::Success || !g.boundingBox().isFinite()) {
+          result.error = QStringLiteral("지질도 좌표를 변환하지 못했습니다. 기존 지도는 유지됩니다.");
+          return result;
+        }
+      } catch (const QgsException&) {
+        result.error = QStringLiteral("지질도 좌표를 변환하지 못했습니다. 기존 지도는 유지됩니다.");
+        return result;
+      }
+    }
     if (g.isNull() || g.isEmpty() || !g.convertToMultiType()) {
       result.error = QStringLiteral("지질도에 읽을 수 없는 구역이 있습니다. 기존 지도는 유지됩니다.");
       return result;

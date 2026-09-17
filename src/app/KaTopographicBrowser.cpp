@@ -1,4 +1,5 @@
 #include "KaTopographicBrowser.h"
+#include "KaDownloadUi.h"
 #include <QCoreApplication>
 #include <QDebug>
 #include <QScreen>
@@ -123,9 +124,27 @@ KaTopographicBrowser::KaTopographicBrowser(QWidget* parent, const QString& downl
   m_profile->setHttpCacheType(QWebEngineProfile::MemoryHttpCache);
   connect(m_profile, &QWebEngineProfile::downloadRequested, this, &KaTopographicBrowser::requestDownload);
   auto* layout = new QVBoxLayout(this);
+  KaDownloadUi::configure(this, layout, QStringLiteral("수치지형도 다운로드"),
+      QStringLiteral("국토정보플랫폼 · 조사 주변 도엽을 확인하고 지도 자료를 받습니다."));
+  auto* statusCard = KaDownloadUi::statusCard(this);
+  auto* statusLayout = qobject_cast<QVBoxLayout*>(statusCard->layout());
+  layout->addWidget(statusCard);
   m_details=new QWidget(this);m_details->setObjectName(QStringLiteral("topographicOfficialDetails"));
+  m_details->setStyleSheet(QStringLiteral(
+      "QWidget#topographicOfficialDetails { background: #eef5fa; }"
+      "QToolButton { color: #263f54; background: #e5eef6; border: 1px solid #b5cddd; border-radius: 4px; padding: 4px; }"
+      "QToolButton:hover { background: #d9edf9; }"
+      "QLineEdit { background: white; color: #263f54; border: 1px solid #b5cddd; border-radius: 4px; padding: 4px; }"
+      "QTreeWidget { background: white; color: #263f54; border: 1px solid #cedeea; }"
+      "QHeaderView::section { background: #e5eef6; color: #263f54; border: 1px solid #cedeea; padding: 4px; }"));
   auto* detailsLayout=new QVBoxLayout(m_details);detailsLayout->setContentsMargins(0,0,0,0);
   m_detailsScroll=new QScrollArea(this);m_detailsScroll->setObjectName(QStringLiteral("topographicDetailsScroll"));
+  auto detailsPalette=m_detailsScroll->palette();
+  detailsPalette.setColor(QPalette::Window,QColor(QStringLiteral("#eef5fa")));
+  detailsPalette.setColor(QPalette::Base,QColor(QStringLiteral("#eef5fa")));
+  detailsPalette.setColor(QPalette::Button,QColor(QStringLiteral("#cedeea")));
+  detailsPalette.setColor(QPalette::ButtonText,QColor(QStringLiteral("#263f54")));
+  m_detailsScroll->setPalette(detailsPalette);
   m_detailsScroll->setWidgetResizable(true);m_detailsScroll->setFrameShape(QFrame::NoFrame);
   m_detailsScroll->setWidget(m_details);m_details->setMinimumSize(680,480);
   layout->addWidget(m_detailsScroll,1);
@@ -167,25 +186,28 @@ KaTopographicBrowser::KaTopographicBrowser(QWidget* parent, const QString& downl
   connect(m_tabs, &QTabWidget::tabCloseRequested, this, &KaTopographicBrowser::closeTab);
   m_compactStatus=new QLabel(this);m_compactStatus->setObjectName(QStringLiteral("topographicCompactStatus"));
   m_stageTrail=new QLabel(QStringLiteral("도엽 확인 → 로그인 → 신청 → 파일 준비 → 다운로드 → 지도에 올리기"),this);
-  m_stageTrail->setWordWrap(true);m_stageTrail->hide();layout->addWidget(m_stageTrail);
+  m_stageTrail->setObjectName(QStringLiteral("topographicStageTrail"));
+  m_stageTrail->setWordWrap(true);detailsLayout->insertWidget(0,m_stageTrail);
   m_currentStage=new QLabel(this);m_currentStage->setObjectName(QStringLiteral("topographicCurrentStage"));
   auto stageFont=m_currentStage->font();stageFont.setBold(true);m_currentStage->setFont(stageFont);
-  m_currentStage->setWordWrap(true);m_currentStage->hide();layout->addWidget(m_currentStage);
-  m_compactStatus->setWordWrap(true);m_compactStatus->hide();layout->addWidget(m_compactStatus);
+  m_currentStage->setWordWrap(true);m_currentStage->hide();statusLayout->addWidget(m_currentStage);
+  m_compactStatus->setWordWrap(true);m_compactStatus->hide();statusLayout->addWidget(m_compactStatus);
   m_transferSummary=new QLabel(this);m_transferSummary->setObjectName(QStringLiteral("topographicTransferSummary"));
-  m_transferSummary->setWordWrap(true);m_transferSummary->hide();layout->addWidget(m_transferSummary);
+  m_transferSummary->setWordWrap(true);detailsLayout->insertWidget(1,m_transferSummary);
   m_progress = new QProgressBar(this); m_progress->setRange(0, 1);
   m_progress->setObjectName(QStringLiteral("topographicProgress"));m_progress->setTextVisible(true);
-  layout->addWidget(m_progress);
+  KaDownloadUi::styleProgress(m_progress);
+  statusLayout->addWidget(m_progress);
   m_downloads = new QTreeWidget(this); m_downloads->setObjectName(QStringLiteral("topographicDownloads"));
   m_downloads->setHeaderLabels({QStringLiteral("파일"), QStringLiteral("진행"), QStringLiteral("상태"), QStringLiteral("취소")});
   m_downloads->setRootIsDecorated(false); m_downloads->setMaximumHeight(150);
-  m_downloads->setColumnWidth(0, 280); m_downloads->setColumnWidth(1, 200); layout->addWidget(m_downloads);
+  m_downloads->setColumnWidth(0, 280); m_downloads->setColumnWidth(1, 200); detailsLayout->addWidget(m_downloads);
   m_status = new QLabel(QStringLiteral("수치지형도를 준비하고 있습니다."), this);
-  m_status->setWordWrap(true); layout->addWidget(m_status);
+  m_status->setWordWrap(true); detailsLayout->insertWidget(2, m_status);
   m_compactActions=new QWidget(this);
   auto* compactActions=new QHBoxLayout(m_compactActions);compactActions->setContentsMargins(0,0,0,0);
-  m_expandButton=new QPushButton(QStringLiteral("공식 화면 보기"),m_compactActions);
+  m_expandButton=new QPushButton(QStringLiteral("상세 보기"),m_compactActions);
+  m_expandButton->setToolTip(QStringLiteral("도엽·파일별 진행 상황과 공식 로그인·인증 화면을 확인합니다."));
   m_expandButton->setObjectName(QStringLiteral("topographicExpandOfficial"));
   auto* compactCancel=new QPushButton(QStringLiteral("취소"),m_compactActions);
   m_compactCancel=compactCancel;
@@ -225,11 +247,11 @@ KaTopographicBrowser::KaTopographicBrowser(QWidget* parent, const QString& downl
 void KaTopographicBrowser::setCompactMode(bool compact) {
   m_compactMode=compact;
   m_details->setVisible(!compact);m_detailsScroll->setVisible(!compact);
-  m_downloads->setVisible(!compact);m_status->setVisible(!compact);
-  m_compactStatus->setVisible(compact);m_expandButton->setVisible(!compact);
-  m_currentStage->setVisible(compact);m_transferSummary->setVisible(compact);m_stageTrail->setVisible(compact);
+  m_downloads->setVisible(!compact);
+  // Keep the common status card visible while opening the official details.
+  m_compactStatus->show();m_expandButton->show();m_currentStage->show();
   m_compactActions->show();
-  m_expandButton->setText(compact?QStringLiteral("공식 화면 보기"):QStringLiteral("공식 화면 접기"));
+  m_expandButton->setText(compact?QStringLiteral("상세 보기"):QStringLiteral("상세 접기"));
   updateProgress();
   if(layout())layout()->activate();
   fitToAvailableScreen();
@@ -279,7 +301,7 @@ void KaTopographicBrowser::fitToAvailableScreen() {
   const QSize decorations=frameGeometry().size()-size();
   const QSize clientLimit=(available.size()-decorations).expandedTo(QSize(1,1));
   setMaximumSize(clientLimit);
-  const QSize wanted=m_compactMode?QSize(600,280).expandedTo(minimumSizeHint()):QSize(1100,780);
+  const QSize wanted=m_compactMode?QSize(680,330).expandedTo(minimumSizeHint()):QSize(1100,780);
   resize(wanted.boundedTo(clientLimit));
   const int x=std::clamp(pos().x(),available.left(),std::max(available.left(),available.right()-width()-decorations.width()));
   const int y=std::clamp(pos().y(),available.top(),std::max(available.top(),available.bottom()-height()-decorations.height()));

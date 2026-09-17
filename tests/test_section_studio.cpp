@@ -14,15 +14,19 @@
 #include <QCoreApplication>
 #include <QDoubleSpinBox>
 #include <QFile>
+#include <QFontDatabase>
+#include <QDir>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QWidget>
 
 #include "app/KaSectionDrawingStudio.h"
+#include "app/KaTheme.h"
 
 #include <qgsapplication.h>
 #include <qgslayoutitemlabel.h>
@@ -42,6 +46,8 @@ private slots:
     void cleanup();
 
     void threePanelsExist();
+    void fitsSmallLogicalScreen_data();
+    void fitsSmallLogicalScreen();
     void placeholderSheetA3();
     void defaultControlValues();
     void layerTreeIgnoresSurveyAndBasemap();
@@ -58,7 +64,13 @@ private:
 
 void TestSectionStudio::initTestCase()
 {
-    // QgsApplication already initialized in main()
+#ifdef Q_OS_WIN
+    // Use the Windows field font even with the offscreen test platform.
+    const QDir windows(qEnvironmentVariable("WINDIR", QStringLiteral("C:/Windows")));
+    for (const QString& file : {QStringLiteral("malgun.ttf"), QStringLiteral("malgunbd.ttf")})
+        QVERIFY(QFontDatabase::addApplicationFont(windows.filePath(QStringLiteral("Fonts/") + file)) >= 0);
+#endif
+    KaTheme::apply(qApp);
 }
 
 void TestSectionStudio::cleanupTestCase()
@@ -86,6 +98,51 @@ void TestSectionStudio::threePanelsExist()
              "sectionLayoutView not found");
     QVERIFY2(studio.findChild<QWidget*>(QStringLiteral("sectionPropertiesPanel")),
              "sectionPropertiesPanel not found");
+}
+
+void TestSectionStudio::fitsSmallLogicalScreen_data()
+{
+    QTest::addColumn<QSize>("size");
+    QTest::newRow("1024x768") << QSize(1000, 690);
+    QTest::newRow("1366x768") << QSize(1340, 690);
+    QTest::newRow("1920x1080") << QSize(1890, 1000);
+    QTest::newRow("1366x768-at-150-percent") << QSize(900, 450);
+    QTest::newRow("1920x1080-at-200-percent") << QSize(940, 470);
+}
+
+void TestSectionStudio::fitsSmallLogicalScreen()
+{
+    QFETCH(QSize, size);
+    KaSectionDrawingStudio studio(m_project);
+    studio.setAttribute(Qt::WA_DontShowOnScreen);
+    studio.resize(size);
+    studio.show();
+    QCoreApplication::processEvents();
+    QVERIFY2(studio.width() <= size.width(), qPrintable(
+        QStringLiteral("requested %1, actual %2").arg(size.width()).arg(studio.width())));
+    QVERIFY(studio.height() <= size.height());
+    auto* view = studio.findChild<QWidget*>(QStringLiteral("sectionLayoutView"));
+    QVERIFY(view && view->width() >= 200 && view->height() >= 100);
+    auto* properties = studio.findChild<QWidget*>(QStringLiteral("sectionPropertiesPanel"));
+    auto* scroll = properties ? qobject_cast<QScrollArea*>(properties->parentWidget()->parentWidget()) : nullptr;
+    QVERIFY(scroll);
+    const auto buttons = properties->findChildren<QPushButton*>();
+    QVERIFY(!buttons.isEmpty());
+    for (auto* button : buttons) {
+        scroll->ensureWidgetVisible(button);
+        QCoreApplication::processEvents();
+        const QRect visible(button->mapTo(scroll->viewport(), QPoint()), button->size());
+        QVERIFY2(scroll->viewport()->rect().contains(visible), qPrintable(
+            QStringLiteral("%1: button %2,%3 %4x%5, viewport %6x%7, panel %8x%9")
+                .arg(button->text()).arg(visible.x()).arg(visible.y())
+                .arg(visible.width()).arg(visible.height())
+                .arg(scroll->viewport()->width()).arg(scroll->viewport()->height())
+                .arg(properties->width()).arg(properties->height())));
+    }
+    const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if (!output.isEmpty())
+        QVERIFY(studio.grab().save(QDir(output).filePath(
+            QString::fromLatin1(QTest::currentDataTag()) + QStringLiteral("-section.png"))));
 }
 
 // ---- (b) A3 가로 placeholder 420x297 ----------------------------------

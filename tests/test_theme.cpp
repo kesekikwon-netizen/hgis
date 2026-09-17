@@ -4,6 +4,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QColor>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFontDatabase>
@@ -31,9 +32,12 @@ class TestTheme : public QObject {
 private slots:
   void initTestCase();
   void ribbonButtons_renderAtIntendedSize();
+  void ribbonOverflow_preservesControlsAndKeyboard();
   void domainIcons_useDistinctColors();
   void iconStates_preserveMeaningAndDisableColor();
   void explicitIconTint_remainsMonochrome();
+  void glossyIcons_keepTransparentCornersAndHighDpi();
+  void appIcon_usesGoldTrowelResource();
   void chromeSurfaces_renderGlossAndReadableText();
   void softenedPalette_matchesPreviousIntensity();
   void regionChip_remainsCompactAndTextOnly();
@@ -135,6 +139,52 @@ const char* const themedIconIds[] = {
     "contour", "dem", "soil", "paleo", "geology", "river", "georef", "buffer",
     "check", "pdf", "export", "more",
 };
+}
+
+void TestTheme::ribbonOverflow_preservesControlsAndKeyboard() {
+  KaBeginnerRibbon ribbon;
+  ribbon.addGroup(QStringLiteral("survey"), QStringLiteral("조사파일"));
+  ribbon.addGroup(QStringLiteral("record"), QStringLiteral("기록"));
+  auto* survey = new QAction(QStringLiteral("조사 열기"), &ribbon);
+  auto* open = ribbon.addAction(QStringLiteral("survey"), survey);
+  auto* draw = new QToolButton(&ribbon);
+  draw->setText(QStringLiteral("그리기"));
+  draw->setCheckable(true);
+  ribbon.addWidget(QStringLiteral("record"), draw);
+  QPointer<QToolButton> retainedDraw(draw);
+  QSignalSpy activated(draw, &QToolButton::clicked);
+  ribbon.resize(700, ribbon.sizeHint().height());
+  ribbon.show();
+  QCoreApplication::processEvents();
+  auto* overflow = ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
+  QVERIFY(overflow);
+  QVERIFY(!overflow->isVisible());
+  ribbon.resize(140, ribbon.height());
+  QTRY_VERIFY(overflow->isVisible());
+  QVERIFY(overflow->width() >= overflow->fontMetrics().horizontalAdvance(overflow->text()));
+  auto* menu = ribbon.findChild<QMenu*>(QStringLiteral("ribbonOverflowMenu"));
+  auto* record = ribbon.findChild<QMenu*>(QStringLiteral("ribbonOverflowGroup_record"));
+  QVERIFY(menu && record && record->menuAction()->isVisible());
+  menu->popup(overflow->mapToGlobal(QPoint(0, overflow->height())));
+  menu->setActiveAction(record->menuAction());
+  QTest::keyClick(menu, Qt::Key_Right);
+  QTRY_VERIFY(record->isVisible());
+  QTRY_VERIFY(draw->isVisible());
+  draw->setFocus();
+  QTest::keyClick(draw, Qt::Key_Space);
+  QCOMPARE(activated.count(), 1);
+  QVERIFY(draw->isChecked());
+  menu->close();
+  for (int i = 0; i < 3; ++i) {
+    ribbon.resize(700, ribbon.height());
+    QTRY_VERIFY(!overflow->isVisible());
+    QVERIFY(retainedDraw && retainedDraw == draw);
+    QCOMPARE(open->defaultAction(), survey);
+    QVERIFY(draw->isVisible());
+    QCOMPARE(draw->font().pixelSize(), 13);
+    ribbon.resize(140, ribbon.height());
+    QTRY_VERIFY(overflow->isVisible());
+  }
 }
 
 void TestTheme::ribbonButtons_renderAtIntendedSize() {
@@ -273,6 +323,49 @@ void TestTheme::domainIcons_useDistinctColors() {
   QVERIFY2(opaquePixelsMatching(soil, [](const QColor& c) {
     return qMax(c.red(), qMax(c.green(), c.blue())) < 100;
   }) >= 20, "soil needs a dark outline as well as the earth fill");
+}
+
+void TestTheme::glossyIcons_keepTransparentCornersAndHighDpi() {
+  for (const char* id : {"new", "map", "layer", "gps", "georef", "pdf"}) {
+    const auto icon = KaIcons::icon(QString::fromLatin1(id));
+    const auto normal = icon.pixmap(QSize(64, 64), 1.0).toImage();
+    QCOMPARE(normal.pixelColor(0, 0).alpha(), 0);
+    QCOMPARE(normal.pixelColor(63, 63).alpha(), 0);
+    QVERIFY(normal.pixelColor(8, 18).alpha() > 240);
+    QVERIFY(normal.pixelColor(8, 46).alpha() > 240);
+    QVERIFY(normal.pixelColor(8, 18).lightness() > normal.pixelColor(8, 46).lightness());
+    const auto hi = icon.pixmap(QSize(40, 40), 2.0);
+    QCOMPARE(hi.size(), QSize(80, 80));
+    QCOMPARE(hi.devicePixelRatio(), 2.0);
+  }
+}
+
+void TestTheme::appIcon_usesGoldTrowelResource() {
+  QFile bundled(QStringLiteral(":/ka-hgis/app-icon.png"));
+  QFile source(QStringLiteral("data/theme/ka-hgis-app.png"));
+  QVERIFY(bundled.open(QIODevice::ReadOnly));
+  QVERIFY(source.open(QIODevice::ReadOnly));
+  QCOMPARE(QCryptographicHash::hash(bundled.readAll(), QCryptographicHash::Sha256),
+           QCryptographicHash::hash(source.readAll(), QCryptographicHash::Sha256));
+  const QImage master(QStringLiteral(":/ka-hgis/app-icon.png"));
+  QVERIFY(!master.isNull());
+  QVERIFY(master.hasAlphaChannel());
+  QVERIFY(master.width() >= 256 && master.height() >= 256);
+  const auto icon = KaIcons::appIcon();
+  QVERIFY(!icon.isNull());
+  for (int size : {16, 32, 48, 64, 128, 256}) {
+    const auto image = icon.pixmap(QSize(size, size), 1.0).toImage();
+    QCOMPARE(image.size(), QSize(size, size));
+    QCOMPARE(image.pixelColor(0, 0).alpha(), 0);
+    QCOMPARE(image.pixelColor(size - 1, size - 1).alpha(), 0);
+    QVERIFY(image.pixelColor(size / 2, size / 2).alpha() > 240);
+    QVERIFY(opaquePixelsMatching(image, [](const QColor& c) {
+      return c.hsvHue() >= 20 && c.hsvHue() <= 55 && c.hsvSaturation() > 60;
+    }) > size * size / 8);
+  }
+  const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+  if (!output.isEmpty() && QDir(output).exists())
+    QVERIFY(icon.pixmap(256, 256).save(QDir(output).filePath(QStringLiteral("app-icon-preview.png"))));
 }
 
 void TestTheme::iconStates_preserveMeaningAndDisableColor() {
@@ -724,7 +817,7 @@ void TestTheme::chromeFontIsFieldKorean() {
            "do not lead chrome with an unshipped Pretendard family");
   QVERIFY2(!qss.contains(QLatin1String("QToolBar#studioToolRail QToolButton")) ||
                !QRegularExpression(QStringLiteral(
-                    R"(QToolBar#studioToolRail QToolButton[\s\S]*?font-size:\s*10px)"))
+                    R"(QToolBar#studioToolRail QToolButton[^\{]*\{[^\}]*font-size:\s*10px)"))
                     .match(qss)
                     .hasMatch(),
            "studio tool rail must not use 10px type");

@@ -104,18 +104,24 @@ private slots:
     }
   }
 
-  void knownTabCodeIsUsedAndUnknownFallsBackToTheLabel() {
-    // 매장유산유존지역은 코드를 확인했다.
-    const QString known =
-        HeritageIntranetFlow::selectDatasetScript(HeritageDataset::BuriedHeritageArea);
-    QVERIFY(known.contains(QStringLiteral("changeTab")));
-    QVERIFY(known.contains(QStringLiteral("\"B\"")));
-    // 지정유산 탭 코드는 아직 모른다. 글자로 찾되 아는 척하지 않는다.
-    QVERIFY(HeritageStyle::tabCode(HeritageDataset::DesignatedHeritage).isEmpty());
-    const QString unknown =
-        HeritageIntranetFlow::selectDatasetScript(HeritageDataset::DesignatedHeritage);
-    QVERIFY(!unknown.contains(QStringLiteral("changeTab")));
-    QVERIFY(unknown.contains(QStringLiteral("지정유산")));
+  void everyDatasetSelectsItsOfficialTabAndWaitsForTheNewForm() {
+    const QStringList codes = {QStringLiteral("S"), QStringLiteral("P"), QStringLiteral("B"),
+                               QStringLiteral("U"), QStringLiteral("R"), QStringLiteral("E")};
+    const auto datasets = HeritageStyle::allDatasets();
+    QCOMPARE(datasets.size(), codes.size());
+    for (qsizetype i = 0; i < datasets.size(); ++i) {
+      const QString js = HeritageIntranetFlow::selectDatasetScript(datasets[i]);
+      QVERIFY(js.contains(QStringLiteral("fn('changeTab')")));
+      QVERIFY(js.contains(QStringLiteral("tab(%1)").arg(HeritageIntranetFlow::jsString(codes[i]))));
+      QVERIFY(js.contains(QStringLiteral("no-changeTab")));
+      QVERIFY(js.contains(QStringLiteral("if(!oldForm)return 'not-found'")));
+      const QString ready = HeritageIntranetFlow::datasetReadyScript(datasets[i]);
+      QVERIFY(ready.contains(QStringLiteral("form===W.__kaHeritagePreviousForm")));
+      QVERIFY(ready.contains(QStringLiteral("var code=%1").arg(HeritageIntranetFlow::jsString(codes[i]))));
+      QVERIFY(ready.contains(QStringLiteral("mode.value!==code")));
+      QVERIFY(ready.contains(QStringLiteral("return 'pending'")));
+      QVERIFY(ready.contains(QStringLiteral("return 'ready'")));
+    }
   }
 
   void regionStepStopsAtSigunguAndNeverGoesDeeper() {
@@ -143,7 +149,9 @@ private slots:
     QVERIFY(!open.contains(QStringLiteral("form.submit")));
     QVERIFY(!open.contains(QStringLiteral("window.top")));
     QVERIFY(open.contains(QStringLiteral("showAgreePopup")));
-    QVERIFY(open.contains(QStringLiteral("tabContentAjax")));
+    QVERIFY(open.contains(QStringLiteral("c[i].showAgreePopup()")));
+    QVERIFY(open.contains(QStringLiteral("return 'opening'")));
+    QVERIFY(open.contains(QStringLiteral("downloadForm(c[i].document)||agreementBox(c[i].document)")));
     QVERIFY(open.contains(QStringLiteral("not-found")));
 
     // 목록은 사이트 자신의 전송 통로로 부른다.
@@ -158,13 +166,14 @@ private slots:
   }
 
 
-  void searchSubmitsTheFormItselfNotOnlyASiteFunction() {
-    // 사이트 함수만 부르면 요청이 아예 안 나가는 화면이 있었다(20번 막힌 지점).
-    // 폼을 직접 제출하는 길이 반드시 있어야 한다.
+  void searchClicksTheScopedButtonWithoutCallingTheOverwrittenMapFunction() {
+    // 같은 이름의 지도 함수가 다운로드 함수를 덮어쓸 수 있으므로 공식 버튼을 누른다.
     const QString js = HeritageIntranetFlow::searchScript();
-    // 페이지를 옮기는 방식은 금지다. 사이트 함수를 그 창에서 부르고, 없으면 그렇다고 말한다.
+    // 폼 제출로 페이지를 옮기지 않고 검색 결과가 바뀌었는지 확인할 노드를 기억한다.
     QVERIFY(!js.contains(QStringLiteral("form.submit")));
-    QVERIFY(js.contains(QStringLiteral("searchGisChaRirList")));
+    QVERIFY(!js.contains(QStringLiteral("searchGisChaRirList")));
+    QVERIFY(js.contains(QStringLiteral("__kaHeritageSearchNode")));
+    QVERIFY(js.contains(QStringLiteral("btn.click();return 'searching'")));
     QVERIFY(js.contains(QStringLiteral("not-found")));
   }
 
@@ -303,27 +312,31 @@ private slots:
     }
   }
 
-  void downloadPageIsTheCodedetaFormNotTheMapPanel() {
+  void downloadPageRequiresAVisibleDownloadFormOrAgreement() {
     // 2026-09-11 실패 outline(main.do): 지도 칸 bjdcd1_newJbn「시도 선택」과
     // 메뉴 「전체다운로드」는 메인 화면에 있다. 다운로드 폼(codedeta)은 없다.
     // 그걸 도착으로 치면 서약서·시군 선택으로 가지 못하고 여기서 멈춘다.
     const QString probe = HeritageIntranetFlow::downloadPageProbeScript();
-    QVERIFY(probe.contains(QStringLiteral("codedeta")));
+    QVERIFY(probe.contains(QStringLiteral("getElementById('searchForm')")));
+    QVERIFY(probe.contains(QStringLiteral("querySelector('#mode')")));
+    QVERIFY(probe.contains(QStringLiteral("/^[SPBURE]$/.test(m.value)&&visibleElement(f)")));
+    QVERIFY(probe.contains(QStringLiteral("downloadForm(document)||agreementBox(document)")));
     QVERIFY(!probe.contains(QStringLiteral("전체다운로드")));
     QVERIFY(!probe.contains(QStringLiteral("시도선택")));
     QVERIFY(probe.contains(QStringLiteral("서약서에동의")));
     QVERIFY(probe.contains(QStringLiteral("not-yet")));
+    QVERIFY(probe.contains(QStringLiteral("page-error")));
   }
 
-  void wrapPrefersCodedetaFrameOverParentSearchFunction() {
-    // 같은 outline: searchGisChaRirList 는 바깥 창 메뉴 onclick 에 있고,
-    // codedeta 는 그 document 에 없다. pick 이 함수만 보면 지도 창에 머문다.
+  void wrapPrefersTheDownloadFormFrameOverMenuText() {
+    // 먼저 실제 다운로드 폼을 고른다. 부모의 메뉴 글자만 보고 지도 창에 머물지 않는다.
     const QString js = HeritageIntranetFlow::searchScript();
-    const int codedetaAt = js.indexOf(QStringLiteral("name*=codedeta"));
-    const int searchFnAt = js.indexOf(QStringLiteral("searchGisChaRirList"));
-    QVERIFY(codedetaAt >= 0);
-    QVERIFY(searchFnAt >= 0);
-    QVERIFY2(codedetaAt < searchFnAt, "pick must take the codedeta frame before the parent search function");
+    const int formAt = js.indexOf(QStringLiteral("if(hasCodedeta(c[i]))return c[i]"));
+    const int menuAt = js.indexOf(QStringLiteral("t.indexOf('지정유산')"));
+    QVERIFY(formAt >= 0);
+    QVERIFY(menuAt >= 0);
+    QVERIFY2(formAt < menuAt, "pick must prefer the download form over parent menu text");
+    QVERIFY(js.contains(QStringLiteral("downloadForm(w.document)")));
     QVERIFY(js.contains(QStringLiteral("frames[i]")));
   }
 
@@ -333,27 +346,37 @@ private slots:
     QVERIFY(js.contains(QStringLiteral("'codedeta'")));
     QVERIFY(!js.contains(QStringLiteral("지정유산")));
     QVERIFY(!js.contains(QStringLiteral("bjdcd")));
-    QVERIFY(!js.contains(QStringLiteral("서약서에동의")));
+    // 공통 도우미에는 서약서 문구가 있지만 반환 판정은 다운로드 폼만 사용한다.
+    QVERIFY(js.contains(QStringLiteral("if(downloadForm(document))return 'codedeta'")));
+    QVERIFY(js.contains(QStringLiteral("return 'other'")));
+    QVERIFY(!js.contains(QStringLiteral("agreementBox(document)")));
   }
 
   void agreeTermsSkipsWhenDownloadFormIsAlreadyOpen() {
     const QString js = HeritageIntranetFlow::agreeTermsScript();
     QVERIFY(js.contains(QStringLiteral("already-open")));
-    QVERIFY(js.contains(QStringLiteral("codedeta")));
+    QVERIFY(js.contains(QStringLiteral("if(downloadForm(document))return 'already-open'")));
   }
 
-  void searchAndDownloadStayOnTheCodedetaWindow() {
+  void searchAndDownloadUseOnlyTheDownloadPanelButtons() {
     // 부모 메뉴의 searchGisChaRirList 는 다른 document 의 것이다.
     // fn() 으로 아무 창의 함수나 잡으면 지도 쪽이 검색돼 조건이 안 걸린다.
     const QString search = HeritageIntranetFlow::searchScript();
     const QString down = HeritageIntranetFlow::downloadAllScript();
     QVERIFY(!search.contains(QStringLiteral("fn('searchGisChaRirList')")));
     QVERIFY(!down.contains(QStringLiteral("fn('searchGisChaRirList')")));
-    // 함수가 있는 창에서 부른다. 부모 창 함수를 아무렇게나 잡지 않는다.
+    // 다운로드 폼의 검색과 전체다운로드 버튼에 연결된 사이트 동작을 사용한다.
     QVERIFY(search.contains(QStringLiteral("cands()")));
-    QVERIFY(search.contains(QStringLiteral("searchGisChaRirList")));
-    QVERIFY(down.contains(QStringLiteral("searchGisChaRirList")));
-    // 검색은 페이지를 옮기지 않는다. 사이트 자신의 함수를 그 함수가 있는 창에서 부른다.
+    QVERIFY(!search.contains(QStringLiteral("searchGisChaRirList")));
+    QVERIFY(!down.contains(QStringLiteral("searchGisChaRirList")));
+    QVERIFY(search.contains(QStringLiteral("scope?findSearch(scope):null")));
+    QVERIFY(search.contains(QStringLiteral("btn.click()")));
+    QVERIFY(down.contains(QStringLiteral("form.closest('#tabContentDiv')")));
+    QVERIFY(down.contains(QStringLiteral("if(!sido||!sido.value)return 'no-region'")));
+    QVERIFY(down.contains(QStringLiteral("if(!sgg||!sgg.value)return 'no-region'")));
+    QVERIFY(down.contains(QStringLiteral("if(hits.length!==1)return 'ambiguous'")));
+    QVERIFY(down.contains(QStringLiteral("hits[0].click()")));
+    // 검색은 페이지를 옮기지 않는다.
     QVERIFY(!search.contains(QStringLiteral("form.submit")));
     QVERIFY(search.contains(QStringLiteral("cands()")));
     QVERIFY(!search.contains(QStringLiteral("new Function")));

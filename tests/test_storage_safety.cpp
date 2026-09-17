@@ -9,10 +9,15 @@
 #include <QtTest>
 
 #include "core/KaSafeQgis.h"
+#include "core/LayerOps.h"
 #include "core/SurveyProjectFactory.h"
 #include "core/SurveyStorage.h"
 #include <qgsapplication.h>
 #include <qgsproject.h>
+#include <qgsfeature.h>
+#include <qgsgeometry.h>
+#include <qgslayertree.h>
+#include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
 
 #ifdef Q_OS_WIN
@@ -62,6 +67,153 @@ static QStringList temporaryArtifacts(const QString& path) {
 class TestStorageSafety : public QObject {
   Q_OBJECT
  private slots:
+  void recoverySnapshot_preservesPendingEditsAndSource_data() {
+    QTest::addColumn<QString>("crs");
+    QTest::newRow("central") << QStringLiteral("EPSG:5186");
+    QTest::newRow("east") << QStringLiteral("EPSG:5187");
+  }
+
+  void recoverySnapshot_preservesPendingEditsAndSource() {
+    QFETCH(QString, crs);
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QString error;
+    const QString source = SurveyProjectFactory::createNewSurvey(
+        dir.path(), QStringLiteral("원본조사"), &error, crs);
+    QVERIFY2(!source.isEmpty(), qPrintable(error));
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(crs));
+    project.setTitle(QStringLiteral("복구 전 현재 작업"));
+    auto* area = LayerOps::ensureDomainLayer(&project, source, QStringLiteral("survey_area"),
+                                             QStringLiteral("조사구역"), &error);
+    auto* line = LayerOps::ensureDomainLayer(&project, source, QStringLiteral("feature_line"),
+                                             QStringLiteral("미저장 선"), &error);
+    QVERIFY2(area && line, qPrintable(error));
+    for (auto* layer : {area, line}) {
+      QVERIFY(layer->startEditing());
+      QgsFeature feature(layer->fields());
+      feature.setAttribute(QStringLiteral("note"), QStringLiteral("기존"));
+      feature.setGeometry(layer == area
+          ? QgsGeometry::fromRect(QgsRectangle(190000, 560000, 190010, 560010))
+          : QgsGeometry::fromWkt(QStringLiteral("LineString (190000 560000, 190010 560010)")));
+      QVERIFY(layer->addFeature(feature));
+      QVERIFY(layer->commitChanges(false));
+    }
+    const QgsFeatureId areaId = *area->allFeatureIds().constBegin();
+    QVERIFY(area->changeAttributeValue(areaId, area->fields().indexOf(QStringLiteral("note")),
+                                       QStringLiteral("수정된 면")));
+    QgsGeometry changedArea = QgsGeometry::fromRect(QgsRectangle(190020, 560020, 190040, 560040));
+    QVERIFY(area->changeGeometry(areaId, changedArea));
+    QgsFeature added(area->fields());
+    added.setAttribute(QStringLiteral("note"), QStringLiteral("새로 추가한 면"));
+    added.setGeometry(QgsGeometry::fromRect(QgsRectangle(190050, 560050, 190060, 560060)));
+    QVERIFY(area->addFeature(added)); // NULL fid + existing fid must both survive writer.
+    const QgsFeatureId lineId = *line->allFeatureIds().constBegin();
+    QVERIFY(line->deleteFeature(lineId));
+    QgsFeature replacement(line->fields());
+    replacement.setAttribute(QStringLiteral("note"), QStringLiteral("삭제 뒤 대체한 선"));
+    replacement.setGeometry(QgsGeometry::fromWkt(QStringLiteral("LineString (190030 560030, 190080 560080)")));
+    QVERIFY(line->addFeature(replacement));
+    auto* reference = new QgsVectorLayer(
+        QStringLiteral("Point?crs=%1&field=note:string").arg(crs), QStringLiteral("참조점"), QStringLiteral("memory"));
+    QVERIFY(reference->isValid());
+    LayerOps::markReferenceLayer(reference);
+    project.addMapLayer(reference);
+    QVERIFY(reference->startEditing());
+    QgsFeature point(reference->fields());
+    point.setAttribute(QStringLiteral("note"), QStringLiteral("메모리에만 있는 점"));
+    point.setGeometry(QgsGeometry::fromWkt(QStringLiteral("Point (190070 560070)")));
+    QVERIFY(reference->addFeature(point));
+    project.layerTreeRoot()->findLayer(reference->id())->setItemVisibilityChecked(false);
+    auto* missingRaster = new QgsRasterLayer(dir.filePath(QStringLiteral("없는사진.tif")),
+                                             QStringLiteral("원본이 없는 사진"), QStringLiteral("gdal"));
+    QVERIFY(!missingRaster->isValid());
+    LayerOps::markReferenceLayer(missingRaster);
+    project.addMapLayer(missingRaster);
+    project.setFileName(dir.filePath(QStringLiteral("현재작업.qgz")));
+    project.setPresetHomePath(dir.path());
+    project.setDirty(true);
+    area->setAllowCommit(false);
+    QVERIFY(!area->commitChanges(false));
+    const QByteArray before = fileHash(source);
+    const QString originalFile = project.fileName();
+    const QString originalHome = project.presetHomePath();
+    QMap<QString, QString> sources;
+    QMap<QString, QMap<QString, QgsFeature>> expected;
+    for (auto* layer : {area, line, reference}) {
+      sources.insert(layer->name(), layer->source());
+      auto iterator = layer->getFeatures();
+      QgsFeature feature;
+      while (iterator.nextFeature(feature))
+        expected[layer->name()].insert(feature.attribute(QStringLiteral("note")).toString(), feature);
+    }
+    const QString folder = dir.filePath(QStringLiteral("복구 사본"));
+    const QString first = SurveyStorage::writeRecoverySnapshot(&project, folder, &error);
+    QVERIFY2(!first.isEmpty(), qPrintable(error));
+    QVERIFY(QFileInfo::exists(first));
+    QCOMPARE(fileHash(source), before);
+    QCOMPARE(project.fileName(), originalFile);
+    QCOMPARE(project.presetHomePath(), originalHome);
+    QVERIFY(project.isDirty());
+    for (auto* layer : {area, line, reference}) {
+      QCOMPARE(layer->source(), sources.value(layer->name()));
+      QVERIFY(layer->isEditable() && layer->isModified());
+    }
+    QgsProject restored;
+    QVERIFY2(restored.read(SurveyStorage::projectUri(first)), qPrintable(restored.error()));
+    QCOMPARE(restored.crs().authid(), crs);
+    QCOMPARE(restored.mapLayers().size(), 4);
+    const auto missing = restored.mapLayersByName(QStringLiteral("원본이 없는 사진"));
+    QCOMPARE(missing.size(), 1);
+    QVERIFY(!missing.first()->isValid());
+    const QStringList external = restored.readListEntry(QStringLiteral("ka_hgis"),
+                                                        QStringLiteral("recovery_external_references"));
+    QVERIFY(external.join(QLatin1Char('\n')).contains(QStringLiteral("원본이 없는 사진")));
+    for (auto* original : {area, line, reference}) {
+      const auto matches = restored.mapLayersByName(original->name());
+      QCOMPARE(matches.size(), 1);
+      auto* snapshot = qobject_cast<QgsVectorLayer*>(matches.first());
+      QVERIFY(snapshot && snapshot->isValid());
+      QCOMPARE(snapshot->crs().authid(), original->crs().authid());
+      QCOMPARE(LayerOps::layerKeyOf(snapshot), LayerOps::layerKeyOf(original));
+      QCOMPARE(LayerOps::isReferenceLayer(snapshot), LayerOps::isReferenceLayer(original));
+      QCOMPARE(snapshot->featureCount(), qint64(expected.value(original->name()).size()));
+      auto* node = restored.layerTreeRoot()->findLayer(snapshot->id());
+      QVERIFY(node);
+      QCOMPARE(node->itemVisibilityChecked(),
+               project.layerTreeRoot()->findLayer(original->id())->itemVisibilityChecked());
+      auto iterator = snapshot->getFeatures();
+      QgsFeature feature;
+      while (iterator.nextFeature(feature)) {
+        const QString key = feature.attribute(QStringLiteral("note")).toString();
+        QVERIFY(expected.value(original->name()).contains(key));
+        const QgsFeature prior = expected.value(original->name()).value(key);
+        QVERIFY(feature.geometry().equals(prior.geometry()));
+        for (const QgsField& field : original->fields()) {
+          QVERIFY(snapshot->fields().lookupField(field.name()) >= 0);
+          QCOMPARE(feature.attribute(field.name()), prior.attribute(field.name()));
+        }
+      }
+    }
+    restored.clear();
+    const QByteArray firstHash = fileHash(first);
+    const QString second = SurveyStorage::writeRecoverySnapshot(&project, folder, &error);
+    QVERIFY2(!second.isEmpty(), qPrintable(error));
+    QVERIFY(second != first);
+    QCOMPARE(fileHash(first), firstHash);
+    QCOMPARE(fileHash(source), before);
+    const QString blocked = dir.filePath(QStringLiteral("파일이라 폴더가 아님"));
+    QVERIFY(writeBytes(blocked, QByteArray("keep")));
+    QVERIFY(SurveyStorage::writeRecoverySnapshot(&project, blocked, &error).isEmpty());
+    QVERIFY(!error.isEmpty());
+    QCOMPARE(fileHash(first), firstHash);
+    QCOMPARE(fileHash(source), before);
+    QVERIFY(project.isDirty());
+    for (auto* layer : {area, line, reference}) QVERIFY(layer->isEditable() && layer->isModified());
+    area->setAllowCommit(true);
+    for (auto* layer : {area, line, reference}) layer->rollBack();
+  }
+
   void newSurvey_existingFilesRemainByteIdentical() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -271,3 +423,4 @@ int main(int argc, char** argv) {
 }
 
 #include "test_storage_safety.moc"
+

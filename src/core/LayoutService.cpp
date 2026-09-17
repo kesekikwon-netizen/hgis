@@ -1,4 +1,5 @@
 #include "LayoutService.h"
+#include "HeritageLayoutNumbers.h"
 #include "DemColorRampLegend.h"
 #include "GeologyMapService.h"
 #include "LayerOps.h"
@@ -16,6 +17,8 @@
 #include <QPen>
 #include <QRectF>
 #include <QStringList>
+#include <QStyleOptionGraphicsItem>
+#include <QTimer>
 
 #include <algorithm>
 #include <cmath>
@@ -44,6 +47,10 @@
 #include <qgslayoutmeasurement.h>
 #include <qgslayoutpagecollection.h>
 #include <qgslayoutsize.h>
+#include <qgslayoututils.h>
+#include <qgslegendrenderer.h>
+#include <qgslegendsettings.h>
+#include <qgsrendercontext.h>
 #include <qgis.h>
 #include <qgslayertree.h>
 #include <qgslayertreelayer.h>
@@ -1226,6 +1233,20 @@ QString LayoutService::exportLayoutPdf(QgsProject* project, const QString& layou
 
   // 저장된 조판(예전 프로젝트에서 열린 것)에도 래스터 단일 렌더를 보장한다.
   applySingleRasterPassRendering(layout);
+  // Saved studio sheets and submission PDFs need the same actual print-label
+  // filtering as the Studio PDF button, including sheets reopened from disk.
+  if (auto* map = dynamic_cast<QgsLayoutItemMap*>(layout->itemById(QStringLiteral("ka_map")))) {
+    HeritageLayoutNumbers localNumbers;
+    auto* numbers = HeritageLayoutNumbers::forMap(map);
+    if (!numbers) numbers = &localNumbers;
+    if (!numbers->update(map, true)) {
+      if (errorOut) *errorOut = numbers->error();
+      return {};
+    }
+    auto* legend = dynamic_cast<QgsLayoutItemLegend*>(layout->itemById(QStringLiteral("ka_legend")));
+    if (!numbers->exportPdf(map, legend, pdfPath, 300., errorOut, true)) return {};
+    return pdfPath;
+  }
   QgsLayoutExporter exporter(layout);
   QgsLayoutExporter::PdfExportSettings settings;
   settings.dpi = 300;
@@ -1233,6 +1254,7 @@ QString LayoutService::exportLayoutPdf(QgsProject* project, const QString& layou
   // 화면 미리보기용으로 낮춰 둔 해상도가 남아 있어도 인쇄는 300 DPI로 나가게 한다.
   const double keepDpi = layout->renderContext().dpi();
   layout->renderContext().setDpi(settings.dpi);
+  settleSheetLegendsForExport(layout);
   const auto r = exporter.exportToPdf(pdfPath, settings);
   layout->renderContext().setDpi(keepDpi);
   if (r != QgsLayoutExporter::Success) {
@@ -1346,8 +1368,7 @@ bool projectLayerChecked(QgsMapLayer* ml) {
   if (!proj || !proj->layerTreeRoot()) return true;
   QgsLayerTreeLayer* node = proj->layerTreeRoot()->findLayer(ml->id());
   if (!node) return false;
-  // LayerOps::visibleLayersPaintOrder uses the checkbox, not ancestor isVisible().
-  return node->itemVisibilityChecked();
+  return node->isVisible();
 }
 
 bool onLinkedMap(QgsLayoutItemLegend* legend, QgsMapLayer* ml) {
@@ -1359,6 +1380,105 @@ bool onLinkedMap(QgsLayoutItemLegend* legend, QgsMapLayer* ml) {
 }
 
 }  // namespace
+
+void LayoutService::flowSheetLegend(QgsLayoutItemLegend* legend) {
+  if (!legend || !legend->layout() || !legend->model()) return;
+  const QString widthKey = QStringLiteral("ka_hgis/legend_flow_width");
+  if (!legend->findChild<QTimer*>(QStringLiteral("ka_legend_flow_timer"))) {
+    auto* timer = new QTimer(legend);
+    timer->setObjectName(QStringLiteral("ka_legend_flow_timer"));
+    timer->setSingleShot(true);
+    timer->setInterval(120);
+    QObject::connect(legend, &QgsLayoutItem::sizePositionChanged, timer, [legend, timer, widthKey] {
+      // Moving or adjusting height must not rebuild the legend or map styles.
+      if (qAbs(legend->rect().width() - legend->customProperty(widthKey).toDouble()) > .01)
+        timer->start();
+    });
+    QObject::connect(timer, &QTimer::timeout, legend, [legend] { flowSheetLegend(legend); });
+    // Symbol hit testing finishes after the initial size measurement. Reflow
+    // once it removes off-map geology/soil rows so no tall empty frame remains.
+    QObject::connect(legend->model(), &QgsLayerTreeModel::hitTestCompleted, timer,
+                     [timer] { timer->start(); });
+    // Export uses blocking hit tests, which update rows without emitting the
+    // asynchronous hitTestCompleted signal.
+    QObject::connect(legend->model(), &QAbstractItemModel::rowsRemoved, timer,
+                     [timer] { timer->start(); });
+    QObject::connect(legend->model(), &QAbstractItemModel::rowsInserted, timer,
+                     [timer] { timer->start(); });
+    QObject::connect(legend->model(), &QAbstractItemModel::modelReset, timer,
+                     [timer] { timer->start(); });
+  }
+  auto* flowTimer = legend->findChild<QTimer*>(QStringLiteral("ka_legend_flow_timer"));
+  if (legend->property("ka_interacting").toBool()) {
+    flowTimer->start();
+    return;
+  }
+  flowTimer->stop();
+  const double width = legend->layout()->convertFromLayoutUnits(
+      legend->rect().width(), Qgis::LayoutUnit::Millimeters).length();
+  if (width <= 0.) return;
+  legend->setCustomProperty(widthKey, legend->rect().width());
+  legend->setResizeToContents(false);
+  legend->setSplitLayer(true);
+  legend->setEqualColumnWidth(true);
+  auto settings = legend->legendSettings();
+  const double points = legend->styleFont(Qgis::LegendComponent::SymbolLabel).pointSizeF();
+  const double minColumn = 55. * qMax(7., points) / 9.;
+  const double available = qMax(1., width - 2. * settings.boxSpace());
+  int rows = 0;
+  for (auto* node : legend->model()->rootGroup()->findLayers())
+    rows += legend->model()->layerLegendNodes(node).size();
+  int columns = qBound(1, static_cast<int>((available + settings.columnSpace()) /
+      (minColumn + settings.columnSpace())), qMax(1, rows));
+  auto context = QgsLayoutUtils::createRenderContextForLayout(legend->layout(), nullptr);
+  QSizeF measured;
+  double wrap = 0.;
+  do {
+    settings.setColumnCount(columns);
+    const double columnWidth = (available - (columns - 1) * settings.columnSpace()) / columns;
+    wrap = qMax(1., columnWidth - settings.symbolSize().width() - 4.);
+    settings.setAutoWrapLinesAfter(wrap);
+    QgsLegendRenderer renderer(legend->model(), settings);
+    measured = renderer.minimumSize(&context);
+    if (measured.width() <= width + .1 || columns == 1) break;
+    --columns;
+  } while (true);
+  legend->setColumnCount(columns);
+  legend->setAutoWrapLinesAfter(wrap);
+  // QGIS measures the same numbered symbols and wrapped text used for export.
+  // Keep the chosen horizontal size and anchor while fitting the height.
+  const QPointF position = legend->pos();
+  legend->attemptResize(QgsLayoutSize(width, measured.height() + .5, Qgis::LayoutUnit::Millimeters));
+  legend->setPos(position);
+  legend->update();
+}
+
+void LayoutService::settleSheetLegendsForExport(QgsLayout* layout) {
+  if (!layout) return;
+  QList<QgsLayoutItemLegend*> legends;
+  layout->layoutItems(legends);
+  const double dpi = qMax(1., layout->renderContext().dpi());
+  const double pixelsPerUnit = dpi / 25.4 *
+      layout->convertFromLayoutUnits(1., Qgis::LayoutUnit::Millimeters).length();
+  for (auto* legend : legends) {
+    if (!legend->isVisible() || legend->excludeFromExports()) continue;
+    // Public legend paint initializes map scale and runs its pending filter.
+    // Paint only the legend into scratch storage; do not render the map twice.
+    QImage scratch(8, 8, QImage::Format_ARGB32_Premultiplied);
+    scratch.fill(Qt::transparent);
+    scratch.setDotsPerMeterX(qRound(dpi / .0254));
+    scratch.setDotsPerMeterY(qRound(dpi / .0254));
+    QPainter painter(&scratch);
+    painter.scale(pixelsPerUnit, pixelsPerUnit);
+    QStyleOptionGraphicsItem option;
+    option.exposedRect = legend->rect();
+    legend->invalidateCache();
+    legend->paint(&painter, &option, nullptr);
+    painter.end();
+    legend->model()->waitForHitTestBlocking();
+    flowSheetLegend(legend);
+  }
+}
 
 void LayoutService::tuneSheetLegend(QgsLayoutItemLegend* legend) {
   if (!legend) return;
@@ -1403,9 +1523,18 @@ void LayoutService::tuneSheetLegend(QgsLayoutItemLegend* legend) {
   }
   for (QgsLayerTreeLayer* ll : root->findLayers()) {
     if (ll->layer() && dynamic_cast<DemColorRampLegend*>(ll->layer()->legend())) {
-      legend->setResizeToContents(true);
-      legend->attemptResize(QgsLayoutSize(1., 1., Qgis::LayoutUnit::Millimeters));
-      legend->adjustBoxSize();
+      // Keep the chosen width: adjustBoxSize() cannot measure until the first
+      // paint, so the old 1 mm reset became a clipped, vertically wrapped strip.
+      legend->setResizeToContents(false);
+      const double width = legend->layout()->convertFromLayoutUnits(
+          legend->rect().width(), Qgis::LayoutUnit::Millimeters).length();
+      if (width <= 1.1) {
+        // Repair only the old collapsed size; ordinary user widths survive.
+        const QPointF position = legend->pos();
+        legend->attemptResize(QgsLayoutSize(55., 40., Qgis::LayoutUnit::Millimeters));
+        legend->setPos(position);
+      }
+      flowSheetLegend(legend);
       break;
     }
   }

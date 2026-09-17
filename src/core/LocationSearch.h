@@ -16,6 +16,7 @@ struct LocationHit {
   double lat = 0;
   double west = 0, south = 0, east = 0, north = 0;
   bool hasBbox = false;
+  QString pnu; // Only populated for an exact parcel-address result.
 };
 
 class LocationSearch : public QObject {
@@ -27,6 +28,7 @@ public:
   ~LocationSearch() override;
 
   void search(const QString& query);
+  void searchParcel(const QString& query);
   void cancel();
   static QString vworldApiKey();
   static void setVworldApiKey(const QString& key);
@@ -36,10 +38,11 @@ signals:
   void failed(const QString& message);
 
 private:
+  void startSearch(const QString& query, bool parcel);
   void searchNominatim(const QString& query);
-  void searchVworld(const QString& query);
+  void searchVworld(const QString& query, bool parcel = false);
   void handleNominatim(const QByteArray& body);
-  void handleVworld(const QByteArray& body);
+  void handleVworld(const QByteArray& body, const QString& parcelQuery = {});
   void completeRequest();
 
   std::unique_ptr<QNetworkAccessManager> m_nam;

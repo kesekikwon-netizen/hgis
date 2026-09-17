@@ -1,4 +1,7 @@
 #include "KaHeritageBrowser.h"
+#include "KaDownloadUi.h"
+#include "KaWindowGeometry.h"
+#include <QShowEvent>
 
 #include "core/HeritageFormParser.h"
 #include "core/HeritageIntranetFlow.h"
@@ -196,18 +199,25 @@ QString safeName(const QString& suggested) {
 KaHeritageBrowser::KaHeritageBrowser(QWidget* parent) : QDialog(parent) {
   setWindowTitle(QStringLiteral("주변유적 받기"));
   setModal(false);
-  resize(680, 170);
+  resize(680, 330);
 
   auto* root = new QVBoxLayout(this);
+  KaDownloadUi::configure(this, root, QStringLiteral("주변유적 다운로드"),
+      QStringLiteral("국가유산 공간정보 인트라넷 · 선택한 시·군의 자료를 순서대로 받습니다."));
+  auto* statusCard = KaDownloadUi::statusCard(this);
+  auto* statusLayout = qobject_cast<QVBoxLayout*>(statusCard->layout());
   m_stageLabel = new QLabel(QStringLiteral("대기"), this);
   m_stageLabel->setStyleSheet(QStringLiteral("font-weight:600;"));
   m_detailLabel = new QLabel(QString(), this);
   m_detailLabel->setWordWrap(true);
-  root->addWidget(m_stageLabel);
-  root->addWidget(m_detailLabel);
+  m_stageLabel->setWordWrap(true);
+  statusLayout->addWidget(m_stageLabel);
+  statusLayout->addWidget(m_detailLabel);
   m_progress = new QProgressBar(this);
   m_progress->setRange(0, 0);
-  root->addWidget(m_progress);
+  KaDownloadUi::styleProgress(m_progress);
+  statusLayout->addWidget(m_progress);
+  root->addWidget(statusCard);
 
   m_profile = new QWebEngineProfile(QStringLiteral("ka-heritage"), this);
   m_requestLog = new HeritageRequestLog(this);
@@ -254,22 +264,23 @@ KaHeritageBrowser::KaHeritageBrowser(QWidget* parent) : QDialog(parent) {
   m_outline->hide();
   m_outline->setMaximumHeight(140);
   m_outline->setPlaceholderText(
-      QStringLiteral("멈춘 자리에서 화면에 있던 것들이 여기에 나옵니다. 다음 선택자를 정할 때 씁니다."));
+      QStringLiteral("진행 중 문제가 발생한 경우 확인할 상세 내용입니다."));
   root->addWidget(m_outline);
 
   auto* buttons = new QHBoxLayout;
-  buttons->addStretch(1);
-  auto* detailsButton = new QPushButton(QStringLiteral("자세히"), this);
+  auto* detailsButton = new QPushButton(QStringLiteral("상세 보기"), this);
   detailsButton->setObjectName(QStringLiteral("heritageDetails"));
   detailsButton->setCheckable(true);
   detailsButton->setToolTip(QStringLiteral("공식 사이트 화면을 펼쳐 봅니다. 막혔을 때만 쓰면 됩니다."));
   connect(detailsButton, &QPushButton::toggled, this, [this](bool on) {
     if (m_tabs) m_tabs->setVisible(on);
     if (m_outline) m_outline->setVisible(on);
-    resize(on ? 980 : 680, on ? 720 : 170);
+    resize(on ? 980 : 680, on ? 720 : 330);
+    KaWindowGeometry::fit(this);
   });
   buttons->addWidget(detailsButton);
-  m_stopButton = new QPushButton(QStringLiteral("중지"), this);
+  buttons->addStretch(1);
+  m_stopButton = new QPushButton(QStringLiteral("취소"), this);
   connect(m_stopButton, &QPushButton::clicked, this, &KaHeritageBrowser::stop);
   buttons->addWidget(m_stopButton);
   root->addLayout(buttons);
@@ -283,6 +294,11 @@ KaHeritageBrowser::KaHeritageBrowser(QWidget* parent) : QDialog(parent) {
 }
 
 KaHeritageBrowser::~KaHeritageBrowser() { stop(); m_poll->stop(); }
+
+void KaHeritageBrowser::showEvent(QShowEvent* event) {
+  QDialog::showEvent(event);
+  KaWindowGeometry::fit(this);
+}
 
 void KaHeritageBrowser::setDownloadRoot(const QString& directory) {
   m_downloadRoot = directory;
@@ -486,6 +502,7 @@ void KaHeritageBrowser::start() {
   stop();
   if (auto* details = findChild<QPushButton*>(QStringLiteral("heritageDetails"))) details->setChecked(false);
   resize(680, 170);
+  KaWindowGeometry::fit(this);
   m_downloadRequests.clear();
   m_pendingDownloads = 0;
   m_downloadRetryReason.clear();

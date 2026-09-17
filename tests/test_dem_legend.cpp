@@ -8,7 +8,19 @@
 #include <qgsapplication.h>
 #include <qgscolorramplegendnode.h>
 #include <qgscolorrampshader.h>
+#include <qgsfeature.h>
+#include <qgsgeometry.h>
 #include <qgslayertreelayer.h>
+#include <qgslayertree.h>
+#include <qgslayoutitemlegend.h>
+#include <qgslayoutitemmap.h>
+#include <qgslayoutexporter.h>
+#include <qgsmaplayerstyle.h>
+#include <qgsmarkersymbol.h>
+#include <qgsmarkersymbollayer.h>
+#include <qgsprintlayout.h>
+#include <qgsproject.h>
+#include <qgsvectorlayer.h>
 #include <qgslegendsettings.h>
 #include <qgscolorramp.h>
 #include <qgsrasterlayer.h>
@@ -19,6 +31,9 @@
 #include <qgssinglebandpseudocolorrenderer.h>
 #include "core/DemColorRampLegend.h"
 #include "core/DemPresentation.h"
+#include "core/HeritageLayoutNumbers.h"
+#include "core/HeritageStyle.h"
+#include "core/LayoutService.h"
 
 class DemLegendTest : public QObject {
   Q_OBJECT
@@ -53,6 +68,125 @@ class DemLegendTest : public QObject {
     layer->setRenderer(renderer);
   }
 private slots:
+  void composedLegendKeepsReadableWidthBeforeFirstPaint_data() {
+    QTest::addColumn<double>("initialWidth");
+    QTest::addColumn<bool>("mixedHeritage");
+    QTest::newRow("dem-width") << 70. << false;
+    QTest::newRow("dem-damaged-width") << 1. << false;
+    QTest::newRow("mixed-width") << 70. << true;
+    QTest::newRow("mixed-damaged-width") << 1. << true;
+  }
+  void composedLegendKeepsReadableWidthBeforeFirstPaint() {
+    QFETCH(double, initialWidth);
+    QFETCH(bool, mixedHeritage);
+    auto demOwner = raster(); QVERIFY(demOwner && demOwner->isValid());
+    auto* dem = demOwner.get();
+    dem->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    QVERIFY(DemPresentation::apply(dem));
+    QgsProject project;
+    project.setCrs(dem->crs());
+    project.addMapLayer(demOwner.release());
+    QList<QgsMapLayer*> layers{dem};
+    QgsVectorLayer* heritage = nullptr;
+    if (mixedHeritage) {
+      heritage = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5186&field=nm:string(80)"),
+          HeritageStyle::layerName(HeritageDataset::DesignatedHeritage), QStringLiteral("memory"));
+      QVERIFY(heritage->isValid());
+      QVERIFY(heritage->startEditing());
+      QgsFeature site(heritage->fields());
+      site.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(190005., 559995.)));
+      site.setAttribute(QStringLiteral("nm"), QStringLiteral("합성 유적"));
+      QVERIFY(heritage->addFeature(site));
+      QVERIFY(heritage->commitChanges());
+      QVERIFY(HeritageStyle::apply(heritage, HeritageDataset::DesignatedHeritage, QStringLiteral("nm")).ok);
+      project.addMapLayer(heritage, false);
+      project.layerTreeRoot()->addGroup(HeritageStyle::layerName(HeritageDataset::DesignatedHeritage))->addLayer(heritage);
+      layers.prepend(heritage);
+    }
+    QgsMapLayerStyle originalDem, originalHeritage;
+    originalDem.readFromLayer(dem);
+    if (heritage) originalHeritage.readFromLayer(heritage);
+    QgsPrintLayout layout(&project);
+    layout.initializeDefaults();
+    auto* map = new QgsLayoutItemMap(&layout);
+    layout.addLayoutItem(map);
+    map->attemptSetSceneRect(QRectF(10., 10., 160., 160.));
+    map->setCrs(dem->crs());
+    map->setKeepLayerSet(true);
+    map->setLayers(layers);
+    map->setExtent(QgsRectangle(189980., 559960., 190040., 560020.));
+    auto* legend = new QgsLayoutItemLegend(&layout);
+    layout.addLayoutItem(legend);
+    legend->setLinkedMap(map);
+    legend->setTitle(QStringLiteral("범례"));
+    legend->setResizeToContents(false);
+    for (auto component : {Qgis::LegendComponent::Title, Qgis::LegendComponent::Group,
+                           Qgis::LegendComponent::Subgroup, Qgis::LegendComponent::SymbolLabel})
+      legend->setStyleFont(component, QFont(QStringLiteral("Malgun Gothic"), 9));
+    legend->attemptSetSceneRect(QRectF(180., 15., initialWidth, 30.));
+    const QPointF anchor = legend->pos();
+    const double expectedWidth = initialWidth > 1.1 ? initialWidth : 55.;
+    // Deliberately no render or event processing: QGIS adjustBoxSize() cannot
+    // establish a usable size before its initial map-scale calculation.
+    LayoutService::tuneSheetLegend(legend);
+    QCOMPARE(legend->rect().width(), expectedWidth);
+    QCOMPARE(legend->pos(), anchor);
+    QVERIFY(legend->rect().height() >= 40.);
+    QVERIFY(legend->rect().height() < 140.);
+    HeritageLayoutNumbers numbers;
+    QVERIFY2(numbers.update(map), qPrintable(numbers.error()));
+    numbers.applyLegend(legend);
+    QCOMPARE(numbers.entries().size(), mixedHeritage ? 1 : 0);
+    for (int repeat = 0; repeat < 3; ++repeat) {
+      LayoutService::tuneSheetLegend(legend);
+      numbers.applyLegend(legend);
+      QCOMPARE(legend->rect().width(), expectedWidth);
+      QCOMPARE(legend->pos(), anchor);
+      QVERIFY(legend->rect().height() >= 40.);
+      QVERIFY(legend->rect().height() < 140.);
+    }
+    QgsLayoutExporter exporter(&layout);
+    const QImage preview = exporter.renderPageToImage(0, QSize(), 120.);
+    QVERIFY(!preview.isNull());
+    QTest::qWait(160);
+    QCOMPARE(legend->rect().width(), expectedWidth);
+    QCOMPARE(legend->pos(), anchor);
+    QVERIFY(legend->rect().height() < 140.);
+    auto* demNode = legend->model()->rootGroup()->findLayer(dem->id());
+    QVERIFY(demNode);
+    const auto demSymbols = legend->model()->layerLegendNodes(demNode);
+    QCOMPARE(demSymbols.size(), 1);
+    QVERIFY(dynamic_cast<QgsColorRampLegendNode*>(demSymbols.first()));
+    if (heritage) {
+      auto* node = legend->model()->rootGroup()->findLayer(heritage->id());
+      QVERIFY(node);
+      const auto symbols = legend->model()->layerLegendNodes(node);
+      QCOMPARE(symbols.size(), 1);
+      QCOMPARE(symbols.first()->data(Qt::DisplayRole).toString(), QStringLiteral("합성 유적"));
+      const auto* symbolNode = dynamic_cast<const QgsSymbolLegendNode*>(symbols.first());
+      QVERIFY(symbolNode);
+      const auto* badge = dynamic_cast<const QgsMarkerSymbol*>(symbolNode->customSymbol());
+      QVERIFY(badge);
+      const auto* number = dynamic_cast<const QgsFontMarkerSymbolLayer*>(badge->symbolLayer(1));
+      QVERIFY(number);
+      QCOMPARE(number->character(), QStringLiteral("1"));
+    }
+    QgsMapLayerStyle afterDem, afterHeritage;
+    afterDem.readFromLayer(dem);
+    QCOMPARE(afterDem.xmlData(), originalDem.xmlData());
+    if (heritage) {
+      afterHeritage.readFromLayer(heritage);
+      QCOMPARE(afterHeritage.xmlData(), originalHeritage.xmlData());
+    }
+    const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if (!output.isEmpty()) {
+      QVERIFY(QDir().mkpath(output));
+      const QString base = QDir(output).filePath(QStringLiteral("dem-composed-%1").arg(QString::fromLatin1(QTest::currentDataTag())));
+      QVERIFY(preview.save(base + QStringLiteral(".png")));
+      QgsLayoutExporter::PdfExportSettings settings;
+      QCOMPARE(exporter.exportToPdf(base + QStringLiteral(".pdf"), settings), QgsLayoutExporter::Success);
+    }
+  }
   void installedLegendHasOneContinuousNode() {
     auto layer = raster(); QVERIFY(layer && layer->isValid());
     QVERIFY(DemPresentation::apply(layer.get()));

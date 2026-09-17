@@ -27,6 +27,7 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QStyle>
 #include <QShowEvent>
 #include <QSizePolicy>
 #include <QSplitter>
@@ -117,7 +118,6 @@ KaSectionDrawingStudio::KaSectionDrawingStudio(QgsProject* project, QWidget* par
     : QWidget(parent)
     , m_project(project)
 {
-    setMinimumWidth(1100);
     buildUi();
     syncCrsComboFromProject();
     rebuildSheet(false);
@@ -325,6 +325,7 @@ QWidget* KaSectionDrawingStudio::buildRightPanel()
     auto* panel = new QWidget();
     panel->setObjectName(QStringLiteral("sectionPropertiesPanel"));
     auto* form = new QFormLayout(panel);
+    form->setRowWrapPolicy(QFormLayout::WrapLongRows);
     form->setLabelAlignment(Qt::AlignRight);
     form->setContentsMargins(8, 8, 8, 8);
     form->setSpacing(6);
@@ -445,6 +446,11 @@ QWidget* KaSectionDrawingStudio::buildRightPanel()
     form->addRow(m_pdfBtn);
 
     scroll->setWidget(panel);
+    panel->ensurePolished();
+    const int requiredWidth = panel->minimumSizeHint().width() +
+        scroll->style()->pixelMetric(QStyle::PM_ScrollBarExtent) + 2 * scroll->frameWidth();
+    scroll->setMinimumWidth(std::max(200, requiredWidth));
+    scroll->setMaximumWidth(std::max(300, requiredWidth));
 
     connect(m_paperCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &KaSectionDrawingStudio::onPaperChanged);

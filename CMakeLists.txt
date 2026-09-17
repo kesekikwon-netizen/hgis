@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(ka-hgis VERSION 0.3.0 LANGUAGES CXX)
+project(ka-hgis VERSION 2.0.0 LANGUAGES CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -61,6 +61,9 @@ set(KA_LIBDIRS
 )
 
 add_library(ka_core STATIC
+  src/core/LayerLabelControls.cpp
+  src/core/CadastralImport.cpp
+  src/core/CadastralPortal.cpp
   data/topographic/topographic.qrc
   src/core/TopographicArchive.cpp
   src/core/TopographicSheets.cpp
@@ -74,6 +77,7 @@ add_library(ka_core STATIC
   src/core/PreparedReferenceMap.cpp
   src/core/DemDownloadService.cpp
   src/core/ExportService.cpp
+  src/core/MapGeoTiffExport.cpp
   src/core/ProjectStateBuilder.cpp
   src/core/LayoutService.cpp
   src/core/LayerOps.cpp
@@ -85,6 +89,7 @@ add_library(ka_core STATIC
   src/core/KoreaRegionCatalog.cpp
   src/core/HeritageStyle.cpp
   src/core/HeritageSiteLegend.cpp
+  src/core/HeritageLayoutNumbers.cpp
   src/core/HeritageRegionResolver.cpp
   src/core/HeritageIntranetSettings.cpp
   src/core/HeritageIntranetFlow.cpp
@@ -122,6 +127,7 @@ add_library(ka_core STATIC
   src/core/KoreaRegionCatalog.h
   src/core/HeritageStyle.h
   src/core/HeritageSiteLegend.h
+  src/core/HeritageLayoutNumbers.h
   src/core/HeritageRegionResolver.h
   src/core/HeritageIntranetSettings.h
   src/core/HeritageIntranetFlow.h
@@ -193,6 +199,7 @@ configure_file(
 )
 
 add_executable(ka-hgis
+  data/theme/icons.qrc
   data/providers/ngii.qrc
   src/app/KaTopographicScopePanel.cpp
   src/app/KaTopographicScopePanel.h
@@ -203,6 +210,9 @@ add_executable(ka-hgis
     src/app/MainWindowUndo.cpp
     src/app/MainWindowDownloads.cpp
     src/app/MainWindowTopographic.cpp
+    src/app/MainWindowCadastral.cpp
+  src/app/KaLayerInformation.cpp
+  src/app/KaLayerInformation.h
   src/app/KaTopographicBrowser.cpp
   src/app/KaTopographicBrowser.h
   src/app/KaHeritageBrowser.cpp
@@ -215,6 +225,10 @@ add_executable(ka-hgis
   src/app/KaTopographicImportDialog.h
   src/app/KaBeginnerRibbon.cpp
   src/app/KaApplication.cpp
+  src/app/KaStartupSplash.cpp
+  src/app/KaStartupSplash.h
+  src/app/KaDownloadUi.cpp
+  src/app/KaDownloadUi.h
   src/app/KaReferenceDownloadJob.cpp
   src/app/KaTheme.cpp
   src/app/KaIcons.cpp
@@ -416,6 +430,7 @@ if(KA_HGIS_BUILD_TESTS)
 
 
   add_executable(ka_theme_tests
+    data/theme/icons.qrc
     tests/test_theme.cpp
     src/app/KaTheme.cpp
     src/app/KaBeginnerRibbon.cpp
@@ -437,6 +452,10 @@ if(KA_HGIS_BUILD_TESTS)
   add_test(NAME region_locator_popup COMMAND ka_region_locator_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
   add_executable(ka_heritage_import_tests tests/test_heritage_import.cpp)
+  add_executable(ka_map_geotiff_export_tests tests/test_map_geotiff_export.cpp)
+  target_link_libraries(ka_map_geotiff_export_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_map_geotiff_export_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  add_test(NAME map_geotiff_export COMMAND ka_map_geotiff_export_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   target_link_libraries(ka_heritage_import_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_heritage_import_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   add_test(NAME heritage_import COMMAND ka_heritage_import_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
@@ -466,6 +485,15 @@ if(KA_HGIS_BUILD_TESTS)
   set_target_properties(ka_heritage_region_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   add_test(NAME heritage_region COMMAND ka_heritage_region_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   add_executable(ka_layer_state_tests tests/test_layer_state.cpp)
+  add_executable(ka_layer_label_tests tests/test_layer_labels.cpp)
+  target_link_libraries(ka_layer_label_tests PRIVATE ka_core Qt6::Test)
+  add_test(NAME layer_labels COMMAND ka_layer_label_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  add_executable(ka_layer_information_tests tests/test_layer_information.cpp
+    src/app/KaLayerInformation.cpp src/app/KaLayerInformation.h)
+  target_link_libraries(ka_layer_information_tests PRIVATE ka_core Qt6::Test)
+  add_test(NAME layer_information COMMAND ka_layer_information_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(layer_labels layer_information PROPERTIES TIMEOUT 90)
+  set_target_properties(ka_layer_label_tests ka_layer_information_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   add_executable(ka_dem_legend_tests tests/test_dem_legend.cpp)
   add_executable(ka_topographic_catalog_tests tests/test_topographic_catalog.cpp)
   add_executable(ka_topographic_archive_tests tests/test_topographic_archive.cpp)
@@ -523,6 +551,26 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_topographic_scope_tests PRIVATE ka_core Qt6::Test Qt6::WebEngineWidgets)
   set_target_properties(ka_topographic_scope_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   add_test(NAME topographic_scope COMMAND ka_topographic_scope_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  foreach(_ka_download_target IN ITEMS ka_heritage_download_retry_tests ka_topographic_browser_tests ka_topographic_scope_tests)
+    target_sources(${_ka_download_target} PRIVATE src/app/KaDownloadUi.cpp src/app/KaDownloadUi.h)
+  endforeach()
+
+  add_executable(ka_startup_splash_tests tests/test_startup_splash.cpp
+    src/app/KaStartupSplash.cpp src/app/KaStartupSplash.h)
+  target_include_directories(ka_startup_splash_tests PRIVATE src)
+  target_link_libraries(ka_startup_splash_tests PRIVATE Qt6::Test Qt6::Widgets)
+  set_target_properties(ka_startup_splash_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  add_test(NAME startup_splash COMMAND ka_startup_splash_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(startup_splash PROPERTIES TIMEOUT 45)
+
+  add_executable(ka_download_ui_tests tests/test_download_ui.cpp
+    src/app/KaDownloadUi.cpp src/app/KaDownloadUi.h
+    src/app/KaTopographicBrowser.cpp src/app/KaTopographicBrowser.h
+    src/app/KaHeritageBrowser.cpp src/app/KaHeritageBrowser.h)
+  target_link_libraries(ka_download_ui_tests PRIVATE ka_core Qt6::Test Qt6::WebEngineWidgets)
+  set_target_properties(ka_download_ui_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  add_test(NAME download_ui COMMAND ka_download_ui_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(download_ui PROPERTIES TIMEOUT 90)
   add_executable(ka_dem_rendering_tests tests/test_dem_rendering.cpp)
   add_executable(ka_dem_presentation_tests tests/test_dem_presentation.cpp src/app/KaDemClassDialog.cpp src/app/KaDemClassDialog.h)
   target_link_libraries(ka_dem_presentation_tests PRIVATE ka_core Qt6::Test)
@@ -575,6 +623,11 @@ if(KA_HGIS_BUILD_TESTS)
   add_test(NAME reference_download COMMAND ka_reference_download_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(reference_download PROPERTIES TIMEOUT 60)
 
+  add_executable(ka_cadastral_tests tests/test_cadastral.cpp)
+  target_link_libraries(ka_cadastral_tests PRIVATE ka_core Qt6::Test)
+  add_test(NAME cadastral COMMAND ka_cadastral_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(cadastral PROPERTIES TIMEOUT 90)
+
   # Exercise the actual window's save/open slots, including project signal callbacks.
   get_target_property(KA_SAVE_OPEN_SOURCES ka-hgis SOURCES)
   list(REMOVE_ITEM KA_SAVE_OPEN_SOURCES src/app/main.cpp src/app/KaApplication.cpp src/app/app.rc)
@@ -611,7 +664,7 @@ if(KA_HGIS_BUILD_TESTS)
       "${OSGEO4W_ROOT}/bin"
     )
     string(JOIN "\\;" _ka_path_esc ${_ka_path})
-    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine terrain_3d_engine save_open_window e2e_opaque_suite network_services storage_safety reference_download region_locator_popup layer_state_regressions map_render above_labels above_labels_125 above_labels_150 above_labels_200 PROPERTIES
+    set_tests_properties(layer_labels layer_information checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine terrain_3d_engine save_open_window e2e_opaque_suite network_services storage_safety reference_download region_locator_popup layer_state_regressions map_render above_labels above_labels_125 above_labels_150 above_labels_200 PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(dem_legend PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(topographic_catalog PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
@@ -625,15 +678,12 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(heritage_style PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(heritage_form PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(heritage_download_retry PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 90)
-    set_tests_properties(heritage_import PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
+    set_tests_properties(heritage_import map_geotiff_export PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
     set_tests_properties(heritage_region PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(webengine_smoke PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 120)
     set_tests_properties(topographic_browser PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 150)
-    # 이 검사는 실제 국토정보플랫폼 사이트와 QtWebEngine 자식 프로세스가 필요하다.
-    # 이 PC에서는 apps/Qt6/bin 의 QtWebEngineProcess.exe 가 뜨지 못해 150초를 기다렸다
-    # 실패하고, 그 사이 사용자 화면에 시스템 오류창을 계속 띄운다. 기본 검사에서 빼고
-    # 필요할 때만 돌린다:  ctest --preset release -R topographic_browser --force-new-ctest-process
-    set_tests_properties(topographic_browser PROPERTIES DISABLED TRUE)
+    # 기본 검사는 로컬 HTTP fixture에서 전송·취소·로그인 세션을 검증한다.
+    # 실제 사이트 3개 검사는 KA_HGIS_LIVE_NGII_* opt-in 없이는 skip한다.
     set_tests_properties(dem_rendering PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
     set_tests_properties(dem_presentation PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     set_property(TEST above_labels APPEND PROPERTY ENVIRONMENT "QT_SCALE_FACTOR=1")

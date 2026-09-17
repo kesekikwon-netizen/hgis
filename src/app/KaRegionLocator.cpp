@@ -126,14 +126,15 @@ void KaRegionLocator::openAddressPopup(const QString& sido) {
     m_dong->setAttribute(Qt::WA_InputMethodEnabled, true);
     m_dong->setInputMethodHints(Qt::ImhNone);
     if (QLineEdit* dongEdit = m_dong->lineEdit()) {
-      dongEdit->setPlaceholderText(QStringLiteral("동·읍·면"));
+      dongEdit->setPlaceholderText(QStringLiteral("법정동·읍·면·리"));
       dongEdit->setAttribute(Qt::WA_InputMethodEnabled, true);
       dongEdit->setInputMethodHints(Qt::ImhNone);
       dongEdit->setFont(hangul);
     }
     m_lot = new QLineEdit(m_popup);
-    m_lot->setPlaceholderText(QStringLiteral("번지"));
-    m_lot->setMaximumWidth(96);
+    m_lot->setPlaceholderText(QStringLiteral("산 12-3"));
+    m_lot->setToolTip(QStringLiteral("번지 (예: 12, 12-3, 산 12-3). 산번지는 ‘산’을 함께 입력하세요."));
+    m_lot->setMaximumWidth(120);
     m_lot->setFont(hangul);
     m_lot->setAttribute(Qt::WA_InputMethodEnabled, true);
     m_lot->setInputMethodHints(Qt::ImhNone);
@@ -161,6 +162,9 @@ void KaRegionLocator::openAddressPopup(const QString& sido) {
     titleRow->addWidget(closeX, 0);
     col->addLayout(titleRow);
     col->addLayout(row);
+    auto* hint = new QLabel(QStringLiteral("번지 입력 시 정확한 지번만 찾습니다. 읍·면은 리까지 입력하세요.\n예: 고아읍 봉한리 / 산 12-3"), m_popup);
+    hint->setWordWrap(true);
+    col->addWidget(hint);
     m_popup->installEventFilter(this);
     connect(closeX, &QToolButton::clicked, this, &KaRegionLocator::closePanel);
     connect(cancel, &QPushButton::clicked, this, &KaRegionLocator::closePanel);
@@ -236,5 +240,6 @@ void KaRegionLocator::emitSearch() {
       m_sido, city, dong, m_lot ? m_lot->text() : QString());
   if (q.isEmpty()) return;
   closePanel();
-  emit searchRequested(q);
+  if (m_lot && !m_lot->text().trimmed().isEmpty()) emit parcelSearchRequested(q);
+  else emit searchRequested(q);
 }

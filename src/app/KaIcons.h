@@ -4,7 +4,7 @@
 #include <QString>
 
 namespace KaIcons {
-// Group-colored field icons with explicit selection and disabled states.
+// Rounded glossy group-colored field icons, including high-DPI and state variants.
 QIcon icon(const QString& id);
 // A valid ink requests a monochrome icon in every mode/state.
 QIcon icon(const QString& id, const QColor& ink);

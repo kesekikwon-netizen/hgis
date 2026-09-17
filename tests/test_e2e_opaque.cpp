@@ -315,23 +315,27 @@ void TestE2EOpaque::testT1_ChecklistEngine_RuleEvaluation() {
 }
 
 void TestE2EOpaque::testT1_VworldKey_PropagationAndRegex() {
-  const QString testKey = QStringLiteral("11111111-2222-3333-4444-555555555555");
+  const QString oldKey = QStringLiteral("11111111-2222-3333-4444-555555555555");
+  const QString testKey = QStringLiteral("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE");
+  QVERIFY(oldKey != testKey);
 
   // 1. WMTS URL replacement
   const QString wmtsUrl = QStringLiteral("http://api.vworld.kr/req/wmts/1.0.0/11111111-2222-3333-4444-555555555555/Satellite/{z}/{y}/{x}.jpeg");
   const QString wmtsFixed = LayerOps::withVworldApiKey(wmtsUrl, testKey);
   QVERIFY(wmtsFixed.contains(testKey));
-  QVERIFY(!wmtsFixed.contains(QStringLiteral("11111111-2222-3333-4444-555555555555")));
+  QVERIFY(!wmtsFixed.contains(oldKey));
 
   // 2. WMS URL replacement
   const QString wmsUrl = QStringLiteral("http://api.vworld.kr/req/wms?KEY=11111111-2222-3333-4444-555555555555&DOMAIN=localhost");
   const QString wmsFixed = LayerOps::withVworldApiKey(wmsUrl, testKey);
   QVERIFY(wmsFixed.contains(QStringLiteral("KEY=") + testKey));
+  QVERIFY(!wmsFixed.contains(oldKey));
 
   // 3. Percent-encoded WMS URL replacement
   const QString wmsEncUrl = QStringLiteral("http://api.vworld.kr/req/wms?KEY%3D11111111-2222-3333-4444-555555555555&DOMAIN=localhost");
   const QString wmsEncFixed = LayerOps::withVworldApiKey(wmsEncUrl, testKey);
   QVERIFY(wmsEncFixed.contains(QStringLiteral("KEY%3D") + testKey));
+  QVERIFY(!wmsEncFixed.contains(oldKey));
 
   // 4. Non-vworld URL preserved
   const QString osmUrl = QStringLiteral("https://tile.openstreetmap.org/{z}/{x}/{y}.png");

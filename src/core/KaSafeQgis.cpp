@@ -26,30 +26,30 @@
 #include <windows.h>
 #endif
 
-static bool readProjectPlain(QgsProject* project, const QString& path) {
-  // Layouts are rebuilt on demand (rebuildLayouts), so restoring them here buys
-  // nothing and costs read time. The QGIS docs also call print layouts the unsafe
-  // part of a project read, which is where the .qgz access violations land.
-  return project->read(path, Qgis::ProjectReadFlag::DontLoadLayouts);
+static bool readProjectPlain(QgsProject* project, const QString& path, bool loadLayouts) {
+  // A user-composed sheet cannot be rebuilt from the map. Explicit GUI opens
+  // restore it; validation/recovery can still omit non-thread-safe layouts.
+  return project->read(path, loadLayouts ? Qgis::ProjectReadFlags()
+                                        : Qgis::ProjectReadFlags(Qgis::ProjectReadFlag::DontLoadLayouts));
 }
 
 static void clearProjectPlain(QgsProject* project) { project->clear(); }
 
-bool kaSafeReadQgisProject(QgsProject* project, const QString& path, bool* crashedOut) {
+bool kaSafeReadQgisProject(QgsProject* project, const QString& path, bool* crashedOut, bool loadLayouts) {
   if (crashedOut) *crashedOut = false;
   if (!project || path.isEmpty())
     return false;
 #ifdef Q_OS_WIN
   bool ok = false;
   __try {
-    ok = readProjectPlain(project, path);
+    ok = readProjectPlain(project, path, loadLayouts);
   } __except (EXCEPTION_EXECUTE_HANDLER) {
     if (crashedOut) *crashedOut = true;
     return false;
   }
   return ok;
 #else
-  return readProjectPlain(project, path);
+  return readProjectPlain(project, path, loadLayouts);
 #endif
 }
 

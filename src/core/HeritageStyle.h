@@ -37,6 +37,9 @@ public:
   static QString tabCode(HeritageDataset ds);
   // 종류별 고정 색. 색을 정하는 곳은 여기 하나뿐이다.
   static QColor color(HeritageDataset ds);
+  // Upgrade only the old dataset default for layout copies. Keep custom RGB
+  // values and the source alpha; this never changes the source layer itself.
+  static QColor layoutColor(HeritageDataset ds, const QColor& sourceColor);
   static std::optional<HeritageDataset> fromLayerName(const QString& name);
 
   // 조사 성과물과 섞이면 안 되는 색. 빨강은 조사구역, 회색은 수치지형도 밑그림이 쓴다.

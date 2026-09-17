@@ -1,4 +1,10 @@
 #include "MainWindow.h"
+#include <QDateTime>
+#include <QRandomGenerator>
+#include "KaStartupSplash.h"
+#include "KaLayerInformation.h"
+#include "core/MapGeoTiffExport.h"
+#include "KaWindowGeometry.h"
 #include "core/DemPresentation.h"
 #include "KaTheme.h"
 #include "KaIcons.h"
@@ -60,6 +66,7 @@
 #include "core/RiverMapService.h"
 #include "core/VworldSettings.h"
 #include "core/LocationSearch.h"
+#include "core/CadastralImport.h"
 #include "core/KoreaRegionCatalog.h"
 #include "core/AdminBoundaryService.h"
 #include "KaRegionLocator.h"
@@ -480,7 +487,8 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
       !kaQgisProjectFileIsUnsafeToRead(gpkgPath)) {
     bool embCrashed = false;
     QString embErr;
-    if (SurveyStorage::readEmbedded(QgsProject::instance(), gpkgPath, &embCrashed, &embErr)) {
+    if (SurveyStorage::readEmbedded(QgsProject::instance(), gpkgPath, &embCrashed, &embErr,
+                                    /*loadLayouts=*/true)) {
       finishOpenedProject(gpkgPath, QStringLiteral("조사 파일 내장"), t.elapsed());
       return true;
     }
@@ -506,7 +514,7 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
     const bool alreadyUnsafe = kaQgisProjectFileIsUnsafeToRead(projectToRead);
     bool readCrashed = false;
     bool readOk = !alreadyUnsafe && kaSafeReadQgisProject(QgsProject::instance(),
-                                                          projectToRead, &readCrashed);
+                                                          projectToRead, &readCrashed, /*loadLayouts=*/true);
     if (!readOk && !alreadyUnsafe)
       kaMarkQgisProjectUnsafeToRead(projectToRead);
     // 원자적 저장이 남긴 직전 정상본. 현재 파일을 못 읽어도 한 세대 전으로 되살릴 수 있다.
@@ -514,7 +522,7 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
     const QString bakPath = kaProjectBackupPath(projectToRead);
     if (!readOk && !readCrashed && QFile::exists(bakPath) &&
         !kaQgisProjectFileIsUnsafeToRead(bakPath)) {
-      readOk = kaSafeReadQgisProject(QgsProject::instance(), bakPath, &readCrashed);
+      readOk = kaSafeReadQgisProject(QgsProject::instance(), bakPath, &readCrashed, /*loadLayouts=*/true);
       if (readOk)
         KaCrashGuard::logLine(
             QStringLiteral("[open] 직전 저장본으로 복구했습니다: %1").arg(bakPath));
@@ -908,6 +916,16 @@ void MainWindow::buildMenus() {
       QStringLiteral("흙토람 입지 후보를 강조하고 구하도·자연제방 등 가설을 그립니다. 확정이 아닙니다"));
   connect(m_btnPaleo, &QToolButton::clicked, this, &MainWindow::startPaleoLandform);
   ribbon->addWidget(QStringLiteral("basemap"), m_btnPaleo);
+  auto [actCadastral, btnCadastral] = addIcon(
+      QStringLiteral("basemap"), QStringLiteral("cadastral"), QStringLiteral("지적도"),
+      QStringLiteral("조사구역 주변 5km 지적도를 받아 경계선과 지번을 표시합니다"),
+      &MainWindow::downloadCadastral);
+  actCadastral->setObjectName(QStringLiteral("actionCadastralDownload"));
+  auto* cadastralMenu = new QMenu(btnCadastral);
+  cadastralMenu->addAction(QStringLiteral("VWorld 계정 설정"), this, &MainWindow::configureCadastralAccount);
+  cadastralMenu->addAction(QStringLiteral("선 색·지번 표시"), this, &MainWindow::configureCadastralStyle);
+  btnCadastral->setMenu(cadastralMenu);
+  btnCadastral->setPopupMode(QToolButton::MenuButtonPopup);
   auto [actGeology, btnGeology] = addIcon(
       QStringLiteral("basemap"), QStringLiteral("geology"), QStringLiteral("지질도"),
       QStringLiteral("KIGAM 1:5만 지질 색 위에 지형 음영을 겹칩니다. 다시 누르면 숨깁니다"),
@@ -963,6 +981,14 @@ void MainWindow::buildMenus() {
   addIcon(QStringLiteral("out"), QStringLiteral("section"), QStringLiteral("단면도"),
           QStringLiteral("단면 GeoTIFF로 표고·거리 눈금 도면을 만듭니다"),
           &MainWindow::openSectionDesigner);
+  auto [actMapGeoTiff, btnMapGeoTiff] = addIcon(
+      QStringLiteral("out"), QStringLiteral("map"), QStringLiteral("GeoTIFF\n저장"),
+      QStringLiteral("현재 지도에 보이는 범위와 레이어를 지도 좌표계 그대로 GeoTIFF로 저장합니다"),
+      &MainWindow::exportMapGeoTiff);
+  m_actMapGeoTiff = actMapGeoTiff;
+  m_actMapGeoTiff->setObjectName(QStringLiteral("actionMapGeoTiff"));
+  m_actMapGeoTiff->setEnabled(false);
+  btnMapGeoTiff->setObjectName(QStringLiteral("btnMapGeoTiff"));
   addIcon(QStringLiteral("out"), QStringLiteral("transform"), QStringLiteral("5179좌표계\n내보내기"),
           QStringLiteral("인트라넷 제출. 선택한 레이어를 EPSG:5179 SHP 파일로만 저장합니다. 지도에는 올리지 않습니다."),
           &MainWindow::convertSelectedTo5179);
@@ -971,6 +997,8 @@ void MainWindow::buildMenus() {
   region->setObjectName(QStringLiteral("regionLocator"));
   connect(region, &KaRegionLocator::searchRequested, this,
           [this](const QString& q) { searchLocation(q); });
+  connect(region, &KaRegionLocator::parcelSearchRequested, this,
+          [this](const QString& q) { searchLocation(q, true); });
   connect(region, &KaRegionLocator::regionSelected, this, [this](const QString& sido) {
     const auto bounds = KoreaRegionCatalog::overviewBounds(sido);
     if (!bounds || m_isOpeningSurvey) return;
@@ -1043,8 +1071,8 @@ void MainWindow::buildMenus() {
                       this, &MainWindow::addBasemapGoogle);
   moreMenu->addSeparator();
   moreMenu->addAction(QStringLiteral("파일함 보이기/숨기기"), this, [this]() {
-    if (m_filesCard)
-      m_filesCard->setVisible(!m_filesCard->isVisible());
+    if (auto* toggle = findChild<QToolButton*>(QStringLiteral("sidebarFilesToggle")))
+      toggle->toggle();
   });
   moreMenu->addAction(QStringLiteral("작업 목록"), this, [this]() {
     if (auto* d = findChild<QDockWidget*>(QStringLiteral("workDock"))) {
@@ -1571,13 +1599,21 @@ void MainWindow::buildUi() {
   });
 
   auto* treeRoot = QgsProject::instance()->layerTreeRoot();
-  auto* model = new QgsLayerTreeModel(treeRoot, this);
+  auto* model = new KaLayerInformationModel(QgsProject::instance(), false, this);
   model->setFlag(QgsLayerTreeModel::AllowNodeReorder, true);
   model->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility, true);
   model->setFlag(QgsLayerTreeModel::AllowNodeRename, true);
-  m_layerTree = new QgsLayerTreeView(central);
+  m_layerTree = new KaLayerInformationView(central);
   m_layerTree->setObjectName(QStringLiteral("layerTree"));
   m_layerTree->setModel(model);
+  KaLayerInformationModel::configureView(m_layerTree);
+  model->setScale(m_canvas->scale());
+  connect(m_canvas, &QgsMapCanvas::scaleChanged, model, &KaLayerInformationModel::setScale);
+  connect(model, &KaLayerInformationModel::labelsEdited, this, [this] {
+    applyLabelStackOrder();
+    LayerOps::refreshCanvasIfIdle(m_canvas);
+    if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
+  });
   m_layerTree->setFocusPolicy(Qt::StrongFocus);
   m_layerTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
   m_layerTree->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
@@ -1594,7 +1630,9 @@ void MainWindow::buildUi() {
     m_layerTree->viewport()->installEventFilter(this);
   m_layerTree->setContextMenuPolicy(Qt::CustomContextMenu);
   connect(m_layerTree, &QWidget::customContextMenuRequested, this, &MainWindow::onLayerTreeContextMenu);
-  connect(m_layerTree, &QTreeView::doubleClicked, this, &MainWindow::onLayerTreeDoubleClicked);
+  connect(m_layerTree, &QTreeView::doubleClicked, this, [this](const QModelIndex& index) {
+    if (index.column() == 0) onLayerTreeDoubleClicked(index);
+  });
   m_bridge = new QgsLayerTreeMapCanvasBridge(treeRoot, m_canvas, this);
   m_bridge->setAutoSetupOnFirstLayer(false);
 
@@ -1717,6 +1755,7 @@ void MainWindow::buildUi() {
   auto* layersInnerLay = new QVBoxLayout(layersInner);
   layersInnerLay->setContentsMargins(4, 4, 4, 4);
   layersInnerLay->addWidget(m_layerTree, 1);
+  layersInnerLay->addWidget(new KaLayerInformationPanel(model, m_layerTree, layersInner));
   m_layerEmpty = new QLabel(
       QStringLiteral("레이어가 없습니다.\n파일함에서 SHP·DXF·DWG를 끌어 넣거나\n위성·지적 배경을 올리세요."),
       layersInner);
@@ -1734,15 +1773,19 @@ void MainWindow::buildUi() {
 #endif
   refreshLayerEmptyState();
 
-  // 레이어 카드에는 버튼을 두지 않는 것이 원칙이다. 추가는 파일함에서 끌어 넣기,
-  // 순서는 마우스 끌기, 삭제는 Delete 키(되돌리기는 Ctrl+Z), 나머지는 우클릭 메뉴다.
-  // 예외가 하나 있다: 레이어가 수십 개로 늘면 하나씩 체크를 풀기가 너무 번거로워
-  // 「전체 끄기 / 전체 켜기」만 제목 옆에 둔다.
+  // 도면/글자 체크와 선택 도면 설정은 목록에 둔다. 가져오기/순서/삭제는
+  // 기존 파일함·드래그·Delete 흐름을 유지하며 전체 도면 체크는 제목 옆에 둔다.
   auto* capRow = new QHBoxLayout();
   capRow->setContentsMargins(0, 0, 0, 0);
   capRow->setSpacing(6);
   capRow->addWidget(capLayers);
   capRow->addStretch(1);
+  auto* filesToggle = new QToolButton(layersCard);
+  filesToggle->setObjectName(QStringLiteral("sidebarFilesToggle"));
+  filesToggle->setText(QStringLiteral("파일함"));
+  filesToggle->setCheckable(true);
+  filesToggle->setChecked(true);
+  capRow->addWidget(filesToggle);
   m_layerCheckAllBtn = new QToolButton(layersCard);
   m_layerCheckAllBtn->setObjectName(QStringLiteral("layerCheckAllBtn"));
   m_layerCheckAllBtn->setFocusPolicy(Qt::NoFocus);
@@ -1820,10 +1863,18 @@ void MainWindow::buildUi() {
   m_leftSplit = leftSplit;
   leftSplit->setHandleWidth(8);
   leftSplit->setChildrenCollapsible(false);
-  layersCard->setMinimumHeight(96);
-  filesPanel->setMinimumHeight(96);
+  leftSplit->installEventFilter(this);
+  auto* filesScroll = new QScrollArea(leftSplit);
+  filesScroll->setObjectName(QStringLiteral("sidebarFilesScroll"));
+  filesScroll->setWidgetResizable(true);
+  filesScroll->setFrameShape(QFrame::NoFrame);
+  filesScroll->setMinimumHeight(60);
+  filesPanel->setMinimumHeight(200);
+  filesScroll->setWidget(filesPanel);
+  m_filesCard = filesScroll;
+  connect(filesToggle, &QToolButton::toggled, filesScroll, &QWidget::setVisible);
   leftSplit->addWidget(layersCard);
-  leftSplit->addWidget(filesPanel);
+  leftSplit->addWidget(filesScroll);
   leftSplit->setStretchFactor(0, 3);
   leftSplit->setStretchFactor(1, 2);
   leftSplit->setSizes({380, 260});
@@ -1993,7 +2044,7 @@ void MainWindow::buildUi() {
   m_mainSplit->addWidget(mapCard);
   m_mainSplit->setStretchFactor(0, 0);
   m_mainSplit->setStretchFactor(1, 1);
-  m_mainSplit->setSizes({268, 1012});
+  m_mainSplit->setSizes({348, 932});
   root->addWidget(m_mainSplit, 1);
 #else
   root->addWidget(new QLabel(QStringLiteral("QGIS SDK 스텁 모드"), central), 1);
@@ -2027,6 +2078,7 @@ void MainWindow::buildUi() {
   connect(m_viewTabs, &QTabWidget::currentChanged, this, [this](int i) {
     if (!m_viewTabs) return;
     QWidget* page = m_viewTabs->widget(i);
+    if (m_actMapGeoTiff) m_actMapGeoTiff->setEnabled(page == m_mapPage);
     if (m_startPage && page == m_startPage)
       m_startPage->reload();
     if (m_mapPage && page == m_mapPage) {
@@ -2038,12 +2090,12 @@ void MainWindow::buildUi() {
       QTimer::singleShot(0, this, [this]() {
         if (!m_drawingStudio) return;
         m_drawingStudio->refreshMapFromProject();
-        m_drawingStudio->centerOnMapCanvas();
       });
     if (m_sectionStudio && page == m_sectionStudio)
       QTimer::singleShot(0, this, [this]() {
         if (m_sectionStudio) m_sectionStudio->refreshLayers();
       });
+    if (m_canvas) onCanvasScaleChanged(m_canvas->scale());
   });
   m_viewTabs->setCurrentWidget(m_startPage);
   setCentralWidget(m_viewTabs);
@@ -2209,6 +2261,46 @@ void MainWindow::rebuildLayouts() {
 #endif
 }
 
+void MainWindow::exportMapGeoTiff() {
+#if KA_HGIS_HAS_QGIS
+  if (!m_canvas || !m_viewTabs || m_viewTabs->currentWidget() != m_mapPage) return;
+  if (m_canvas->layers().isEmpty()) {
+    QMessageBox::information(this, QStringLiteral("GeoTIFF 저장"),
+                             QStringLiteral("지도에 저장할 레이어가 없습니다."));
+    return;
+  }
+  QFileDialog dialog(this, QStringLiteral("현재 지도 GeoTIFF 저장"), preferredSurveyDir());
+  dialog.setObjectName(QStringLiteral("mapGeoTiffSaveDialog"));
+  dialog.setAcceptMode(QFileDialog::AcceptSave);
+  dialog.setNameFilter(QStringLiteral("GeoTIFF (*.tif *.tiff)"));
+  dialog.setDefaultSuffix(QStringLiteral("tif"));
+  dialog.selectFile(QStringLiteral("지도_%1.tif")
+                        .arg(m_canvas->mapSettings().destinationCrs().authid().replace(':', '_')));
+  if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty()) return;
+  const QString path = dialog.selectedFiles().first();
+  const QgsMapSettings snapshot = m_canvas->mapSettings();
+  QProgressDialog progress(QStringLiteral("현재 지도를 GeoTIFF로 저장하고 있습니다…"),
+                            QStringLiteral("취소"), 0, 0, this);
+  progress.setWindowTitle(QStringLiteral("GeoTIFF 저장"));
+  progress.setWindowModality(Qt::ApplicationModal);
+  progress.setMinimumDuration(0);
+  progress.setAutoClose(false);
+  progress.show();
+  QString error;
+  const bool ok = MapGeoTiffExport::write(snapshot, path, &error,
+                                         [&progress]() { return progress.wasCanceled(); });
+  progress.hide();
+  if (ok) {
+    statusBar()->showMessage(QStringLiteral("GeoTIFF 저장 완료 · %1 · %2")
+                                .arg(snapshot.destinationCrs().authid(), path), 15000);
+  } else if (progress.wasCanceled()) {
+    statusBar()->showMessage(QStringLiteral("GeoTIFF 저장을 취소했습니다."), 5000);
+  } else {
+    QMessageBox::warning(this, QStringLiteral("GeoTIFF 저장 실패"), error);
+  }
+#endif
+}
+
 void MainWindow::openLayoutDesigner() {
 #if KA_HGIS_HAS_QGIS
   if (!m_viewTabs)
@@ -2221,7 +2313,7 @@ void MainWindow::openLayoutDesigner() {
     m_viewTabs->setCurrentWidget(m_drawingStudio);
     hideSubTools();
     m_drawingStudio->refreshMapFromProject();
-    m_drawingStudio->centerOnMapCanvas();
+    onCanvasScaleChanged(m_canvas->scale());
     return;
   }
   double w = 297.0, h = 210.0;
@@ -2230,6 +2322,10 @@ void MainWindow::openLayoutDesigner() {
   if (!m_drawingStudio) {
     m_drawingStudio = new KaDrawingStudio(QgsProject::instance(), m_canvas, w, h, this);
     m_drawingStudio->setAttribute(Qt::WA_DeleteOnClose, false);
+    connect(m_drawingStudio, &KaDrawingStudio::drawingScaleChanged, this, [this](double scale) {
+      if (m_viewTabs && m_viewTabs->currentWidget() == m_drawingStudio)
+        onCanvasScaleChanged(scale);
+    });
   } else {
     m_drawingStudio->resetPaper(w, h);
   }
@@ -2504,7 +2600,7 @@ void MainWindow::openRecentSurvey(const QString& path) {
   m_surveyPath.clear();
   m_workspaceRestoreSuppressesAutosave = true;
   if (kaQgisProjectFileIsUnsafeToRead(path) ||
-      !kaSafeReadQgisProject(QgsProject::instance(), path)) {
+      !kaSafeReadQgisProject(QgsProject::instance(), path, nullptr, /*loadLayouts=*/true)) {
     kaMarkQgisProjectUnsafeToRead(path);
     QMessageBox::warning(this, QStringLiteral("오류"), QStringLiteral("프로젝트를 열 수 없습니다."));
     return;
@@ -3008,6 +3104,7 @@ void MainWindow::bindMapDisplayScreen() {
   if (!wh || m_mapScreenBound) return;
   m_mapScreenBound = true;
   connect(wh, &QWindow::screenChanged, this, [this](QScreen*) {
+    KaWindowGeometry::fit(this);
     if (m_canvas) LayerOps::applyCanvasScreenDpi(m_canvas);
     scheduleMapDisplayRefresh();
     QTimer::singleShot(100, this, [this]() {
@@ -3030,6 +3127,7 @@ void MainWindow::bindMapDisplayScreen() {
 
 void MainWindow::showEvent(QShowEvent* event) {
   QMainWindow::showEvent(event);
+  KaWindowGeometry::fit(this);
 #if KA_HGIS_HAS_QGIS
   bindMapDisplayScreen();
   if (m_canvas) {
@@ -3939,6 +4037,10 @@ void MainWindow::convertShpFileTo5179() {
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
 #if KA_HGIS_HAS_QGIS
   if (!event) return QMainWindow::eventFilter(watched, event);
+  if (watched == m_leftSplit && event->type() == QEvent::Resize && m_leftSplit->height() < 430) {
+    if (auto* toggle = findChild<QToolButton*>(QStringLiteral("sidebarFilesToggle")))
+      toggle->setChecked(false);
+  }
   if (m_mapSplitter && watched == m_mapSplitter && event->type() == QEvent::Resize)
     refreshAlignUi();
   if (m_subToolsMode == QLatin1String("align") &&
@@ -4231,6 +4333,9 @@ static void afterBasemapAdded(MainWindow* self, QgsMapCanvas* canvas, const QStr
 void MainWindow::onCanvasScaleChanged(double scale) {
 #if KA_HGIS_HAS_QGIS
   if (m_scaleUiGuard || !m_scaleEdit) return;
+  if (m_drawingStudio && m_viewTabs && m_viewTabs->currentWidget() == m_drawingStudio)
+    scale = m_drawingStudio->drawingScale();
+  if (!std::isfinite(scale) || scale <= 0.) return;
   m_scaleUiGuard = true;
   // 축척 칸은 콤보의 입력줄 하나뿐이다. 여기에 현재 축척을 그대로 보여 준다.
   // 예전에는 가까운 프리셋으로 setCurrentIndex 까지 했는데, 그러면 1:1873 을
@@ -4263,6 +4368,13 @@ void MainWindow::applyMapScaleFromUi() {
   const double s = scaleDenominatorFromUi(m_scaleEdit->text());
   if (s <= 0.0) {
     statusBar()->showMessage(QStringLiteral("축척 숫자를 입력하세요 (예: 1000 → 1:1000)"), 5000);
+    return;
+  }
+  if (m_drawingStudio && m_viewTabs && m_viewTabs->currentWidget() == m_drawingStudio) {
+    m_drawingStudio->setDrawingScale(s);
+    onCanvasScaleChanged(m_drawingStudio->drawingScale());
+    statusBar()->showMessage(QStringLiteral("도면 축척 적용 1:%1")
+                                .arg(m_drawingStudio->drawingScale(), 0, 'f', 0), 4000);
     return;
   }
   m_scaleUiGuard = true;
@@ -5891,8 +6003,11 @@ void MainWindow::exportShpPackage() {
   if (summary.isEmpty()) summary = QStringLiteral("OK\n");
   const QString enc = QInputDialog::getItem(this, QStringLiteral("인코딩"), QStringLiteral("SHP 인코딩"),
                                       {QStringLiteral("UTF-8"), QStringLiteral("EUC-KR")}, 0, false);
-  const QString dir = QFileDialog::getExistingDirectory(this, QStringLiteral("제출 폴더"));
+  if (enc.isEmpty()) return;
+  const QString dir = QFileDialog::getExistingDirectory(this, QStringLiteral("제출 결과를 저장할 위치"));
   if (dir.isEmpty()) return;
+  m_packageCreated = false;
+  refreshWorkPanel();
   if (hasErr) {
     QMessageBox::warning(
         this, QStringLiteral("제출 차단"),
@@ -5904,8 +6019,11 @@ void MainWindow::exportShpPackage() {
   }
   QString err;
 #if KA_HGIS_HAS_QGIS
+  const QString packageName = QStringLiteral("제출_%1_%2")
+      .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz")),
+           QString::number(QRandomGenerator::global()->generate(), 16));
   const QString out = ExportService::exportSubmissionPackage(
-      QgsProject::instance(), dir, enc, summary, /*blockOnError=*/true, hasErr, &err);
+      QgsProject::instance(), QDir(dir).filePath(packageName), enc, summary, /*blockOnError=*/true, hasErr, &err);
 #else
   const QString out;
   err = QStringLiteral("QGIS required");
@@ -7208,18 +7326,36 @@ bool MainWindow::commitSurveyEdits(int* committedCount) {
   if (committedCount) *committedCount = 0;
 #if KA_HGIS_HAS_QGIS
   if (QgsProject* proj = QgsProject::instance()) {
+    QStringList committedLayers;
     for (QgsMapLayer* l : proj->mapLayers()) {
       auto* v = qobject_cast<QgsVectorLayer*>(l);
       if (!v || !v->isValid() || !v->isEditable() || !v->isModified())
         continue;
       if (!v->commitChanges(false)) {
-        const QString message = QStringLiteral("%1의 편집 내용을 저장하지 못했습니다. 편집은 유지됩니다.")
-                                    .arg(v->name());
-        const QString details = v->commitErrors().join(QLatin1Char('\n'));
+        QString message = QStringLiteral("%1의 편집을 저장하지 못해 전체 저장을 마치지 못했습니다. "
+                                         "미저장 편집은 유지됩니다. 창을 닫지 말고 원인을 확인한 뒤 다시 저장하세요.")
+                              .arg(v->name());
+        QString details = v->commitErrors().join(QLatin1Char('\n'));
+        if (!committedLayers.isEmpty())
+          message += QStringLiteral(" 이미 저장한 레이어: %1.").arg(committedLayers.join(QStringLiteral(", ")));
+        const QString recoveryDirectory = QDir(m_surveyPath.isEmpty()
+            ? preferredSurveyDir() : QFileInfo(m_surveyPath).absolutePath()).filePath(QStringLiteral("복구사본"));
+        QString recoveryError;
+        const QString recovery = SurveyStorage::writeRecoverySnapshot(proj, recoveryDirectory, &recoveryError);
+        if (!recovery.isEmpty()) {
+          message += QStringLiteral(" 현재 편집 도형의 복구 사본을 보관했습니다: %1").arg(QDir::toNativeSeparators(recovery));
+          details += QStringLiteral("\n복구 사본은 벡터 피처와 레이어 구성을 보관합니다. "
+                                    "조판은 포함하지 않으며 사진·래스터는 외부 원본 참조로 남습니다. "
+                                    "원본 파일도 함께 보관하세요. 현재 조사 저장은 아직 완료되지 않았습니다.");
+        } else {
+          message += QStringLiteral(" 복구 사본도 만들지 못했습니다. 현재 창을 계속 열어 두세요.");
+          details += QStringLiteral("\n복구 사본 실패: %1").arg(recoveryError);
+        }
         KaCrashGuard::logLine(QStringLiteral("[save] %1 — %2").arg(message, details));
         notify(Notice::Warning, QStringLiteral("저장 실패"), message, details);
         return false;
       }
+      committedLayers << v->name();
       if (committedCount) ++*committedCount;
     }
   }
@@ -7776,7 +7912,7 @@ void MainWindow::openProject() {
   m_surveyPath.clear();
   m_workspaceRestoreSuppressesAutosave = true;
   if (kaQgisProjectFileIsUnsafeToRead(path) ||
-      !kaSafeReadQgisProject(QgsProject::instance(), path)) {
+      !kaSafeReadQgisProject(QgsProject::instance(), path, nullptr, /*loadLayouts=*/true)) {
     kaMarkQgisProjectUnsafeToRead(path);
     QMessageBox::warning(this, QStringLiteral("오류"), QStringLiteral("프로젝트를 열 수 없습니다."));
     return;
@@ -7839,7 +7975,7 @@ void MainWindow::openProject() {
   QMessageBox::information(this, QStringLiteral("스텁"), QStringLiteral("프로젝트 열기 시뮬레이션"));
 #endif
 }
-void MainWindow::searchLocation(const QString& query) {
+void MainWindow::searchLocation(const QString& query, bool parcel) {
   if (!m_locator) return;
   const QString q = query.trimmed();
   if (q.isEmpty()) {
@@ -7860,7 +7996,8 @@ void MainWindow::searchLocation(const QString& query) {
     statusBar()->showMessage(QStringLiteral("위치 검색을 취소했습니다."), 4000);
   });
   m_searchProgress->show();
-  m_locator->search(q);
+  if (parcel) m_locator->searchParcel(q);
+  else m_locator->search(q);
 }
 
 void MainWindow::applySurfaceSurveyFieldMap(const QString& sido, const QString& city,
@@ -8035,12 +8172,16 @@ void MainWindow::zoomToLocation(const LocationHit& hit) {
     xf.setBallparkTransformsAreAppropriate(true);
     LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, dest.authid());
 
-    const QgsPointXY p = xf.transform(QgsPointXY(lon, lat));
+    QgsPointXY p = xf.transform(QgsPointXY(lon, lat));
     m_startupViewApplied = true; // Explicit navigation wins over queued initial framing.
     showMapWorkspace();
     LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+    const bool localParcel = !hit.pnu.isEmpty()
+        && CadastralImport::focusParcel(QgsProject::instance(), m_canvas, hit.pnu, &p);
     const bool useBounds = hit.hasBbox && hit.west != 0.0 && hit.east != 0.0;
-    if (useBounds) {
+    if (localParcel) {
+      // focusParcel has already framed the actual cadastral geometry.
+    } else if (useBounds) {
       QgsRectangle r(hit.west, hit.south, hit.east, hit.north);
       r = xf.transformBoundingBox(r);
       r.scale(1.2);
@@ -8049,7 +8190,7 @@ void MainWindow::zoomToLocation(const LocationHit& hit) {
       const double pad = dest.authid().contains(QLatin1String("4326")) ? 0.004 : 400.0;
       m_canvas->setExtent(QgsRectangle(p.x() - pad, p.y() - pad, p.x() + pad, p.y() + pad));
     }
-    if (!useBounds && m_canvas->scale() > 8000.0)
+    if (!localParcel && !useBounds && m_canvas->scale() > 8000.0)
       m_canvas->zoomScale(3000.0, true);
     LayerOps::clampCanvasToKorea(m_canvas);
     markFoundLocation(p, hit.title);
@@ -8460,25 +8601,14 @@ void MainWindow::exportReportLayout() {
 
 
 void MainWindow::showAbout() {
-  QMessageBox::about(
-      this, QStringLiteral("정보"),
-      QStringLiteral(
-          "필드고고학GIS  버전 1\n"
-          "동국문화재연구원\n"
-          "만든이: youngin kwon\n"
-          "향후 업데이트 진행\n"
-          "\n"
-          "QGIS를 포크하지 않고 qgis_core / qgis_gui를 링크합니다.\n"
-          "작업 CRS: EPSG:5186/5187  ·  업로드: EPSG:5179\n"
-          "\n"
-          "저작권·라이선스\n"
-          "QGIS  © QGIS Development Team  ·  GNU GPL v2 이상\n"
-          "Qt    © The Qt Company Ltd.  ·  LGPLv3 / GPLv2+\n"
-          "GDAL/OGR  © OSGeo  ·  MIT/X11\n"
-          "PROJ  © PROJ contributors  ·  MIT\n"
-          "GEOS  © GEOS contributors  ·  LGPLv2.1\n"
-          "\n"
-          "본 소프트웨어는 GNU GPL v2 이상으로 배포됩니다."));
+  QMessageBox::about(this, QStringLiteral("정보"),
+      QStringLiteral("필드고고학GIS  v2\n동국문화재연구원 · 만든이: 권영인\n\n"
+                     "QGIS를 포크하지 않고 qgis_core / qgis_gui를 링크합니다.\n"
+                     "작업 CRS: EPSG:5186/5187 · 업로드: EPSG:5179\n\n"
+                     "저작권·라이선스\n") + KaStartupSplash::attributionText() +
+      QStringLiteral("\n선택한 지도에 따라 OpenStreetMap·CARTO·OpenTopoMap·NASA GIBS·"
+                     "Copernicus DEM·Google 자료를 사용합니다. 각 제공처의 표시·이용조건을 따릅니다.\n\n"
+                     "본 소프트웨어는 GNU GPL v2 이상으로 배포됩니다."));
 }
 
 bool MainWindow::configureHeritageAccount() {

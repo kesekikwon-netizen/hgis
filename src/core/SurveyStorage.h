@@ -29,6 +29,12 @@ bool hasEmbeddedProject(const QString& gpkgPath);
 // 실패하면 원본과 기존 대상 파일을 유지한다. 원본·대상이 같으면 아무것도 바꾸지 않는다.
 bool copySurvey(const QString& sourceGpkg, const QString& targetGpkg, QString* errorOut = nullptr);
 
+// 커밋하지 않은 현재 벡터 편집을 새 복구 GPKG에 보관한다. 원본 레이어/작업공간은 바꾸지
+// 않으며 매번 별도 폴더를 만든다. 래스터는 외부 참조로 유지하고 조판은 포함하지 않는다.
+// 성공 시 복구 파일 경로, 실패 시 빈 문자열을 반환한다.
+QString writeRecoverySnapshot(QgsProject* project, const QString& recoveryDirectory,
+                              QString* errorOut = nullptr);
+
 struct AbsorbResult {
   QStringList imported;   // .gpkg 안으로 들여온 레이어 이름
   QStringList failed;     // 들여오지 못한 레이어 이름(원래 경로를 그대로 둔다)
@@ -44,7 +50,8 @@ AbsorbResult absorbExternalVectors(QgsProject* project, const QString& gpkgPath)
 bool writeEmbedded(QgsProject* project, const QString& gpkgPath, QString* errorOut = nullptr);
 
 // .gpkg 안의 프로젝트를 읽는다. crashedOut은 KaSafeQgis와 같은 의미다(SEH 발생).
+// 사용자가 명시적으로 작업공간을 열 때만 loadLayouts=true로 저장 조판도 복원한다.
 bool readEmbedded(QgsProject* project, const QString& gpkgPath, bool* crashedOut = nullptr,
-                  QString* errorOut = nullptr);
+                  QString* errorOut = nullptr, bool loadLayouts = false);
 
 }  // namespace SurveyStorage

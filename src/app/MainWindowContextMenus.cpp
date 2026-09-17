@@ -7,6 +7,7 @@
 #include "KaMeasureMapTool.h"
 #include "core/GeorefService.h"
 #include "core/LayerOps.h"
+#include "core/LayerLabelControls.h"
 
 #include <QAction>
 #include <QApplication>
@@ -194,6 +195,7 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
   const LayerMenuKind kind = menuKind(layer);
   const bool domain = isDomain(kind);
   const QPointer<QgsVectorLayer> vector(qobject_cast<QgsVectorLayer*>(layer.data()));
+  const bool layoutLabels = treeView->objectName() == QLatin1String("layoutLayerTree");
   const bool valid = layer->isValid();
   const bool hasFeatures = vector && valid && vector->featureCount() > 0;
   const QString invalidReason = valid ? QString() : QStringLiteral("레이어 파일을 찾을 수 없습니다. 자료를 다시 열어 주세요.");
@@ -261,15 +263,22 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
       labels->menuAction()->setToolTip(QStringLiteral("영상에 포함된 글자는 별도로 크기를 바꿀 수 없습니다."));
       return;
     }
-    const bool labelable = valid && LayerOps::hasToggleableLabels(vector);
+    const auto labelInfo = LayerLabelControls::describe(vector, layoutLabels);
+    const bool labelable = valid && labelInfo.supported;
     const QString labelReason = labelable ? QString() : QStringLiteral("표시할 이름이나 번호 항목이 없습니다.");
     labels->menuAction()->setEnabled(labelable);
     labels->menuAction()->setToolTip(labelReason);
-    const bool on = LayerOps::labelsVisible(vector);
-    add(labels, "layer.labelsVisible", on ? QStringLiteral("이름·번호 숨기기") : QStringLiteral("이름·번호 보이기"), labelReason,
-        [vector, on, refreshViews]() { if (vector) { LayerOps::setLabelsVisible(vector, !on); refreshViews(); } });
+    const bool on = labelInfo.enabled;
+    add(labels, "layer.labelsVisible", labelInfo.caption + (on ? QStringLiteral(" 숨기기") : QStringLiteral(" 보이기")), labelReason,
+        [vector, on, layoutLabels, refreshViews]() {
+          if (vector && LayerLabelControls::setVisible(vector, !on, layoutLabels)) refreshViews();
+        });
+    // Layout heritage numbers own their expression and badge size. Source name
+    // fields must not overwrite that independent presentation from this menu.
+    if (layoutLabels && LayerLabelControls::isHeritage(vector)) return;
     const QString currentField = LayerOps::currentLabelField(vector);
     QMenu* fields = addSubmenu(labels, "layer.labelField", QStringLiteral("표시할 항목"));
+    fields->menuAction()->setEnabled(labelInfo.fieldEditable);
     const QgsFields available = vector->fields();
     QMenu* fieldGroup = fields;
     QMenu* fieldPage = fields;
@@ -282,21 +291,20 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
       const QString field = available.at(i).name();
       QAction* action = add(fieldGroup, "layer.labelFieldValue", fieldTitle(available.at(i)), {},
           [this, vector, field, refreshViews]() { if (vector) {
-            LayerOps::applyNameAttributeLabels(vector, field, LayerOps::labelFontSize(vector, 5.0), LayerOps::labelShowArea(vector, false));
-            applyLabelStackOrder(); refreshViews();
+            if (LayerLabelControls::setField(vector, field)) { applyLabelStackOrder(); refreshViews(); }
           }});
       action->setCheckable(true); action->setChecked(field == currentField);
     }
-    if (vector->geometryType() == Qgis::GeometryType::Polygon) {
+    if (labelInfo.areaEditable) {
       const bool areaOn = LayerOps::labelShowArea(vector, false);
       QAction* action = add(labels, "layer.labelArea", QStringLiteral("면적(㎡) 함께 표시"), labelReason,
           [this, vector, currentField, areaOn, refreshViews]() { if (vector) {
-            LayerOps::applyNameAttributeLabels(vector, currentField, LayerOps::labelFontSize(vector, 5.0), !areaOn);
-            applyLabelStackOrder(); refreshViews();
+            if (LayerLabelControls::setArea(vector, !areaOn)) { applyLabelStackOrder(); refreshViews(); }
           }});
       action->setCheckable(true); action->setChecked(areaOn);
     }
     QMenu* sizes = addSubmenu(labels, "layer.labelSize", QStringLiteral("글자 크기"));
+    sizes->menuAction()->setEnabled(vector->labeling() != nullptr);
     for (double size : {3., 4., 5., 6., 7., 8., 9., 10., 12., 14.}) {
       QAction* action = add(sizes, "layer.labelSizeValue", QStringLiteral("%1 pt").arg(size), labelReason,
           [this, vector, size, refreshViews]() { if (vector) {

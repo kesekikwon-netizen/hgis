@@ -22,6 +22,50 @@
 class LayerStateTest : public QObject {
   Q_OBJECT
 private slots:
+  void hiddenAncestorExcludesLayersAndInvalidatesOverlayCache() {
+    QgsProject project;
+    auto* root = project.layerTreeRoot();
+    auto* references = root->addGroup(QStringLiteral("참조 지도"));
+    auto* subgroup = references->addGroup(QStringLiteral("주변유적"));
+    auto* polygon = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"),
+                                       QStringLiteral("유적"), QStringLiteral("memory"));
+    polygon->setRenderer(new QgsSingleSymbolRenderer(QgsFillSymbol::createSimple(
+        {{QStringLiteral("color"), QStringLiteral("255,0,0,255")},
+         {QStringLiteral("outline_color"), QStringLiteral("0,0,0,255")}}).release()));
+    auto* label = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5187"),
+                                     QStringLiteral("라벨"), QStringLiteral("memory"));
+    QgsPalLayerSettings settings;
+    settings.fieldName = QStringLiteral("'label'");
+    settings.isExpression = true;
+    label->setLabeling(new QgsVectorLayerSimpleLabeling(settings));
+    label->setLabelsEnabled(true);
+    project.addMapLayer(polygon, false);
+    project.addMapLayer(label, false);
+    auto* polygonNode = subgroup->addLayer(polygon);
+    auto* labelNode = root->addLayer(label);
+    QVERIFY(LayerOps::visibleLayersPaintOrder(&project).contains(polygon));
+    QVERIFY(LayerOps::layersDrawnAboveLabels(&project).contains(polygon));
+    references->setItemVisibilityChecked(false);
+    QVERIFY(polygonNode->itemVisibilityChecked());
+    QVERIFY(!polygonNode->isVisible());
+    QVERIFY(!LayerOps::isLayerVisible(&project, polygon->name()));
+    QVERIFY(!LayerOps::visibleLayersPaintOrder(&project).contains(polygon));
+    QVERIFY(!LayerOps::layersDrawnAboveLabels(&project).contains(polygon));
+    labelNode->setItemVisibilityChecked(false);
+    QVERIFY(LayerOps::visibleLayersPaintOrder(&project).isEmpty());
+    references->setItemVisibilityChecked(true);
+    QCOMPARE(LayerOps::visibleLayersPaintOrder(&project), QList<QgsMapLayer*>{polygon});
+    QVERIFY(!labelNode->itemVisibilityChecked());
+    subgroup->setItemVisibilityChecked(false);
+    QVERIFY(LayerOps::visibleLayersPaintOrder(&project).isEmpty());
+    QVERIFY(LayerOps::toggleLayerVisibility(&project, nullptr, polygon->name(), true));
+    QVERIFY(subgroup->isVisible());
+    QVERIFY(LayerOps::isLayerVisible(&project, polygon->name()));
+    QVERIFY(!labelNode->itemVisibilityChecked());
+    labelNode->setItemVisibilityChecked(true);
+    QVERIFY(LayerOps::layersDrawnAboveLabels(&project).contains(polygon));
+  }
+
   void newSurveyPolygonShowsAreaByDefault() {
     QgsVectorLayer layer(QStringLiteral("Polygon?crs=EPSG:5186&field=survey_name:string"),
                          QStringLiteral("조사구역"), QStringLiteral("memory"));

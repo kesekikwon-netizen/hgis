@@ -1,5 +1,7 @@
 #include <QtTest>
 #include <QApplication>
+#include <QPushButton>
+#include <QScreen>
 #include <QFile>
 #include <QSignalSpy>
 #include <QStandardPaths>
@@ -47,6 +49,19 @@ private:
   }
 
 private slots:
+  void detailsFitAvailableScreen() {
+    KaHeritageBrowser browser;
+    restrictRequests(browser);
+    browser.show();
+    auto* details = browser.findChild<QPushButton*>(QStringLiteral("heritageDetails"));
+    QVERIFY(details);
+    for (bool expanded : {true, false, true}) {
+      details->setChecked(expanded);
+      QCoreApplication::processEvents();
+      QVERIFY(browser.screen()->availableGeometry().contains(browser.frameGeometry()));
+      QVERIFY(browser.rect().contains(QRect(details->mapTo(&browser, QPoint()), details->size())));
+    }
+  }
   void completedResponseIsValidated_data() {
     QTest::addColumn<bool>("empty");
     QTest::addColumn<bool>("validArchive");

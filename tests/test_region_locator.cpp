@@ -165,7 +165,8 @@ private slots:
     (*it)->click();
     QCoreApplication::processEvents();
     QVERIFY(available.contains(locator->m_popup->geometry()));
-    QSignalSpy search(locator, &KaRegionLocator::searchRequested);
+    QSignalSpy search(locator, &KaRegionLocator::parcelSearchRequested);
+    QSignalSpy generic(locator, &KaRegionLocator::searchRequested);
     locator->m_city->setCurrentIndex(1);
     locator->m_dong->setEditText(QStringLiteral("중앙동"));
     locator->m_lot->setText(QStringLiteral("123-4"));
@@ -177,12 +178,24 @@ private slots:
     }
     locator->emitSearch();
     QCOMPARE(search.count(), 1);
+    QCOMPARE(generic.count(), 0);
     const QString address = search.first().first().toString();
     QVERIFY(address.contains(QStringLiteral("부산광역시")));
     QVERIFY(address.contains(QStringLiteral("중앙동")));
     QVERIFY(address.contains(QStringLiteral("123-4")));
     QVERIFY(!locator->m_popup->isVisible());
     QVERIFY(!(*it)->isChecked());
+  }
+
+  void emptyLotKeepsRegionSearch() {
+    KaRegionLocator locator;
+    locator.openAddressPopup(QStringLiteral("경상북도"));
+    QSignalSpy generic(&locator, &KaRegionLocator::searchRequested);
+    QSignalSpy parcel(&locator, &KaRegionLocator::parcelSearchRequested);
+    locator.m_dong->setEditText(QStringLiteral("고아읍 봉한리"));
+    locator.emitSearch();
+    QCOMPARE(generic.count(), 1);
+    QCOMPARE(parcel.count(), 0);
   }
 };
 

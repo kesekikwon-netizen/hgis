@@ -8,9 +8,16 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
+#include <QResizeEvent>
+#include <QScreen>
+#include <QScrollArea>
+#include <QShowEvent>
 #include <QSizePolicy>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QWidgetAction>
 
 KaBeginnerRibbon::KaBeginnerRibbon(QWidget* parent) : QWidget(parent) {
   setObjectName(QStringLiteral("beginnerRibbon"));
@@ -20,6 +27,17 @@ KaBeginnerRibbon::KaBeginnerRibbon(QWidget* parent) : QWidget(parent) {
   m_row->setContentsMargins(metrics.buttonSpacing, metrics.buttonPadding,
                            metrics.buttonSpacing, metrics.buttonPadding);
   m_row->setSpacing(metrics.buttonSpacing);
+  m_row->setSizeConstraint(QLayout::SetNoConstraint);
+  m_overflow = new QToolButton(this);
+  m_overflow->setObjectName(QStringLiteral("ribbonOverflow"));
+  m_overflow->setText(QStringLiteral("더 많은 작업"));
+  m_overflow->setFocusPolicy(Qt::TabFocus);
+  m_overflow->setPopupMode(QToolButton::InstantPopup);
+  m_overflowMenu = new QMenu(m_overflow);
+  m_overflowMenu->setObjectName(QStringLiteral("ribbonOverflowMenu"));
+  m_overflow->setMenu(m_overflowMenu);
+  m_row->addWidget(m_overflow);
+  m_overflow->hide();
 }
 
 QFrame* KaBeginnerRibbon::addGroup(const QString& id, const QString& caption) {
@@ -41,9 +59,34 @@ QFrame* KaBeginnerRibbon::addGroup(const QString& id, const QString& caption) {
   btns->setSpacing(metrics.buttonSpacing);
   vl->addWidget(cap);
   vl->addLayout(btns, 1);
-  m_row->addWidget(fr, 0);
+  m_row->insertWidget(m_row->count() - 1, fr, 0);
   m_groups.insert(id, fr);
   m_btnRows.insert(id, btns);
+  m_groupOrder.append(id);
+  auto* menu = m_overflowMenu->addMenu(caption);
+  menu->setObjectName(QStringLiteral("ribbonOverflowGroup_") + id);
+  auto* scroll = new QScrollArea(menu);
+  scroll->setWidgetResizable(true);
+  scroll->setFrameShape(QFrame::NoFrame);
+  auto* host = new QWidgetAction(menu);
+  host->setDefaultWidget(scroll);
+  menu->addAction(host);
+  menu->menuAction()->setVisible(false);
+  m_groupMenus.insert(id, menu);
+  m_groupScrolls.insert(id, scroll);
+  connect(menu, &QMenu::aboutToShow, this, [scroll] {
+    QTimer::singleShot(0, scroll, [scroll] {
+      if (auto* content = scroll->widget()) {
+        const auto controls = content->findChildren<QWidget*>();
+        for (auto* control : controls) {
+          if (control->isVisible() && control->isEnabled() && control->focusPolicy() != Qt::NoFocus) {
+            control->setFocus(Qt::PopupFocusReason);
+            break;
+          }
+        }
+      }
+    });
+  });
   return fr;
 }
 
@@ -61,6 +104,7 @@ QToolButton* KaBeginnerRibbon::addAction(const QString& groupId, QAction* action
   b->setDefaultAction(action);
   applyTwoLine(b);
   row->addWidget(b);
+  connect(b, &QToolButton::clicked, m_overflowMenu, &QMenu::close);
   return b;
 }
 
@@ -71,6 +115,7 @@ void KaBeginnerRibbon::addWidget(const QString& groupId, QWidget* widget) {
   if (auto* b = qobject_cast<QToolButton*>(widget)) {
     b->setText(twoLine(b->text()));
     applyTwoLine(b);
+    connect(b, &QToolButton::clicked, m_overflowMenu, &QMenu::close);
   }
   row->addWidget(widget);
 }
@@ -129,4 +174,75 @@ void KaBeginnerRibbon::applyTwoLine(QToolButton* button) {
 
 QFrame* KaBeginnerRibbon::group(const QString& id) const {
   return m_groups.value(id, nullptr);
+}
+
+QSize KaBeginnerRibbon::sizeHint() const {
+  const auto margins = m_row->contentsMargins();
+  int width = margins.left() + margins.right();
+  int height = 0;
+  for (const auto& id : m_groupOrder) {
+    const QSize size = m_groups.value(id)->sizeHint();
+    width += size.width() + m_row->spacing();
+    height = std::max(height, size.height());
+  }
+  return QSize(width, height + margins.top() + margins.bottom());
+}
+
+QSize KaBeginnerRibbon::minimumSizeHint() const {
+  return QSize(m_overflow->sizeHint().width() + 16, sizeHint().height());
+}
+
+void KaBeginnerRibbon::resizeEvent(QResizeEvent* event) {
+  QWidget::resizeEvent(event);
+  updateOverflow();
+}
+
+void KaBeginnerRibbon::showEvent(QShowEvent* event) {
+  QWidget::showEvent(event);
+  updateOverflow();
+}
+
+void KaBeginnerRibbon::updateOverflow() {
+  if (m_updatingOverflow) return;
+  m_updatingOverflow = true;
+  const bool overflow = sizeHint().width() > width();
+  const auto margins = m_row->contentsMargins();
+  int available = width() - margins.left() - margins.right();
+  if (overflow) available -= m_overflow->sizeHint().width() + m_row->spacing();
+  QStringList priority;
+  for (const auto& id : {QStringLiteral("survey"), QStringLiteral("record"), QStringLiteral("out")})
+    if (m_groups.contains(id)) priority.append(id);
+  for (const auto& id : m_groupOrder)
+    if (!priority.contains(id)) priority.append(id);
+  QStringList visible;
+  for (const auto& id : priority) {
+    const int needed = m_groups.value(id)->sizeHint().width() + m_row->spacing();
+    if (!overflow || needed <= available) {
+      visible.append(id);
+      available -= needed;
+    }
+  }
+  for (const auto& id : m_groupOrder) {
+    auto* frame = m_groups.value(id);
+    auto* scroll = m_groupScrolls.value(id);
+    const bool onRibbon = visible.contains(id);
+    if (onRibbon) {
+      if (scroll->widget()) {
+        scroll->takeWidget(); // QWidgetAction continues to own only the empty scroll host.
+        frame->setParent(this);
+      }
+      m_row->removeWidget(frame);
+      m_row->insertWidget(m_row->count() - 1, frame);
+      frame->show();
+    } else {
+      m_row->removeWidget(frame);
+      if (scroll->widget() != frame) scroll->setWidget(frame);
+      const QSize room = screen()->availableGeometry().size() - QSize(48, 100);
+      scroll->setFixedSize(frame->sizeHint().expandedTo(QSize(120, 80)).boundedTo(room) + QSize(20, 20));
+      frame->show();
+    }
+    m_groupMenus.value(id)->menuAction()->setVisible(!onRibbon);
+  }
+  m_overflow->setVisible(overflow);
+  m_updatingOverflow = false;
 }

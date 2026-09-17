@@ -24,6 +24,7 @@ class QTabWidget;
 class QWebEnginePage;
 class QWebEngineProfile;
 class QWebEngineDownloadRequest;
+class QShowEvent;
 
 // 국가유산 GIS통합인트라넷 자동화 창.
 //
@@ -53,6 +54,9 @@ public:
   HeritageStage stage() const { return m_stage; }
   // 멈춘 자리에서 화면에 무엇이 있었는지. 선택자를 정하는 데 쓴다. 비밀번호는 들어가지 않는다.
   QString lastOutline() const { return m_lastOutline; }
+
+protected:
+  void showEvent(QShowEvent* event) override;
 
 signals:
   void stageChanged(HeritageStage stage, const QString& message);

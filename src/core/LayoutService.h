@@ -11,9 +11,14 @@
 class QgsProject;
 class QgsLayout;
 class QgsLayoutItemMap;
+class QgsLayoutItemLegend;
 
 class LayoutService {
 public:
+  // Reflow the existing legend into readable columns inside its chosen width.
+  static void flowSheetLegend(QgsLayoutItemLegend* legend);
+  // Finish pending legend filtering and sizing before the first PDF paint.
+  static void settleSheetLegendsForExport(QgsLayout* layout);
   enum class Paper { A4, A3 };
   enum class Orientation { Portrait, Landscape };
 

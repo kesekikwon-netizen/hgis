@@ -28,8 +28,8 @@ const Entry kTable[] = {
     {HeritageDataset::AlterationStandard, "현상변경허용기준", "P", "#E67E22"},
     {HeritageDataset::BuriedHeritageArea, "매장유산유존지역", "B", "#2E86C1"},
     {HeritageDataset::HeritageDistributionMap, "문화유적분포지도", "U", "#27AE60"},
-    {HeritageDataset::SurfaceSurveyArea, "지표조사구역", "R", "#16A085"},
-    {HeritageDataset::ExcavationSurveyArea, "발굴조사구역", "E", "#A0522D"},
+    {HeritageDataset::SurfaceSurveyArea, "지표조사구역", "R", "#D4AA00"},
+    {HeritageDataset::ExcavationSurveyArea, "발굴조사구역", "E", "#C2187D"},
 };
 
 const Entry* entryOf(HeritageDataset ds) {
@@ -95,6 +95,19 @@ QString HeritageStyle::tabCode(HeritageDataset ds) {
 QColor HeritageStyle::color(HeritageDataset ds) {
   const Entry* e = entryOf(ds);
   return e ? QColor(QString::fromUtf8(e->hex)) : QColor();
+}
+
+QColor HeritageStyle::layoutColor(HeritageDataset ds, const QColor& sourceColor) {
+  QColor legacy;
+  if (ds == HeritageDataset::SurfaceSurveyArea)
+    legacy = QColor(QStringLiteral("#16A085"));
+  else if (ds == HeritageDataset::ExcavationSurveyArea)
+    legacy = QColor(QStringLiteral("#A0522D"));
+  if (!sourceColor.isValid() || !legacy.isValid() || sourceColor.rgb() != legacy.rgb())
+    return sourceColor;
+  QColor result = color(ds);
+  result.setAlphaF(sourceColor.alphaF());
+  return result;
 }
 
 std::optional<HeritageDataset> HeritageStyle::fromLayerName(const QString& name) {

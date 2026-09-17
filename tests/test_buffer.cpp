@@ -142,6 +142,7 @@ void TestBuffer::setLabelsVisible_togglesPolygonLabels() {
   auto* vl = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("조사구역"),
                                 QStringLiteral("memory"));
   QVERIFY(vl->isValid());
+  LayerOps::markSurveyLayer(vl, QStringLiteral("survey_area"));
   QVERIFY2(LayerOps::hasToggleableLabels(vl),
            "라벨을 아직 안 켠 폴리곤에도 우클릭 「글자 켜기」가 나와야 한다");
   QVERIFY(LayerOps::setLabelsVisible(vl, true));

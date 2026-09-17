@@ -232,20 +232,29 @@ private slots:
     QApplication::setFont(QFont(families.first(),9));
 #endif
   }
-  void compactDownloadShowsOnlyProgressAndCancel() {
+  void compactDownloadKeepsProgressAndOffersExplicitDetails() {
     LocalDownloadServer server;QVERIFY(server.listen(QHostAddress::LocalHost));QTemporaryDir files;
     KaTopographicBrowser browser(nullptr,files.path());browser.setPortalTestUrl(server.url(QStringLiteral("/ms/map/NlipMap.do")));browser.navigate(server.url());
     browser.setCompactMode(true);browser.show();
     auto* details=browser.findChild<QWidget*>(QStringLiteral("topographicOfficialDetails"));
     auto* expand=browser.findChild<QPushButton*>(QStringLiteral("topographicExpandOfficial"));
-    QVERIFY(details);QVERIFY(expand);QVERIFY(details->isHidden());QVERIFY(!expand->isVisible());
+    QVERIFY(details);QVERIFY(expand);QVERIFY(details->isHidden());QVERIFY(expand->isVisible());
+    QCOMPARE(expand->text(),QStringLiteral("상세 보기"));
     QVERIFY(!browser.findChild<QTreeWidget*>(QStringLiteral("topographicDownloads"))->isVisible());
     auto* status=browser.findChild<QLabel*>(QStringLiteral("topographicCompactStatus"));
     auto* stage=browser.findChild<QLabel*>(QStringLiteral("topographicCurrentStage"));
     auto* summary=browser.findChild<QLabel*>(QStringLiteral("topographicTransferSummary"));
     auto* progress=browser.findChild<QProgressBar*>(QStringLiteral("topographicProgress"));
     QVERIFY(status);QVERIFY(stage);QVERIFY(summary);QVERIFY(progress);
-    QVERIFY(stage->isVisible());QVERIFY(summary->isVisible());QVERIFY(progress->isTextVisible());
+    QVERIFY(stage->isVisible());QVERIFY(!summary->isVisible());QVERIFY(progress->isTextVisible());
+    QTest::mouseClick(expand,Qt::LeftButton);
+    QVERIFY(details->isVisible());QVERIFY(summary->isVisible());
+    QVERIFY(stage->isVisible());QVERIFY(progress->isVisible());
+    QCOMPARE(expand->text(),QStringLiteral("상세 접기"));
+    QTest::mouseClick(expand,Qt::LeftButton);
+    QVERIFY(details->isHidden());QVERIFY(!summary->isVisible());
+    QVERIFY(stage->isVisible());QVERIFY(progress->isVisible());
+    QCOMPARE(expand->text(),QStringLiteral("상세 보기"));
     browser.setActivityStatus(QStringLiteral("로그인 · 신청서 · 동의 · DXF 다운로드 중"));
     QVERIFY(!status->text().contains(QStringLiteral("로그인")));
     QCOMPARE(progress->minimum(),0);QCOMPARE(progress->maximum(),1);QCOMPARE(progress->value(),0);
@@ -265,7 +274,7 @@ private slots:
     QVERIFY(!stage->text().contains(QStringLiteral("실패")));QVERIFY(progress->value()<progress->maximum());
     browser.prepareSheets(1125000,1980000,5000,{QStringLiteral("378044")});
     QVERIFY(status->text().contains(QStringLiteral("좌표")));
-    QVERIFY(details->isHidden());QVERIFY(!expand->isVisible());
+    QVERIFY(details->isHidden());QVERIFY(expand->isVisible());
     browser.setProcessing(false);
     QSignalSpy cancelled(&browser,&KaTopographicBrowser::cancelRequested);
     browser.stopAutomatic();QVERIFY(details->isHidden());QVERIFY(cancelled.isEmpty());

@@ -21,6 +21,7 @@ public:
 signals:
   void regionSelected(const QString& sido);
   void searchRequested(const QString& query);
+  void parcelSearchRequested(const QString& query);
 
 protected:
   bool eventFilter(QObject* watched, QEvent* event) override;

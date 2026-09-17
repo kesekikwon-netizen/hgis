@@ -2,6 +2,7 @@
 #include "KaCrashGuard.h"
 #include "KaTheme.h"
 #include "KaIcons.h"
+#include "KaStartupSplash.h"
 #include "MainWindow.h"
 #include <QElapsedTimer>
 #include <QApplication>
@@ -28,17 +29,11 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QWidget>
-#include <QSplashScreen>
-#include <QPainter>
-#include <QLinearGradient>
-#include <QPixmap>
-#include <QFont>
-#include <QFontMetrics>
-#include <QPen>
 #include <QEventLoop>
 #include <QThread>
 #include <QTimer>
 #include <functional>
+#include <memory>
 #include <cstdlib>
 #include <string>
 #include <QFileInfo>
@@ -596,76 +591,6 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
   return all ? 0 : 5;
 }
 
-// 전문가 프로그램 로딩 화면. 이름·제작처·링크 라이브러리 저작권을 읽을 시간을 준다.
-static QPixmap makeFieldSplashPixmap() {
-  QPixmap pm(720, 460);
-  QLinearGradient g(0, 0, 0, pm.height());
-  g.setColorAt(0.0, QColor(14, 18, 24));
-  g.setColorAt(0.55, QColor(22, 32, 46));
-  g.setColorAt(1.0, QColor(18, 28, 40));
-  QPainter p(&pm);
-  p.fillRect(pm.rect(), g);
-  p.setRenderHint(QPainter::Antialiasing, true);
-  p.setPen(QPen(QColor(201, 162, 39, 180), 1.2));
-  p.drawRect(pm.rect().adjusted(14, 14, -15, -15));
-  p.setPen(QPen(QColor(201, 162, 39, 70), 1));
-  p.drawLine(QPointF(48, 118), QPointF(pm.width() - 48, 118));
-
-  p.setPen(QColor(232, 220, 186));
-  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 10));
-  p.drawText(QRect(48, 32, pm.width() - 96, 22), Qt::AlignLeft | Qt::AlignVCenter,
-             QStringLiteral("동국문화재연구원  ·  만든이: youngin kwon"));
-
-  p.setPen(Qt::white);
-  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 28, QFont::Bold));
-  p.drawText(QRect(48, 58, pm.width() - 96, 48), Qt::AlignLeft | Qt::AlignVCenter,
-             QStringLiteral("필드고고학GIS"));
-
-  p.setPen(QColor(201, 162, 39));
-  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 11, QFont::DemiBold));
-  p.drawText(QRect(48, 128, pm.width() - 96, 22), Qt::AlignLeft,
-             QStringLiteral("버전 1  ·  향후 업데이트 진행"));
-
-  p.setPen(QColor(210, 216, 224));
-  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 9));
-  const QString notices = QStringLiteral(
-      "이 프로그램은 QGIS를 포크하지 않고 qgis_core / qgis_gui 라이브러리를 링크합니다.\n"
-      "\n"
-      "QGIS  © QGIS Development Team  ·  GNU GPL v2 이상\n"
-      "Qt    © The Qt Company Ltd.  ·  LGPLv3 / GPLv2+\n"
-      "GDAL/OGR  © OSGeo  ·  MIT/X11\n"
-      "PROJ  © PROJ contributors  ·  MIT\n"
-      "GEOS  © GEOS contributors  ·  LGPLv2.1\n"
-      "SQLite, PROJ 데이터, VWorld 배경지도는 각 저작권·이용약관을 따릅니다.\n"
-      "\n"
-      "본 소프트웨어는 GNU GPL v2 이상으로 배포됩니다.");
-  p.drawText(QRect(48, 162, pm.width() - 96, 230), Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
-             notices);
-
-  p.setPen(QColor(160, 168, 178));
-  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 8));
-  p.drawText(QRect(48, pm.height() - 52, pm.width() - 96, 22), Qt::AlignLeft,
-             QStringLiteral("현장 조사를 불러오는 중…"));
-  p.end();
-  return pm;
-}
-
-// 저작권·제작처를 읽을 시간은 주되 이벤트 루프는 막지 않는다. 예전 구현은
-// msleep(20) 루프로 4.5초를 통째로 태워, 그 동안 배경지도 로딩도 첫 렌더도
-// 진행되지 못했다. 타이머로 걷으면 같은 시간이 실제 준비 작업에 쓰인다.
-static void holdSplashThenFinish(QSplashScreen* splash, QWidget* mainWindow, int ms) {
-  if (!splash) return;
-  if (ms <= 0) {
-    splash->finish(mainWindow);
-    splash->deleteLater();
-    return;
-  }
-  QTimer::singleShot(ms, splash, [splash, mainWindow]() {
-    splash->finish(mainWindow);
-    splash->deleteLater();
-  });
-}
-
 int KaApplication::run(int argc, char** argv) {
   // 충돌 시 심볼 스택·미니덤프가 남도록 가장 먼저 설치한다.
   KaCrashGuard::install();
@@ -736,27 +661,18 @@ int KaApplication::run(int argc, char** argv) {
   app.setApplicationName(QStringLiteral("ka-hgis"));
   app.setApplicationDisplayName(QStringLiteral("필드고고학GIS"));
   app.setOrganizationName(QStringLiteral("ka-hgis"));
-  app.setApplicationVersion(QStringLiteral("1"));
+  app.setApplicationVersion(QStringLiteral("2"));
   app.setStyle(QStringLiteral("Fusion"));
-  {
-    const QString icoPath = QDir(QCoreApplication::applicationDirPath())
-                                .filePath(QStringLiteral("../data/theme/ka-hgis.ico"));
-    const QString icoLocal = QDir(QCoreApplication::applicationDirPath())
-                                 .filePath(QStringLiteral("data/theme/ka-hgis.ico"));
-    QIcon appIco;
-    if (QFile::exists(icoLocal)) appIco = QIcon(icoLocal);
-    else if (QFile::exists(icoPath)) appIco = QIcon(icoPath);
-    app.setWindowIcon(appIco.isNull() ? KaIcons::appIcon() : appIco);
-  }
+  app.setWindowIcon(KaIcons::appIcon());
   KaTheme::apply(&app);
 
-  QSplashScreen* splash = nullptr;
+  std::unique_ptr<KaStartupSplash> splash;
   if (!smokeQuit && !qaPhase1) {
-    splash = new QSplashScreen(makeFieldSplashPixmap());
+    splash = std::make_unique<KaStartupSplash>();
     splash->show();
-    splash->showMessage(QStringLiteral("라이브러리를 불러오는 중…"),
-                        Qt::AlignBottom | Qt::AlignHCenter, QColor(200, 206, 214));
-    app.processEvents();
+    // Present the notice before the synchronous SDK initialization. The reading
+    // gauge starts only once initialization has returned to the event loop.
+    app.processEvents(QEventLoop::ExcludeUserInputEvents);
   }
 
 #if KA_HGIS_HAS_QGIS
@@ -868,17 +784,8 @@ int KaApplication::run(int argc, char** argv) {
     if (smokeQuit || qaPhase1 || !openGpkg.isEmpty())
       w.setRestoreLastSurveyEnabled(false);
     KaCrashGuard::logLine(QStringLiteral("[boot] 메인창 구성 %1 ms").arg(bootTimer.elapsed()));
-    w.show();
-    if (splash) {
-      splash->showMessage(QStringLiteral("준비 완료"), Qt::AlignBottom | Qt::AlignHCenter,
-                          QColor(200, 206, 214));
-      // 창은 0.8초면 준비된다(실측). 예전 4.5초는 시작 시간의 80%가 이 대기였다.
-      // 저작권·라이선스 전문은 도움말 → 정보에 있고 GPL 준수는 거기서 이뤄진다.
-      // 스플래시는 제작처를 알아볼 정도만 보이면 된다.
-      holdSplashThenFinish(splash, &w, 1800);
-      splash = nullptr;
-    }
-    KaCrashGuard::logLine(QStringLiteral("[boot] 창 표시 %1 ms").arg(bootTimer.elapsed()));
+    if (!splash)
+      w.show();  // Preserve visible-window checks in the explicit QA fast path.
     if (demoSurvey && openGpkg.isEmpty()) {
       const QString dir = QDir::temp().filePath(QStringLiteral("ka-hgis-survey-verify"));
       QDir().mkpath(dir);
@@ -919,6 +826,18 @@ int KaApplication::run(int argc, char** argv) {
       QMetaObject::invokeMethod(&app, &QCoreApplication::quit, Qt::QueuedConnection);
     }
 
+    if (splash) {
+      QObject::connect(splash.get(), &KaStartupSplash::readyToShow, &w, [&]() {
+        w.show();
+        splash->close();
+        KaCrashGuard::logLine(QStringLiteral("[boot] 10초 안내 후 창 표시 %1 ms")
+                                  .arg(bootTimer.elapsed()));
+      });
+      splash->markReady();
+    } else {
+      // Explicit automated smoke/QA keeps its fast path without a reading delay.
+      KaCrashGuard::logLine(QStringLiteral("[boot] 창 표시 %1 ms").arg(bootTimer.elapsed()));
+    }
     code = app.exec();
   }
 #if KA_HGIS_HAS_QGIS

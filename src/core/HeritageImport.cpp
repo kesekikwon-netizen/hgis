@@ -8,13 +8,20 @@
 #include <qgslayertreegroup.h>
 #include <qgslayertreelayer.h>
 #include <qgsproject.h>
+#include <qgsvectorfilewriter.h>
+#include <qgsvectordataprovider.h>
 #include <qgsvectorlayer.h>
 
 #include <cpl_conv.h>
+#include <cpl_string.h>
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QScopeGuard>
 #include <QSet>
+#include <QTemporaryDir>
+#include <memory>
 #include <optional>
 
 namespace {
@@ -31,6 +38,88 @@ bool looksLikeText(const QgsVectorLayer* layer, int index) {
   if (!layer || index < 0 || index >= layer->fields().count()) return false;
   const QMetaType::Type type = static_cast<QMetaType::Type>(layer->fields().at(index).type());
   return type == QMetaType::QString;
+}
+
+// Decode a disposable SHP copy before writing Unicode storage. Rewriting a SHP
+// as UTF-8 would truncate Korean DBF column names (10 bytes) and long values.
+QgsVectorLayer* utf8WorkingLayer(const QString& shp, const QString& layerName,
+                                const QString& archiveRoot, QgsProject* project, QString& error) {
+  const QString workingRoot = QDir(archiveRoot).filePath(QStringLiteral("UTF8"));
+  if (!QDir().mkpath(workingRoot)) {
+    error = QStringLiteral("UTF-8 작업 자료를 보관할 폴더를 만들지 못했습니다.");
+    return nullptr;
+  }
+  QTemporaryDir working(QDir(workingRoot).filePath(QStringLiteral("heritage-XXXXXX")));
+  QTemporaryDir scratch;
+  if (!working.isValid() || !scratch.isValid()) {
+    error = QStringLiteral("UTF-8 변환용 임시 폴더를 만들지 못했습니다.");
+    return nullptr;
+  }
+  const QFileInfo original(shp);
+  const QString base = original.dir().filePath(original.completeBaseName());
+  const QString copyBase = scratch.filePath(QStringLiteral("source"));
+  for (const QString& suffix : {QStringLiteral(".shp"), QStringLiteral(".shx"), QStringLiteral(".dbf"),
+                               QStringLiteral(".prj"), QStringLiteral(".cpg")}) {
+    if (!QFileInfo::exists(base + suffix)) continue;
+    if (!QFile::copy(base + suffix, copyBase + suffix)) {
+      error = QStringLiteral("%1의 인코딩 변환용 사본을 만들지 못했습니다.").arg(original.fileName());
+      return nullptr;
+    }
+  }
+
+  // Existing encoding helpers write a CPG and set process-wide GDAL options.
+  // Apply them only to scratch files and restore both global and thread state.
+  char** config = CPLGetConfigOptions();
+  const char* global = CSLFetchNameValue(config, "SHAPE_ENCODING");
+  const auto oldGlobal = global ? std::optional<QByteArray>(global) : std::nullopt;
+  CSLDestroy(config);
+  const char* local = CPLGetThreadLocalConfigOption("SHAPE_ENCODING", nullptr);
+  const auto oldLocal = local ? std::optional<QByteArray>(local) : std::nullopt;
+  const auto restore = qScopeGuard([oldGlobal, oldLocal]() {
+    CPLSetConfigOption("SHAPE_ENCODING", oldGlobal ? oldGlobal->constData() : nullptr);
+    CPLSetThreadLocalConfigOption("SHAPE_ENCODING", oldLocal ? oldLocal->constData() : nullptr);
+  });
+  const QString copiedShp = copyBase + QStringLiteral(".shp");
+  const QString encoding = LayerOps::prepareShapefileEncoding(copiedShp);
+  CPLSetThreadLocalConfigOption("SHAPE_ENCODING", encoding.toLatin1().constData());
+  QgsVectorLayer source(copiedShp, layerName, QStringLiteral("ogr"));
+  if (!source.isValid()) {
+    error = QStringLiteral("%1 을(를) 열지 못했습니다.").arg(original.fileName());
+    return nullptr;
+  }
+  const auto releaseScratchConnections = qScopeGuard([&source]() {
+    source.dataProvider()->reloadData();
+  });
+  source.setProviderEncoding(encoding);
+
+  QgsVectorFileWriter::SaveVectorOptions options;
+  options.driverName = QStringLiteral("GPKG");
+  options.fileEncoding = QStringLiteral("UTF-8");
+  options.layerName = QStringLiteral("heritage");
+  // Reserve new storage columns without changing an original field named fid/geom.
+  const auto storageName = [&source](QString name) {
+    while (source.fields().lookupField(name) >= 0) name += QLatin1Char('_');
+    return name;
+  };
+  options.layerOptions = {QStringLiteral("FID=%1").arg(storageName(QStringLiteral("__hgis_fid"))),
+                          QStringLiteral("GEOMETRY_NAME=%1").arg(storageName(QStringLiteral("__hgis_geom")))};
+  const QString path = working.filePath(QStringLiteral("heritage.gpkg"));
+  QString writerError;
+  if (QgsVectorFileWriter::writeAsVectorFormatV3(&source, path, project->transformContext(), options,
+                                               &writerError) != QgsVectorFileWriter::NoError) {
+    error = QStringLiteral("%1의 UTF-8 작업 자료를 만들지 못했습니다: %2")
+                .arg(original.fileName(), writerError);
+    return nullptr;
+  }
+  auto result = std::make_unique<QgsVectorLayer>(path + QStringLiteral("|layername=heritage"),
+                                                layerName, QStringLiteral("ogr"));
+  if (!result->isValid() || result->featureCount() != source.featureCount()) {
+    error = QStringLiteral("%1의 UTF-8 작업 자료를 확인하지 못했습니다.").arg(original.fileName());
+    return nullptr;
+  }
+  // Project save/reopen needs this cache after the import call and app exit.
+  working.setAutoRemove(false);
+  return result.release();
 }
 
 }  // namespace
@@ -136,7 +225,6 @@ HeritageImport::Result HeritageImport::loadDataset(QgsProject* project, Heritage
         return out;
       }
     }
-    const QString encoding = LayerOps::prepareShapefileEncoding(shp);
     // 한 ZIP 에 여러 SHP 가 들어온다(예: 지정유산 →
     // 국가지정유산 · 시도지정유산 · 국가등록문화유산 · 시도등록문화유산 ·
     // 국가지정유산보호구역 · 시도지정유산보호구역, 2026-09-12 실제 파일로 확인).
@@ -144,14 +232,11 @@ HeritageImport::Result HeritageImport::loadDataset(QgsProject* project, Heritage
     // **이름은 파일 이름 그대로, 색과 범례는 그 종류의 것**을 쓴다.
     const QString baseName = QFileInfo(shp).completeBaseName();
     const QString layerName = baseName.isEmpty() ? datasetName : baseName;
-    auto* layer = new QgsVectorLayer(shp, layerName, QStringLiteral("ogr"));
-    if (!layer->isValid()) {
-      out.error = QStringLiteral("%1 을(를) 열지 못했습니다.").arg(QFileInfo(shp).fileName());
-      delete layer;
+    auto* layer = utf8WorkingLayer(shp, layerName, archiveRoot, project, out.error);
+    if (!layer) {
       qDeleteAll(loaded);
       return out;
     }
-    if (!encoding.isEmpty()) LayerOps::setShapefileEncoding(layer, encoding);
 
     // 유적명은 실제 필드에서 고른다. 없으면 그렇다고 말한다.
     const QString nameField = chooseNameField(layer);

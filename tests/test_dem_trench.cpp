@@ -712,8 +712,8 @@ void TestDemTrench::layerTreeMenu_hasLabelToggleAndTrenchRatio() {
   QVERIFY2(src.contains(QLatin1String("applyTrenchByRatio")) ||
                src.contains(QLatin1String("buildForTargetRatio")),
            "10%/2%는 길이 배분으로 자동 배치해야 한다");
-  QVERIFY2(src.contains(QLatin1String("setLabelsVisible")),
-           "글자 토글은 LayerOps::setLabelsVisible");
+  QVERIFY2(src.contains(QLatin1String("LayerLabelControls::setVisible")),
+           "글자 토글은 지도/조판 구분과 기존 스타일을 보존하는 공통 서비스를 사용한다");
 }
 
 void TestDemTrench::applySnapConfig_vertexAndSegmentNotWmsPromise() {

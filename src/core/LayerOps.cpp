@@ -1,4 +1,5 @@
 #include "LayerOps.h"
+#include "LayerLabelControls.h"
 #include "DemPresentation.h"
 #include "DemColorRampLegend.h"
 #include <QSignalBlocker>
@@ -755,7 +756,7 @@ QString labelOrderSignature(QgsLayerTree* root) {
     QgsMapLayer* ml = n ? n->layer() : nullptr;
     if (!ml) { sig += QLatin1Char('-'); continue; }
     sig += ml->id();
-    sig += n->itemVisibilityChecked() ? QLatin1Char('1') : QLatin1Char('0');
+    sig += n->isVisible() ? QLatin1Char('1') : QLatin1Char('0');
     if (auto* vl = qobject_cast<QgsVectorLayer*>(ml)) {
       // 스타일·라벨을 고치면 QGIS 가 객체를 새로 만든다. 포인터가 곧 변경 표시다.
       sig += vl->labelsEnabled() ? QLatin1Char('L') : QLatin1Char('l');
@@ -798,7 +799,7 @@ bool refreshLabelOrderCache(QgsProject* project) {
     if (!ml || !ml->isValid()) continue;
     auto* vl = qobject_cast<QgsVectorLayer*>(ml);
     const bool hasLabels = vl && vl->labelsEnabled() && vl->labeling();
-    const bool visible = node->itemVisibilityChecked();
+    const bool visible = node->isVisible();
     const bool hidesOwn = hasLabels && hidesOwnLabelsWhenDrawnLast(vl);
 
     // 1) 레이어 속성. 병렬 렌더러(composeImage)와 QGIS 데스크톱에서 쓰인다.
@@ -867,12 +868,7 @@ void LayerOps::applyLayerOrderToLabels(QgsProject* project, QgsMapCanvas* canvas
 
 
 bool LayerOps::hasToggleableLabels(const QgsMapLayer* layer) {
-  const auto* vl = qobject_cast<const QgsVectorLayer*>(layer);
-  if (!vl || !vl->isValid())
-    return false;
-  return vl->labeling() != nullptr || vl->labelsEnabled() ||
-         vl->geometryType() == Qgis::GeometryType::Polygon ||
-         vl->fields().count() > 0;
+  return LayerLabelControls::describe(layer).supported;
 }
 
 bool LayerOps::labelsVisible(const QgsMapLayer* layer) {
@@ -881,21 +877,7 @@ bool LayerOps::labelsVisible(const QgsMapLayer* layer) {
 }
 
 bool LayerOps::setLabelsVisible(QgsMapLayer* layer, bool on) {
-  auto* vl = qobject_cast<QgsVectorLayer*>(layer);
-  if (!vl || !vl->isValid())
-    return false;
-  if (on && !vl->labeling()) {
-    const QString nf = detectNameField(vl);
-    if (!nf.isEmpty()) {
-      applyNameAttributeLabels(vl, nf, 5.0, false);
-      return true;
-    } else if (vl->geometryType() == Qgis::GeometryType::Polygon && applyAreaM2Labels(vl)) {
-      return true;
-    }
-  }
-  vl->setLabelsEnabled(on);
-  vl->triggerRepaint();
-  return true;
+  return LayerLabelControls::setVisible(layer, on);
 }
 
 bool LayerOps::applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fillIn, const QColor& strokeIn,
@@ -2665,7 +2647,7 @@ QList<QgsMapLayer*> LayerOps::visibleLayersPaintOrder(QgsProject* project) {
     if (isAlignPending(l)) return;
     if (root) {
       if (QgsLayerTreeLayer* n = root->findLayer(l->id())) {
-        if (!n->itemVisibilityChecked()) return;
+        if (!n->isVisible()) return;
       }
     }
     visible.append(l);
@@ -4636,7 +4618,8 @@ bool LayerOps::toggleLayerVisibility(QgsProject* project, QgsMapCanvas* canvas, 
   for (QgsMapLayer* l : layers) {
     if (!l) continue;
     if (QgsLayerTreeLayer* node = root->findLayer(l->id())) {
-      node->setItemVisibilityChecked(visible);
+      if (visible) node->setItemVisibilityCheckedParentRecursive(true);
+      else node->setItemVisibilityChecked(false);
     }
   }
   refreshCanvasIfIdle(canvas);
@@ -4651,7 +4634,7 @@ bool LayerOps::isLayerVisible(QgsProject* project, const QString& name) {
   for (QgsMapLayer* l : layers) {
     if (!l) continue;
     if (QgsLayerTreeLayer* node = root->findLayer(l->id())) {
-      if (node->itemVisibilityChecked()) return true;
+      if (node->isVisible()) return true;
     }
   }
   return false;

@@ -7,6 +7,7 @@
 #include <QPainterPath>
 #include <QPixmap>
 #include <QScopedValueRollback>
+#include <QLinearGradient>
 
 namespace {
 
@@ -14,6 +15,7 @@ thread_local QColor tInk;
 thread_local QColor tAccent;
 thread_local QIcon::Mode tMode = QIcon::Normal;
 thread_local QIcon::State tState = QIcon::Off;
+thread_local bool tGlossyTile = true;
 
 QColor stateColor(const QColor& color) {
   if (tMode == QIcon::Disabled) {
@@ -61,26 +63,57 @@ QPixmap base(int s = 64) {
 void prep(QPainter& p, qreal width = 3.0) {
   p.setRenderHint(QPainter::Antialiasing, true);
   p.setPen(QPen(tInk, qMax(3.0, width), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-  p.setBrush(tAccent.lighter(150));
+  p.setBrush(tGlossyTile ? (tMode == QIcon::Disabled ? QColor(240, 240, 240)
+                                                   : QColor(0xF1, 0xF5, 0xF7))
+                        : tAccent.lighter(150));
 }
 
-void fillInk(QPainter& p) { p.setBrush(tAccent); }
+void fillInk(QPainter& p) { p.setBrush(tGlossyTile ? tInk : tAccent); }
 
 QIcon bakeIcon(void (*fn)(QPainter&), const QColor& accent) {
-  auto pmAt = [&](QIcon::Mode mode, QIcon::State state) {
+  auto pmAt = [&](int size, QIcon::Mode mode, QIcon::State state) {
     QScopedValueRollback<QIcon::Mode> modeGuard(tMode, mode);
     QScopedValueRollback<QIcon::State> stateGuard(tState, state);
     QScopedValueRollback<QColor> inkGuard(tInk, stateColor(KaTheme::iconPalette().ink));
     QScopedValueRollback<QColor> accentGuard(tAccent, stateColor(accent));
-    auto pm = base();
+    auto pm = base(size);
     QPainter p(&pm);
+    p.scale(size / 64.0, size / 64.0);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    if (tGlossyTile) {
+      const QRectF tile(2, 2, 60, 60);
+      QPainterPath outline;
+      outline.addRoundedRect(tile, 14, 14);
+      QLinearGradient body(0, 2, 0, 62);
+      body.setColorAt(0, tAccent.lighter(220));
+      body.setColorAt(0.43, tAccent.lighter(135));
+      body.setColorAt(0.46, tAccent.lighter(115));
+      body.setColorAt(1, tAccent.darker(118));
+      p.fillPath(outline, body);
+      p.save();
+      p.setClipPath(outline);
+      QPainterPath sheen;
+      sheen.moveTo(2, 2); sheen.lineTo(62, 2); sheen.lineTo(62, 26);
+      sheen.quadTo(32, 38, 2, 26); sheen.closeSubpath();
+      QLinearGradient reflection(0, 2, 0, 34);
+      reflection.setColorAt(0, QColor(255, 255, 255, 95));
+      reflection.setColorAt(1, QColor(255, 255, 255, 20));
+      p.fillPath(sheen, reflection);
+      p.restore();
+      p.setBrush(Qt::NoBrush);
+      p.setPen(QPen(QColor(255, 255, 255, 100), 0.8));
+      p.drawPath(outline);
+    }
+    p.save();
+    if (tGlossyTile) { p.translate(5.1, 5.1); p.scale(0.84, 0.84); }
+    fn(p);
+    p.restore();
     if (mode == QIcon::Selected) {
       p.setRenderHint(QPainter::Antialiasing, true);
       p.setPen(QPen(KaTheme::iconPalette().selected, 2.5));
       p.setBrush(Qt::NoBrush);
       p.drawRoundedRect(QRectF(3, 3, 58, 58), 9, 9);
     }
-    fn(p);
     if (state == QIcon::On) {
       p.setPen(QPen(tInk, 2.0));
       p.setBrush(tAccent);
@@ -94,9 +127,10 @@ QIcon bakeIcon(void (*fn)(QPainter&), const QColor& accent) {
     return pm;
   };
   QIcon ic;
-  for (const auto mode : {QIcon::Normal, QIcon::Active, QIcon::Selected, QIcon::Disabled})
-    for (const auto state : {QIcon::Off, QIcon::On})
-      ic.addPixmap(pmAt(mode, state), mode, state);
+  for (int size : {64, 128})
+    for (const auto mode : {QIcon::Normal, QIcon::Active, QIcon::Selected, QIcon::Disabled})
+      for (const auto state : {QIcon::Off, QIcon::On})
+        ic.addPixmap(pmAt(size, mode, state), mode, state);
   return ic;
 }
 
@@ -690,39 +724,14 @@ void dEasyDraw(QPainter& p) {
 namespace KaIcons {
 
 QIcon appIcon() {
-  static QIcon cached;
-  if (!cached.isNull()) return cached;
-  QIcon ic;
-  for (int s : {16, 20, 24, 32, 48, 64, 128, 256}) {
-    QPixmap pm(s, s);
-    pm.fill(Qt::transparent);
-    QPainter p(&pm);
-    p.setRenderHint(QPainter::Antialiasing, true);
-    const qreal m = s * 0.07;
-    const QRectF tile(m, m, s - 2 * m, s - 2 * m);
-    p.setPen(Qt::NoPen);
-    p.setBrush(QColor(0x0F, 0x76, 0x6E));
-    p.drawRoundedRect(tile, s * 0.18, s * 0.18);
-    p.setBrush(QColor(0xF6, 0xF1, 0xE8));
-    const qreal cx = s * 0.50;
-    const qreal cy = s * 0.54;
-    const qreal w = s * 0.26;
-    const qreal h = s * 0.20;
-    QPolygonF site;
-    site << QPointF(cx - w, cy + h) << QPointF(cx - w * 0.65, cy - h)
-         << QPointF(cx + w * 0.88, cy - h * 0.55) << QPointF(cx + w * 0.42, cy + h);
-    p.drawPolygon(site);
-    p.setPen(QPen(QColor(0xF6, 0xF1, 0xE8), qMax(1.2, s * 0.055), Qt::SolidLine, Qt::RoundCap));
-    p.drawLine(QPointF(cx, m + s * 0.11), QPointF(cx, m + s * 0.22));
-    ic.addPixmap(pm);
-  }
-  cached = ic;
+  static const QIcon cached(QStringLiteral(":/ka-hgis/app-icon.png"));
   return cached;
 }
 
 QIcon icon(const QString& id) {
   static QHash<QString, QIcon> cache;
-  if (cache.contains(id)) return cache.value(id);
+  const QString cacheKey = id + (tGlossyTile ? QStringLiteral("/glossy") : QStringLiteral("/flat"));
+  if (cache.contains(cacheKey)) return cache.value(cacheKey);
 
   const QColor accent = groupColor(id);
   const auto bake = [&accent](void (*draw)(QPainter&)) { return bakeIcon(draw, accent); };
@@ -787,11 +796,13 @@ QIcon icon(const QString& id) {
   else if (id == QLatin1String("layout_coord_point")) ic = bake(dCoordPoint);
   else ic = bake(dDocPlus);
 
-  cache.insert(id, ic);
+  cache.insert(cacheKey, ic);
   return ic;
 }
 
 QIcon icon(const QString& id, const QColor& ink) {
+  // Monochrome utility consumers need the glyph, not a solid tinted tile.
+  QScopedValueRollback<bool> tileGuard(tGlossyTile, !ink.isValid());
   const QIcon source = icon(id);
   if (!ink.isValid()) return source;
   QIcon tinted;

@@ -1,4 +1,7 @@
 #include "KaDrawingStudio.h"
+#include "KaLayerInformation.h"
+#include <QDomDocument>
+#include <qgsmaplayerstyle.h>
 #include "KaTheme.h"
 #include "KaIcons.h"
 #include "KaCrashGuard.h"
@@ -101,6 +104,7 @@
 #include <qgslinesymbol.h>
 #include <qgsfillsymbol.h>
 #include <qgslayoutmanager.h>
+#include <qgslayoutmeasurementconverter.h>
 #include <qgslayoutpagecollection.h>
 #include <qgslayoutrendercontext.h>
 #include <qgslayoutview.h>
@@ -299,23 +303,29 @@ QRectF itemPaperRect(QgsLayoutItem* item) {
   return item->sceneBoundingRect();
 }
 
-void lockSheetChromeItem(QgsLayoutItem* item) {
-  if (!item)
-    return;
-  item->setLocked(true);
+bool isSheetDecoration(const QgsLayoutItem* item) {
+  if (!item) return false;
+  const QString id = item->id();
+  return id == QLatin1String(kIdScaleBar) || id == QLatin1String(kIdScale)
+         || id == QLatin1String(kIdCrs) || id == QLatin1String(kIdNorth);
+}
+
+double decorationSizePercent(const QgsLayoutItem* item) {
+  return item->customProperty(QStringLiteral("ka_hgis/chrome_size_percent"), 100.).toDouble();
 }
 
 void compactSheetScaleBar(QgsLayoutItemScaleBar* sb) {
   if (!sb)
     return;
+  const double factor = decorationSizePercent(sb) / 100.;
   sb->setLabelVerticalPlacement(Qgis::ScaleBarDistanceLabelVerticalPlacement::AboveSegment);
-  sb->setHeight(2.4);
-  sb->setLabelBarSpace(1.0);
-  sb->setBoxContentSpace(0.6);
+  sb->setHeight(2.4 * factor);
+  sb->setLabelBarSpace(1.0 * factor);
+  sb->setBoxContentSpace(0.6 * factor);
   QgsTextFormat fmt = sb->textFormat();
   QFont f(QStringLiteral("Malgun Gothic"), 7);
   fmt.setFont(f);
-  fmt.setSize(7.0);
+  fmt.setSize(7.0 * factor);
   fmt.setSizeUnit(Qgis::RenderUnit::Points);
   sb->setTextFormat(fmt);
   LayoutService::applySheetScaleBarInk(sb);
@@ -800,15 +810,33 @@ bool KaDrawingStudio::promptPaper(QWidget* parent, double* widthMm, double* heig
 
 KaDrawingStudio::KaDrawingStudio(QgsProject* project, QgsMapCanvas* mapCanvas,
                                  double paperWidthMm, double paperHeightMm, QWidget* parent)
-    : QMainWindow(parent), m_project(project), m_mapCanvas(mapCanvas),
+    : QMainWindow(parent), m_project(project ? project : QgsProject::instance()), m_mapCanvas(mapCanvas),
       m_paperW(paperWidthMm), m_paperH(paperHeightMm) {
   setAttribute(Qt::WA_DeleteOnClose, false);
   setWindowTitle(QStringLiteral("조판"));
   resize(1280, 860);
   ensureLayoutGuiRegistered(mapCanvas);
-  ensureBlankLayout();
+  const auto* savedLayout = layout();
+  if (savedLayout && savedLayout->pageCollection()->pageCount() > 0) {
+    const auto size = savedLayout->renderContext().measurementConverter().convert(
+        savedLayout->pageCollection()->page(0)->pageSize(), Qgis::LayoutUnit::Millimeters);
+    m_paperW = size.width();
+    m_paperH = size.height();
+  }
+  if (!savedLayout) ensureBlankLayout();
   buildUi();
-  autoPlaceDefaultSheet();
+  if (savedLayout) zoomPaperVisible();
+  else autoPlaceDefaultSheet();
+  connect(&m_heritageNumbers, &HeritageLayoutNumbers::visibleEntriesChanged, this, [this]() {
+    if (property("ka_interacting").toBool()) {
+      setProperty("ka_visible_legend_pending", true);
+      return;
+    }
+    if (auto* legend = dynamic_cast<QgsLayoutItemLegend*>(findItemById(layout(), kIdLegend))) {
+      LayoutService::tuneSheetLegend(legend);
+      m_heritageNumbers.applyLegend(legend);
+    }
+  });
   // The embedded studio shares MainWindow's shortcut router. Registering a
   // second WindowShortcut makes Ctrl+Z ambiguous and neither action runs.
   if (!parent) {
@@ -1008,6 +1036,7 @@ void KaDrawingStudio::buildUi() {
   leftSplit->setObjectName(QStringLiteral("studioLeftSplit"));
   leftSplit->setHandleWidth(8);
   leftSplit->setChildrenCollapsible(false);
+  leftSplit->installEventFilter(this);
 
   auto* layerBox = new QFrame(leftSplit);
   layerBox->setObjectName(QStringLiteral("layersCard"));
@@ -1021,6 +1050,12 @@ void KaDrawingStudio::buildUi() {
   capRow->setSpacing(6);
   capRow->addWidget(leftCap);
   capRow->addStretch(1);
+  auto* filesToggle = new QToolButton(layerBox);
+  filesToggle->setObjectName(QStringLiteral("sidebarFilesToggle"));
+  filesToggle->setText(QStringLiteral("파일함"));
+  filesToggle->setCheckable(true);
+  filesToggle->setChecked(true);
+  capRow->addWidget(filesToggle);
   m_layerCheckAllBtn = new QToolButton(layerBox);
   m_layerCheckAllBtn->setObjectName(QStringLiteral("layoutLayerCheckAllBtn"));
   m_layerCheckAllBtn->setFocusPolicy(Qt::NoFocus);
@@ -1028,14 +1063,19 @@ void KaDrawingStudio::buildUi() {
       "레이어 체크를 한 번에 모두 끄거나 켭니다. 하나라도 켜져 있으면 전부 끕니다."));
   connect(m_layerCheckAllBtn, &QToolButton::clicked, this, &KaDrawingStudio::toggleAllLayersChecked);
   capRow->addWidget(m_layerCheckAllBtn);
-  m_layerModel = new QgsLayerTreeModel(QgsProject::instance()->layerTreeRoot(), this);
+  auto* informationModel = new KaLayerInformationModel(m_project, true, this);
+  m_layerModel = informationModel;
   m_layerModel->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility, true);
   m_layerModel->setFlag(QgsLayerTreeModel::AllowNodeReorder, true);
   m_layerModel->setFlag(QgsLayerTreeModel::AllowNodeRename, false);
-  m_layerTree = new QgsLayerTreeView(layerBox);
+  m_layerTree = new KaLayerInformationView(layerBox);
   m_layerTree->setObjectName(QStringLiteral("layoutLayerTree"));
   m_layerTree->setModel(m_layerModel);
-  m_layerTree->setMinimumWidth(160);
+  KaLayerInformationModel::configureView(m_layerTree);
+  connect(informationModel, &KaLayerInformationModel::labelsEdited, this, &KaDrawingStudio::syncMapFromLayers);
+  connect(this, &KaDrawingStudio::drawingScaleChanged, informationModel, &KaLayerInformationModel::setScale);
+  if (auto* map = mapItem()) informationModel->setScale(map->scale());
+  m_layerTree->setMinimumWidth(300);
   m_layerTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
   m_layerTree->setDragDropMode(QAbstractItemView::InternalMove);
   m_layerTree->setDefaultDropAction(Qt::MoveAction);
@@ -1056,7 +1096,8 @@ void KaDrawingStudio::buildUi() {
       menu.exec(m_layerTree->viewport()->mapToGlobal(pt));
     }
   });
-  connect(m_layerTree, &QTreeView::doubleClicked, this, [this](const QModelIndex&) {
+  connect(m_layerTree, &QTreeView::doubleClicked, this, [this](const QModelIndex& index) {
+    if (index.column() != 0) return;
     auto* mainWin = qobject_cast<MainWindow*>(window());
     if (mainWin) {
       mainWin->editCurrentLayerStyle(m_layerTree->currentLayer());
@@ -1065,21 +1106,22 @@ void KaDrawingStudio::buildUi() {
   connect(m_layerTree, &QgsLayerTreeView::currentLayerChanged, this,
           &KaDrawingStudio::updateLayerOpacityControl);
 
-  connect(m_layerTree->selectionModel(), &QItemSelectionModel::selectionChanged,
-          this, &KaDrawingStudio::syncMapFromLayers);
-  connect(m_layerModel, &QAbstractItemModel::dataChanged, this, &KaDrawingStudio::syncMapFromLayers);
+  // Selecting a row does not change the drawing's layer set or styles.
+  connect(m_layerModel, &QAbstractItemModel::dataChanged, this, [this](const QModelIndex& first, const QModelIndex&) {
+    if (first.column() == 0) syncMapFromLayers();
+  });
   connect(m_layerModel, &QAbstractItemModel::rowsMoved, this, &KaDrawingStudio::syncMapFromLayers);
   connect(m_layerModel, &QAbstractItemModel::modelReset, this, &KaDrawingStudio::syncMapFromLayers);
   connect(m_layerModel, &QAbstractItemModel::layoutChanged, this, &KaDrawingStudio::syncMapFromLayers);
-  if (QgsLayerTree* tree = QgsProject::instance()->layerTreeRoot()) {
+  if (QgsLayerTree* tree = m_project->layerTreeRoot()) {
     connect(tree, &QgsLayerTreeNode::visibilityChanged, this, [this](QgsLayerTreeNode*) {
       refreshLayerCheckAllButton();
       syncMapFromLayers();
     });
   }
-  layerBox->setMinimumHeight(96);
   layerLay->addLayout(capRow);
   layerLay->addWidget(m_layerTree, 1);
+  layerLay->addWidget(new KaLayerInformationPanel(informationModel, m_layerTree, layerBox));
   refreshLayerCheckAllButton();
   auto* layerEmpty = new QLabel(
       QStringLiteral("이 도면에는 레이어가 없습니다.\n필요한 레이어를 켜고\n용지 위에 올려 보세요."),
@@ -1087,16 +1129,16 @@ void KaDrawingStudio::buildUi() {
   layerEmpty->setObjectName(QStringLiteral("emptyState"));
   layerEmpty->setAlignment(Qt::AlignCenter);
   layerEmpty->setWordWrap(true);
-  layerEmpty->setVisible(QgsProject::instance()->mapLayers().isEmpty());
+  layerEmpty->setVisible(m_project->mapLayers().isEmpty());
   layerLay->addWidget(layerEmpty);
   auto syncEmpty = [this, layerEmpty]() {
-    const bool empty = !QgsProject::instance() || QgsProject::instance()->mapLayers().isEmpty();
+    const bool empty = !m_project || m_project->mapLayers().isEmpty();
     if (layerEmpty) layerEmpty->setVisible(empty);
     if (m_layerTree) m_layerTree->setVisible(!empty);
   };
-  connect(QgsProject::instance(), &QgsProject::layersAdded, this,
+  connect(m_project, &QgsProject::layersAdded, this,
           [syncEmpty](const QList<QgsMapLayer*>&) { syncEmpty(); });
-  connect(QgsProject::instance(), &QgsProject::layersRemoved, this,
+  connect(m_project, &QgsProject::layersRemoved, this,
           [syncEmpty](const QStringList&) { syncEmpty(); });
   syncEmpty();
   leftSplit->addWidget(layerBox);
@@ -1104,9 +1146,16 @@ void KaDrawingStudio::buildUi() {
   auto* mainWin = qobject_cast<MainWindow*>(parentWidget());
   if (!mainWin) mainWin = qobject_cast<MainWindow*>(parent());
 
-  m_filesPanel = new KaFileBrowserPanel(leftSplit);
+  auto* filesScroll = new QScrollArea(leftSplit);
+  filesScroll->setObjectName(QStringLiteral("sidebarFilesScroll"));
+  filesScroll->setWidgetResizable(true);
+  filesScroll->setFrameShape(QFrame::NoFrame);
+  filesScroll->setMinimumHeight(60);
+  m_filesPanel = new KaFileBrowserPanel(filesScroll);
   m_filesPanel->setObjectName(QStringLiteral("studioFilesPanel"));
-  m_filesPanel->setMinimumHeight(96);
+  m_filesPanel->setMinimumHeight(200);
+  filesScroll->setWidget(m_filesPanel);
+  connect(filesToggle, &QToolButton::toggled, filesScroll, &QWidget::setVisible);
   connect(m_filesPanel, &KaFileBrowserPanel::fileActivated, this, [this, mainWin](const QString& path) {
     if (mainWin) {
       const bool raster = GeorefService::isImagePath(path);
@@ -1118,7 +1167,7 @@ void KaDrawingStudio::buildUi() {
   connect(m_filesPanel, &KaFileBrowserPanel::statusMessage, this, [this](const QString& msg) {
     if (m_status) m_status->setText(msg);
   });
-  leftSplit->addWidget(m_filesPanel);
+  leftSplit->addWidget(filesScroll);
 
   leftSplit->setStretchFactor(0, 3);
   leftSplit->setStretchFactor(1, 2);
@@ -1190,6 +1239,10 @@ void KaDrawingStudio::buildUi() {
   m_scaleSyncTimer->setSingleShot(true);
   m_scaleSyncTimer->setInterval(280);
   connect(m_scaleSyncTimer, &QTimer::timeout, this, &KaDrawingStudio::flushHeavyScaleSync);
+  m_layerSyncTimer = new QTimer(this);
+  m_layerSyncTimer->setSingleShot(true);
+  m_layerSyncTimer->setInterval(80);
+  connect(m_layerSyncTimer, &QTimer::timeout, this, &KaDrawingStudio::flushLayerSync);
 
   auto* side = new QFrame(root);
   side->setObjectName(QStringLiteral("studioLeftCol"));
@@ -1284,17 +1337,19 @@ void KaDrawingStudio::buildUi() {
   auto* northSizeRow = new QHBoxLayout;
   northSizeRow->addWidget(new QLabel(QStringLiteral("크기"), m_cardNorth));
   m_northSize = new QDoubleSpinBox(m_cardNorth);
-  m_northSize->setRange(12.0, 80.0);
+  m_northSize->setRange(3.0, 80.0);
   m_northSize->setDecimals(0);
   m_northSize->setSuffix(QStringLiteral(" mm"));
   m_northSize->setValue(28.0);
   connect(m_northSize, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double mm) {
     auto* it = findItemById(layout(), kIdNorth);
     if (!it) return;
-    QRectF r = it->sceneBoundingRect();
+    it->beginCommand(QStringLiteral("방위표 크기"));
+    QRectF r(it->pos(), it->rect().size());
     r.setWidth(mm);
     r.setHeight(mm);
     it->attemptSetSceneRect(r);
+    it->endCommand();
     it->update();
   });
   northSizeRow->addWidget(m_northSize, 1);
@@ -1397,6 +1452,23 @@ void KaDrawingStudio::buildUi() {
   }
   addScaleRowGap();
   scaleLay->addLayout(barRow);
+  auto* sizeRow = new QHBoxLayout;
+  sizeRow->addWidget(new QLabel(QStringLiteral("선택 항목 크기"), m_scaleBar));
+  m_decorationSize = new QDoubleSpinBox(m_scaleBar);
+  m_decorationSize->setObjectName(QStringLiteral("decorationSize"));
+  m_decorationSize->setRange(25., 200.);
+  m_decorationSize->setDecimals(0);
+  m_decorationSize->setSingleStep(10.);
+  m_decorationSize->setSuffix(QStringLiteral(" %"));
+  m_decorationSize->setValue(100.);
+  m_decorationSize->setKeyboardTracking(false);
+  m_decorationSize->setEnabled(false);
+  m_decorationSize->setToolTip(QStringLiteral("용지의 축척자·축척·좌표계·방위표를 선택해 크기를 조절합니다. 위치는 끌어서 옮깁니다."));
+  connect(m_decorationSize, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+          this, &KaDrawingStudio::resizeSelectedDecoration);
+  sizeRow->addWidget(m_decorationSize, 1);
+  addScaleRowGap();
+  scaleLay->addLayout(sizeRow);
   auto* extraRow = new QHBoxLayout;
   extraRow->setSpacing(buttonMetrics.buttonSpacing);
   auto* scaleLblBtn = makeRailTile(m_scaleBar, KaIcons::icon(QStringLiteral("layout_scale")),
@@ -1524,7 +1596,7 @@ void KaDrawingStudio::buildUi() {
   m_studioSplit->setStretchFactor(0, 0);
   m_studioSplit->setStretchFactor(1, 1);
   m_studioSplit->setStretchFactor(2, 0);
-  m_studioSplit->setSizes({268, 900, 320});
+  m_studioSplit->setSizes({348, 820, 320});
   rootLay->addWidget(m_studioSplit, 1);
   setCentralWidget(root);
 
@@ -1566,7 +1638,6 @@ void KaDrawingStudio::autoPlaceDefaultSheet() {
 
 void KaDrawingStudio::refreshMapFromProject() {
   syncMapFromLayers();
-  ensureStandardDecorations();
 }
 
 void KaDrawingStudio::placeTerrain3dPicture(const QString& pngPath, const QgsRectangle& groundExtent,
@@ -1824,7 +1895,8 @@ void KaDrawingStudio::beginPlaceScaleBar(const QString& style) {
 void KaDrawingStudio::beginPlaceScaleLabel() {
   endActivateMap();
   m_placeKind = PlaceKind::ScaleLabel;
-  placeScaleLabel(defaultItemRect(kIdScale));
+  auto* item = findItemById(layout(), kIdScale);
+  placeScaleLabel(item ? QRectF(item->pos(), item->rect().size()) : defaultItemRect(kIdScale));
   m_placeUndo.append(QString::fromUtf8(kIdScale));
   if (m_status)
     m_status->setText(QStringLiteral("축척 글자를 넣었습니다. 끌어 옮기세요."));
@@ -2295,6 +2367,7 @@ void KaDrawingStudio::applyCrsGrid(QgsLayoutItemMap* map) {
 
 void KaDrawingStudio::showEvent(QShowEvent* event) {
   QMainWindow::showEvent(event);
+  syncMapFromLayers();
   if (m_paperFitPending) {
     m_paperFitPending = false;
     QTimer::singleShot(0, this, [this]() { zoomPaperVisible(); });
@@ -2370,12 +2443,9 @@ void KaDrawingStudio::applyLayersToMap(QgsLayoutItemMap* map, bool includeLiveBa
   }
   map->setKeepLayerSet(true);
   map->setFollowVisibilityPreset(false);
-  map->setLayers(layers);
-  map->invalidateCache();
-  map->refresh();
-  syncAboveLabelsMap(map);
+  if (map->layers() != layers) map->setLayers(layers);
   const QgsCoordinateReferenceSystem crs = studioMapCrs(m_mapCanvas, m_project);
-  if (crs.isValid())
+  if (crs.isValid() && crs != map->crs())
     map->setCrs(crs);
   if (!refitExtent) return;
   const QgsRectangle ext = studioMapExtent(m_mapCanvas, crs);
@@ -2415,6 +2485,21 @@ void KaDrawingStudio::syncAboveLabelsMap(QgsLayoutItemMap* base) {
   top->setKeepLayerSet(true);
   top->setFollowVisibilityPreset(false);
   top->setLayers(above);
+  top->setKeepLayerStyles(true);
+  auto overlayStyles = base->layerStyleOverrides();
+  for (auto* layer : above) {
+    if (!qobject_cast<QgsVectorLayer*>(layer)) continue;
+    QgsMapLayerStyle style;
+    if (overlayStyles.contains(layer->id())) style = QgsMapLayerStyle(overlayStyles.value(layer->id()));
+    else style.readFromLayer(layer);
+    QDomDocument document;
+    if (!document.setContent(style.xmlData())) continue;
+    // The overlay draws geometry only. Number collision detection must run
+    // once across all layers, in the base map, rather than once per map item.
+    document.documentElement().setAttribute(QStringLiteral("labelsEnabled"), QStringLiteral("0"));
+    overlayStyles.insert(layer->id(), document.toString());
+  }
+  top->setLayerStyleOverrides(overlayStyles);
   top->setCrs(base->crs());
   top->setMapRotation(base->mapRotation());
   top->attemptSetSceneRect(base->rect().translated(base->pos()));
@@ -2506,6 +2591,8 @@ void KaDrawingStudio::createOrResizeMap(const QRectF& layoutRect) {
       snapMapScaleToNice();
     connect(held, &QgsLayoutItemMap::extentChanged, this, &KaDrawingStudio::syncScaleDecorations,
             Qt::UniqueConnection);
+    connect(held, &QgsLayoutItemMap::mapRotationChanged, this, &KaDrawingStudio::syncScaleDecorations,
+            Qt::UniqueConnection);
     ensureStandardDecorations();
     refreshScaleWidgets(true);
     useSelectTool();
@@ -2543,6 +2630,7 @@ void KaDrawingStudio::applyLegendSettings() {
   auto* ly = layout();
   if (!ly) return;
   auto* legend = dynamic_cast<QgsLayoutItemLegend*>(findItemById(ly, kIdLegend));
+  const bool created = !legend;
   if (!legend) {
     // 사용자가 지운 범례는 글자 설정을 만졌다고 되살아나면 안 된다.
     if (m_legendRemoved) return;
@@ -2550,6 +2638,7 @@ void KaDrawingStudio::applyLegendSettings() {
     legend->setId(QString::fromUtf8(kIdLegend));
     legend->setFrameEnabled(true);
     legend->setBackgroundEnabled(true);
+    legend->setCacheMode(QGraphicsItem::DeviceCoordinateCache);
     legend->setResizeToContents(false);
     if (auto* map = mapItem())
       legend->setLinkedMap(map);
@@ -2570,9 +2659,14 @@ void KaDrawingStudio::applyLegendSettings() {
   legend->setStyleFont(Qgis::LegendComponent::SymbolLabel, QFont(QStringLiteral("Malgun Gothic"), qMax(7, pt - 1)));
   if (auto* map = mapItem()) {
     legend->setLinkedMap(map);
-    legend->setLegendFilterByMapEnabled(true);
   }
-  LayoutService::tuneSheetLegend(legend);
+  if (created) {
+    LayoutService::tuneSheetLegend(legend);
+    m_heritageNumbers.applyLegend(legend);
+  } else {
+    // Font/title edits only affect presentation, not map features or numbering.
+    LayoutService::flowSheetLegend(legend);
+  }
   legend->update();
 }
 
@@ -2584,28 +2678,34 @@ void KaDrawingStudio::placeLegend(const QRectF& layoutRect) {
   if (auto* legend = dynamic_cast<QgsLayoutItemLegend*>(findItemById(ly, kIdLegend))) {
     legend->setResizeToContents(false);
     legend->attemptSetSceneRect(layoutRect);
-    LayoutService::tuneSheetLegend(legend);
+    LayoutService::flowSheetLegend(legend);
     legend->update();
   }
   finishPlace();
 }
 
 void KaDrawingStudio::applyNorthNow() {
-  placeNorth(findItemById(layout(), kIdNorth)
-                 ? findItemById(layout(), kIdNorth)->sceneBoundingRect()
-                 : defaultItemRect(kIdNorth));
+  auto* item = findItemById(layout(), kIdNorth);
+  placeNorth(item ? QRectF(item->pos(), item->rect().size()) : defaultItemRect(kIdNorth));
 }
 
 void KaDrawingStudio::placeNorth(const QRectF& layoutRect, bool selectAfter) {
   auto* ly = layout();
   if (!ly) return;
-  if (auto* old = findItemById(ly, kIdNorth))
+  double percent = 100.;
+  double rotation = 0.;
+  bool placed = false;
+  if (auto* old = findItemById(ly, kIdNorth)) {
+    percent = decorationSizePercent(old);
+    rotation = old->itemRotation();
+    placed = old->customProperty(QStringLiteral("ka_hgis/chrome_placed"), false).toBool();
     ly->removeLayoutItem(old);
+  }
 
   const int kind = northKindFromRel(m_pendingNorthSvg);
   const QString png = writeNorthPng(kind);
   QRectF r = layoutRect;
-  if (!r.isValid() || r.width() < 16.0 || r.height() < 16.0)
+  if (!r.isValid())
     r = defaultItemRect(kIdNorth);
 
   if (png.isEmpty()) {
@@ -2630,6 +2730,11 @@ void KaDrawingStudio::placeNorth(const QRectF& layoutRect, bool selectAfter) {
     pic->refreshPicture();
     ly->addLayoutItem(pic);
   }
+  if (auto* item = findItemById(ly, kIdNorth)) {
+    item->setItemRotation(rotation, false);
+    item->setCustomProperty(QStringLiteral("ka_hgis/chrome_size_percent"), percent);
+    item->setCustomProperty(QStringLiteral("ka_hgis/chrome_placed"), placed);
+  }
   if (selectAfter)
     finishPlace();
 }
@@ -2637,7 +2742,8 @@ void KaDrawingStudio::placeNorth(const QRectF& layoutRect, bool selectAfter) {
 void KaDrawingStudio::applyScaleBarNow() {
   auto* ly = layout();
   if (!ly) return;
-  placeScaleBar(defaultItemRect(kIdScaleBar));
+  auto* item = findItemById(ly, kIdScaleBar);
+  placeScaleBar(item ? QRectF(item->pos(), item->rect().size()) : defaultItemRect(kIdScaleBar));
 }
 
 void KaDrawingStudio::placeScaleBar(const QRectF& layoutRect, bool selectAfter) {
@@ -2657,7 +2763,7 @@ void KaDrawingStudio::placeScaleBar(const QRectF& layoutRect, bool selectAfter) 
                                                  : m_pendingScaleBarStyle);
   sb->setUnits(Qgis::DistanceUnit::Meters);
   sb->setUnitLabel(QStringLiteral("m"));
-  const QRectF keep = (layoutRect.width() >= 32.0 && layoutRect.height() >= 8.0)
+  const QRectF keep = layoutRect.isValid()
                           ? layoutRect
                           : defaultItemRect(kIdScaleBar);
   sb->attemptSetSceneRect(keep);
@@ -2669,7 +2775,8 @@ void KaDrawingStudio::placeScaleBar(const QRectF& layoutRect, bool selectAfter) 
 void KaDrawingStudio::applyCrsLabelNow() {
   auto* ly = layout();
   if (!ly) return;
-  placeCrsLabel(defaultItemRect(kIdCrs));
+  auto* item = findItemById(ly, kIdCrs);
+  placeCrsLabel(item ? QRectF(item->pos(), item->rect().size()) : defaultItemRect(kIdCrs));
 }
 
 void KaDrawingStudio::placeCrsLabel(const QRectF& layoutRect) {
@@ -2691,7 +2798,7 @@ void KaDrawingStudio::placeCrsLabel(const QRectF& layoutRect) {
       (mapItem() && mapItem()->crs().isValid()) ? mapItem()->crs()
                                                 : studioMapCrs(m_mapCanvas, m_project);
   lbl->setText(koreanCrsLabel(crs));
-  const QRectF keep = (layoutRect.width() >= 24.0 && layoutRect.height() >= 6.0)
+  const QRectF keep = layoutRect.isValid()
                           ? layoutRect
                           : defaultItemRect(kIdCrs);
   lbl->attemptSetSceneRect(keep);
@@ -2715,7 +2822,7 @@ void KaDrawingStudio::placeScaleLabel(const QRectF& layoutRect, bool selectAfter
   lbl->setBackgroundEnabled(false);
   lbl->setFrameEnabled(false);
   lbl->setReferencePoint(QgsLayoutItem::UpperLeft);
-  const QRectF keep = (layoutRect.width() >= 24.0 && layoutRect.height() >= 6.0)
+  const QRectF keep = layoutRect.isValid()
                           ? layoutRect
                           : defaultItemRect(kIdScale);
   lbl->attemptSetSceneRect(keep);
@@ -2746,7 +2853,7 @@ void KaDrawingStudio::repaintMapLayers() {
 }
 
 void KaDrawingStudio::toggleAllLayersChecked() {
-  QgsProject* proj = QgsProject::instance();
+  QgsProject* proj = m_project;
   QgsLayerTree* root = proj ? proj->layerTreeRoot() : nullptr;
   if (!root) return;
   const QList<QgsLayerTreeLayer*> layers = root->findLayers();
@@ -2769,7 +2876,7 @@ void KaDrawingStudio::toggleAllLayersChecked() {
 
 void KaDrawingStudio::refreshLayerCheckAllButton() {
   if (!m_layerCheckAllBtn) return;
-  QgsProject* proj = QgsProject::instance();
+  QgsProject* proj = m_project;
   QgsLayerTree* root = proj ? proj->layerTreeRoot() : nullptr;
   const QList<QgsLayerTreeLayer*> layers = root ? root->findLayers() : QList<QgsLayerTreeLayer*>();
   m_layerCheckAllBtn->setEnabled(!layers.isEmpty());
@@ -2784,7 +2891,16 @@ void KaDrawingStudio::refreshLayerCheckAllButton() {
 }
 
 void KaDrawingStudio::syncMapFromLayers() {
+  if (m_syncingMapFromLayers || m_syncingHeritageNumbers) return;
+  m_layerSyncPending = true;
+  if (isVisible() && m_layerSyncTimer) m_layerSyncTimer->start();
+}
+
+void KaDrawingStudio::flushLayerSync() {
+  if (!isVisible() || !m_layerSyncPending) return;
+  if (property("ka_interacting").toBool()) { m_layerSyncTimer->start(); return; }
   if (m_syncingMapFromLayers) return;
+  m_layerSyncPending = false;
   m_syncingMapFromLayers = true;
   struct Guard {
     bool& flag;
@@ -2793,14 +2909,7 @@ void KaDrawingStudio::syncMapFromLayers() {
 
   if (auto* map = mapItem()) {
     applyLayersToMap(map, true, false);
-    if (auto* ly = layout()) {
-      if (auto* legend = dynamic_cast<QgsLayoutItemLegend*>(findItemById(ly, kIdLegend))) {
-        legend->setLinkedMap(map);
-        LayoutService::tuneSheetLegend(legend);
-        legend->update();
-      }
-      ly->refresh();
-    }
+    syncHeritageNumbers();
   }
 }
 
@@ -2811,7 +2920,7 @@ void KaDrawingStudio::relinkDecorations() {
   if (auto* legend = dynamic_cast<QgsLayoutItemLegend*>(findItemById(ly, kIdLegend))) {
     legend->setLinkedMap(map);
     legend->setResizeToContents(false);
-    LayoutService::tuneSheetLegend(legend);
+    m_heritageNumbers.applyLegend(legend);
   }
   if (auto* sb = dynamic_cast<QgsLayoutItemScaleBar*>(findItemById(ly, kIdScaleBar)))
     applyNiceScaleBar(sb);
@@ -2858,16 +2967,19 @@ void KaDrawingStudio::applyStandardChromePositions() {
     const double maxW = std::max(32.0, chrome.crs.left() - 4.0 - chrome.scaleBar.left());
     if (wantW >= 32.0)
       bar.setWidth(std::clamp(wantW, 32.0, maxW));
-    compactSheetScaleBar(sb);
-    sb->setReferencePoint(QgsLayoutItem::UpperLeft);
-    sb->attemptSetSceneRect(bar);
-    sb->refresh();
+    if (!sb->customProperty(QStringLiteral("ka_hgis/chrome_placed"), false).toBool()) {
+      compactSheetScaleBar(sb);
+      sb->setReferencePoint(QgsLayoutItem::UpperLeft);
+      sb->attemptSetSceneRect(bar);
+      sb->refresh();
+      sb->setCustomProperty(QStringLiteral("ka_hgis/chrome_placed"), true);
+    }
     bar = QRectF(sb->pos(), sb->rect().size());
     if (bar.width() < 8.0 || bar.height() < 4.0)
       bar = chrome.scaleBar;
     if (bar.right() > chrome.crs.left() - 2.0)
       bar.setWidth(std::max(32.0, chrome.crs.left() - 4.0 - bar.left()));
-    lockSheetChromeItem(sb);
+    sb->setLocked(false);
   }
   QRectF label = chrome.scaleLabel;
   label.setLeft(bar.left());
@@ -2875,21 +2987,30 @@ void KaDrawingStudio::applyStandardChromePositions() {
   label.setHeight(7.0);
   label.moveTop(bar.bottom() + 2.5);
   if (auto* sc = findItemById(ly, kIdScale)) {
-    sc->setReferencePoint(QgsLayoutItem::UpperLeft);
-    if (auto* scaleLbl = dynamic_cast<QgsLayoutItemLabel*>(sc)) {
-      scaleLbl->setHAlign(Qt::AlignHCenter);
-      scaleLbl->setVAlign(Qt::AlignTop);
+    if (!sc->customProperty(QStringLiteral("ka_hgis/chrome_placed"), false).toBool()) {
+      sc->setReferencePoint(QgsLayoutItem::UpperLeft);
+      if (auto* scaleLbl = dynamic_cast<QgsLayoutItemLabel*>(sc)) {
+        scaleLbl->setHAlign(Qt::AlignHCenter);
+        scaleLbl->setVAlign(Qt::AlignTop);
+      }
+      sc->attemptSetSceneRect(label);
+      sc->setCustomProperty(QStringLiteral("ka_hgis/chrome_placed"), true);
     }
-    sc->attemptSetSceneRect(label);
-    lockSheetChromeItem(sc);
+    sc->setLocked(false);
   }
   if (auto* crs = findItemById(ly, kIdCrs)) {
-    crs->attemptSetSceneRect(chrome.crs);
-    lockSheetChromeItem(crs);
+    if (!crs->customProperty(QStringLiteral("ka_hgis/chrome_placed"), false).toBool()) {
+      crs->attemptSetSceneRect(chrome.crs);
+      crs->setCustomProperty(QStringLiteral("ka_hgis/chrome_placed"), true);
+    }
+    crs->setLocked(false);
   }
   if (auto* north = findItemById(ly, kIdNorth)) {
-    north->attemptSetSceneRect(chrome.north);
-    lockSheetChromeItem(north);
+    if (!north->customProperty(QStringLiteral("ka_hgis/chrome_placed"), false).toBool()) {
+      north->attemptSetSceneRect(chrome.north);
+      north->setCustomProperty(QStringLiteral("ka_hgis/chrome_placed"), true);
+    }
+    north->setLocked(false);
   }
 }
 
@@ -2937,9 +3058,9 @@ void KaDrawingStudio::applyNiceScaleBar(QgsLayoutItemScaleBar* sb) {
     mapWmm = ly->convertFromLayoutUnits(map->rect().width(), Qgis::LayoutUnit::Millimeters).length();
   const double segM = LayoutService::niceScaleBarSegmentMeters(mapWmm, denom, segs);
   if (segM > 0.0)
-    sb->setUnitsPerSegment(segM);
-  LayoutService::applySheetScaleBarInk(sb);
-  applyStandardChromePositions();
+    sb->setUnitsPerSegment(segM * decorationSizePercent(sb) / 100.);
+  compactSheetScaleBar(sb);
+  sb->resizeToMinimumWidth();
 }
 
 int KaDrawingStudio::displayScale(double raw) {
@@ -2970,6 +3091,7 @@ void KaDrawingStudio::syncScaleDecorations() {
   auto* ly = layout();
   if (!map || !ly) return;
   const int sc = displayScale(map->scale());
+  emit drawingScaleChanged(map->scale());
   if (m_scaleSpin && sc > 0) {
     const bool blocked = m_scaleSpin->blockSignals(true);
     m_scaleSpin->setValue(sc);
@@ -2993,6 +3115,8 @@ void KaDrawingStudio::flushHeavyScaleSync() {
   auto* map = mapItem();
   auto* ly = layout();
   if (!map || !ly) return;
+  if (property("ka_interacting").toBool()) { m_scaleSyncTimer->start(); return; }
+  if (m_layerSyncPending) flushLayerSync();
   if (auto* sb = dynamic_cast<QgsLayoutItemScaleBar*>(findItemById(ly, kIdScaleBar)))
     applyNiceScaleBar(sb);
   // 자동 간격이면 축척이 바뀔 때 도곽 간격도 다시 계산한다.
@@ -3000,6 +3124,33 @@ void KaDrawingStudio::flushHeavyScaleSync() {
     applyCrsGrid(map);
   if (!m_coordMapPts.isEmpty())
     relayoutCoordCallouts();
+  syncHeritageNumbers();
+}
+
+bool KaDrawingStudio::syncHeritageNumbers(bool force) {
+  if (m_syncingHeritageNumbers || (!isVisible() && !force)) return true;
+  auto* map = mapItem();
+  auto* ly = layout();
+  if (!map || !ly) return false;
+  m_syncingHeritageNumbers = true;
+  struct Guard {
+    bool& flag;
+    ~Guard() { flag = false; }
+  } guard{m_syncingHeritageNumbers};
+  const quint64 previous = m_heritageNumbers.revision();
+  m_heritageNumbers.followRenderedLabels(map);
+  if (!m_heritageNumbers.update(map, force)) {
+    if (m_status) m_status->setText(m_heritageNumbers.error());
+    return false;
+  }
+  if (previous == m_heritageNumbers.revision()) return true;
+  syncAboveLabelsMap(map);
+  if (auto* legend = dynamic_cast<QgsLayoutItemLegend*>(findItemById(ly, kIdLegend))) {
+    LayoutService::tuneSheetLegend(legend);
+    m_heritageNumbers.applyLegend(legend);
+  }
+  map->refresh();
+  return true;
 }
 
 void KaDrawingStudio::syncScaleChips() {
@@ -3022,6 +3173,36 @@ void KaDrawingStudio::onLayoutSelectionChanged(QgsLayoutItem* item) {
   updateInspector(item);
 }
 
+void KaDrawingStudio::resizeSelectedDecoration(double percent) {
+  auto* ly = layout();
+  if (!ly) return;
+  const auto selected = ly->selectedLayoutItems(false);
+  if (selected.size() != 1 || !isSheetDecoration(selected.first())) return;
+  auto* item = selected.first();
+  const double previous = decorationSizePercent(item);
+  const double ratio = percent / previous;
+  const QPointF position = item->pos();
+  const QSizeF size = item->rect().size();
+  item->beginCommand(QStringLiteral("도면 항목 크기"));
+  item->setCustomProperty(QStringLiteral("ka_hgis/chrome_size_percent"), percent);
+  if (auto* bar = dynamic_cast<QgsLayoutItemScaleBar*>(item)) {
+    // Change map distance as well as ink size: scaling the graphic alone lies about distance.
+    applyNiceScaleBar(bar);
+    item->attemptResize(QgsLayoutSize(item->rect().width(), size.height() * ratio));
+  } else {
+    if (auto* label = dynamic_cast<QgsLayoutItemLabel*>(item)) {
+      QFont font = label->font();
+      font.setPointSizeF(font.pointSizeF() * ratio);
+      label->setFont(font);
+    }
+    item->attemptResize(QgsLayoutSize(size * ratio));
+  }
+  item->attemptMove(QgsLayoutPoint(position));
+  item->endCommand();
+  item->update();
+  updateInspector(item);
+}
+
 void KaDrawingStudio::updateInspector(QgsLayoutItem* item) {
   if (!item) {
     if (auto* ly = layout()) {
@@ -3034,6 +3215,18 @@ void KaDrawingStudio::updateInspector(QgsLayoutItem* item) {
   const bool scaleItem = id == QLatin1String(kIdScale) || id == QLatin1String(kIdScaleBar)
                          || id == QLatin1String(kIdMap);
   const bool north = id == QLatin1String(kIdNorth);
+  if (m_decorationSize) {
+    const bool blocked = m_decorationSize->blockSignals(true);
+    const bool editable = isSheetDecoration(item) && layout()->selectedLayoutItems(false).size() == 1;
+    m_decorationSize->setEnabled(editable);
+    m_decorationSize->setValue(editable ? decorationSizePercent(item) : 100.);
+    m_decorationSize->blockSignals(blocked);
+  }
+  if (north && m_northSize) {
+    const bool blocked = m_northSize->blockSignals(true);
+    m_northSize->setValue(item->rect().width());
+    m_northSize->blockSignals(blocked);
+  }
 
   if (m_scaleBar) m_scaleBar->setVisible(true);
   if (m_cardLegend) m_cardLegend->setVisible(true);
@@ -3063,6 +3256,19 @@ void KaDrawingStudio::updateInspector(QgsLayoutItem* item) {
   setDrawerCardActive(card);
 }
 
+double KaDrawingStudio::drawingScale() const {
+  const auto* map = mapItem();
+  return map ? map->scale() : 0.;
+}
+
+void KaDrawingStudio::setDrawingScale(double denominator) {
+  if (!m_scaleSpin || !mapItem() || !std::isfinite(denominator) || denominator <= 0.) return;
+  const double bounded = std::clamp(denominator, static_cast<double>(m_scaleSpin->minimum()),
+                                   static_cast<double>(m_scaleSpin->maximum()));
+  m_scaleSpin->setValue(static_cast<int>(std::lround(bounded)));
+  applyOnScreenScale();
+}
+
 void KaDrawingStudio::applyOnScreenScale() {
   auto* map = mapItem();
   auto* ly = layout();
@@ -3073,19 +3279,7 @@ void KaDrawingStudio::applyOnScreenScale() {
   }
   const int wanted = std::max(10, m_scaleSpin->value());
   if (wanted <= 0) return;
-  const double widthMm = ly->convertFromLayoutUnits(map->rect().width(), Qgis::LayoutUnit::Millimeters).length();
-  QgsRectangle ext = map->extent();
-  if (ext.isNull() || !ext.isFinite() || ext.width() <= 0.0)
-    ext = studioMapExtent(m_mapCanvas, studioMapCrs(m_mapCanvas, m_project));
-  const QgsRectangle next = LayoutService::extentForPaperScale(ext, widthMm, static_cast<double>(wanted));
-  if (next.isFinite() && next.width() > 0.0)
-    map->zoomToExtent(next);
-  if (auto* sb = dynamic_cast<QgsLayoutItemScaleBar*>(findItemById(ly, kIdScaleBar)))
-    applyNiceScaleBar(sb);
-  const bool blocked = m_scaleSpin->blockSignals(true);
-  m_scaleSpin->setValue(wanted);
-  m_scaleSpin->blockSignals(blocked);
-  refreshScaleWidgets();
+  map->setScale(static_cast<double>(wanted));
   syncScaleDecorations();
   if (m_status)
     m_status->setText(QStringLiteral("축척을 1 : %1 로 맞췄습니다.").arg(wanted));
@@ -3257,6 +3451,12 @@ void KaDrawingStudio::removeSelectedLayers() {
 }
 
 bool KaDrawingStudio::eventFilter(QObject* watched, QEvent* event) {
+  if (event && event->type() == QEvent::Resize && watched->objectName() == QLatin1String("studioLeftSplit")) {
+    if (auto* splitter = qobject_cast<QSplitter*>(watched); splitter && splitter->height() < 430) {
+      if (auto* toggle = findChild<QToolButton*>(QStringLiteral("sidebarFilesToggle")))
+        toggle->setChecked(false);
+    }
+  }
   const bool onTree = m_layerTree && event && (watched == m_layerTree || watched == m_layerTree->viewport());
   const bool onDropTarget = event &&
       ((m_view && (watched == m_view || watched == m_view->viewport())) || onTree);
@@ -3295,6 +3495,36 @@ bool KaDrawingStudio::eventFilter(QObject* watched, QEvent* event) {
     }
   }
   const bool onView = m_view && event && (watched == m_view || watched == m_view->viewport());
+  if (onView && event->type() == QEvent::MouseButtonPress) {
+    setProperty("ka_interacting", true);
+    if (auto* map = mapItem()) map->setProperty("ka_interacting", true);
+    if (auto* legend = findItemById(layout(), kIdLegend))
+      legend->setProperty("ka_interacting", true);
+  }
+  if (onView && (event->type() == QEvent::MouseButtonRelease ||
+                 event->type() == QEvent::Hide || event->type() == QEvent::WindowDeactivate)) {
+    setProperty("ka_interacting", false);
+    if (auto* map = mapItem()) map->setProperty("ka_interacting", false);
+    if (auto* legend = findItemById(layout(), kIdLegend))
+      legend->setProperty("ka_interacting", false);
+    // Let QGIS finish its native move/resize first, then settle expensive work.
+    QTimer::singleShot(0, this, [this] {
+      if (property("ka_interacting").toBool()) return;
+      if (property("ka_visible_legend_pending").toBool()) {
+        setProperty("ka_visible_legend_pending", false);
+        if (auto* legend = dynamic_cast<QgsLayoutItemLegend*>(findItemById(layout(), kIdLegend))) {
+          LayoutService::tuneSheetLegend(legend);
+          m_heritageNumbers.applyLegend(legend);
+        }
+      }
+      if (auto* legend = findItemById(layout(), kIdLegend)) {
+        if (auto* timer = legend->findChild<QTimer*>(QStringLiteral("ka_legend_flow_timer"));
+            timer && timer->isActive()) timer->start(0);
+      }
+      syncScaleDecorations();
+      if (m_layerSyncPending && m_layerSyncTimer) m_layerSyncTimer->start();
+    });
+  }
   if (onView && event->type() == QEvent::Resize && m_keepPaperCentered && !m_mmbPanning) {
     const QSize now = m_view->viewport() ? m_view->viewport()->size() : QSize();
     const QSize d = now - m_lastFitViewport;
@@ -3368,6 +3598,7 @@ void KaDrawingStudio::undoLastChange() {
   auto* ly = layout();
   if (ly && ly->undoStack() && ly->undoStack()->stack() && ly->undoStack()->stack()->canUndo()) {
     ly->undoStack()->stack()->undo();
+    updateInspector(nullptr);
     if (m_status)
       m_status->setText(QStringLiteral("한 단계 되돌렸습니다."));
     return;
@@ -3501,6 +3732,16 @@ void KaDrawingStudio::centerOnMapCanvas() {
     } catch (...) {
     }
   }
+  // Tab activation requests this more than once. Resetting an identical view
+  // still makes QGIS rebuild its extent-filtered legend and render the map.
+  const QgsRectangle current = map->extent();
+  const double targetScale = m_mapCanvas->scale();
+  const double tolerance = qMax(current.width(), current.height()) * 1e-10;
+  if (current.isFinite() && ext.isFinite() && targetScale > 1. &&
+      std::abs(current.center().x() - ext.center().x()) <= tolerance &&
+      std::abs(current.center().y() - ext.center().y()) <= tolerance &&
+      std::abs(map->scale() - targetScale) <= targetScale * 1e-9)
+    return;
   if (!LayoutService::applyCanvasViewToLayoutMap(map, ext, m_mapCanvas->scale()))
     return;
   map->invalidateCache();
@@ -3571,28 +3812,36 @@ void KaDrawingStudio::savePdf() {
   const QString path = QFileDialog::getSaveFileName(
       this, QStringLiteral("도면 PDF 저장"), QStringLiteral("도면.pdf"), QStringLiteral("PDF (*.pdf)"));
   if (path.isEmpty()) return;
+  // Drain queued UI changes before the export's mandatory synchronous update.
+  if (m_layerSyncTimer) m_layerSyncTimer->stop();
+  if (m_layerSyncPending) {
+    m_layerSyncPending = false;
+    if (auto* map = mapItem()) applyLayersToMap(map, true, false);
+  }
+  if (!syncHeritageNumbers(true)) {
+    QMessageBox::warning(this, QStringLiteral("도면 번호"), m_heritageNumbers.error());
+    return;
+  }
   if (auto* map = mapItem())
     applyCrsGrid(map);
   if (m_pageOutline) m_pageOutline->hide();
-  QgsLayoutExporter exporter(ly);
-  QgsLayoutExporter::PdfExportSettings settings;
-  settings.dpi = 300;
   // 화면 미리보기는 낮은 해상도로 두고, 인쇄용 해상도는 내보내는 동안만 올린다.
   const double previewDpi = ly->renderContext().dpi();
-  ly->renderContext().setDpi(settings.dpi);
-  const auto pdfOk = exporter.exportToPdf(path, settings);
+  QString pdfError;
+  const bool pdfOk = m_heritageNumbers.exportPdf(mapItem(),
+      dynamic_cast<QgsLayoutItemLegend*>(findItemById(ly, kIdLegend)), path, 300., &pdfError);
   ly->renderContext().setDpi(previewDpi);
   if (auto* map = mapItem()) {
     map->invalidateCache();
     map->refresh();
   }
   if (m_pageOutline) m_pageOutline->show();
-  if (pdfOk != QgsLayoutExporter::Success) {
-    KaCrashGuard::logLine(QStringLiteral("[layout] PDF 내보내기 실패 코드 %1 — %2")
-                              .arg(int(pdfOk))
+  if (!pdfOk) {
+    KaCrashGuard::logLine(QStringLiteral("[layout] PDF 내보내기 실패 %1 — %2")
+                              .arg(pdfError)
                               .arg(path));
     QMessageBox::warning(this, QStringLiteral("PDF"),
-                         QStringLiteral("저장에 실패했습니다. (코드 %1)").arg(int(pdfOk)));
+                         pdfError);
     return;
   }
   if (m_status) m_status->setText(QStringLiteral("저장: %1").arg(path));

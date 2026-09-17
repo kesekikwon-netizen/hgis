@@ -11,6 +11,10 @@
 #include <QTcpSocket>
 #include <QUuid>
 #include <functional>
+#include <QUrlQuery>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 
 #include "core/AdminBoundaryService.h"
 #include "core/LocationSearch.h"
@@ -59,10 +63,14 @@ public:
     setProxy(QNetworkProxy::NoProxy);
   }
   QList<int> transferTimeouts;
+  QList<QUrlQuery> queries;
 protected:
   QNetworkReply* createRequest(Operation operation, const QNetworkRequest& request,
                                QIODevice* outgoingData) override {
     transferTimeouts.push_back(request.transferTimeout());
+    QUrlQuery sanitized(request.url());
+    sanitized.removeAllQueryItems(QStringLiteral("key"));
+    queries.push_back(sanitized);
     QNetworkRequest local(request);
     const QString path = request.url().host().contains(QLatin1String("nominatim"))
                            ? QStringLiteral("/nominatim") : QStringLiteral("/vworld");
@@ -77,7 +85,178 @@ private:
 class NetworkServicesTest : public QObject {
   Q_OBJECT
 private slots:
+  void parcelMatches_data() {
+    QTest::addColumn<QString>("input");
+    QTest::addColumn<QString>("returned");
+    QTest::addColumn<QString>("pnu");
+    QTest::addColumn<bool>("matches");
+    const QString pnu = QStringLiteral("4719025025100120003");
+    const QString mountain = QStringLiteral("4719025025200120003");
+    QTest::newRow("exact-no-title") << QStringLiteral("경북 구미시 고아읍 봉한리 12-3") << QStringLiteral("경상북도 구미시 고아읍 봉한리 12-3") << pnu << true;
+    QTest::newRow("normalize-lot") << QStringLiteral("경북  구미시 고아읍 봉한리 0012 - 0003번지") << QStringLiteral("경상북도 구미시 고아읍 봉한리 12-3") << pnu << true;
+    QTest::newRow("mountain") << QStringLiteral("경북 구미시 고아읍 봉한리 산 12-3") << QStringLiteral("경상북도 구미시 고아읍 봉한리 산12-3") << mountain << true;
+    QTest::newRow("wrong-mountain") << QStringLiteral("경북 구미시 고아읍 봉한리 12-3") << QStringLiteral("경상북도 구미시 고아읍 봉한리 산12-3") << mountain << false;
+    QTest::newRow("wrong-sub") << QStringLiteral("경북 구미시 고아읍 봉한리 12-4") << QStringLiteral("경상북도 구미시 고아읍 봉한리 12-3") << pnu << false;
+    QTest::newRow("wrong-main") << QStringLiteral("경북 구미시 고아읍 봉한리 112-3") << QStringLiteral("경상북도 구미시 고아읍 봉한리 12-3") << pnu << false;
+    QTest::newRow("wrong-ri") << QStringLiteral("경북 구미시 고아읍 괴평리 12-3") << QStringLiteral("경상북도 구미시 고아읍 봉한리 12-3") << pnu << false;
+    QTest::newRow("wrong-city") << QStringLiteral("경북 상주시 고아읍 봉한리 12-3") << QStringLiteral("경상북도 구미시 고아읍 봉한리 12-3") << pnu << false;
+    QTest::newRow("added-general-gu") << QStringLiteral("경기 수원시 이의동 12-3") << QStringLiteral("경기도 수원시 영통구 이의동 12-3") << pnu << true;
+    QTest::newRow("explicit-wrong-gu") << QStringLiteral("경기 수원시 장안구 이의동 12-3") << QStringLiteral("경기도 수원시 영통구 이의동 12-3") << pnu << false;
+    QTest::newRow("numbered-dong") << QStringLiteral("서울 성동구 성수동1가 12-3") << QStringLiteral("서울특별시 성동구 성수동1가 12-3") << pnu << true;
+    QTest::newRow("sejongro-legal-dong") << QStringLiteral("서울 종로구 세종로 1-68") << QStringLiteral("서울특별시 종로구 세종로 1-68") << QStringLiteral("1111011900100010068") << true;
+    QTest::newRow("wrong-numbered-dong") << QStringLiteral("서울 성동구 성수동2가 12-3") << QStringLiteral("서울특별시 성동구 성수동1가 12-3") << pnu << false;
+    QTest::newRow("sejong") << QStringLiteral("세종 세종시 나성동 12-3") << QStringLiteral("세종특별자치시 나성동 12-3") << pnu << true;
+    QTest::newRow("renamed-province") << QStringLiteral("강원도 춘천시 온의동 12-3") << QStringLiteral("강원특별자치도 춘천시 온의동 12-3") << pnu << true;
+    QTest::newRow("bad-pnu") << QStringLiteral("경북 구미시 고아읍 봉한리 12-3") << QStringLiteral("경상북도 구미시 고아읍 봉한리 12-3") << mountain << false;
+    QTest::newRow("missing-pnu") << QStringLiteral("경북 구미시 고아읍 봉한리 12-3") << QStringLiteral("경상북도 구미시 고아읍 봉한리 12-3") << QString() << false;
+  }
+
+  void parcelMatches() {
+    QFETCH(QString, input);
+    QFETCH(QString, returned);
+    QFETCH(QString, pnu);
+    QFETCH(bool, matches);
+    LocalServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    const QJsonObject item{{"id", pnu}, {"address", QJsonObject{{"parcel", returned}}},
+                           {"point", QJsonObject{{"x", "128.3"}, {"y", "36.2"}}}};
+    const QByteArray body = QJsonDocument(QJsonObject{{"response", QJsonObject{
+      {"status", "OK"}, {"result", QJsonObject{{"items", QJsonArray{item, item}}}}}}}).toJson();
+    server.handler = [body](QTcpSocket* socket, const QString&) { LocalServer::respond(socket, body); };
+    auto network = std::make_unique<LocalNetwork>(server.serverPort());
+    auto* observed = network.get();
+    LocationSearch service(std::move(network), 3000);
+    QSignalSpy finished(&service, &LocationSearch::finished);
+    QSignalSpy failed(&service, &LocationSearch::failed);
+    service.searchParcel(input);
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size() + failed.size(), 1, 3000);
+    QCOMPARE(finished.size(), matches ? 1 : 0);
+    QCOMPARE(server.requests.size(), 1); // Never fall back to place/OSM.
+    QCOMPARE(observed->queries.first().queryItemValue("type"), QStringLiteral("ADDRESS"));
+    QCOMPARE(observed->queries.first().queryItemValue("category"), QStringLiteral("PARCEL"));
+    QCOMPARE(observed->queries.first().queryItemValue("crs"), QStringLiteral("EPSG:4326"));
+    if (matches) {
+      const auto hits = qvariant_cast<QVector<LocationHit>>(finished.first().first());
+      QCOMPARE(hits.size(), 1); // Same PNU duplicate removed.
+      QCOMPARE(hits.first().title, returned);
+      QCOMPARE(hits.first().pnu, pnu);
+      QCOMPARE(hits.first().lon, 128.3);
+    } else QVERIFY(failed.first().first().toString().contains(QStringLiteral("정확히 일치")));
+  }
+
+  void incompleteParcelNeverRequestsNetwork() {
+    LocalServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    auto network = std::make_unique<LocalNetwork>(server.serverPort());
+    auto* observed = network.get();
+    LocationSearch service(std::move(network), 3000);
+    QSignalSpy failed(&service, &LocationSearch::failed);
+    const QStringList inputs{QStringLiteral("경북 구미시 고아읍 12-3"),
+      QStringLiteral("경북 봉한리 12-3"), QStringLiteral("경북 구미시 봉한리 0"),
+      QStringLiteral("경북 구미시 봉한리 12-3-4"), QStringLiteral("경북 구미시 봉한리 12번 건물")};
+    for (const auto& input : inputs) service.searchParcel(input);
+    QCOMPARE(failed.size(), inputs.size());
+    QVERIFY(observed->queries.isEmpty());
+  }
+
+  void parcelMissingKeyDoesNotUsePlaceSearch() {
+    LocalServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    auto network = std::make_unique<LocalNetwork>(server.serverPort());
+    auto* observed = network.get();
+    LocationSearch service(std::move(network), 3000);
+    QSignalSpy failed(&service, &LocationSearch::failed);
+    qputenv("VWORLD_API_KEY", " "); // Nonempty override avoids reading machine settings.
+    service.searchParcel(QStringLiteral("경북 구미시 고아읍 봉한리 12-3"));
+    qputenv("VWORLD_API_KEY", "local-test-key");
+    QCOMPARE(failed.size(), 1);
+    QVERIFY(failed.first().first().toString().contains(QStringLiteral("API 키")));
+    QVERIFY(observed->queries.isEmpty());
+  }
+
+  void parcelUncertainResultsDoNotMove_data() {
+    QTest::addColumn<QString>("problem");
+    for (const auto& name : {"different-pnus", "truncated-records", "truncated-pages", "bad-point"})
+      QTest::newRow(name) << QString::fromLatin1(name);
+  }
+
+  void parcelUncertainResultsDoNotMove() {
+    QFETCH(QString, problem);
+    const QString address = QStringLiteral("경상북도 구미시 고아읍 봉한리 12-3");
+    QJsonObject item{{"id", "4719025025100120003"}, {"address", QJsonObject{{"parcel", address}}},
+                     {"point", QJsonObject{{"x", "128.3"}, {"y", "36.2"}}}};
+    if (problem == QLatin1String("bad-point")) item["point"] = QJsonObject{{"x", "36.2"}, {"y", "128.3"}};
+    QJsonArray items{item};
+    if (problem == QLatin1String("different-pnus")) {
+      item["id"] = QStringLiteral("4719025026100120003");
+      items.append(item);
+    }
+    QJsonObject response{{"status", "OK"}, {"result", QJsonObject{{"items", items}}}};
+    if (problem == QLatin1String("truncated-records")) response["record"] = QJsonObject{{"total", "1001"}};
+    if (problem == QLatin1String("truncated-pages")) response["page"] = QJsonObject{{"total", 2}};
+    const auto body = QJsonDocument(QJsonObject{{"response", response}}).toJson();
+    LocalServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.handler = [body](QTcpSocket* socket, const QString&) { LocalServer::respond(socket, body); };
+    LocationSearch service(std::make_unique<LocalNetwork>(server.serverPort()), 3000);
+    QSignalSpy failed(&service, &LocationSearch::failed);
+    QSignalSpy finished(&service, &LocationSearch::finished);
+    service.searchParcel(address);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.size(), 1, 3000);
+    QCOMPARE(finished.size(), 0);
+    QCOMPARE(server.requests.size(), 1);
+  }
+
+  void parcelErrorsNeverFallbackAndAllowRetry_data() {
+    QTest::addColumn<QByteArray>("body");
+    QTest::addColumn<int>("status");
+    QTest::newRow("key-error") << serviceError << 200;
+    QTest::newRow("http-error") << serviceError << 503;
+    QTest::newRow("malformed") << QByteArray("not json") << 200;
+    QTest::newRow("not-found") << QByteArray(R"({"response":{"status":"NOT_FOUND"}})") << 200;
+  }
+
+  void parcelErrorsNeverFallbackAndAllowRetry() {
+    QFETCH(QByteArray, body);
+    QFETCH(int, status);
+    LocalServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.handler = [body, status](QTcpSocket* socket, const QString&) { LocalServer::respond(socket, body, status); };
+    LocationSearch service(std::make_unique<LocalNetwork>(server.serverPort()), 3000);
+    QSignalSpy failed(&service, &LocationSearch::failed);
+    QSignalSpy finished(&service, &LocationSearch::finished);
+    for (int i = 1; i <= 2; ++i) {
+      service.searchParcel(QStringLiteral("경북 구미시 고아읍 봉한리 12-3"));
+      QTRY_COMPARE_WITH_TIMEOUT(failed.size(), i, 3000);
+      QCOMPARE(server.requests.size(), i);
+      QVERIFY(!failed.last().first().toString().contains(QStringLiteral("private")));
+    }
+    QCOMPARE(finished.size(), 0);
+  }
+
   void initTestCase() {
+    if (qEnvironmentVariableIsSet("KA_HGIS_LIVE_PARCEL")) {
+      m_liveKey = qgetenv("VWORLD_API_KEY");
+      if (m_liveKey.trimmed().isEmpty()) {
+        QSettings secrets(QStringLiteral("config/secrets.ini"), QSettings::IniFormat);
+        m_liveKey = secrets.value(QStringLiteral("vworld/apiKey")).toString().toUtf8();
+        if (m_liveKey.trimmed().isEmpty())
+          m_liveKey = secrets.value(QStringLiteral("apiKey")).toString().toUtf8();
+      }
+      if (m_liveKey.trimmed().isEmpty()) {
+        const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+        for (const QString& relative : {QStringLiteral("ka-hgis/ka-hgis/ka-hgis-vworld.ini"),
+                                        QStringLiteral("ka-hgis/ka-hgis-vworld.ini")}) {
+          QSettings saved(QDir(base).filePath(relative), QSettings::IniFormat);
+          m_liveKey = saved.value(QStringLiteral("VWorld/ApiKey")).toString().toUtf8();
+          if (!m_liveKey.trimmed().isEmpty()) break;
+        }
+      }
+      if (m_liveKey.trimmed().isEmpty()) {
+        QSettings saved(QStringLiteral("ka-hgis"), QStringLiteral("ka-hgis"));
+        m_liveKey = saved.value(QStringLiteral("VWorld/ApiKey")).toString().toUtf8();
+      }
+    }
     QStandardPaths::setTestModeEnabled(true);
     QCoreApplication::setApplicationName(QStringLiteral("ka-network-test-")
                                         + QUuid::createUuid().toString(QUuid::Id128));
@@ -97,6 +276,25 @@ private slots:
     else qunsetenv("VWORLD_API_KEY");
     QFile::remove(QDir(m_settingsDir).filePath(QStringLiteral("ka-hgis-vworld.ini")));
     QDir().rmdir(m_settingsDir);
+  }
+
+  void liveParcelSearch() {
+    if (!qEnvironmentVariableIsSet("KA_HGIS_LIVE_PARCEL") || m_liveKey.trimmed().isEmpty())
+      QSKIP("Opt-in live public-address check requires a local key; normal tests stay offline.");
+    LocationSearch service;
+    QSignalSpy failed(&service, &LocationSearch::failed);
+    QSignalSpy finished(&service, &LocationSearch::finished);
+    qputenv("VWORLD_API_KEY", m_liveKey);
+    service.searchParcel(QStringLiteral("서울특별시 종로구 세종로 1-68"));
+    qputenv("VWORLD_API_KEY", "local-test-key");
+    QTRY_VERIFY_WITH_TIMEOUT(!failed.isEmpty() || !finished.isEmpty(), 25000);
+    QVERIFY2(failed.isEmpty(), failed.isEmpty() ? "" : qPrintable(failed.first().first().toString()));
+    QCOMPARE(finished.size(), 1);
+    const auto hits = qvariant_cast<QVector<LocationHit>>(finished.first().first());
+    QCOMPARE(hits.size(), 1);
+    QCOMPARE(hits.first().pnu, QStringLiteral("1111011900100010068"));
+    QVERIFY(hits.first().lon > 126.9 && hits.first().lon < 127.1);
+    QVERIFY(hits.first().lat > 37.5 && hits.first().lat < 37.7);
   }
 
   void locationDeadlineReleasesPendingAndAllowsRetry() {
@@ -264,6 +462,7 @@ private slots:
   }
 
 private:
+  QByteArray m_liveKey;
   QString m_settingsDir;
   QByteArray m_oldKey;
   bool m_hadKey = false;

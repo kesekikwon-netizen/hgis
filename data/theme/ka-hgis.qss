@@ -432,9 +432,22 @@ QTreeView, QgsLayerTreeView, QListWidget, QTableWidget, QTableView {
   font-family: "Malgun Gothic", "Segoe UI";
 }
 QTreeView::item, QgsLayerTreeView::item, QListWidget::item, QTableWidget::item, QTableView::item {
-  color: @ink@;
+  /* Inherit the view text color; allow the layer model's group/hidden colors. */
   padding: 5px 6px;
   min-height: 24px;
+}
+QTreeView[kaLayerInformation="true"] {
+  font-size: 10px;
+  background: @surface@;
+  alternate-background-color: #f2f6fa;
+}
+QTreeView[kaLayerInformation="true"]::item {
+  padding: 1px 4px;
+  min-height: 18px;
+}
+QTreeView[kaLayerInformation="true"] QHeaderView::section {
+  font-size: 10px;
+  padding: 4px 6px;
 }
 QTreeView::item:selected, QgsLayerTreeView::item:selected, QListWidget::item:selected,
 QTableWidget::item:selected, QTableView::item:selected {
@@ -718,6 +731,12 @@ QCheckBox::indicator:checked, QTreeView::indicator:checked, QgsLayerTreeView::in
 QCheckBox::indicator:unchecked, QTreeView::indicator:unchecked, QgsLayerTreeView::indicator:unchecked {
   background: @surface@;
   border: 1.2px solid @inkDisabled@;
+}
+
+QTreeView[kaLayerInformation="true"]::indicator {
+  width: 14px;
+  height: 14px;
+  margin: 1px;
 }
 
 QMenu {

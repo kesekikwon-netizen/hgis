@@ -59,7 +59,6 @@ void MainWindow::openTopographicDownload() {
     scope->setLibraryDirectory(directory); scope->activate();
   }
   showMapWorkspace();
-  m_topographicBrowser->setWindowFlag(Qt::Tool,true);
   m_topographicBrowser->setWindowModality(Qt::NonModal);
   m_topographicBrowser->setCompactMode(true);
   m_topographicBrowser->show();

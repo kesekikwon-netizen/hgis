@@ -4,6 +4,8 @@
 class QgsProject;
 class ExportService {
 public:
+  // outDir must be absent or empty. Publish only a fully generated package;
+  // failure returns an empty string and never overwrites a previous package.
   static QString exportSubmissionPackage(QgsProject* project,
                                          const QString& outDir,
                                          const QString& encoding,

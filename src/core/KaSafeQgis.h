@@ -11,8 +11,10 @@ class QgsProject;
 // left on the stack, so QgsRuntimeProfiler keeps dangling parent pointers and the
 // next QgsVectorLayer ctor dies inside QgsRuntimeProfiler::start. Callers must
 // stop touching QGIS and ask for a restart instead of carrying on.
+// Set loadLayouts only for an explicit GUI-thread workspace open. Validation
+// and recovery reads keep the default lightweight path.
 bool kaSafeReadQgisProject(QgsProject* project, const QString& path,
-                           bool* crashedOut = nullptr);
+                           bool* crashedOut = nullptr, bool loadLayouts = false);
 
 // One generation back: 안동시.qgz -> 안동시.bak.qgz. The suffix has to stay last —
 // QgsZipUtils::isZipFile only accepts ".qgz", so a name like "안동시.qgz.bak" is

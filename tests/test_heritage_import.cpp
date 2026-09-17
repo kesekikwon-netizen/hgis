@@ -16,6 +16,7 @@
 #include <qgsproject.h>
 #include <qgssymbol.h>
 #include <qgsvectorlayer.h>
+#include <qgsvectordataprovider.h>
 #include <qgsvectorfilewriter.h>
 #include <qgsfeature.h>
 #include <qgsgeometry.h>
@@ -58,36 +59,94 @@ class HeritageImportTest : public QObject {
   }
 
 private slots:
+  void cp949NamesSurviveAutomaticImport_data() {
+    QTest::addColumn<bool>("withCpg");
+    QTest::addColumn<QString>("inputEncoding");
+    QTest::newRow("declared-cp949") << true << QStringLiteral("CP949");
+    QTest::newRow("missing-cpg") << false << QStringLiteral("CP949");
+    QTest::newRow("already-utf8") << true << QStringLiteral("UTF-8");
+  }
   void cp949NamesSurviveAutomaticImport() {
+    QFETCH(bool, withCpg);
+    QFETCH(QString, inputEncoding);
     QTemporaryDir temp;
     QVERIFY(temp.isValid());
-    QgsVectorLayer source(QStringLiteral("Polygon?crs=EPSG:5187&field=NAME:string(100)"),
+    const bool cp949 = inputEncoding == QLatin1String("CP949");
+    const QString koreanField = cp949 ? QStringLiteral("국가유산명") : QStringLiteral("명칭");
+    QgsVectorLayer source(QStringLiteral("Polygon?crs=EPSG:5187&field=NAME:string(100)&field=%1:string(100)&field=NOTE:string(240)").arg(koreanField),
                           QStringLiteral("fixture"), QStringLiteral("memory"));
     QVERIFY(source.startEditing());
     QgsFeature feature(source.fields());
     const QString name = QStringLiteral("안동 하회리 유적");
     feature.setAttribute(0, name);
+    feature.setAttribute(1, name);
+    const QString longText = QStringLiteral("유적").repeated(cp949 ? 50 : 20);
+    feature.setAttribute(2, longText);
     feature.setGeometry(QgsGeometry::fromWkt(QStringLiteral(
         "POLYGON((100000 400000,100010 400000,100010 400010,100000 400010,100000 400000))")));
     QVERIFY(source.addFeature(feature));
     QVERIFY(source.commitChanges());
     QgsVectorFileWriter::SaveVectorOptions options;
     options.driverName = QStringLiteral("ESRI Shapefile");
-    options.fileEncoding = QStringLiteral("CP949");
+    options.fileEncoding = inputEncoding;
     const QString shp = temp.filePath(QStringLiteral("문화유적.shp"));
     QCOMPARE(QgsVectorFileWriter::writeAsVectorFormatV3(&source, shp, QgsCoordinateTransformContext(), options),
              QgsVectorFileWriter::NoError);
+    const QString base = temp.filePath(QStringLiteral("문화유적"));
+    if (!withCpg) QVERIFY(QFile::remove(base + QStringLiteral(".cpg")));
+    QMap<QString, QByteArray> originals;
+    for (const QString& suffix : {QStringLiteral(".shp"), QStringLiteral(".shx"), QStringLiteral(".dbf"),
+                                 QStringLiteral(".prj"), QStringLiteral(".cpg")}) {
+      if (QFileInfo::exists(base + suffix)) originals.insert(suffix, readFile(base + suffix));
+    }
+    const char* oldGlobal = CPLGetConfigOption("SHAPE_ENCODING", nullptr);
+    const auto savedGlobal = oldGlobal ? std::optional<QByteArray>(oldGlobal) : std::nullopt;
+    const char* oldLocal = CPLGetThreadLocalConfigOption("SHAPE_ENCODING", nullptr);
+    const auto savedLocal = oldLocal ? std::optional<QByteArray>(oldLocal) : std::nullopt;
+    const auto restoreEncoding = qScopeGuard([savedGlobal, savedLocal]() {
+      CPLSetConfigOption("SHAPE_ENCODING", savedGlobal ? savedGlobal->constData() : nullptr);
+      CPLSetThreadLocalConfigOption("SHAPE_ENCODING", savedLocal ? savedLocal->constData() : nullptr);
+    });
+    CPLSetConfigOption("SHAPE_ENCODING", "UTF-8");
+    CPLSetThreadLocalConfigOption("SHAPE_ENCODING", "CP1252");
     QgsProject project;
     const auto imported = HeritageImport::loadDataset(&project, HeritageDataset::DesignatedHeritage,
                                                       {shp}, temp.filePath(QStringLiteral("cache")));
     QVERIFY2(imported.ok(), qPrintable(imported.error));
+    QCOMPARE(QByteArray(CPLGetThreadLocalConfigOption("SHAPE_ENCODING", nullptr)), QByteArray("CP1252"));
+    CPLSetThreadLocalConfigOption("SHAPE_ENCODING", nullptr);
+    QCOMPARE(QByteArray(CPLGetConfigOption("SHAPE_ENCODING", nullptr)), QByteArray("UTF-8"));
     QCOMPARE(imported.layers.size(), 1);
+    const QString workingFile = imported.layers.first()->source().section(QLatin1Char('|'), 0, 0);
+    QCOMPARE(QFileInfo(workingFile).suffix(), QStringLiteral("gpkg"));
+    QVERIFY(workingFile.startsWith(temp.filePath(QStringLiteral("cache"))));
+    QVERIFY(readFile(workingFile).contains(name.toUtf8()));
+    QCOMPARE(imported.layers.first()->crs(), source.crs());
+    QCOMPARE(imported.layers.first()->featureCount(), source.featureCount());
+    for (auto it = originals.cbegin(); it != originals.cend(); ++it)
+      QCOMPARE(readFile(base + it.key()), it.value());
+    QCOMPARE(QFileInfo::exists(base + QStringLiteral(".cpg")), withCpg);
     QgsFeature read;
     QVERIFY(imported.layers.first()->getFeatures().nextFeature(read));
     QCOMPARE(read.attribute(QStringLiteral("NAME")).toString(), name);
+    QCOMPARE(read.attribute(koreanField).toString(), name);
+    QCOMPARE(read.attribute(QStringLiteral("NOTE")).toString(), longText);
+    QVERIFY(read.geometry().isTopologicallyEqual(feature.geometry()));
     const auto* renderer = dynamic_cast<const QgsCategorizedSymbolRenderer*>(imported.layers.first()->renderer());
     QVERIFY(renderer);
     QCOMPARE(renderer->categories().first().label(), name);
+    const QString projectPath = temp.filePath(QStringLiteral("saved.qgs"));
+    QVERIFY(project.write(projectPath));
+    project.clear();
+    QVERIFY(project.read(projectPath));
+    QCOMPARE(project.mapLayers().size(), 1);
+    auto* reopened = qobject_cast<QgsVectorLayer*>(project.mapLayers().first());
+    QVERIFY(reopened && reopened->isValid());
+    QVERIFY(reopened->getFeatures().nextFeature(read));
+    QCOMPARE(read.attribute(koreanField).toString(), name);
+    QCOMPARE(read.attribute(QStringLiteral("NOTE")).toString(), longText);
+    reopened->dataProvider()->reloadData();
+    project.clear();
   }
 
   void receivedIncompleteZipRequestsRetry() {

@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QElapsedTimer>
+#include <QEvent>
 #include <QBuffer>
 #include <QDir>
 #include <QFile>
@@ -15,6 +16,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QSemaphore>
+#include <QScopeGuard>
 #include <atomic>
 #include <memory>
 #include <gdal.h>
@@ -30,8 +32,12 @@
 #include "core/TilePackService.h"
 #include <qgsapplication.h>
 #include <qgscoordinatetransformcontext.h>
+#include <qgscoordinatetransform.h>
 #include <qgsfeedback.h>
 #include <qgsexception.h>
+#include <qgsfeature.h>
+#include <qgsgeometry.h>
+#include <qgsmapcanvas.h>
 #include <qgsnetworkaccessmanager.h>
 #include <qgsproject.h>
 #include <qgsrectangle.h>
@@ -48,6 +54,8 @@ private slots:
   void noResponseTimesOut();
   void workerCancellationLeavesGuiResponsive();
   void geologyServerErrorIsNotNoDataFallback();
+  void geologyResponseCrsPreservesSurveyLocation_data();
+  void geologyResponseCrsPreservesSurveyLocation();
   void trickleResponseHasAbsoluteDeadline();
   void localCapabilitiesPreserveWmsEndpoint();
   void qgisExceptionBecomesFailure();
@@ -317,6 +325,126 @@ void TestReferenceDownload::geologyServerErrorIsNotNoDataFallback() {
   QgsRasterLayer check(empty.rasterUri, QStringLiteral("prepared local capabilities"), QStringLiteral("wms"));
   QVERIFY(check.isValid());
   QVERIFY(check.htmlMetadata().contains(QStringLiteral("https://data.kigam.re.kr/geoserver/ows")));
+}
+
+void TestReferenceDownload::geologyResponseCrsPreservesSurveyLocation_data() {
+  QTest::addColumn<QString>("coordinateCrs");
+  QTest::addColumn<QString>("declaredCrs");
+  QTest::addColumn<bool>("ready");
+  QTest::newRow("requested-5186") << QStringLiteral("EPSG:5186") << QStringLiteral("EPSG:5186") << true;
+  QTest::newRow("response-5187") << QStringLiteral("EPSG:5187") << QStringLiteral("EPSG:5187") << true;
+  QTest::newRow("response-4326") << QStringLiteral("EPSG:4326") << QStringLiteral("urn:ogc:def:crs:EPSG::4326") << true;
+  QTest::newRow("geojson-default-4326") << QStringLiteral("EPSG:4326") << QString() << true;
+  QTest::newRow("unknown-declared-crs") << QStringLiteral("EPSG:5187") << QStringLiteral("EPSG:999999") << false;
+  QTest::newRow("invalid-geographic-coordinates") << QStringLiteral("EPSG:5187") << QStringLiteral("EPSG:4326") << false;
+}
+
+void TestReferenceDownload::geologyResponseCrsPreservesSurveyLocation() {
+  QFETCH(QString, coordinateCrs);
+  QFETCH(QString, declaredCrs);
+  QFETCH(bool, ready);
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const QString base = directory.filePath(QStringLiteral("geology.gpkg"));
+  QFile original(base);
+  QVERIFY(original.open(QIODevice::WriteOnly));
+  original.write("previous-reference");
+  original.close();
+
+  // A synthetic square at the inspected Daegu survey location; no field file is opened.
+  const QgsCoordinateReferenceSystem surveyCrs(QStringLiteral("EPSG:5187"));
+  const QgsCoordinateReferenceSystem outputCrs(QStringLiteral("EPSG:5186"));
+  const QgsPointXY center(135803.5234375, 412903.0625);
+  const QgsRectangle surveyExtent(center.x() - 50, center.y() - 50, center.x() + 50, center.y() + 50);
+  const QgsCoordinateTransformContext context;
+  const QgsCoordinateTransform responseTransform(surveyCrs, QgsCoordinateReferenceSystem(coordinateCrs), context);
+  const QgsCoordinateTransform toOutput(surveyCrs, outputCrs, context);
+  QgsGeometry responseGeometry = QgsGeometry::fromRect(surveyExtent);
+  QCOMPARE(responseGeometry.transform(responseTransform), Qgis::GeometryOperationResult::Success);
+  QJsonObject response{
+      {QStringLiteral("type"), QStringLiteral("FeatureCollection")},
+      {QStringLiteral("features"), QJsonArray{QJsonObject{
+          {QStringLiteral("type"), QStringLiteral("Feature")},
+          {QStringLiteral("properties"), QJsonObject{
+              {QStringLiteral("기호"), QStringLiteral("Qa")},
+              {QStringLiteral("지층"), QStringLiteral("시험 충적층")},
+              {QStringLiteral("시대"), QStringLiteral("제4기")}}},
+          {QStringLiteral("geometry"), QJsonDocument::fromJson(responseGeometry.asJson(15).toUtf8()).object()}}}}};
+  if (!declaredCrs.isEmpty()) {
+    response.insert(QStringLiteral("crs"), QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("name")},
+        {QStringLiteral("properties"), QJsonObject{{QStringLiteral("name"), declaredCrs}}}});
+  }
+  const QByteArray responseBytes = QJsonDocument(response).toJson(QJsonDocument::Compact);
+  int featureRequests = 0;
+  int colorRequests = 0;
+  const auto result = GeologyMapService::prepare(toOutput.transformBoundingBox(surveyExtent), base, context,
+      nullptr, [&](const QNetworkRequest& request, QByteArray* body, QString*, QgsFeedback*) {
+        const QUrlQuery query(request.url());
+        if (query.queryItemValue(QStringLiteral("request")) == QLatin1String("GetFeature")) {
+          ++featureRequests;
+          if (query.queryItemValue(QStringLiteral("srsName")) != QLatin1String("EPSG:5186")) return false;
+          *body = responseBytes;
+          return true;
+        }
+        if (query.queryItemValue(QStringLiteral("request")) != QLatin1String("GetMap")) return false;
+        ++colorRequests;
+        QImage image(query.queryItemValue(QStringLiteral("width")).toInt(),
+                     query.queryItemValue(QStringLiteral("height")).toInt(), QImage::Format_ARGB32);
+        image.fill(QColor(249, 249, 127));
+        QBuffer buffer(body);
+        return buffer.open(QIODevice::WriteOnly) && image.save(&buffer, "PNG");
+      });
+  // QGIS releases OGR feature-source handles with deleteLater, including failed
+  // preparation. Drain those releases after the local project dies and before
+  // either temporary directory tries to remove its GeoJSON/GPKG files.
+  const auto releaseProviders = qScopeGuard([&result] {
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    if (result.storage) result.storage->setAutoRemove(true);
+  });
+  QCOMPARE(featureRequests, 1);
+  QCOMPARE(readFile(base), QByteArray("previous-reference"));
+  if (!ready) {
+    QCOMPARE(result.status, PreparedReferenceMap::Status::Failed);
+    QVERIFY(!result.error.isEmpty());
+    QVERIFY(result.rasterUri.isEmpty());
+    QCOMPARE(colorRequests, 0);
+    return;
+  }
+  QVERIFY2(result.isReady(), qPrintable(result.error));
+  QCOMPARE(colorRequests, 1);
+  QVERIFY(result.officialColors.contains(QStringLiteral("Qa")));
+  {
+    QgsProject project;
+    project.setCrs(surveyCrs);
+    project.setTransformContext(context);
+    // A local placeholder avoids fetching hillshade while testing registration.
+    auto* shade = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"),
+        GeologyMapService::reliefLayerTitle(), QStringLiteral("memory"));
+    project.addMapLayer(shade);
+    QgsMapCanvas canvas;
+    canvas.freeze(true);
+    canvas.setDestinationCrs(surveyCrs);
+    canvas.setExtent(surveyExtent);
+    const QgsRectangle before = canvas.extent();
+    QString error;
+    auto* layer = qobject_cast<QgsVectorLayer*>(GeologyMapService::addPrepared(&project, &canvas, result, &error));
+    QVERIFY2(layer, qPrintable(error));
+    QCOMPARE(layer->crs(), outputCrs);
+    QCOMPARE(project.crs(), surveyCrs);
+    QCOMPARE(canvas.mapSettings().destinationCrs(), surveyCrs);
+    QCOMPARE(canvas.extent(), before);
+    QCOMPARE(layer->featureCount(), 1);
+    QVERIFY(LayerOps::isReferenceLayer(layer));
+    QgsFeature feature;
+    QVERIFY(layer->getFeatures().nextFeature(feature));
+    QgsGeometry geometry = feature.geometry();
+    QVERIFY(geometry.contains(QgsGeometry::fromPointXY(toOutput.transform(center))));
+    QCOMPARE(geometry.transform(QgsCoordinateTransform(layer->crs(), surveyCrs, project.transformContext())),
+             Qgis::GeometryOperationResult::Success);
+    QVERIFY(geometry.contains(QgsGeometry::fromPointXY(center)));
+    QVERIFY(geometry.centroid().asPoint().distance(center) < 0.01);
+  }
 }
 
 void TestReferenceDownload::tilePackWorkerHonoursDownloadOutcome_data() {
