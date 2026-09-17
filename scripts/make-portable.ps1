@@ -1,10 +1,16 @@
 ﻿# Build a self-contained Windows folder: USB copy, no OSGeo4W install on the target PC.
 param(
-  [string]$OutDir = ""
+  [string]$OutDir = "",
+  [switch]$IncludeLocalCredentials
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $out = if ($OutDir) { $OutDir } else { Join-Path $root "dist\ka-hgis-portable" }
+$out = [System.IO.Path]::GetFullPath($out)
+# Never erase an existing delivery or a user's data through an arbitrary OutDir.
+if (Test-Path -LiteralPath $out) {
+  throw "Output already exists. Choose a new folder with -OutDir: $out"
+}
 $exe = Join-Path $root "build\Release\ka-hgis.exe"
 if (-not (Test-Path $exe)) { throw "Build ka-hgis.exe first (Release)." }
 
@@ -26,9 +32,6 @@ if (-not (Test-Path -LiteralPath $caBundle -PathType Leaf)) {
 Write-Host "Portable out: $out"
 & (Join-Path $PSScriptRoot 'copy-webengine-runtime.ps1') -OsgeoRoot $OSGEO -Destination $out -CheckOnly
 Write-Host "Runtime from: $OSGEO"
-if (Test-Path $out) {
-  Get-ChildItem $out -Force | Where-Object { $_.Name -notin @('data') } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-}
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 function Invoke-Robo([string]$src, [string]$dst, [string[]]$xd = @()) {
@@ -49,6 +52,15 @@ function Copy-Dlls([string]$src, [string]$dst) {
 }
 
 Copy-Item $exe $out -Force
+Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $out
+$noticeDir = Join-Path $out 'licenses'
+New-Item -ItemType Directory -Force -Path $noticeDir | Out-Null
+foreach ($notice in @('LICENSE', 'AUTHORS', 'CONTRIBUTORS')) {
+  $noticeSource = Join-Path $qgis ('doc/' + $notice)
+  if (Test-Path -LiteralPath $noticeSource -PathType Leaf) {
+    Copy-Item -LiteralPath $noticeSource -Destination (Join-Path $noticeDir ('QGIS-' + $notice))
+  }
+}
 # libcurl needs its trust store as well as DLLs on a standalone machine.
 Copy-Item -LiteralPath $caBundle -Destination $out -Force
 # PDB가 있으면 함께 배포 — 크래시 로그(KaCrashGuard)가 함수명·줄번호까지 심볼화한다.
@@ -183,7 +195,7 @@ $readmeKo = @"
 필드고고학GIS  포터블 (Windows 10/11 64비트)
 
 이 폴더 전체를 USB에 두면, QGIS/OSGeo4W를 설치하지 않은 다른 PC에서도 실행됩니다.
-Visual Studio 설치도 필요 없습니다. 모니터 크기·배율은 앱이 맞춥니다.
+Visual Studio 설치도 필요 없습니다. Windows 화면 배율과 현재 모니터 작업 영역을 따릅니다.
 
 실행:
   ka-hgis.exe   ← 이것을 더블클릭 (다른 PC·USB·한글 경로에서도)
@@ -194,10 +206,13 @@ Visual Studio 설치도 필요 없습니다. 모니터 크기·배율은 앱이 
 주의:
   - apps, bin, share 폴더를 지우면 실행되지 않습니다.
   - 폴더 이름에 한글이 있어도 되지만, 경로가 너무 길면 start.bat 을 쓰세요.
-  - VWorld 키는 만든 PC의 키를 config\secrets.ini 에 넣었습니다. USB를 다른 사람에게 주지 마세요.
+  - VWorld 지도·주소 검색은 더보기 → VWorld API 키에서 유효한 키를 입력하세요.
+  - 주변유적·수치지형도 다운로드 계정도 더보기 메뉴에서 입력하세요. 인터넷이 필요합니다.
+  - 설정은 포터블 config 폴더에 저장됩니다. 계정을 입력한 폴더를 공유할 때 주의하세요.
   - GNU GPL v2 이상 (QGIS 라이브러리 링크). 자세한 공지는 앱 정보 창.
 
-제작: 동국문화재연구원  ·  버전 1
+제작: 동국문화재연구원  ·  만든이: youngin kwon
+소스: https://github.com/kwonyoungin11/hgis
 "@
 Set-Content -LiteralPath (Join-Path $out "README.txt") -Value $readmeKo -Encoding UTF8
 Set-Content -LiteralPath (Join-Path $out "사용법.txt") -Value $readmeKo -Encoding UTF8
@@ -206,6 +221,15 @@ function Copy-VworldKeyToPortable([string]$portableRoot) {
   $dstDir = Join-Path $portableRoot "config"
   New-Item -ItemType Directory -Force -Path $dstDir | Out-Null
   $dst = Join-Path $dstDir "secrets.ini"
+  # QStandardPaths::AppConfigLocation on Windows: LocalAppData/org/app.
+  # Copy Qt's serialized INI intact; legacy org-only settings may hold an expired key.
+  $personal = Join-Path $env:LOCALAPPDATA 'ka-hgis/ka-hgis/ka-hgis-vworld.ini'
+  if (Test-Path -LiteralPath $personal -PathType Leaf) {
+    Copy-Item -LiteralPath $personal -Destination $dst -Force
+    Copy-Item -LiteralPath $personal -Destination (Join-Path $dstDir 'ka-hgis-vworld.ini') -Force
+    Write-Host 'VWorld key: current app settings included (value not printed)'
+    return
+  }
   $cands = @(
     (Join-Path $env:APPDATA "ka-hgis\ka-hgis-vworld.ini"),
     (Join-Path $env:LOCALAPPDATA "ka-hgis\ka-hgis-vworld.ini"),
@@ -233,7 +257,7 @@ function Copy-VworldKeyToPortable([string]$portableRoot) {
   Write-Host "VWorld key: copied into portable config/secrets.ini (value not printed)"
 }
 
-Copy-VworldKeyToPortable $out
+if ($IncludeLocalCredentials) { Copy-VworldKeyToPortable $out }
 
 # 수치지형도(국토정보플랫폼) 계정을 포터블에 실어 보낸다. VWorld 키와 같은 방식이다.
 # 앱은 config 폴더의 ngii-local.ini 를 대체 파일로 이미 읽는다(TopographicSettings).
@@ -244,6 +268,7 @@ function Copy-NgiiAccountToPortable([string]$portableRoot) {
   New-Item -ItemType Directory -Force -Path $dstDir | Out-Null
   $dst = Join-Path $dstDir "ngii-local.ini"
   $cands = @(
+    (Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA "ka-hgis") "ka-hgis") "ngii-account.ini"),
     (Join-Path (Join-Path $env:APPDATA "ka-hgis") "ngii-account.ini"),
     (Join-Path (Join-Path $env:LOCALAPPDATA "ka-hgis") "ngii-account.ini"),
     (Join-Path (Join-Path (Join-Path $env:APPDATA "ka-hgis") "ka-hgis") "ngii-account.ini"),
@@ -259,7 +284,26 @@ function Copy-NgiiAccountToPortable([string]$portableRoot) {
   Write-Host "NGII account: copied into portable config/ngii-local.ini (values not printed)"
 }
 
-Copy-NgiiAccountToPortable $out
+if ($IncludeLocalCredentials) { Copy-NgiiAccountToPortable $out }
+
+if ($IncludeLocalCredentials) {
+  $heritageCandidates = @(
+    (Join-Path $env:LOCALAPPDATA 'ka-hgis/ka-hgis/heritage-account.ini'),
+    (Join-Path $env:APPDATA 'ka-hgis/ka-hgis/heritage-account.ini'),
+    (Join-Path $root 'config/heritage-local.ini')
+  )
+  $heritageSource = $heritageCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+  if ($heritageSource) {
+    $configDir = Join-Path $out 'config'
+    New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+    Copy-Item -LiteralPath $heritageSource -Destination (Join-Path $configDir 'heritage-account.ini')
+    Write-Host 'Heritage account: included (values not printed)'
+  } else {
+    Write-Host 'Heritage account: not found; enter it in the app.'
+  }
+  Add-Content -LiteralPath (Join-Path $out 'README.txt') -Encoding UTF8 -Value "`r`n개인용 패키지: 이 PC에 저장된 API 키와 계정 파일을 포함했습니다."
+  Add-Content -LiteralPath (Join-Path $out '사용법.txt') -Encoding UTF8 -Value "`r`n개인용 패키지: 이 PC에 저장된 API 키와 계정 파일을 포함했습니다."
+}
 
 Write-Host "Portable folder ready: $out"
 Get-ChildItem $out | Select-Object Name, Mode, @{n='MB';e={ if ($_.PSIsContainer) { '' } else { [math]::Round($_.Length/1MB,1) } }}

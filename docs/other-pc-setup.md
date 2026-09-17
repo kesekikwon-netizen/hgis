@@ -144,7 +144,9 @@ git push origin main
 
 ## E) 실행만 (포터블)
 
-실행만: 개발 PC에서 `.\scripts\make-portable.ps1` 후 `dist\ka-hgis-portable\` **통째** 복사 → `start.bat`. 대상 PC에 OSGeo4W 불필요.
+실행만: 개발 PC에서 `.\scripts\make-portable.ps1 -OutDir '<새 출력 폴더>'` 후 해당 폴더를 **통째** 복사 → `ka-hgis.exe` 또는 `start.bat`. 대상 PC에 OSGeo4W 불필요. 기존 폴더는 덮어쓰거나 삭제하지 않으므로 매번 새 출력 경로를 사용한다.
+
+사용자가 개인 계정까지 포함하도록 요청한 경우에만 `-IncludeLocalCredentials`를 추가한다. 현재 앱의 VWorld 키와 수치지형도·국가유산 인트라넷 계정을 포함하며 값은 로그에 출력하지 않는다. `scripts/verify-portable-pack.ps1 -OutDir '<출력 폴더>'`로 주요 런타임 파일을 확인한다. 실제 실행·좌표계·웹 엔진 검증은 이 파일 검사와 별도로 수행한다.
 
 ---
 

@@ -1,3 +1,158 @@
+## 2026-09-16 사용자 요청 v2 포터블 제작
+
+- 배포 ZIP: A:/qgis/dist/ka-hgis-v2-portable-20260916.zip (375,871,305 bytes, 약376MB). 최신 레이어목록·다운로드UI·아이콘 포함. 실행은 압축전체해제 후 ka-hgis.exe.
+- scripts/make-portable.ps1·verify-portable-pack 통과. SDK경로제거한환경에서패키지offscreen시작검사0,36provider로드. ZIP전체CRC·내부EXE/QSS/ICO/PNG원본hash일치 확인. 개인계정/API키와QA설정/cache는ZIP에서제외.
+- ZIP SHA256 741ebef6a06f7aa84b96add2dfca8fcabc9af0c637524d1e1c5988a2d5ce4d1a. EXE는기존D7C860DF...4CF3. 원본생성폴더dist/ka-hgis-portable에는QA기본설정이남으므로배포용ZIP사용.
+- 다른PC실행미검증·코드서명없음. 기존회귀2실패/200%작은전체창배치한계는버전안내에명시. 제품코드수정/사용자앱조작/커밋없음. 근거build/qa/portable-v2-20260916/REPORT.md.
+
+## 2026-09-16 레이어 목록 글자·행간 축소와 상태 구별
+
+- 지도/조판 KaLayerInformation 공통목록만13→10px(약20%), 실제행34→22px. 그룹진한파랑굵게/일반진한회색/숨김옅은회색기울임, 번갈아옅은행배경. 지도지명·번호·심볼은변경없음.
+- Release·smoke·대상CTest3/3통과. 전체최초47/50에서theme검사의정규식블록범위오탐을고쳐재검사통과, 기존heritage_flow/e2e_opaque_suite2실패·topographic_browser비활성. 전체save_open182.21초통과.
+- 네이티브목록100/150/200%행높이·체크검증pass, 실제지도/조판100/150%통합pass. 200%작은전체창에서는표시설정/파일함이목록viewport를1px로압축하여통합검사fail; 별도배치보완필요. 선행원인/회귀여부단정하지않음.
+- Graft소스대조·clangd0오류/SDK선언탐색·Archify9/9및4화면완료. 계획plans/2026-09-16-layer-list-density.md, 근거build/qa/layer-list-density-20260916/REPORT.md, 사용법docs/user/layer-information.md.
+- Desktop→현재Release확인. EXE D7C860DF058529FDCBB81D0CC988FEB88A1D777987E6E657F93A3B12778C4CF3. 사용자앱재시작/포터블/커밋없음.
+
+## 2026-09-16 수치지형도 다운로드 창 정합성 보완
+
+- 공통 색상만 적용되고 남은 수치지형도 전용 기본카드/680×360/Qt::Tool 차이를 정리. 일반 비모달 Dialog·680×330, 현재 단계/안내/막대와 상세 보기/취소 구성. 긴 단계·도엽/파일 정보는 상세에 배치하고 펼친 중에도 상태 카드는 유지한다. 상세 영역의 OS 어두운 팔레트 대비도 보완.
+- 실제 리본 클릭→MainWindowTopographic→KaTopographicBrowser 경로 QA 추가. 다운로드/인증/범위/좌표 처리 변경 없음. 전체 Release·smoke, Windows100/150/200% UI 각6pass, 최종 실제 리본 검사 및 대상CTest2/2 통과. 전체CTest48/50, 기존 heritage_flow/e2e_opaque_suite 실패·topographic_browser 비활성 유지.
+- Graft 소스 대조, clangd 두 제품파일 오류0·공통 configure 선언탐색0, Archify9/9·4화면 검토. 근거 build/qa/topographic-download-ui-20260916/REPORT.md, 계획 plans/2026-09-16-topographic-download-ui.md.
+- 바탕화면 바로가기→현재 Release 연결 확인. EXE SHA256 4120EC33FDD463C4DD7D3BD67165D802A12BE422702859816B9604BA2F329097. 사용자 앱 재시작/새 포터블/커밋 없음.
+
+## 2026-09-16 둥근 글로시 UI·바탕화면 흙손 아이콘
+
+- 사용자참조대로 KaIcons 공통타일을 둥근색상/곡선반사광/밝은그림으로 변경. 기능별색·체크·선택테두리·회색비활성 보존,64/128px캐시. 명시적단색아이콘은별도flatglyph캐시로유지.
+- 금색흙손 투명PNG를 built-in이미지도구로만들고 Qt내장/WindowsRC/바탕화면ICO로연결.1차가짜격자배경거부,2차진짜RGBA채택.마스터 data/theme/ka-hgis-app.png; scripts/update-app-icon.ps1로8크기ICO생성·네이티브Windows검증. 앱외부ICO우선경로제거로같은내장그림사용.
+- 바탕화면 %USERPROFILE%/Desktop/고고학 전용 HGIS.lnk 생성완료. scripts/start-ka-hgis.vbs→launch.ps1→현재Release, 새data/theme/ka-hgis.ico연결확인. 새포터블/커밋/사용자앱·탐색기재시작없음.
+- 전체Release·smoke통과. Windows100/150/200%테마각23pass, 실제Qt미리보기및EXE추출아이콘확인. stale내장이미지를검사에서발견하여QRC갱신/원본hash일치검사로해결. 전체CTest48/50통과, 기존heritage_flow/e2e_opaque_suite2실패·topographic_browser비활성,save_open181.38초.
+- 실제compileDB282항목·clangd아이콘/boot오류0·Qt선언탐색0, Graft소스대조, Archify9/9·4화면·명암검토. 근거 build/qa/glossy-icons-20260916/REPORT.md, 계획 plans/2026-09-16-glossy-icons.md, 사용법 docs/user/glossy-icons.md.
+- EXE SHA256 35E063FAC72CE6D0F9818A9177E897121740A1852ED14E87512B2BDC8D506C34. ICO E3C9E1D2235C87116F4BEB9DE2856A971E6556672BB797DBB8A07A0287272ECA. 다른PC미검증.
+
+## 2026-09-16 찾기 지번 정확 일치 검색
+
+- 오른쪽 위 찾기에서 번지가 있으면 VWorld ADDRESS/PARCEL 검색으로 분리한다. 기존 place 검색과 주소 결과의 title 부재가 지번 검색을 방해하던 경로를 수정했다. 법정동·리/산/본번/부번 및 19자리 PNU의 지번 부분을 확인하고, 불일치·오류·잘린 결과·서로 다른 PNU 후보에는 이동하지 않는다. 번지 없는 지역 검색은 유지.
+- 입력창은 법정동·리와 산번지 예시를 안내한다. 세종시 중복 명칭·시도 개칭·세종로·숫자 법정동·생략된 일반구를 처리한다. 일치 PNU의 열린 지적도는 경계 선택과 실제 필지 범위 이동(5186/5187)을 제공하며 원본 도형/속성을 수정하지 않는다.
+- Release 전체 빌드·시작 smoke 통과. 대상3개 통과, 최종 네트워크37pass/실시간항목기본skip; 공개 주소 서울 종로구 세종로1-68의 실제 VWorld 결과/PNU 별도 확인 통과. Windows100/150/200% 입력창31pass씩과 이미지 검토. 전체CTest48/50통과, 이전 heritage_flow/e2e_opaque_suite 실패2개·topographic_browser 비활성. save_open183.07초.
+- 필수 도구: Graft 후보/소스 대조, 실제 compile DB279항목·clangd 제품3파일오류0 및 MainWindow/SDK선언탐색오류0, Archify9/9·4viewport·명암이미지 검토. 근거 build/qa/parcel-search-20260916/REPORT.md, 계획 plans/2026-09-16-parcel-search.md, 사용법 docs/user/parcel-search.md.
+- EXE SHA256 75C82B536F8389AD2D1BA410CD0BCCA9F60E0ACCAF59C420DC96DB4E57FEBB7B. 시작스크립트→현재Release 연결 확인. 이번Desktop에.lnk없음. 새포터블/커밋/사용자앱재시작없음. 실제문제지번미제공·모든지번/다른PC미검증; 기관의 최신 지번 미반영 가능성은 남는다.
+
+## 2026-09-16 v2 시작 안내·다운로드 UI 통일
+
+- 요청대로 파란 글로시/둥근 외곽 KaStartupSplash, v2·만든이 권영인·실제 기술/자료 고지. 초기 준비 후 10,000ms 안내 게이지가 끝난 뒤에만 메인창 표시. 클릭 조기숨김 없음, 이벤트루프 타이머 사용. 홈만 여는 기본 시작·명시적 smoke/QA 빠른 경로 유지. 앱버전2/CMake2.0.0/READMEv2, About공통고지.
+- KaDownloadUi 공통 제목/흰 상태 카드·여백·진행률·버튼을 수치지형도/지적도/주변유적에 적용. 지적도는 비모달 전용창에서 기존 QgsTask 진행·취소 연결. 유적 공식자동화/시군범위/원본자료 변경 없음. 수치지형도 간단화면에서도 공식화면 펼치기 지원. 실제 수신율을 알 수 없으면 미확정 표시를 유지한다.
+- 실제 Windows100/150/200% 시작화면 각4pass(실제10초/응답/준비gate)와 세 다운로드창 취소·상세전환·진행률 검사 통과. 최종 캡처 직접 검토. 전체 Release·smoke통과, CTest48/50통과, 기존heritage_flow/e2e_opaque_suite2개실패·topographic_browser비활성. save_open_window184.42초. Graft소스대조·clangd3제품파일진단0/선언탐색·Archify9/9 및4viewport명암브라우저/이미지검토완료.
+- 근거 build/qa/startup-download-ui-20260916/REPORT.md, 계획 plans/2026-09-16-startup-download-ui.md, 사용법 docs/user/startup-download-ui.md. EXE SHA256 C210B22F9F3BD2A08B2FA930FBFC1CFCC12C8A0E988A337561B0BFC5DECBCDCB. Desktop에GIS.lnk없어실제바로가기재확인은미완료; 시작스크립트→현재Release연결확인.
+- 실서버 다운로드/사용자원본/실행앱조작·포터블·커밋·푸시없음. 고지갱신은 전체종속성라이선스감사나전체포터블배포고지검증이아니다. 기존GIS미해결사항유지.
+
+## 2026-09-16 레이어 열 경계 드래그
+
+- 사용자 요청으로 도면 · 레이어 / 글자 사이 헤더 경계선을 좌우로 드래그할 수 있게 했다. 공통 KaLayerInformation 뷰가 첫 열 Interactive/둘째 Stretch를 사용하며, QGIS 기본 resize 이후 선택 폭을 복원한다. 창을 줄이거나 경계를 끝까지 끌 때 글자 체크·문구 폭(최소88px)을 남긴다. 앱 재시작 간 폭 저장은 추가하지 않았다.
+- 제품 변경은 KaLayerInformation.cpp/.h, 실제 지도/조판 모드 마우스 드래그·창 확장/복귀·상태 갱신 유지 검사를 test_layer_information.cpp에 추가. 너비 조작의 labelsEdited0회·원본 라벨/도형 유지 확인. 초기 좁은 목록 통합 실패는 최소 글자 폭 보완으로 해결했고 기존 검사 조건을 낮추지 않았다.
+- 최종 Release 빌드·smoke·Windows100/125/150/200% 조작 및 실제 MainWindow/Studio 통합 검사 통과. 전체CTest46/48, 기존heritage_flow/e2e_opaque_suite2개실패·topographic_browser비활성. save_open_window190.20초통과. Graft API/소스 대조, clangd오류0/Qt선언 탐색, Archify9/9·4viewport명암브라우저·이미지 검토 완료.
+- 근거 build/qa/layer-column-resize-20260916/REPORT.md, 계획 plans/2026-09-16-layer-column-resize.md. EXE SHA25612059BEEB6794C7037DA5465034B182BFEF11F2BBA5750655820FB986D7CAE3B. 시작 스크립트→현재Release 연결 확인. 이번 Desktop에는.lnk가없어실제바로가기재확인은미완료. 포터블·사용자앱종료·커밋·푸시없음.
+
+## 2026-09-16 레이어 도면·글자 체크 UI
+
+- 1차 프롬프트 검토 뒤 사용자 ‘진행’ 승인으로 구현. 지도/레이아웃 왼쪽 목록에 도면 · 레이어 / 글자 두 열, 목록 아래 선택 레이어 표시 설정을 제공한다. 지번·높이·유적명·면적·번호를 의미에 맞춰 표시하며 그룹 부분 체크와 일괄 변경, 부모 숨김/축척 제한 안내를 지원한다.
+- LayerLabelControls는 기존 표현식·서체·색·위치·축척을 보존하고 임의 첫 필드를 자동 선택하지 않는다. 내용/면적 편집도 설정을 복제하고 관련 표현식만 바꾼다. 전용 지번/높이/기호에는 일반 필드 편집을 숨긴다. 영상에 합성된 글자는 별도 조작 불가다.
+- KaLayerInformation 공통 모델/뷰/패널을 지도와 조판 및 기존 우클릭에 연결했다. QGIS 기본 단일 열 폭·Space 동작을 작은 뷰 보정으로 해결했다. 기본 왼쪽 폭348px·최소300px·들여쓰기12px. 상태 변경 알림120ms 병합, 200레이어 3회 변경71ms·알림1회 관측(지도 렌더 시간 아님).
+- 조판 유적의 ka_hgis/layout_numbers_visible는 원본 이름 설정과 독립. 끄면 복제 스타일의 글자와 번호 범례를 제거하고 다시 켜면 페이지 표시 대상만 분류별 연번으로 복원한다. 숨김 상태 삭제·혼합 범례·PDF·QGZ 저장/재열기 검사 통과.
+- 최종 전체 Release 빌드·시작 smoke 통과. CTest46/48 통과, 기존 heritage_flow/e2e_opaque_suite 2개 실패·topographic_browser 비활성. save_open_window174.63초 통과. Windows100/125/150/200% DPI 입력 및 실제 MainWindow/Studio 통합 조작 통과, 정상 폭 캡처 검토. Graft 소스 대조·실제 compile DB clangd3제품파일 오류0/SDK선언 탐색·Archify9/9 및4viewport 명/암 브라우저·이미지 검토 완료.
+- 근거 build/qa/layer-information-20260916/REPORT.md, 실행계획 plans/2026-09-16-layer-information-ui-implementation.md, 사용법 docs/user/layer-information.md. 바탕화면 고고학 전용 GIS 바로가기→현재 Release 연결 확인. EXE SHA256 F25D75FCCD135E58256344655F4B257928F20D8594299C2FB77CE29F44B2FF4B.
+- 포터블/커밋/푸시 없음. 실행 앱·원본 조사·이전 배포 보존. 다른 실물PC/장시간 현장 자료 미검증. 기존 지질도 오프셋의 사용자 조사 상태 확인은 별도 미해결이다.
+
+## 2026-09-16 조사 주변 5km 지적도 자동 다운로드
+
+- 사용자 Document.pdf 3쪽을 먼저 개발 프롬프트(plans/2026-09-16-cadastral-development-prompt.md)로 가공한 뒤 구현했다. 후속 답변 5km는 조사구역 전체 경계의 5000m 버퍼다.
+- CadastralPortal이 공식 VWorld 행정구역 API·로그인·목록·ZIP 요청을 앱 작업자에서 실행한다. 경계에 걸친 여러 시군구를 받고 원본을 보존한다. 개인 계정은 로컬 설정으로 저장하며 소스/문서/로그에 값을 남기지 않는다.
+- CadastralImport가 QGIS CRS 변환·정확한 교차로 필지를 추려 공간 인덱스 GPKG(PNU/JIBUN)를 만든다. 전체 필지 형상 유지, 동일 PNU의 다른 도형 보존, 정확한 중복만 제거. 기본 검정 0.2mm·채움 없음, 지번은 1:10000보다 확대할 때 표시. 색/지번 설정·참조 그룹·QGZ 재열기 검증.
+- 배경 지도 → 지적도, 옆 메뉴 → VWorld 계정 설정 / 선 색·지번 표시. 비모달 진행/취소, 조사 전환 결과 폐기, 갱신일/원본 내용/범위/CRS 캐시. 조사 폴더 지적도/원본과 지적도/표시에 저장한다.
+- 실제 C++ 경로로 구미·칠곡 2개 ZIP을 받아 원본 453,579필지→49,017필지, 표시 파일 17,301,504bytes. 최초 준비 46.451초, Windows 폰트 검사 캐시 11.445초(공식 목록 확인 포함), 전체 렌더 1.904초, 확대 렌더 0.181초·지번 207개. 해당 PC/범위의 관측값이며 무지연 보장 아님.
+- Release 전체 빌드·시작 smoke 통과. 전체 CTest 44/46 통과, 기존 heritage_flow/e2e_opaque_suite 2개 실패, topographic_browser 비활성. clangd 3파일 오류0·SDK 선언 탐색, Graft 소스 대조, Archify9/9 및4화면 확인. offscreen 폰트 사각형은 Windows 플랫폼으로 재검사해 실제 한글·숫자 정상 확인.
+- 근거 build/qa/cadastral-20260916/REPORT.md와 live-windows-fonts.xml, ctest-final.log. 사용법 docs/user/cadastral-download.md. EXE SHA256 6687F3886D88E21A1FA77C475763667E2382A77F24721D09B92A53A6435E4343.
+- 새 포터블/커밋/푸시 없음. 사용자 실행 앱·원본 조사·기존 배포 보존. 다른 실물 PC·모든 지역 실시간 다운로드·장시간 수동 UI 검증은 미실행. 이전 지질도 오프셋의 사용자 조사 상태 확인은 별도 미해결이다.
+
+## 2026-09-15 페이지 표시 유적의 분류별 연번
+
+- 최신 사용자 요청으로 이전 ‘재번호화하지 않는다’ 규칙을 대체한다. 실제 페이지에 배치된 유적만 자료 분류마다 1..N으로 다시 매기고 지도·범례의 번호/색/유적명을 일치시킨다. 같은 유적의 여러 피처는 같은 번호와 범례 1행이다.
+- HeritageLayoutNumbers가 전체 후보/원래 override를 별도 보관한다. QGIS PAL의 layer ID/FID/번호 및 종이 교차로 실제 표시 피처만 골라 연번화한다. 이미 배치된 라벨 하단 변 중점을 원본 CRS로 변환해 Center/Bottom으로 고정하므로 번호 폭 변화로 충돌 배치가 뒤바뀌는 것을 피한다. 새 번호에 맞춰 원 크기를 줄이며 충돌 금지·기존 여백을 유지한다. 숨겨진 같은 유적의 형제 FID는 다시 표시하지 않는다.
+- 미리보기는 연번 렌더 완료 뒤 범례를 갱신한다. 범위/축척/지도 위치/페이지/DPI/원본 변경에는 전체 후보를 복원한다. 드래그 중 복원과 결과 적용은 release까지 보류한다. PDF는 인쇄 DPI의 실제 배치부터 다시 확인하고 최대 3회 내 번호/범례 일치를 검증한 뒤 QSaveFile로 확정한다.
+- 최종 Release 빌드·시작 smoke·clangd 진단0과 실제 SDK 선언 탐색·Graft 소스 대조·Archify9/9 및4화면 통과. 서비스35개와 실제 Studio 표시/숨김·200개 갱신 병합·지도50%종이밖이동/복귀 검사 통과. 두자리11/12→1/2,5186→5187,30도회전,숨겨진형제,PDF일치,원본스타일보존 확인. 전체 CTest43/45통과, 기존heritage_flow/e2e_opaque_suite2개실패·topographic_browser비활성. save_open_window176.17초통과. build/qa/consecutive-numbers-20260915/ctest-final.log 참조.
+- 승인된 개인 포터블 후속본: 바탕화면 HGIS-포터블-페이지연번-20260915. EXE SHA256 1B6ECEF15C573A26460054ADA260164BBAB98C209FC5FED1F234937BEB3DA00C. 개발SDK경로없는 Windows 시작244모듈·번들CRS 통과. ZIP/CRC/소스snapshot: build/qa/portable-consecutive-numbers-20260915/delivery-result.json. 미서명·실제다른PC미검증. 실행앱·원본조사·이전배포보존. 커밋/푸시없음.
+- 사용법 docs/user/layout-heritage-numbers.md, 근거 build/qa/consecutive-numbers-20260915/REPORT.md. 이전 지질도 오프셋의 현재 조사 상태 확인은 별도 미해결이다.
+
+## 2026-09-15 페이지에 실제 표시된 번호만 범례에 연결
+
+- 원인: 도면과 겹치는 유적 후보를 범례로 만들면서 QGIS 충돌 배치에서 숨긴 번호까지 포함했다. 실제 PAL 결과의 레이어ID·피처ID·번호와 페이지/지도 교차를 확인하여 표시 번호만 남긴다. 같은 레이어/번호는1행이며 분류별 번호와 색·유적명 연결을 유지한다. 제외된 번호를 메우려고 재번호화하지 않는다.
+- 미리보기의 시작 상태·revision을 추적해 진행 중 변경/교체된 결과는 버리고 새 렌더를 확인한다. 완료 후 범례만 갱신한다. 지도/종이 이동은120ms 병합, held 입력은최종release까지보류, 범례 이동만으로지도재렌더없음.
+- Studio 및 LayoutService 제출/저장조판 PDF는 실제 인쇄 PAL 결과를확인하고필요할때만2차출력해같은집합인지검증한뒤QSaveFile확정한다. 출력제외페이지를제외하고DPI를복원한다. 일반PDF도현재Studio서비스를재사용하며QObject종료때지도owner참조를해제한다.
+- 원본자료·스타일보존. 실제밀집12후보중10개표시와범례정확일치,중복/피처ID교체/페이지밖/30도회전/일반PDF/liveowner수명 검사통과. Poppler PDF직접확인. 최종Release전체빌드·smoke·clangd3파일진단0·실제SDK선언탐색·Graft대조·Archify9/9및4화면통과. 전체CTest43/45통과, 기존heritage_flow/e2e_opaque_suite실패2개·topographic_browser비활성, save_open_window171.86초통과. 근거: build/qa/visible-number-legend-20260915/REPORT.md.
+- 기존개인포터블요청의후속본: 바탕화면 HGIS-포터블-표시번호범례-20260915. EXE SHA256 1E33D4BDDE98A168C87749495F216D24487ECB306E5EA58DB34F8F155ACBBAD8. 개발SDK경로없는Windows시작·번들CRS통과. ZIP/CRC/소스snapshot결과: build/qa/portable-visible-numbers-20260915/delivery-result.json. 미서명·실제다른PC미검증. 실행앱·원본조사·이전배포보존. 커밋/푸시없음.
+- 이전지질도오프셋의현재조사본경로답변대기는별도미해결이다. 이번번호범례수정으로지질도화면문제까지해결됐다고주장하지않는다. 사용법: docs/user/layout-heritage-numbers.md.
+
+
+## 2026-09-15 참조 그룹 숨김·DEM/혼합 범례·지질 응답 CRS
+
+- 상위 참조 그룹 숨김을 무시하던 LayerOps 표시목록/덧그림 캐시/표시 질의를 isVisible로 수정했다. 명시적인 배경지도 켜기는 부모도 켠다. Studio 레이어 트리와 전체 체크는 조판의 m_project에 연결한다. 부모 숨김→도형/번호/범례 제거→다시켜기200개 번호복원 검사 통과.
+- DEM 범례1×1mm초기화를 제거하고 이전1mm손상은55mm로복구한다. 번호+지질 혼합에서는QGIS map filter를 유지하고 최종override후명시갱신한다. 비동기hit test완료와 동기행변경에 맞춰높이재배치한다. PDF직전범례만scratch paint→hit test대기→높이확정하므로 첫PDF도 긴빈테두리가남지않는다.
+- Geology prepare에서 응답CRS를무시하던별도결함을수정했다. 명시GeoJSON CRS를fromOgcWmsCrs로검증하고 실제5186변환을수행한다. 정상5186/5187/4326/미선언4행,미상/잘못된위경도2행,5187조사적재위치·범위·원본보존 검사통과. 소스에 임의좌표계 지정으로 맞추지 않는다.
+- **사용자화면 지질도오프셋은 아직미확정.** 최신로컬지질GPKG5186/1583개는 저장조사5187중심을변환한위치와실제겹친다(feature406). 개발/포터블QGIS+PROJ결과동일. 저장QGZ와내장workspace에는아직지질layer가없고transformContext비어있다. 현재어긋난상태를다른이름으로저장한경로를사용자에게요청했고답변대기. 이번응답CRS수정이해당화면문제까지해결했다고말하지않는다.
+- Release전체빌드/시작smoke/실제DB clangd진단0 및 isVisible선언탐색/Graft대조/Archify9검사·4화면 확인. DEM4행,혼합전환·범위변경·첫PDF,그룹숨김,응답CRS6행검사통과. 전체CTest43/45통과, 기존heritage_flow/e2e_opaque_suite2개실패·topographic_browser비활성, save_open_window235.07초통과. 근거: build/qa/reference-dem-geology-20260915/REPORT.md 및 ctest-final.log. 사용법: docs/user/reference-map-checks.md.
+- 앞선개인포터블요청후속본: 바탕화면 HGIS-포터블-참조지도범례-20260915. EXE SHA256 CA24D08301B65667AA95B649B95B5604067D3D94FBE48DD8BF88F539CE654004. 개발SDK없는Windows시작247모듈·번들CRS통과. ZIP/CRC/현재소스snapshot결과: build/qa/portable-reference-dem-20260915/delivery-result.json. 미서명·다른실물PC미검증. 사용자실행앱·조사원본·이전배포보존. 커밋/푸시없음.
+## 2026-09-15 조판 조작 최적화·축척 일치·분류색·번호 겹침 방지
+
+- 사용자 요청: 범례 생성/이동/크기조절과 축척변경 지연, 도면 정보와 하단 축척 불일치, 비슷한 분류색, 도면 번호 겹침을 수정한다.
+- 조판의 번호/범례/폭 계산은 마우스를 잡은 동안 보류하고 놓은 뒤 최종 상태를 반영한다. release 상태는 즉시 해제하며 대기 콜백은 새 press가 있으면 종료한다. 원본 revision별 복제 레이어를 재사용하고 실제 도면 범위의 category만 전달하며 native 범례 중복 재생성을 제거했다. 제목/글꼴 변경은 번호 트리를 유지하고 범례 이동은 QGIS 캐시를 사용한다.
+- 활성 레이아웃의 실제 map scale을 도면 정보·종이 축척·하단 축척에 양방향 연결했다. 일반 지도 범위/축척과 기존 조판 탭 상태를 보존한다. 지표 금황#D4AA00·발굴 진분홍#C2187D으로 구별하며 옛 기본색은 조판 복제본에서만 바꾼다. 임의색·원본 XML·자료는 유지한다.
+- 번호는 point_on_surface 주변 후보에 배치하고 색 원 지름을 포함한 여백·충돌 금지·가는 연결선을 적용했다. 덧지도는 도형만 그려 본 지도의 번호 배치와 중복되지 않는다. 밀집12항목 PDF에서10개 표시, 모든 원 쌍 최소여유2.79649mm 검증. 공간이 부족한 번호는 숨기며 범례에는 남는다. 모든 번호가 항상 표시된다는 보장은 없다.
+- CMake Release·시작smoke·clangd 실제 compile DB 진단0·Graft 소스 대조·Archify9/9 및4화면 검증. 최종 대상7개 통과(studio-release-settle.xml). 전체 CTest45개 중43개 통과, 기존heritage_flow/e2e_opaque_suite2개 실패·topographic_browser비활성. save_open_window164.79초 통과. 근거: build/qa/layout-interaction-20260915/ctest-delivery.log. 실제 색상/밀집 PDF를 Poppler로 확인했다. 성능 수치는 합성자료 조건이며 다른 PC의 완전무지연을 보장하지 않는다. 상세: build/qa/layout-interaction-20260915/REPORT.md.
+- 이전 포터블 요청의 후속 수정본: 바탕화면 HGIS-포터블-조판최적화-20260915. 최종 EXE SHA256 1F3C6B48319017B526F9F4EEA604BBD38FD94EF3D656D7F623CFD0C3B272DA82. SDK 경로 없는 Windows 시작245모듈·번들CRS 통과. ZIP/CRC/소스 스냅샷 결과: build/qa/portable-interaction-20260915/delivery-result.json. 승인된 개인config는 값미기록 hash일치. 미서명·다른 실물PC미검증. 사용자 실행앱·원본조사·기존배포보존. 커밋/푸시없음.
+## 2026-09-15 범례 폭에 따른 자동 여러 열 배치
+
+- 사용자 요청: 범례 상자를 가로로 넓히면 긴 한 열을 여러 열로 자동 배치한다. LayoutService::flowSheetLegend가 범례 소유120ms 타이머로 폭 변경만 반영하고, QGIS 열 분할·자동 줄바꿈·내용 높이 측정을 사용한다. 폭·위치·색 원·자료 분류별 번호·유적명을 유지한다. 원본 레이어/범례 노드/번호 캐시 재생성 없음.
+- 합성43항목에서 폭70→190→70mm에 따라 열1→3→1, 높이372.149→137.185→372.149mm. 실제 크기변경 타이머, 이동만 할 때 미실행, 대기 중 삭제 안전성, 원본/번호/노드 보존 검사 통과. PDF의 좁고 넓은 범례를 Poppler로 직접 확인했다.
+- core24개 통과, 전체Release빌드·시작smoke·clangd두파일 오류0·실제API선언탐색 통과. Graft/실제소스 대조와 Archify9검사·4화면 통과. 전체 CTest43/45, 기존heritage_flow/e2e_opaque_suite실패2개·topographic_browser비활성. save_open_window161.87초 통과. 근거: build/qa/legend-auto-columns-20260915/REPORT.md.
+- 앞서 승인된 포터블 후속 수정본: 바탕화면 HGIS-포터블-범례자동열-20260915. 개발SDK경로 없는 Windows독립시작244모듈·번들CRS통과. 승인된개인config원본일치(값미기록). EXE SHA2562365E2714B6F6E23CC8985F0656A7F0D610898E2154C665045B17B1C8583AC9F. ZIP/CRC/소스일치결과: build/qa/portable-legend-columns-20260915/delivery-result.json. 기존배포·실행앱·원본자료보존, 미서명·실제다른PC미검증, 커밋/푸시없음.
+## 2026-09-15 레이아웃 진입 지연 수정
+
+- 사용자 보고한 레이아웃 지연을 합성1500분류/도면100항목으로 재현했다. 변경 없는 번호 확인 평균240.793ms, 범례 적용974.782ms가 강제·중복 실행되는 구조였다.
+- HeritageLayoutNumbers는 source style/data/repaint/CRS 및 편집·rollback 신호를 lifetime-bound revision으로 추적한다. 변경 없는 확인에서 전체 스타일 XML 직렬화와 feature count 조회를 없앴고, 범례 수동노드에 revision을 기록해 같은 결과를 재생성하지 않는다. 새 트리·실제 편집·범위 변경은 재계산한다.
+- Studio는 갱신 요청을80ms timer로 합치고 숨긴동안 보류한다. 같은 결과에서는 범례/덧지도/지도 refresh를 생략한다. 동일 중심·축척 재설정도 생략하여 QGIS의 범위 범례 재생성을 막는다. PDF 직전은 pending layer 반영 후 강제계산1회를 유지한다. 일반 지도/원본 자료는 변경하지 않는다.
+- 같은 합성1500분류에서 cache update0.095ms, legend0.006ms로 감소. 실제 Studio200분류 검사: 번호스타일 최초준비455ms, 재표시14ms, 변경없는10요청 계산0회·범례노드유지, 실제색변경1회·숨김변경후표시1회 반영. 이 수치는 사용자 원본 속도나 모든 PC 보장이 아니다.
+- core22개 통과/선택PDF1개 생략 후 별도PDF3개 통과, Studio 대상5개 통과. PDF를 Poppler로 렌더해 색원/번호/한글 범례를 확인했다. 전체 CTest43/45, 기존heritage_flow/e2e_opaque_suite실패2개·topographic_browser비활성. save_open_window227.30초 통과. Release전체빌드/시작smoke/clangd core·Studio오류0/Archify9검사·4화면 통과. Graft·실제소스와리뷰근거: build/qa/layout-entry-performance-20260915/.
+- 기존 포터블 요청의 후속 수정으로 바탕화면 HGIS-포터블-레이아웃속도개선-20260915에 최신Release를 포함했다. 독립Windows시작250모듈·번들CRS통과, 승인된개인용config원본일치(값미기록). EXE SHA2561704DADA39EFABEE11AD21295D4DD510475C06133FAF22DB01CD07DF52663164. ZIP/CRC/소스스냅샷결과는 build/qa/portable-layout-performance-20260915/delivery-result.json. 기존배포/사용자실행앱/원본조사를조작하지 않았다. 미서명상태·실제다른PC미검증, 커밋/푸시없음.
+## 2026-09-15 조판 유적 번호·색 원 범례와 최종 포터블
+
+- 사용자 확정: 지정유산 등 여섯 자료 분류별로 1번부터 시작한다. 조판의 긴 유적명을 레이어 색의 원 안 번호로 바꾸고, 범례에는 같은 색 원·번호와 유적명을 표시한다. 같은 레이어의 같은 category는 같은 번호, 다른 레이어는 별도 번호다.
+- HeritageLayoutNumbers가 실제 도면의 회전 범위를 원본 CRS로 변환해 표시 유적만 조회한다. 숨긴 category/범위 밖은 제외하며 single-symbol 자료도 지원한다. 복제 스타일을 조판 map overrides에 적용하므로 일반 지도 라벨·원본 데이터/스타일은 유지한다. 본 지도/덧지도·범위 변경·PDF 직전 갱신을 연결했다. 다운로드·로그인 흐름은 변경하지 않았다.
+- Codex/AGENTS/프로젝트 GIS·인트라넷 스킬, Graft 실제 소스 대조, clangd 선언 탐색·core/Studio 검사 오류0, CMake Release 전체 빌드·시작 smoke, Archify 9/9·브라우저4크기 검증 완료. 컴파일 DB 250항목. clangd의 unrelated refactoring action 자체검사를 제외한 ExpandAutoType 제한 검사이며 실제 compiler diagnostics 오류0이다.
+- 합성 번호·범례·원본 보존·CRS/회전·단일 심볼·PDF 포함 Qt 검사19개 통과. 실제 PDF를 Poppler로 렌더해 색원/번호/한글 범례 대응과 잘림 없음을 확인했다. 전체 CTest 45개 중43개 통과, 기존 heritage_flow/e2e_opaque_suite 2개 실패, topographic_browser 별도 비활성. save_open_window 215.98초 통과. 상세: build/qa/heritage-numbers-20260915/.
+- 바탕화면 새 개인용 폴더 HGIS-포터블-유적번호-20260915에 최신 실행본과 런타임을 포함했다. 사용자 승인한 계정 파일은 config에만 복사했고 원본과 일치한다(값 미기록). 개발 SDK 없는 Windows 별도 실행과 250개 모듈·번들 CRS 검사 통과. 실행본 SHA256 2FD76374192FCF2305275C50987B16B4004DA8E6EAF340050461C5FF8BF11147. ZIP·CRC·소스 스냅샷 결과: build/qa/portable-heritage-numbers-20260915/delivery-result.json.
+- 실행본은 미서명이라 SmartScreen 경고가 남을 수 있다. 사용자가 확인한 자세한 정보 → 실행 안내와 정식 서명 도구/문서를 포함한다. 실제 다른 PC 실행은 미검증이다. 이전 배포와 사용자 실행 중 앱/원본 조사를 변경하지 않았다. 커밋·푸시 없음. 사용법: docs/user/layout-heritage-numbers.md.
+## 2026-09-15 조판 장식 이동·축소와 SmartScreen 안내
+
+- 조판의 축척자·축척 글자·좌표계·방위표 잠금을 해제했다. 하단 항목 이동으로 선택/이동하고 오른쪽 도면 정보의 선택 항목 크기(25~200%)로 글자·그림을 함께 조절한다.
+- 자동 배치는 최초 1회만 적용한다. 지도 축척 변경/새로고침/모양 변경이 사용자가 옮긴 위치를 되돌리지 않는다. 축척자는 QGIS 지도 연결을 유지하고 구간 거리도 비율에 맞춰 바꿔 축소된 막대에 맞는 숫자를 표시한다. 크기 변경은 QGIS undo를 지원한다.
+- Release 전체 빌드·시작 smoke·대상 회귀·PDF 출력 확인 통과. 전체 CTest 45개 중 43개 통과, 기존 heritage_flow/e2e_opaque_suite 실패 2개, topographic_browser 비활성. 상세: build/qa/decoration-20260915/ 및 decoration-*.log/txt. 사용법: docs/user/layout-decorations.md.
+- 다른 PC에서 자세한 정보→실행이 있음을 사용자가 확인했다. SmartScreen 평판 경고로 안내했다. 현재 EXE는 미서명이고 코드 서명 인증서가 없어 실제 서명은 미완료다. scripts/sign-release.ps1과 docs/portable-desktop.md에 확인/정식 서명 절차를 마련했다. 보안 설정/기존 포터블/원본 조사/계정은 변경하지 않았다. 커밋·푸시 없음.
+
+## 2026-09-15 지도 화면 GeoTIFF 저장
+
+- 사용자 최종 요구는 지도 화면에 보이는 것을 GeoTIFF로 저장하는 버튼 한 개다. SMARTTOPO C 배경 영상용이며 추가 좌표계/해상도 대화상자는 만들지 않는다.
+- 지도 탭의 내보내기 그룹에 GeoTIFF 저장을 추가했다. 저장 위치만 정하면 현재 canvas mapSettings의 CRS·범위·회전·표시 레이어 순서/스타일/투명도를 QGIS로 렌더링한 RGB8 TIFF를 쓴다. 실제 픽셀→지도 변환을 GeoTIFF에 기록하며 현재 CRS를 강제로 5179로 바꾸지 않는다.
+- MapGeoTiffExport 서비스가 렌더 오류/취소와 안전한 파일 확정을 담당한다. 표시/숨김 원본 래스터를 덮어쓰지 않고 실패·취소 시 기존 출력 파일을 보존한다. 조사 원본과 프로젝트 상태는 수정하지 않는다.
+- 새 GeoTIFF 검사 12개와 지도 탭 버튼 검사 통과, 전체 Release 빌드·시작 smoke 통과. 다른 CRS의 원본을 현재 지도 CRS로 그린 결과, 회전, 고배율, 투명도, 선택 표시, 원본/기존 출력 보존을 실제 TIFF 재읽기로 확인했다. 전체 CTest 결과는 .codex/NOW.md와 build/qa/map-geotiff-20260915/를 따른다.
+- 현재 개발 실행본에 반영. 기존 바탕화면 포터블 폴더·ZIP을 자동 갱신하지 않았다. SMARTTOPO C 실기기 로드는 미검증이다. 사용법: docs/user/map-geotiff.md.
+
+## 2026-09-15 개인용 포터블·작은 화면·UTF-8 적재
+
+- 바탕화면 개인용 포터블은 Qt/QGIS/GDAL/PROJ/WebEngine/MSVC 런타임을 포함한다. 사용자 요청으로 현재 VWorld 키·수치지형도 계정·국가유산 인트라넷 계정도 config에 포함한다. 소스와 로그에는 값이 없다. 기존 개발용 바로가기는 바꾸지 않는다.
+- 메인 창·주변유적 진행창은 현재 모니터 작업영역에 맞추며 단면도 고정 1100px 최소폭/속성 패널 버튼 잘림을 수정했다. 1024/1366/1920 화면 및 150%/200% 상당 작은 논리공간 검사와 화면 검토 통과.
+- 주변유적을 새로 받거나 적재할 때 원본 인코딩으로 읽고 UTF-8 GPKG 작업 사본을 쓴다. 한글 SHP 필드명·긴 문자열의 UTF-8 재작성 손실을 피하며 원본·좌표계·도형을 보존한다. 이미 저장된 SHP를 시작 때 강제로 변경하지 않는다.
+- 전체 Release 빌드, UTF-8 importer 검사, SDK 경로 없는 native Windows 번들 시작·좌표계·WebEngine 한글 DOM 검사 통과. 다른 실물 PC와 모든 모니터를 검증한 것은 아니다. 전체 CTest/ZIP 결과는 .codex/NOW.md와 build/qa/desktop-portable-20260915/를 따른다.
+- 재생성·사용법: docs/portable-desktop.md. 개인용 포터블 생성은 이번에 명시적으로 요청한 배포 작업이며 이후 일반 검증 때 자동 생성하지 않는다.
+
 ## 2026-09-15 자동 시도 판정·지적도 복구
 
 - 조사구역의 내부 대표점과 원본 레이어 CRS를 쓰는 자동 시도/시군 판정은 기존 경로를 유지한다. 이전 VWorld 키는 공식 서버에서 INVALID_KEY였으며 사용자가 앱에 입력한 새 키로 주소/WMS가 정상 응답했다.

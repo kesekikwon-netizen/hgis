@@ -1,4 +1,4 @@
-# 고고학 전용 HGIS (ka-hgis) v0.3
+# 고고학 전용 HGIS (ka-hgis) v2
 
 C++/Qt6 독립 실행형 필드고고학 HGIS. **OSGeo4W qgis-dev (QGIS 4.x) 라이브러리 링크**. 소스 포크 아님.
 
