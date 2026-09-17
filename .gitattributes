@@ -1,0 +1,10 @@
+# 저장소에는 LF 로 저장하고, 체크아웃할 때 OS 규칙을 따른다.
+* text=auto
+
+# 바이너리로 다뤄 diff/merge 에서 깨지지 않게 한다.
+*.png binary
+*.ico binary
+*.pdf binary
+*.gpkg binary
+*.zip binary
+*.qgz binary

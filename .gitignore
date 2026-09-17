@@ -124,3 +124,7 @@ config/ngii-local.ini
 
 # QGIS offline manuals: large Desktop User Guide PDFs stay local (see docs/vendor/qgis-manual-3.44/README.md)
 docs/vendor/qgis-manual-3.44/QGIS-*-DesktopUserGuide-*.pdf
+
+# 내부 개발 계획·실행 로그는 공개 저장소에 올리지 않는다.
+plans/
+logs/
