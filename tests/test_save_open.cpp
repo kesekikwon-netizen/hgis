@@ -80,6 +80,8 @@
 #include <qgslayoutexporter.h>
 #include <QDoubleSpinBox>
 #include <qgslayoutview.h>
+#include <qgslayoutmousehandles.h>
+#include <qgslayoutviewtoolselect.h>
 #include <qgsmapcanvas.h>
 #include <qgsmaplayerstyle.h>
 #include <qgsmaptopixel.h>
@@ -852,6 +854,8 @@ private slots:
     QVERIFY(map);
     auto* size = studio.findChild<QDoubleSpinBox*>(QStringLiteral("decorationSize"));
     QVERIFY(QMetaObject::invokeMethod(&studio, "useSelectTool"));
+    auto* selectTool = studio.findChild<QgsLayoutViewToolSelect*>();
+    QVERIFY(selectTool);
     QMap<QString, QPointF> positions;
     for (const QString& id : {QStringLiteral("ka_scalebar"), QStringLiteral("ka_scale"),
                               QStringLiteral("ka_crs"), QStringLiteral("ka_north")}) {
@@ -864,6 +868,12 @@ private slots:
       view->centerOn(item);
       ly->setSelectedItem(item);
       QCoreApplication::processEvents();
+      // 선택 핸들이 새 항목으로 옮겨오기 전에 누르면 이전 항목의 회전 핸들을 잡아,
+      // 항목이 움직이는 대신 회전한다. 핸들이 자리를 잡을 때까지 기다린다.
+      QTRY_VERIFY2(selectTool->mouseHandles() &&
+                       QLineF(selectTool->mouseHandles()->sceneBoundingRect().center(),
+                              item->sceneBoundingRect().center()).length() < 0.5,
+                   qPrintable(id + QStringLiteral(" 선택 핸들이 자리를 잡지 못했다")));
       QVERIFY(size->isEnabled());
       const QRectF before(item->pos(), item->rect().size());
       const QPoint from = view->mapFromScene(item->mapToScene(item->rect().center()));
@@ -885,7 +895,7 @@ private slots:
       if (!dragOutput.isEmpty() && QLineF(before.topLeft(), moved).length() <= 3.)
         studio.grab().save(QDir(dragOutput).filePath(QStringLiteral("decoration-drag-failure.png")));
       QVERIFY2(QLineF(before.topLeft(), moved).length() > 3., qPrintable(id + QStringLiteral(" did not drag")));
-      QVERIFY(qAbs(item->itemRotation()) < .001);
+      QVERIFY2(qAbs(item->itemRotation()) < .001, qPrintable(id + QStringLiteral(" 가 회전했다")));
       positions.insert(id, moved);
       const auto* bar = dynamic_cast<QgsLayoutItemScaleBar*>(item);
       const double distance = bar ? bar->unitsPerSegment() : 0.;
