@@ -262,6 +262,7 @@ add_executable(ka-hgis
   src/app/KaSurveyAreaDialog.cpp
   src/app/KaStatusBar.cpp
   src/app/KaCrashGuard.cpp
+  src/app/KaGdalErrorLog.cpp
   src/app/KaRegionLocator.cpp
   src/app/KaFileBrowserPanel.cpp
   src/app/KaLayerOpacityRail.cpp
@@ -297,6 +298,7 @@ add_executable(ka-hgis
   src/app/KaStatusBar.h
   src/app/KaRegionLocator.h
   src/app/KaCrashGuard.h
+  src/app/KaGdalErrorLog.h
 )
 target_include_directories(ka-hgis PRIVATE ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
 target_link_directories(ka-hgis PRIVATE ${KA_LIBDIRS})
@@ -467,6 +469,13 @@ if(KA_HGIS_BUILD_TESTS)
   ka_add_qtest(region_locator_popup ka_region_locator_tests)
 
   add_executable(ka_heritage_import_tests tests/test_heritage_import.cpp)
+  add_executable(ka_gdal_log_tests tests/test_gdal_error_log.cpp
+    src/app/KaGdalErrorLog.cpp src/app/KaGdalErrorLog.h src/app/KaCrashGuard.cpp src/app/KaCrashGuard.h)
+  target_include_directories(ka_gdal_log_tests PRIVATE src ${KA_INCLUDES})
+  target_link_directories(ka_gdal_log_tests PRIVATE ${KA_LIBDIRS})
+  target_link_libraries(ka_gdal_log_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_gdal_log_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(gdal_error_log ka_gdal_log_tests)
   add_executable(ka_export_survey_areas_tests tests/test_export_survey_areas.cpp)
   target_link_libraries(ka_export_survey_areas_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_export_survey_areas_tests PROPERTIES WIN32_EXECUTABLE FALSE)
@@ -699,6 +708,7 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(heritage_style PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(heritage_form PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(heritage_download_retry PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 90)
+    set_tests_properties(gdal_error_log PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(export_survey_areas PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     set_tests_properties(heritage_import map_geotiff_export PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
     set_tests_properties(heritage_region PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)

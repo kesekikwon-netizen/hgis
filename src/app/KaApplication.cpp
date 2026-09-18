@@ -1,5 +1,6 @@
 #include "KaApplication.h"
 #include "KaCrashGuard.h"
+#include "KaGdalErrorLog.h"
 #include "KaTheme.h"
 #include "KaIcons.h"
 #include "KaStartupSplash.h"
@@ -685,6 +686,8 @@ int KaApplication::run(int argc, char** argv) {
   QgsApplication::setPluginPath(prefix + QStringLiteral("/plugins"));
   QgsApplication::setPkgDataPath(prefix);
   QgsApplication::initQgis();
+  // GDAL failures reach the session log too; a desktop launch has no console.
+  KaGdalErrorLog::install();
   {
     const KaPortablePaths bundled = KaPortableRuntime::discover(kaExeDir());
     if (bundled.looksBundled() && !bundled.projData.isEmpty()) {
