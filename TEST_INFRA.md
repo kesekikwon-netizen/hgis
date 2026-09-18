@@ -133,5 +133,26 @@ ctest --test-dir build -C Release -R e2e_opaque_suite --output-on-failure
 
 ### Direct Executable Execution
 ```powershell
-.\build\Release\ka_e2e_tests.exe
+# QtTest 결과는 화면에 나오지 않는다. -o 로 파일을 받아서 본다.
+.\build\Release\ka_e2e_tests.exe -o result.txt,txt
 ```
+
+### QtTest 결과 로그 (2026-09-18)
+
+이 Qt 빌드(OSGeo4W Qt 6.11)의 QtTest 는 결과를 표준출력으로 내보내지 않는다.
+콘솔·파이프·`cmd` 리다이렉트 모두 빈 출력이고 `-o <파일>,txt` 로만 나온다.
+그래서 예전에는 ctest 로그에 `<end of output>` 만 남아 실패 원인을 알 수 없었다.
+
+지금은 모든 검사를 `cmake/run_qtest.cmake` 래퍼로 실행한다. 래퍼가 결과를
+`build/test-logs/<검사이름>.txt` 로 받고, **실패했을 때만** 그 내용을 출력하므로
+`ctest` 출력에 실패 지점이 그대로 남는다. 검사를 추가할 때는 `add_test` 대신
+`ka_add_qtest(<검사이름> <타깃>)` 을 쓴다.
+
+### 검사 격리 규칙
+
+- 실제 앱과 같은 조직/앱 이름(`ka-hgis`)을 쓰지 않는다. 쓰면 WebEngine 프로필과
+  설정이 사용자의 실제 폴더에 쌓인다. 검사 전용 이름과
+  `QStandardPaths::setTestModeEnabled(true)` 를 쓴다.
+- 결과물은 저장소 안에 쓰지 않는다. `QTemporaryDir` 이나 `QDir::temp()` 를 쓴다.
+- 고정 이름 폴더를 쓸 때는 시작할 때 지운다. 제출 내보내기는 비어 있지 않은 폴더를
+  거부하므로, 남겨 두면 다음 실행부터 계속 실패한다.

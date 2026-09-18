@@ -1068,8 +1068,9 @@ private slots:
     if (qEnvironmentVariableIntValue("KA_HGIS_LIVE_NGII_TEST") != 1)
       QSKIP("Official public-page network check is opt-in: KA_HGIS_LIVE_NGII_TEST=1");
     QTemporaryDir files; QVERIFY(files.isValid());
+    // 기본값이 소스 폴더였다. 검사 결과물이 저장소에 남지 않도록 임시 폴더를 쓴다.
     const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR",
-        QDir::currentPath() + QStringLiteral("/qa/ngii-browser"));
+        QDir::temp().filePath(QStringLiteral("ka-hgis-qa/ngii-browser")));
     QVERIFY(QDir().mkpath(output));
     KaTopographicBrowser browser(nullptr, files.path());
     auto* tabs = browser.findChild<QTabWidget*>(QStringLiteral("topographicTabs")); QVERIFY(tabs);

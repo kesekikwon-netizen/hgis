@@ -736,8 +736,10 @@ int main(int argc, char** argv) {
   QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
   KaPortableRuntime::applyWebEngineFlags();
   QApplication app(argc, argv);
-  QCoreApplication::setOrganizationName(QStringLiteral("ka-hgis"));
-  QCoreApplication::setApplicationName(QStringLiteral("ka-hgis"));
+  // 실제 앱과 같은 이름을 쓰면 WebEngine 프로필과 설정이 사용자의 실제 폴더에 쌓인다.
+  QCoreApplication::setOrganizationName(QStringLiteral("ka-hgis-offline-tests"));
+  QCoreApplication::setApplicationName(QStringLiteral("heritage-browser"));
+  QStandardPaths::setTestModeEnabled(true);
   HeritageBrowserTest test;
   return QTest::qExec(&test, argc, argv);
 }
