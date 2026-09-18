@@ -17,6 +17,12 @@ get_filename_component(_ka_log_dir "${KA_TEST_LOG}" DIRECTORY)
 file(MAKE_DIRECTORY "${_ka_log_dir}")
 file(REMOVE "${KA_TEST_LOG}")
 
+# The app's session log and crash dumps go under the build tree, never into the
+# user's %LOCALAPPDATA%\ka-hgis\logs.
+get_filename_component(_ka_test_name "${KA_TEST_LOG}" NAME_WE)
+set(ENV{KA_HGIS_LOG_DIR} "${_ka_log_dir}/app-logs/${_ka_test_name}")
+file(MAKE_DIRECTORY "$ENV{KA_HGIS_LOG_DIR}")
+
 execute_process(COMMAND "${KA_TEST_EXE}" -o "${KA_TEST_LOG},txt" RESULT_VARIABLE _ka_result)
 
 if(NOT _ka_result EQUAL 0)

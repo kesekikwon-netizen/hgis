@@ -33,6 +33,10 @@ std::atomic<bool> g_inCrash{false};
 QtMessageHandler g_prevQtHandler = nullptr;
 
 QString logDirQ() {
+  // Tests and QA point this elsewhere so they never write into the user's own
+  // session log or crash folder.
+  const QString overridden = qEnvironmentVariable("KA_HGIS_LOG_DIR");
+  if (!overridden.isEmpty()) return QDir::fromNativeSeparators(overridden);
   const QByteArray localAppData = qgetenv("LOCALAPPDATA");
   QString base = localAppData.isEmpty() ? QDir::tempPath()
                                         : QString::fromLocal8Bit(localAppData);

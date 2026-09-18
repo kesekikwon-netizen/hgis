@@ -14,6 +14,7 @@ public:
   // 세션 로그 한 줄 기록(스레드 안전, 연속 중복은 횟수로 접어서 기록).
   static void logLine(const QString& line);
 
-  // 로그 폴더 경로(%LOCALAPPDATA%\ka-hgis\logs).
+  // 로그 폴더 경로(%LOCALAPPDATA%\ka-hgis\logs). KA_HGIS_LOG_DIR 이 있으면 그 폴더를
+  // 쓴다. 검사가 사용자의 실제 세션 로그와 충돌 폴더에 기록하지 않게 하려는 것이다.
   static QString logDir();
 };

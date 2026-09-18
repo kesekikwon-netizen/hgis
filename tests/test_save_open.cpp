@@ -3164,6 +3164,10 @@ static QByteArray localCadastralCapabilities() {
 }
 
 int main(int argc, char** argv) {
+  // Run directly (not through ctest), the app code would log into the user's own
+  // session log. Keep test logs in a temporary folder instead.
+  if (qEnvironmentVariableIsEmpty("KA_HGIS_LOG_DIR"))
+    qputenv("KA_HGIS_LOG_DIR", QDir::temp().filePath(QStringLiteral("ka-hgis-test-logs")).toUtf8());
   QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
   QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
   // GDAL WMS uses libcurl outside QGIS's request preprocessor. Keep its remote
