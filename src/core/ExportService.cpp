@@ -16,13 +16,16 @@
 #include <qgsrasterlayer.h>
 #include <qgsprintlayout.h>
 #include <qgslayoutitemmap.h>
+#include <QMap>
 #include <qgsvectorfilewriter.h>
+#include <qgsfeatureiterator.h>
+#include <qgsfield.h>
+#include <qgsgeometry.h>
+#include <qgsvectordataprovider.h>
+#include <qgswkbtypes.h>
+#include <memory>
 #include <qgscoordinatetransformcontext.h>
 #include <qgslayoutmanager.h>
-
-static QgsVectorLayer* layerByName(QgsProject* p, const QString& name) {
-  return LayerOps::findByLayerKey(p, name);
-}
 
 static bool isSectionSheetComposed(QgsProject* project) {
   if (!project || !project->layoutManager())
@@ -143,22 +146,98 @@ QString ExportService::exportSubmissionPackage(QgsProject* project,
     };
     const QgsCoordinateReferenceSystem epsg5179(QStringLiteral("EPSG:5179"));
     for (const QString& n : names) {
-      QgsVectorLayer* vl = layerByName(project, n);
-      if (!vl || vl->featureCount() <= 0) continue;
-      // 이름 폴백으로 찾았더라도 명시적인 참조 자료는 제출 SHP에 넣지 않는다.
-      // 주변유적의 표시 이름을 도메인 이름으로 바꿔도 사유 자료 역할은 유지된다.
-      if (vl->customProperty(QString::fromUtf8(LayerOps::kPropLayerRole)).toString() ==
-          QLatin1String(LayerOps::kRoleReference)) continue;
+      // 조사구역은 사용자가 레이어를 여러 개 만들 수 있다. 같은 키를 가진 레이어를
+      // 모두 모아 하나의 SHP 로 쓴다. 하나만 내보내면 제출물에서 구역이 빠진다.
+      QList<QgsVectorLayer*> candidates = LayerOps::findAllByLayerKey(project, n);
+      if (candidates.isEmpty()) {
+        // layer_key 가 없는 예전 조사와 GPKG 에서 바로 연 레이어는 이름으로 찾는다.
+        // 다른 도메인 키를 가진 레이어는 제외한다. 참조 자료는 아래에서 걸러진다.
+        QMap<QString, QgsVectorLayer*> byName;
+        const auto named = project->mapLayersByName(n);
+        for (QgsMapLayer* l : named) {
+          auto* v = qobject_cast<QgsVectorLayer*>(l);
+          if (!v) continue;
+          const QString key = LayerOps::layerKeyOf(v);
+          if (!key.isEmpty() && key != n) continue;
+          byName.insert(v->id(), v);  // id 순으로 정렬해 순서를 고정한다.
+        }
+        candidates = byName.values();
+      }
+
+      QList<QgsVectorLayer*> sources;
+      for (QgsVectorLayer* vl : candidates) {
+        if (!vl || !vl->isValid() || vl->featureCount() <= 0) continue;
+        // 명시적인 참조 자료는 제출 SHP 에 넣지 않는다. 주변유적의 표시 이름을
+        // 도메인 이름으로 바꿔도 참조 자료 역할은 유지된다.
+        if (vl->customProperty(QString::fromUtf8(LayerOps::kPropLayerRole)).toString() ==
+            QLatin1String(LayerOps::kRoleReference)) continue;
+        sources.append(vl);
+      }
+      if (sources.isEmpty()) continue;
+
+      QgsVectorLayer* primary = sources.first();
+      // 레이어가 둘 이상이면 메모리 레이어에 합친다. SHP 덧붙이기는 드라이버에
+      // 따라 기존 파일을 덮어써 도형이 사라질 수 있으므로 쓰지 않는다.
+      std::unique_ptr<QgsVectorLayer> merged;
+      if (sources.size() > 1) {
+        merged.reset(new QgsVectorLayer(
+            QStringLiteral("%1?crs=%2")
+                .arg(QgsWkbTypes::displayString(primary->wkbType()), primary->crs().authid()),
+            n, QStringLiteral("memory")));
+        if (!merged || !merged->isValid()) {
+          if (errorOut) *errorOut = QStringLiteral("%1 레이어를 합치지 못했습니다.").arg(n);
+          return {};
+        }
+        if (!merged->dataProvider()->addAttributes(primary->fields().toList())) {
+          if (errorOut) *errorOut = QStringLiteral("%1 속성 구성을 만들지 못했습니다.").arg(n);
+          return {};
+        }
+        merged->updateFields();
+        for (QgsVectorLayer* vl : sources) {
+          QgsCoordinateTransform toPrimary;
+          if (vl->crs().isValid() && primary->crs().isValid() && vl->crs() != primary->crs())
+            toPrimary = QgsCoordinateTransform(vl->crs(), primary->crs(), project->transformContext());
+          QgsFeatureList batch;
+          QgsFeatureIterator it = vl->getFeatures();
+          QgsFeature source;
+          while (it.nextFeature(source)) {
+            QgsFeature copy(merged->fields());
+            // 필드는 이름으로 맞춘다. 레이어마다 속성 순서가 다를 수 있다.
+            for (const QgsField& field : merged->fields()) {
+              const int index = source.fields().indexOf(field.name());
+              if (index >= 0) copy.setAttribute(field.name(), source.attribute(index));
+            }
+            QgsGeometry geometry = source.geometry();
+            if (toPrimary.isValid() && !geometry.isNull()) {
+              QgsGeometry reprojected = geometry;
+              if (reprojected.transform(toPrimary) != Qgis::GeometryOperationResult::Success) {
+                if (errorOut) *errorOut = QStringLiteral("%1 좌표 변환에 실패했습니다.").arg(n);
+                return {};
+              }
+              geometry = reprojected;
+            }
+            copy.setGeometry(geometry);
+            batch.append(copy);
+          }
+          if (!batch.isEmpty() && !merged->dataProvider()->addFeatures(batch)) {
+            if (errorOut) *errorOut = QStringLiteral("%1 도형을 합치지 못했습니다.").arg(n);
+            return {};
+          }
+        }
+        merged->updateExtents();
+      }
+
+      QgsVectorLayer* out = merged ? merged.get() : primary;
       const QString shp = dir.filePath(n + QStringLiteral(".shp"));
       QgsVectorFileWriter::SaveVectorOptions opts;
       opts.driverName = QStringLiteral("ESRI Shapefile");
       opts.fileEncoding = enc;
-      if (vl->crs().isValid() && vl->crs() != epsg5179) {
-        opts.ct = QgsCoordinateTransform(vl->crs(), epsg5179, project->transformContext());
+      if (out->crs().isValid() && out->crs() != epsg5179) {
+        opts.ct = QgsCoordinateTransform(out->crs(), epsg5179, project->transformContext());
       }
       QString errMsg, newFn, newLayer;
       const auto we = QgsVectorFileWriter::writeAsVectorFormatV3(
-          vl, shp, project->transformContext(), opts, &errMsg, &newFn, &newLayer);
+          out, shp, project->transformContext(), opts, &errMsg, &newFn, &newLayer);
       if (we != QgsVectorFileWriter::NoError) {
         if (errorOut) *errorOut = errMsg.isEmpty() ? QStringLiteral("SHP failed: %1").arg(n) : errMsg;
         return {};

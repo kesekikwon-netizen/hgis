@@ -287,6 +287,11 @@ public:
   static bool isReferenceLayer(const QgsMapLayer* layer);
   static bool isBasemapLayer(const QgsMapLayer* layer);
   static QgsVectorLayer* findByLayerKey(QgsProject* project, const QString& layerKey);
+  // 같은 layer_key 를 가진 레이어를 모두 돌려준다. 조사구역처럼 사용자가 레이어를
+  // 여러 개 만들 수 있으므로, 제출 패키지가 하나만 내보내지 않게 하려고 쓴다.
+  // 이름 폴백은 하지 않는다. 표시 이름만 도메인 이름으로 바꾼 참조 자료가 섞이면 안 된다.
+  // 순서는 범례(레이어 트리) 순서를 따르므로 실행할 때마다 같다.
+  static QList<QgsVectorLayer*> findAllByLayerKey(QgsProject* project, const QString& layerKey);
   // Current layer is used only when its ka_hgis/layer_key equals requiredKey.
   // 유구면 must not fall back to survey_area just because it is the current polygon.
   static QgsVectorLayer* digitizeTargetLayer(QgsProject* project, QgsVectorLayer* current,

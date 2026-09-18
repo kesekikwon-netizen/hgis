@@ -452,6 +452,10 @@ if(KA_HGIS_BUILD_TESTS)
   add_test(NAME region_locator_popup COMMAND ka_region_locator_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
   add_executable(ka_heritage_import_tests tests/test_heritage_import.cpp)
+  add_executable(ka_export_survey_areas_tests tests/test_export_survey_areas.cpp)
+  target_link_libraries(ka_export_survey_areas_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_export_survey_areas_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  add_test(NAME export_survey_areas COMMAND ka_export_survey_areas_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   add_executable(ka_map_geotiff_export_tests tests/test_map_geotiff_export.cpp)
   target_link_libraries(ka_map_geotiff_export_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_map_geotiff_export_tests PROPERTIES WIN32_EXECUTABLE FALSE)
@@ -678,6 +682,7 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(heritage_style PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(heritage_form PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(heritage_download_retry PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 90)
+    set_tests_properties(export_survey_areas PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     set_tests_properties(heritage_import map_geotiff_export PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
     set_tests_properties(heritage_region PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(webengine_smoke PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 120)
@@ -702,7 +707,8 @@ if(KA_HGIS_BUILD_TESTS)
         buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine
         section_studio_engine terrain_3d_engine save_open_window e2e_opaque_suite network_services
         storage_safety reference_download region_locator_popup layer_state_regressions map_render
-        above_labels above_labels_125 above_labels_150 above_labels_200 dem_presentation)
+        above_labels above_labels_125 above_labels_150 above_labels_200 dem_presentation
+        export_survey_areas)
       set(_ka_test_temp "${_ka_test_temp_root}/ka-hgis-tests-${_ka_test_temp_id}/${_ka_test}")
       file(MAKE_DIRECTORY "${_ka_test_temp}")
       set_property(TEST ${_ka_test} APPEND PROPERTY ENVIRONMENT

@@ -1898,6 +1898,32 @@ QgsVectorLayer* LayerOps::findByLayerKey(QgsProject* project, const QString& lay
   return nullptr;
 }
 
+QList<QgsVectorLayer*> LayerOps::findAllByLayerKey(QgsProject* project, const QString& layerKey) {
+  QList<QgsVectorLayer*> found;
+  if (!project || layerKey.isEmpty()) return found;
+  // 레이어 트리 순서를 먼저 따른다. mapLayers() 는 해시 순서라 실행마다 달라진다.
+  if (QgsLayerTree* root = project->layerTreeRoot()) {
+    const auto nodes = root->findLayers();
+    for (QgsLayerTreeLayer* node : nodes) {
+      auto* v = qobject_cast<QgsVectorLayer*>(node ? node->layer() : nullptr);
+      if (!v || found.contains(v)) continue;
+      if (layerKeyOf(v) == layerKey) found.append(v);
+    }
+  }
+  // 트리에 없지만 프로젝트에 있는 레이어도 포함한다. id 순으로 넣어 순서를 고정한다.
+  QStringList restIds;
+  const auto all = project->mapLayers();
+  for (auto it = all.constBegin(); it != all.constEnd(); ++it) {
+    auto* v = qobject_cast<QgsVectorLayer*>(it.value());
+    if (!v || found.contains(v)) continue;
+    if (layerKeyOf(v) == layerKey) restIds.append(it.key());
+  }
+  restIds.sort();
+  for (const QString& id : restIds)
+    found.append(qobject_cast<QgsVectorLayer*>(all.value(id)));
+  return found;
+}
+
 QgsVectorLayer* LayerOps::digitizeTargetLayer(QgsProject* project, QgsVectorLayer* current,
                                               const QString& requiredKey) {
   if (requiredKey.isEmpty())
