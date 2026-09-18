@@ -49,6 +49,8 @@ bool ChecklistEngine::evalOne(const Rule& r, const QJsonObject& state) {
     return !state.value(QStringLiteral("has_abstract_marker")).toBool();
   if (ct.startsWith(QLatin1String("field_any:feature_poly")))
     return state.value(QStringLiteral("has_kind_period")).toBool();
+  if (ct.startsWith(QLatin1String("geometry_valid")))
+    return state.value(QStringLiteral("geometries_valid")).toBool(true);
   if (ct.startsWith(QLatin1String("geometry_type:feature")))
     return state.value(QStringLiteral("geometries_valid")).toBool(true);
   if (ct.startsWith(QLatin1String("extent_within")))

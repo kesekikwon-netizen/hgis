@@ -292,6 +292,10 @@ public:
   // 이름 폴백은 하지 않는다. 표시 이름만 도메인 이름으로 바꾼 참조 자료가 섞이면 안 된다.
   // 순서는 범례(레이어 트리) 순서를 따르므로 실행할 때마다 같다.
   static QList<QgsVectorLayer*> findAllByLayerKey(QgsProject* project, const QString& layerKey);
+  // 제출과 검수가 함께 쓰는 도메인 레이어 목록. 키로 찾고, 키를 가진 레이어가 하나도
+  // 없을 때만 이름으로 찾는다(layer_key 가 없는 예전 조사 대응). 다른 키를 가진
+  // 레이어와 참조 자료는 제외한다.
+  static QList<QgsVectorLayer*> domainLayersForKey(QgsProject* project, const QString& layerKey);
   // Current layer is used only when its ka_hgis/layer_key equals requiredKey.
   // 유구면 must not fall back to survey_area just because it is the current polygon.
   static QgsVectorLayer* digitizeTargetLayer(QgsProject* project, QgsVectorLayer* current,

@@ -1,10 +1,15 @@
 ﻿// 제출 패키지가 같은 layer_key 를 가진 레이어를 모두 내보내는지 검증한다.
 // 조사구역 대화상자의 「새 조사구역 레이어 만들기」는 survey_area_2, _3 을
 // 같은 키로 만든다. 예전에는 첫 레이어 하나만 내보내 제출물에서 구역이 빠졌다.
+#include "core/ChecklistEngine.h"
 #include "core/ExportService.h"
 #include "core/LayerOps.h"
+#include "core/ProjectStateBuilder.h"
 
+#include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
+#include <QJsonObject>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -40,6 +45,17 @@ bool addSquare(QgsVectorLayer* layer, const QString& label, double x, double y) 
   return true;
 }
 
+QString rulesFile() {
+  const QStringList candidates = {
+    QDir::current().filePath(QStringLiteral("data/rules/drawing_checklist.v1.json")),
+    QDir(QCoreApplication::applicationDirPath()).filePath(
+        QStringLiteral("../../data/rules/drawing_checklist.v1.json")),
+  };
+  for (const auto& path : candidates)
+    if (QFileInfo::exists(path)) return path;
+  return candidates.first();
+}
+
 long long featureCountOf(const QString& shpPath) {
   QgsVectorLayer written(shpPath, QStringLiteral("written"), QStringLiteral("ogr"));
   return written.isValid() ? written.featureCount() : -1;
@@ -54,6 +70,7 @@ private slots:
   void emptyFirstLayerDoesNotDropTheSubmissionShp();
   void referenceLayerNamedLikeDomainStaysOut();
   void legacyLayerWithoutKeyStillExports();
+  void invalidGeometryInSecondLayerBlocksSubmission();
 };
 
 // 구역 레이어가 둘이면 두 도형이 모두 제출 SHP 에 들어가야 한다.
@@ -164,6 +181,48 @@ void TestExportSurveyAreas::legacyLayerWithoutKeyStillExports() {
            output);
   QVERIFY2(error.isEmpty(), qPrintable(error));
   QCOMPARE(featureCountOf(QDir(output).filePath(QStringLiteral("survey_area.shp"))), 1LL);
+}
+
+// 자기교차 도형은 제출 전에 검수에서 막혀야 한다. 두 번째 레이어에 있어도 마찬가지다.
+// 예전에는 키마다 레이어를 하나만 확인해서, 두 번째 레이어의 무효 도형이 그대로 나갔다.
+void TestExportSurveyAreas::invalidGeometryInSecondLayerBlocksSubmission() {
+  QgsProject project;
+  project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+  auto* survey = addSurveyAreaLayer(&project, QStringLiteral("조사구역"));
+  QVERIFY(survey);
+  QVERIFY(addSquare(survey, QStringLiteral("1구역"), 200000, 450000));
+
+  auto* firstFeatures = addSurveyAreaLayer(&project, QStringLiteral("유구_면"),
+                                           QStringLiteral("feature_poly"));
+  QVERIFY(firstFeatures);
+  QVERIFY(addSquare(firstFeatures, QStringLiteral("정상 유구"), 200010, 450010));
+
+  auto* secondFeatures = addSurveyAreaLayer(&project, QStringLiteral("유구_면 2"),
+                                            QStringLiteral("feature_poly"));
+  QVERIFY(secondFeatures);
+  // 나비 모양(자기교차) 폴리곤
+  QgsFeature bowtie(secondFeatures->fields());
+  bowtie.setAttribute(QStringLiteral("name"), QStringLiteral("자기교차"));
+  bowtie.setGeometry(QgsGeometry::fromWkt(QStringLiteral(
+      "POLYGON((200100 450100, 200150 450150, 200150 450100, 200100 450150, 200100 450100))")));
+  QVERIFY(!bowtie.geometry().isNull());
+  QVERIFY(!bowtie.geometry().isGeosValid());
+  QgsFeatureList batch{bowtie};
+  QVERIFY(secondFeatures->dataProvider()->addFeatures(batch));
+  secondFeatures->updateExtents();
+
+  const QJsonObject state = ProjectStateBuilder::fromProject(&project);
+  QVERIFY2(!state.value(QStringLiteral("geometries_valid")).toBool(true),
+           "두 번째 레이어의 무효 도형을 검수가 놓쳤다");
+  QCOMPARE(state.value(QStringLiteral("feature_poly_count")).toInt(), 2);
+
+  ChecklistEngine engine;
+  QVERIFY2(engine.loadRules(rulesFile()), qPrintable(rulesFile()));
+  bool blocked = false;
+  for (const CheckResult& result : engine.evaluate(state))
+    if (result.id == QLatin1String("GEOMETRY_VALID"))
+      blocked = !result.passed && result.severity == QLatin1String("error");
+  QVERIFY2(blocked, "GEOMETRY_VALID 규칙이 제출을 막지 않았다");
 }
 
 #include "test_export_survey_areas.moc"

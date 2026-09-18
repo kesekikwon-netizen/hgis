@@ -148,30 +148,9 @@ QString ExportService::exportSubmissionPackage(QgsProject* project,
     for (const QString& n : names) {
       // 조사구역은 사용자가 레이어를 여러 개 만들 수 있다. 같은 키를 가진 레이어를
       // 모두 모아 하나의 SHP 로 쓴다. 하나만 내보내면 제출물에서 구역이 빠진다.
-      QList<QgsVectorLayer*> candidates = LayerOps::findAllByLayerKey(project, n);
-      if (candidates.isEmpty()) {
-        // layer_key 가 없는 예전 조사와 GPKG 에서 바로 연 레이어는 이름으로 찾는다.
-        // 다른 도메인 키를 가진 레이어는 제외한다. 참조 자료는 아래에서 걸러진다.
-        QMap<QString, QgsVectorLayer*> byName;
-        const auto named = project->mapLayersByName(n);
-        for (QgsMapLayer* l : named) {
-          auto* v = qobject_cast<QgsVectorLayer*>(l);
-          if (!v) continue;
-          const QString key = LayerOps::layerKeyOf(v);
-          if (!key.isEmpty() && key != n) continue;
-          byName.insert(v->id(), v);  // id 순으로 정렬해 순서를 고정한다.
-        }
-        candidates = byName.values();
-      }
-
       QList<QgsVectorLayer*> sources;
-      for (QgsVectorLayer* vl : candidates) {
-        if (!vl || !vl->isValid() || vl->featureCount() <= 0) continue;
-        // 명시적인 참조 자료는 제출 SHP 에 넣지 않는다. 주변유적의 표시 이름을
-        // 도메인 이름으로 바꿔도 참조 자료 역할은 유지된다.
-        if (vl->customProperty(QString::fromUtf8(LayerOps::kPropLayerRole)).toString() ==
-            QLatin1String(LayerOps::kRoleReference)) continue;
-        sources.append(vl);
+      for (QgsVectorLayer* vl : LayerOps::domainLayersForKey(project, n)) {
+        if (vl->featureCount() > 0) sources.append(vl);
       }
       if (sources.isEmpty()) continue;
 

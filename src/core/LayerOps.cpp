@@ -1924,6 +1924,30 @@ QList<QgsVectorLayer*> LayerOps::findAllByLayerKey(QgsProject* project, const QS
   return found;
 }
 
+QList<QgsVectorLayer*> LayerOps::domainLayersForKey(QgsProject* project, const QString& layerKey) {
+  QList<QgsVectorLayer*> found = findAllByLayerKey(project, layerKey);
+  if (found.isEmpty() && project) {
+    // layer_key 가 없는 예전 조사와 GPKG 에서 바로 연 레이어는 이름으로 찾는다.
+    QMap<QString, QgsVectorLayer*> byName;  // id 순으로 정렬해 순서를 고정한다.
+    const auto named = project->mapLayersByName(layerKey);
+    for (QgsMapLayer* l : named) {
+      auto* v = qobject_cast<QgsVectorLayer*>(l);
+      if (!v) continue;
+      const QString key = layerKeyOf(v);
+      if (!key.isEmpty() && key != layerKey) continue;
+      byName.insert(v->id(), v);
+    }
+    found = byName.values();
+  }
+  // 표시 이름을 도메인 이름으로 바꾼 참조 자료는 도메인 자료가 아니다.
+  found.removeIf([](QgsVectorLayer* v) {
+    return !v || !v->isValid() ||
+           v->customProperty(QString::fromUtf8(kPropLayerRole)).toString() ==
+               QLatin1String(kRoleReference);
+  });
+  return found;
+}
+
 QgsVectorLayer* LayerOps::digitizeTargetLayer(QgsProject* project, QgsVectorLayer* current,
                                               const QString& requiredKey) {
   if (requiredKey.isEmpty())

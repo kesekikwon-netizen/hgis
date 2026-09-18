@@ -45,25 +45,23 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
 
   st.insert(QStringLiteral("project_crs_set"), project->crs().isValid());
 
-  auto sas = LayerOps::surveyAreaLayers(project);
-  if (sas.isEmpty()) {
-    if (auto* fallback = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"))) {
-      sas.append(fallback);
-    }
-  }
-  auto* fp = LayerOps::findByLayerKey(project, QStringLiteral("feature_poly"));
-  auto* fl = LayerOps::findByLayerKey(project, QStringLiteral("feature_line"));
-  auto* cp = LayerOps::findByLayerKey(project, QStringLiteral("control_points"));
-  auto* sl = LayerOps::findByLayerKey(project, QStringLiteral("section_line"));
+  // 같은 키의 레이어가 여러 개일 수 있다. 하나만 보면 검수 결과가 실제와 달라진다.
+  const auto sas = LayerOps::domainLayersForKey(project, QStringLiteral("survey_area"));
+  const auto fps = LayerOps::domainLayersForKey(project, QStringLiteral("feature_poly"));
+  const auto fls = LayerOps::domainLayersForKey(project, QStringLiteral("feature_line"));
+  const auto cps = LayerOps::domainLayersForKey(project, QStringLiteral("control_points"));
+  const auto sls = LayerOps::domainLayersForKey(project, QStringLiteral("section_line"));
 
-  int saCount = 0;
-  for (auto* saLayer : sas) {
-    saCount += int(saLayer->featureCount());
-  }
-  const int fpCount = fp ? int(fp->featureCount()) : 0;
-  const int flCount = fl ? int(fl->featureCount()) : 0;
-  const int cpCount = cp ? int(cp->featureCount()) : 0;
-  const int slCount = sl ? int(sl->featureCount()) : 0;
+  const auto totalFeatures = [](const QList<QgsVectorLayer*>& layers) {
+    int count = 0;
+    for (auto* layer : layers) count += int(layer->featureCount());
+    return count;
+  };
+  const int saCount = totalFeatures(sas);
+  const int fpCount = totalFeatures(fps);
+  const int flCount = totalFeatures(fls);
+  const int cpCount = totalFeatures(cps);
+  const int slCount = totalFeatures(sls);
   st.insert(QStringLiteral("survey_area_count"), saCount);
   st.insert(QStringLiteral("feature_poly_count"), fpCount);
   st.insert(QStringLiteral("feature_line_count"), flCount);
@@ -90,11 +88,12 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
   st.insert(QStringLiteral("survey_is_polygon"), surveyPoly || saCount == 0);
   st.insert(QStringLiteral("has_abstract_marker"), saCount > 0 && !surveyPoly);
 
-  bool hasKindPeriod = fpCount == 0;
-  if (fp && fpCount > 0) {
-    QgsFeatureIterator it = fp->getFeatures();
+  // 유구가 없으면 통과, 있으면 모든 유구에 종류와 시대가 있어야 통과한다.
+  bool hasKindPeriod = true;
+  for (auto* layer : fps) {
+    if (layer->featureCount() <= 0) continue;
+    QgsFeatureIterator it = layer->getFeatures();
     QgsFeature f;
-    hasKindPeriod = true;
     while (it.nextFeature(f)) {
       const QString kind = f.attribute(QStringLiteral("kind")).toString().trimmed();
       const QString period = f.attribute(QStringLiteral("period")).toString().trimmed();
@@ -108,11 +107,24 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
       }
     }
   }
+  // 선과 단면선도 자기교차 같은 무효 도형이 그대로 제출되면 안 된다.
+  for (const auto& layers : {fls, sls}) {
+    for (auto* layer : layers) {
+      if (layer->featureCount() <= 0) continue;
+      QgsFeatureIterator it = layer->getFeatures();
+      QgsFeature f;
+      while (it.nextFeature(f)) {
+        const QgsGeometry g = f.geometry();
+        if (!g.isNull() && !g.isGeosValid()) geosValid = false;
+      }
+    }
+  }
   st.insert(QStringLiteral("has_kind_period"), hasKindPeriod);
   st.insert(QStringLiteral("geometries_valid"), geosValid);
 
   bool d=false,e=false,p=false,o=false,a=false;
-  if (cp && cpCount > 0) {
+  for (auto* cp : cps) {
+    if (cp->featureCount() <= 0) continue;
     QgsFeatureIterator it = cp->getFeatures();
     QgsFeature f;
     while (it.nextFeature(f)) {
