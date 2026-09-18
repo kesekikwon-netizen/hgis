@@ -2550,8 +2550,7 @@ private slots:
     const QSet<QString> created = gpkgFiles() - beforeFiles;
     QCOMPARE(created.size(), 1);
     const QString recovery = *created.constBegin();
-    const QByteArray recoveryBefore = contents(recovery);
-    QVERIFY(!recoveryBefore.isEmpty());
+    QVERIFY(!contents(recovery).isEmpty());
     QgsProject recovered;
     QVERIFY(recovered.read(SurveyStorage::projectUri(recovery)));
     for (int i = 0; i < order.size(); ++i) {
@@ -2563,6 +2562,10 @@ private slots:
       QCOMPARE(value.attribute(QStringLiteral("note")).toString(), QStringLiteral("미저장 변경 %1").arg(i));
     }
     recovered.clear();
+    // 기준 바이트는 복구본을 읽은 뒤에 잡는다. 읽기만 해도 SQLite 가 WAL 을 정리해
+    // 파일 헤더(저널 모드·변경 카운터)가 바뀐다. 읽기 전 값과 비교하면 항상 다르다.
+    const QByteArray recoveryBefore = contents(recovery);
+    QVERIFY(!recoveryBefore.isEmpty());
     auto* bar = window.findChild<QgsMessageBar*>();
     QVERIFY(bar);
     bool recoveryWarning = false;

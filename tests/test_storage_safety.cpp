@@ -191,7 +191,17 @@ class TestStorageSafety : public QObject {
         QVERIFY(feature.geometry().equals(prior.geometry()));
         for (const QgsField& field : original->fields()) {
           QVERIFY(snapshot->fields().lookupField(field.name()) >= 0);
-          QCOMPARE(feature.attribute(field.name()), prior.attribute(field.name()));
+          // 저장 왕복에서 생기는 차이는 데이터 손실이 아니다.
+          // - 아직 저장되지 않은 도형의 fid 는 비어 있고, GPKG 가 기록할 때 새로 매긴다.
+          // - 설정하지 않은 값은 NULL 로 두어도 빈 값으로 돌아온다.
+          // 값이 있던 항목은 그대로 유지되어야 하며, 그것만 엄격히 비교한다.
+          const QVariant actual = feature.attribute(field.name());
+          const QVariant expectedValue = prior.attribute(field.name());
+          if (expectedValue.isNull()) {
+            const bool isFid = field.name().compare(QLatin1String("fid"), Qt::CaseInsensitive) == 0;
+            if (isFid || actual.isNull() || actual.toString().isEmpty()) continue;
+          }
+          QCOMPARE(actual, expectedValue);
         }
       }
     }

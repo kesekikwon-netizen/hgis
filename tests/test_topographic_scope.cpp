@@ -24,6 +24,7 @@
 #include <qgsmapcanvas.h>
 #include <qgsproject.h>
 #include "app/KaTopographicScopePanel.h"
+#include "core/KaPortableRuntime.h"
 #include "app/KaTopographicImportDialog.h"
 #include "core/LayerOps.h"
 #include "core/TopographicSheets.h"
@@ -702,6 +703,7 @@ private slots:
 };
 int main(int argc, char** argv) {
   QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+  KaPortableRuntime::applyWebEngineFlags();
   QgsApplication app(argc, argv, true);
   QFontDatabase::addApplicationFont(QStringLiteral("C:/Windows/Fonts/malgun.ttf"));
   QgsApplication::setPrefixPath(qEnvironmentVariable("QGIS_PREFIX_PATH"), true);

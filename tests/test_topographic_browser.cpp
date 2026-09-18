@@ -33,6 +33,7 @@
 #include <functional>
 #include <memory>
 #include "app/KaTopographicBrowser.h"
+#include "core/KaPortableRuntime.h"
 
 class LocalDownloadServer : public QTcpServer {
 public:
@@ -1392,6 +1393,10 @@ private slots:
 };
 
 int main(int argc, char** argv) {
+  // 다른 WebEngine 검사들과 같은 초기화. 이게 없으면 Chromium 샌드박스 때문에
+  // 로컬 픽스처 페이지가 끝내 로드되지 않아 모든 검사가 타임아웃으로 죽는다.
+  QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+  KaPortableRuntime::applyWebEngineFlags();
   QApplication app(argc, argv);
   const bool manual = app.arguments().contains(QStringLiteral("--manual-ngii"));
   QStandardPaths::setTestModeEnabled(true);
