@@ -227,6 +227,12 @@ add_executable(ka-hgis
   src/app/KaApplication.cpp
   src/app/KaStartupSplash.cpp
   src/app/KaStartupSplash.h
+  src/app/KaSplashPalette.h
+  src/app/KaSplashCredits.cpp
+  src/app/KaSplashCredits.h
+  src/app/KaSplashScene.cpp
+  src/app/KaSplashScene.h
+  src/app/KaSplashScenePaint.cpp
   src/app/KaDownloadUi.cpp
   src/app/KaDownloadUi.h
   src/app/KaReferenceDownloadJob.cpp
@@ -569,7 +575,9 @@ if(KA_HGIS_BUILD_TESTS)
   endforeach()
 
   add_executable(ka_startup_splash_tests tests/test_startup_splash.cpp
-    src/app/KaStartupSplash.cpp src/app/KaStartupSplash.h)
+    data/theme/icons.qrc
+    src/app/KaStartupSplash.cpp src/app/KaStartupSplash.h
+    src/app/KaSplashPalette.h src/app/KaSplashCredits.cpp src/app/KaSplashCredits.h src/app/KaSplashScene.cpp src/app/KaSplashScene.h src/app/KaSplashScenePaint.cpp)
   target_include_directories(ka_startup_splash_tests PRIVATE src)
   target_link_libraries(ka_startup_splash_tests PRIVATE Qt6::Test Qt6::Widgets)
   set_target_properties(ka_startup_splash_tests PROPERTIES WIN32_EXECUTABLE FALSE)

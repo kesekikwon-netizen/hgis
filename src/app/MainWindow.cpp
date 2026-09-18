@@ -8602,7 +8602,7 @@ void MainWindow::exportReportLayout() {
 
 void MainWindow::showAbout() {
   QMessageBox::about(this, QStringLiteral("정보"),
-      QStringLiteral("필드고고학GIS  v2\n동국문화재연구원 · 만든이: 권영인\n\n"
+      QStringLiteral("필드고고학GIS  v2\n동국문화재연구원 · 만든이: 권영인 · 조유량 · 박종환\n\n"
                      "QGIS를 포크하지 않고 qgis_core / qgis_gui를 링크합니다.\n"
                      "작업 CRS: EPSG:5186/5187 · 업로드: EPSG:5179\n\n"
                      "저작권·라이선스\n") + KaStartupSplash::attributionText() +
