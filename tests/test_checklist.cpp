@@ -134,6 +134,8 @@ void TestKaHgis::exportBlocksOnError() {
 void TestKaHgis::exportAllowsWhenClean() {
   const QString dir = QDir::temp().filePath(QStringLiteral("ka_ok_pkg"));
   QDir(dir).removeRecursively();
+  // _dirty 폴더도 지운다. 남겨 두면 다음 실행에서 제출 폴더가 비어 있지 않아 항상 실패한다.
+  QDir(dir + QStringLiteral("_dirty")).removeRecursively();
   QString err;
   // Phase-1 path: blockOnError=false even if hasChecklistErrors (errors only in README).
   const QString outDirty = ExportService::exportSubmissionPackage(
