@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $out = if ($OutDir) { $OutDir } else { Join-Path $root "dist\ka-hgis-portable" }
 foreach ($n in @("ka-hgis.exe", "start.bat", "run.ps1", "README.txt", "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "qgis_core.dll", "qgis_gui.dll", "Qt6Core.dll", "vcruntime140.dll", "msvcp140.dll",
     "curl-ca-bundle.crt", "QtWebEngineProcess.exe", "Qt6WebEngineCore.dll",
     "apps/Qt6/resources/icudtl.dat", "apps/Qt6/resources/qtwebengine_resources.pak",

@@ -1,3 +1,4 @@
+#include "KaSessionLog.h"
 #include "GeologyMapService.h"
 #include "LayerOps.h"
 
@@ -462,6 +463,7 @@ bool elevationCoversGeology(QgsRasterLayer* elev, QgsMapLayer* geology) {
       const QgsCoordinateTransform tr(geology->crs(), elev->crs(), QgsCoordinateTransformContext());
       ge = tr.transformBoundingBox(ge);
     } catch (...) {
+      KaSessionLog::line(QStringLiteral("[except] core/GeologyMapService.cpp:464"));
       return false;
     }
   }

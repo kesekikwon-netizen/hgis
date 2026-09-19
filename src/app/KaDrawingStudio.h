@@ -86,6 +86,7 @@ public slots:
   // 창 단축키(Delete·Ctrl+Z)가 이 화면 대신 가로채므로, 바깥에서 넘겨받는다.
   void handleDeleteKey();
   void handleUndoKey();
+  void handleRedoKey();
   void deleteSelectedItems();
   void removeSelectedLayers();
   void undoLastChange();

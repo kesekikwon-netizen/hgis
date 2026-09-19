@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.21)
-project(ka-hgis VERSION 2.0.0 LANGUAGES CXX)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" KA_HGIS_VERSION_FILE LIMIT_COUNT 1)
+string(STRIP "${KA_HGIS_VERSION_FILE}" KA_HGIS_VERSION)
+if(NOT KA_HGIS_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+  message(FATAL_ERROR "VERSION must be major.minor.patch, got '${KA_HGIS_VERSION}'")
+endif()
+project(ka-hgis VERSION ${KA_HGIS_VERSION} LANGUAGES CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -74,6 +79,7 @@ add_library(ka_core STATIC
   src/core/ChecklistEngine.cpp
   src/core/SurveyProjectFactory.cpp
   src/core/SurveyStorage.cpp
+  src/core/SurveySession.cpp
   src/core/PreparedReferenceMap.cpp
   src/core/DemDownloadService.cpp
   src/core/ExportService.cpp
@@ -81,6 +87,9 @@ add_library(ka_core STATIC
   src/core/ProjectStateBuilder.cpp
   src/core/LayoutService.cpp
   src/core/LayerOps.cpp
+  src/core/BasemapOps.cpp
+  src/core/LabelOps.cpp
+  src/core/ControlPointCsv.cpp
   src/core/KaPortableRuntime.cpp
   src/core/DemColorRampLegend.cpp
   src/core/DemPresentation.cpp
@@ -92,6 +101,8 @@ add_library(ka_core STATIC
   src/core/HeritageLayoutNumbers.cpp
   src/core/HeritageRegionResolver.cpp
   src/core/HeritageIntranetSettings.cpp
+  src/core/KaSecretStore.cpp
+  src/core/KaSessionLog.cpp
   src/core/HeritageIntranetFlow.cpp
   src/core/HeritageImport.cpp
   src/core/HeritageFormParser.cpp
@@ -117,11 +128,13 @@ add_library(ka_core STATIC
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
   src/core/SurveyStorage.h
+  src/core/SurveySession.h
   src/core/ExportService.h
   src/core/ProjectStateBuilder.h
   src/core/LayoutService.h
   src/core/LayerOps.h
   src/core/KaPortableRuntime.h
+  src/core/KaSessionLog.h
   src/core/LocationSearch.h
   src/core/AdminBoundaryService.h
   src/core/KoreaRegionCatalog.h
@@ -156,6 +169,9 @@ add_library(ka_core STATIC
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
 target_link_libraries(ka_core PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::PrintSupport Qt6::Network Qt6::Svg qgis_core qgis_gui gdal_i)
+if (WIN32)
+  target_link_libraries(ka_core PUBLIC crypt32)
+endif()
 if (MSVC)
   target_compile_options(ka_core PRIVATE /openmp /utf-8)
 endif()
@@ -209,6 +225,9 @@ add_executable(ka-hgis
     src/app/MainWindowContextMenus.cpp
     src/app/MainWindowUndo.cpp
     src/app/MainWindowDownloads.cpp
+    src/app/MainWindowExport.cpp
+    src/app/MainWindowEditing.cpp
+    src/app/MainWindowSession.cpp
     src/app/MainWindowTopographic.cpp
     src/app/MainWindowCadastral.cpp
   src/app/KaLayerInformation.cpp
@@ -266,6 +285,10 @@ add_executable(ka-hgis
   src/app/KaRegionLocator.cpp
   src/app/KaFileBrowserPanel.cpp
   src/app/KaLayerOpacityRail.cpp
+  src/app/KaSnapSettingsWidget.cpp
+  src/app/KaSnapSettingsWidget.h
+  src/app/KaFeatureFormDialog.cpp
+  src/app/KaFeatureFormDialog.h
   src/app/MainWindow.h
   src/app/KaSurveyAreaDialog.h
   src/app/KaFileBrowserPanel.h
@@ -303,7 +326,11 @@ add_executable(ka-hgis
 target_include_directories(ka-hgis PRIVATE ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
 target_link_directories(ka-hgis PRIVATE ${KA_LIBDIRS})
 target_link_libraries(ka-hgis PRIVATE ka_core Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::PrintSupport Qt6::Network Qt6::Svg Qt6::WebEngineWidgets qgis_core qgis_gui)
-target_compile_definitions(ka-hgis PRIVATE KA_HGIS_HAS_QGIS=1 "CORE_EXPORT=__declspec(dllimport)" "GUI_EXPORT=__declspec(dllimport)")
+target_compile_definitions(ka-hgis PRIVATE
+  KA_HGIS_HAS_QGIS=1
+  "CORE_EXPORT=__declspec(dllimport)"
+  "GUI_EXPORT=__declspec(dllimport)"
+  "KA_HGIS_VERSION=\"${PROJECT_VERSION}\"")
 
 # 릴리스에도 PDB를 만들어 크래시 로그(KaCrashGuard)가 함수명·줄번호까지 심볼화하게 한다.
 # /FS: 병렬 컴파일에서 같은 PDB에 안전하게 쓰도록(C1041 방지).
@@ -345,9 +372,14 @@ if(KA_HGIS_BUILD_TESTS)
   # QtTest 결과는 이 Qt 빌드에서 표준출력으로 나오지 않는다. 래퍼로 실행해
   # 실패했을 때만 원인을 ctest 로그에 남긴다. 자세한 사정은 cmake/run_qtest.cmake 참고.
   function(ka_add_qtest test_name target_name)
+    ka_add_qtest_filter(${test_name} ${target_name})
+  endfunction()
+  function(ka_add_qtest_filter test_name target_name)
+    string(JOIN " " _ka_filter ${ARGN})
     add_test(NAME ${test_name} COMMAND ${CMAKE_COMMAND}
       -DKA_TEST_EXE=$<TARGET_FILE:${target_name}>
       -DKA_TEST_LOG=${CMAKE_BINARY_DIR}/test-logs/${test_name}.txt
+      "-DKA_TEST_FILTER=${_ka_filter}"
       -P ${CMAKE_SOURCE_DIR}/cmake/run_qtest.cmake
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endfunction()
@@ -362,7 +394,8 @@ if(KA_HGIS_BUILD_TESTS)
   ka_add_qtest(checklist_engine ka_hgis_tests)
 
   add_executable(ka_workflow_tests tests/test_workflow.cpp
-    src/app/KaCaptureMapTool.cpp src/app/KaCaptureMapTool.h)
+    src/app/KaCaptureMapTool.cpp src/app/KaCaptureMapTool.h
+    src/app/KaCrashGuard.cpp src/app/KaCrashGuard.h)
   target_link_libraries(ka_workflow_tests PRIVATE ${KA_TEST_LIBS})
   target_include_directories(ka_workflow_tests PRIVATE ${KA_INCLUDES})
   target_link_directories(ka_workflow_tests PRIVATE ${KA_LIBDIRS})
@@ -462,7 +495,8 @@ if(KA_HGIS_BUILD_TESTS)
   ka_add_qtest(theme_qss ka_theme_tests)
 
   add_executable(ka_region_locator_tests tests/test_region_locator.cpp
-    src/app/KaRegionLocator.cpp src/app/KaTheme.cpp src/core/KoreaRegionCatalog.cpp)
+    src/app/KaRegionLocator.cpp src/app/KaBeginnerRibbon.cpp src/app/KaTheme.cpp
+    src/core/KoreaRegionCatalog.cpp)
   set_target_properties(ka_region_locator_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   target_link_libraries(ka_region_locator_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
   target_include_directories(ka_region_locator_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
@@ -476,10 +510,20 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_gdal_log_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_gdal_log_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(gdal_error_log ka_gdal_log_tests)
+  add_executable(ka_catch_log_tests tests/test_catch_log.cpp src/core/KaSessionLog.cpp)
+  set_target_properties(ka_catch_log_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_include_directories(ka_catch_log_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(ka_catch_log_tests PRIVATE Qt6::Test Qt6::Core)
+  ka_add_qtest(catch_log ka_catch_log_tests)
   add_executable(ka_export_survey_areas_tests tests/test_export_survey_areas.cpp)
   target_link_libraries(ka_export_survey_areas_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_export_survey_areas_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(export_survey_areas ka_export_survey_areas_tests)
+  add_executable(ka_perf_tests tests/test_perf.cpp)
+  target_link_libraries(ka_perf_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_perf_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(perf_engine ka_perf_tests)
+  set_tests_properties(perf_engine PROPERTIES TIMEOUT 300)
   add_executable(ka_map_geotiff_export_tests tests/test_map_geotiff_export.cpp)
   target_link_libraries(ka_map_geotiff_export_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_map_geotiff_export_tests PROPERTIES WIN32_EXECUTABLE FALSE)
@@ -617,7 +661,12 @@ if(KA_HGIS_BUILD_TESTS)
   set_target_properties(ka_map_render_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   target_link_libraries(ka_map_render_tests PRIVATE ka_core Qt6::Test Qt6::Network)
   ka_add_qtest(map_render ka_map_render_tests)
+  add_executable(ka_parallel_render_tests tests/test_parallel_render.cpp)
+  set_target_properties(ka_parallel_render_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_parallel_render_tests PRIVATE ka_core Qt6::Test Qt6::Network)
+  ka_add_qtest(parallel_render ka_parallel_render_tests)
   set_tests_properties(region_locator_popup layer_state_regressions map_render PROPERTIES TIMEOUT 60)
+  set_tests_properties(parallel_render PROPERTIES TIMEOUT 90)
 
   add_executable(ka_hgis_above_labels_tests tests/test_above_labels.cpp src/app/KaAboveLabelsOverlay.cpp)
   set_target_properties(ka_hgis_above_labels_tests PROPERTIES WIN32_EXECUTABLE FALSE)
@@ -665,11 +714,72 @@ if(KA_HGIS_BUILD_TESTS)
   set_target_properties(ka_save_open_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   target_link_libraries(ka_save_open_tests PRIVATE ka_core Qt6::Test Qt6::Svg Qt6::WebEngineWidgets)
   target_include_directories(ka_save_open_tests PRIVATE ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
+  target_compile_definitions(ka_save_open_tests PRIVATE "KA_HGIS_VERSION=\"${PROJECT_VERSION}\"")
   if(MSVC)
     target_compile_options(ka_save_open_tests PRIVATE /utf-8 /FS)
   endif()
-  ka_add_qtest(save_open_window ka_save_open_tests)
-  set_tests_properties(save_open_window PROPERTIES TIMEOUT 240)
+  # One exe, several CTest names. QtTest function filter:
+  # https://doc.qt.io/qt-6/qtest-overview.html
+  ka_add_qtest_filter(save_open_window ka_save_open_tests
+    compactLayerListKeepsHierarchyAndMapLabelSize
+    layerInformationControlsIntegrateWithMapAndDrawingStudio
+    geoTiffButtonOnlyEnabledOnMapTab
+    windowGeometryFitsLogicalMonitors
+    mainWindowFitsAvailableScreenOnShow
+    provinceChipMovesMapWithoutLoadingLayers)
+  ka_add_qtest_filter(save_open_topo ka_save_open_tests
+    topographicActualWindowRemainsStableAfterCompletion
+    topographicDownloadKeepsMapVisibleAndUsesSurveyFolder)
+  ka_add_qtest_filter(save_open_drawing ka_save_open_tests
+    drawingStudio_decorationsMoveAndShrink
+    drawingStudio_heritageRefreshRequestsCoalesceAndReuseOnRevisit
+    drawingStudioAboveLabelsMapDrawsGeometryWithoutDuplicateNumberLabels
+    drawingStudio_largeScaleChipsApplyToMapAndInput
+    drawingInspectorUsesHeightWithoutOverlapping
+    scaleControlFollowsActiveDrawingWithoutChangingMapCanvas
+    scaleControl_isSingleWidgetAcceptingBothForms)
+  ka_add_qtest_filter(save_open_edit ka_save_open_tests
+    layerContextMenu_matchesLayerKind
+    changingLabelFontKeepsEveryLayerAndItsVisibility
+    trenchPresetRespectsAreaAndDimensions
+    layerDeleteKeyPreservesSourceAndUndoRestoresPendingEdits
+    ctrlZRestoresVertexEditsAndGroupedFeatureDeletion
+    layerContextMenu_usesClickedRowAndLeavesSourceIntact
+    layerContextMenu_moveToBottomPreservesRegisteredLayer
+    mapContextMenu_onlyOffersRecordEditingForSurveyFeatures)
+  ka_add_qtest_filter(save_open_roundtrip ka_save_open_tests
+    saveAndReopen_keepsTreeGeometryAttributesAndStyle
+    saveReopenSubmit_preservesWorkAndPackage
+    save_keepsDrawnSurveyArea
+    save_fieldPackageKeepsSurveyAreaReadable)
+  ka_add_qtest_filter(save_open_open ka_save_open_tests
+    open_repairsRegistryOnlyLayers
+    startupHome_ignoresRememberedSurveyUntilUserOpensIt
+    open_blocksNestedOpenAndAutosave
+    emptyGpkgWithoutWorkspace_opensWithoutDomainLayers)
+  ka_add_qtest_filter(save_open_open_invalid ka_save_open_tests
+    invalidSurvey_doesNotReplaceCurrentWork
+    openWhileDrawing_resetsCaptureBeforeReplacingLayers
+    open_unsavedWorkRespectsAnswer)
+  ka_add_qtest_filter(save_open_commit ka_save_open_tests
+    partialCommit_preservesRemainingBufferAndCreatesIndependentRecovery
+    failedCommit_doesNotOverwriteSavedWorkspace)
+  ka_add_qtest_filter(save_open_saveas ka_save_open_tests
+    newSurvey_selectedCrsSurvivesSaveAndOpen
+    embeddedOpenRestoresDemInActualTree
+    saveAs_preservesActualTablesAndReopensCopy
+    newSurvey_existingNamePreservesUnsavedCurrentSurvey
+    closeSave_preservesMemoryReferenceVectorOnReopen
+    saveAs_embeddedFailureRestoresSourcesAndRemainsUnsaved
+    saveAs_existingDestinationIsNotOverwritten
+    save_qgisExceptionStaysInsideSlot
+    save_companionFailureKeepsEmbeddedWorkspaceAndWarns
+    fieldCopy_restoresAllValidLayersAndSavesTree)
+  set(KA_SAVE_OPEN_TESTS
+    save_open_window save_open_topo save_open_drawing
+    save_open_edit save_open_roundtrip save_open_open
+    save_open_open_invalid save_open_commit save_open_saveas)
+  set_tests_properties(${KA_SAVE_OPEN_TESTS} PROPERTIES TIMEOUT 60 RESOURCE_LOCK ka_save_open)
 
   add_executable(ka_e2e_tests tests/test_e2e_opaque.cpp)
   set_target_properties(ka_e2e_tests PROPERTIES WIN32_EXECUTABLE FALSE)
@@ -694,7 +804,7 @@ if(KA_HGIS_BUILD_TESTS)
       "${OSGEO4W_ROOT}/bin"
     )
     string(JOIN "\\;" _ka_path_esc ${_ka_path})
-    set_tests_properties(layer_labels layer_information checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine terrain_3d_engine save_open_window e2e_opaque_suite network_services storage_safety reference_download region_locator_popup layer_state_regressions map_render above_labels above_labels_125 above_labels_150 above_labels_200 PROPERTIES
+    set_tests_properties(layer_labels layer_information checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine terrain_3d_engine ${KA_SAVE_OPEN_TESTS} e2e_opaque_suite network_services storage_safety reference_download region_locator_popup layer_state_regressions map_render above_labels above_labels_125 above_labels_150 above_labels_200 PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(dem_legend PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(topographic_catalog PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
@@ -709,7 +819,11 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(heritage_form PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(heritage_download_retry PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 90)
     set_tests_properties(gdal_error_log PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+    set_tests_properties(catch_log PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+    set_tests_properties(cadastral PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
     set_tests_properties(export_survey_areas PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
+    set_tests_properties(perf_engine PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 300)
+    set_tests_properties(parallel_render PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
     set_tests_properties(heritage_import map_geotiff_export PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
     set_tests_properties(heritage_region PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(webengine_smoke PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 120)
@@ -732,10 +846,10 @@ if(KA_HGIS_BUILD_TESTS)
     string(SUBSTRING "${_ka_test_temp_id}" 0 12 _ka_test_temp_id)
     foreach(_ka_test IN ITEMS checklist_engine workflow_engine georef_engine feature_presets
         buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine
-        section_studio_engine terrain_3d_engine save_open_window e2e_opaque_suite network_services
+        section_studio_engine terrain_3d_engine ${KA_SAVE_OPEN_TESTS} e2e_opaque_suite network_services
         storage_safety reference_download region_locator_popup layer_state_regressions map_render
         above_labels above_labels_125 above_labels_150 above_labels_200 dem_presentation
-        export_survey_areas)
+        export_survey_areas perf_engine parallel_render catch_log cadastral)
       set(_ka_test_temp "${_ka_test_temp_root}/ka-hgis-tests-${_ka_test_temp_id}/${_ka_test}")
       file(MAKE_DIRECTORY "${_ka_test_temp}")
       set_property(TEST ${_ka_test} APPEND PROPERTY ENVIRONMENT

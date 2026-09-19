@@ -1,3 +1,4 @@
+#include "KaCrashGuard.h"
 #include "MainWindow.h"
 #include "KaAttributeMapTool.h"
 #include "KaCaptureMapTool.h"
@@ -423,6 +424,7 @@ void MainWindow::showLayerAreaSummary(QgsVectorLayer* layer, bool showRatio) {
     }
     QMessageBox::information(this, QStringLiteral("면적 확인"), text);
   } catch (...) {
+    KaCrashGuard::logLine(QStringLiteral("[except] app/MainWindowContextMenus.cpp:425"));
     notify(Notice::Warning, QStringLiteral("면적 확인"), QStringLiteral("면적을 계산하지 못했습니다. 도형과 좌표계를 검수한 뒤 다시 실행하세요."));
   }
 }

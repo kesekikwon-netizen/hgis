@@ -717,9 +717,13 @@ void TestDemTrench::layerTreeMenu_hasLabelToggleAndTrenchRatio() {
 }
 
 void TestDemTrench::applySnapConfig_vertexAndSegmentNotWmsPromise() {
-  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString src = QString::fromUtf8(f.readAll());
+  QString src;
+  for (const QString& path : {QStringLiteral("src/app/MainWindow.cpp"),
+                              QStringLiteral("src/app/MainWindowEditing.cpp")}) {
+    QFile f(path);
+    QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(path));
+    src += QString::fromUtf8(f.readAll());
+  }
   const int snap = src.indexOf(QLatin1String("void MainWindow::applySnapConfig()"));
   QVERIFY2(snap >= 0, "applySnapConfig");
   const QString fn = src.mid(snap, 700);

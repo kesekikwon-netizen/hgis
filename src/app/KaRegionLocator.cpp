@@ -7,7 +7,9 @@
 #include <QKeyEvent>
 #include <QComboBox>
 #include <QFont>
-#include <QGuiApplication>
+#include <QApplication>
+#include <QMenu>
+#include <QTimer>
 #include <QScreen>
 #include <QSignalBlocker>
 #include <QFrame>
@@ -19,6 +21,19 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <algorithm>
+
+namespace {
+QWidget* hostOutsideMenu(QWidget* widget) {
+  QWidget* host = widget ? widget->window() : nullptr;
+  while (host && (qobject_cast<QMenu*>(host) ||
+                  host->windowFlags().testFlag(Qt::WindowType::Popup))) {
+    QWidget* parent = host->parentWidget();
+    if (!parent) break;
+    host = parent->window();
+  }
+  return host ? host : widget;
+}
+}
 
 KaRegionLocator::KaRegionLocator(QWidget* parent) : QWidget(parent) {
   setObjectName(QStringLiteral("regionLocator"));
@@ -88,6 +103,7 @@ bool KaRegionLocator::eventFilter(QObject* watched, QEvent* event) {
         return true;
       }
     } else if (event->type() == QEvent::WindowDeactivate) {
+      if (m_suppressDeactivate) return false;
       closePanel();
     }
   }
@@ -96,12 +112,12 @@ bool KaRegionLocator::eventFilter(QObject* watched, QEvent* event) {
 
 void KaRegionLocator::openAddressPopup(const QString& sido) {
   m_sido = sido;
-  QWidget* host = window();
+  const bool fromMenu = qobject_cast<QMenu*>(window()) != nullptr;
+  QWidget* host = hostOutsideMenu(this);
   if (!m_popup) {
-    m_popup = new QFrame(host ? host : this);
+    m_popup = new QFrame(host, Qt::Tool | Qt::FramelessWindowHint);
     m_popup->setObjectName(QStringLiteral("regionAddressPopup"));
     // A transient grab window steals the Windows IME; Tool is a real window so Hangul composes.
-    m_popup->setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
     m_popup->setAttribute(Qt::WA_InputMethodEnabled, true);
     m_popup->setAutoFillBackground(true);
     auto* col = new QVBoxLayout(m_popup);
@@ -172,9 +188,8 @@ void KaRegionLocator::openAddressPopup(const QString& sido) {
     connect(m_lot, &QLineEdit::returnPressed, this, &KaRegionLocator::emitSearch);
     connect(m_dong->lineEdit(), &QLineEdit::returnPressed, this, &KaRegionLocator::emitSearch);
     connect(m_city, &QComboBox::currentIndexChanged, this, &KaRegionLocator::fillDongs);
-  } else if (m_popup->parentWidget() != host && host) {
-    m_popup->setParent(host);
-    m_popup->setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
+  } else if (host && m_popup->parentWidget() != host) {
+    m_popup->setParent(host, Qt::Tool | Qt::FramelessWindowHint);
   }
   m_sidoLabel->setText(sido);
   const QSignalBlocker block(m_city);
@@ -191,8 +206,23 @@ void KaRegionLocator::openAddressPopup(const QString& sido) {
   if (popupScreen) placeAddressPopup(anchor, popupScreen->availableGeometry());
   m_popup->show();
   m_popup->raise();
-  m_popup->activateWindow();
-  m_dong->setFocus();
+  if (fromMenu) {
+    // The overflow menu is a popup. Leaving it open grabs the mouse and, on
+    // deactivate, hides a child tool window. Close it after the popup has a
+    // host outside the menu.
+    m_suppressDeactivate = true;
+    while (QWidget* popup = QApplication::activePopupWidget())
+      popup->close();
+    QTimer::singleShot(0, this, [this] {
+      m_suppressDeactivate = false;
+      if (!m_popup || !m_popup->isVisible()) return;
+      m_popup->activateWindow();
+      if (m_dong) m_dong->setFocus();
+    });
+  } else {
+    m_popup->activateWindow();
+    m_dong->setFocus();
+  }
 }
 
 void KaRegionLocator::placeAddressPopup(const QRect& anchor, const QRect& available) {

@@ -1,3 +1,4 @@
+#include "KaSessionLog.h"
 #include "LayoutService.h"
 #include "HeritageLayoutNumbers.h"
 #include "DemColorRampLegend.h"
@@ -1090,6 +1091,7 @@ LayoutService::DrawingBuildResult LayoutService::buildDrawing(QgsProject* projec
     result.warningKo = QString::fromUtf8(ex.what());
     if (errorOut) *errorOut = result.warningKo;
   } catch (...) {
+    KaSessionLog::line(QStringLiteral("[except] core/LayoutService.cpp:1092"));
     result.warningKo = QStringLiteral("도면을 만드는 중 오류가 났습니다.");
     if (errorOut) *errorOut = result.warningKo;
   }
@@ -1294,6 +1296,7 @@ QImage LayoutService::renderPreview(QgsProject* project, const QString& layoutNa
     if (errorOut) *errorOut = QString::fromUtf8(ex.what());
     return {};
   } catch (...) {
+    KaSessionLog::line(QStringLiteral("[except] core/LayoutService.cpp:1296"));
     if (errorOut) *errorOut = QStringLiteral("미리보기를 그리는 중 오류가 났습니다.");
     return {};
   }

@@ -1,3 +1,4 @@
+#include "KaSessionLog.h"
 #include "KaPortableRuntime.h"
 
 #include <QByteArray>
@@ -349,6 +350,7 @@ bool KaPortableRuntime::koreaWorkAndWebCrsValid() {
     const QgsPointXY out = xf.transform(QgsPointXY(14135000.0, 4510000.0));
     return std::isfinite(out.x()) && std::isfinite(out.y());
   } catch (...) {
+    KaSessionLog::line(QStringLiteral("[except] core/KaPortableRuntime.cpp:351"));
     return false;
   }
 }

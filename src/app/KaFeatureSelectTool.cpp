@@ -1,3 +1,4 @@
+#include "KaCrashGuard.h"
 #include "KaFeatureSelectTool.h"
 
 #include "KaVertexEditTool.h"
@@ -403,6 +404,7 @@ void KaFeatureSelectTool::selectAtPoint(const QgsPointXY& mapPt, bool addToSelec
       try {
         layerPt = xf.transform(mapPt);
       } catch (...) {
+        KaCrashGuard::logLine(QStringLiteral("[except] app/KaFeatureSelectTool.cpp:405"));
         continue;
       }
     }
@@ -497,6 +499,7 @@ void KaFeatureSelectTool::selectInRect(const QgsRectangle& mapRect, bool addToSe
       try {
         layerGeom.transform(xf);
       } catch (...) {
+        KaCrashGuard::logLine(QStringLiteral("[except] app/KaFeatureSelectTool.cpp:499"));
         continue;
       }
     }

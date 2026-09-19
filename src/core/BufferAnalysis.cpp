@@ -1,3 +1,4 @@
+#include "KaSessionLog.h"
 #include "BufferAnalysis.h"
 #include "LayerOps.h"
 
@@ -69,6 +70,7 @@ QgsGeometry unionInCrs(QgsVectorLayer* source, const QgsCoordinateReferenceSyste
       try {
         if (g.transform(xf) != Qgis::GeometryOperationResult::Success) continue;
       } catch (...) {
+        KaSessionLog::line(QStringLiteral("[except] core/BufferAnalysis.cpp:71"));
         continue;
       }
     }

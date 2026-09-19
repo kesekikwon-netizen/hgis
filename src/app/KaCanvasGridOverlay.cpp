@@ -1,3 +1,4 @@
+#include "KaCrashGuard.h"
 #include "KaCanvasGridOverlay.h"
 #include "core/CanvasGridMath.h"
 
@@ -163,6 +164,7 @@ void KaCanvasGridOverlay::paintGeographic(QPainter* p) {
     try {
       pt = toWgs.transform(pt);
     } catch (...) {
+      KaCrashGuard::logLine(QStringLiteral("[except] app/KaCanvasGridOverlay.cpp:165"));
       return;
     }
     lon0 = std::min(lon0, pt.x());
@@ -183,6 +185,7 @@ void KaCanvasGridOverlay::paintGeographic(QPainter* p) {
     try {
       return toCanvasCoordinates(toMap.transform(QgsPointXY(lon, lat))) - origin;
     } catch (...) {
+      KaCrashGuard::logLine(QStringLiteral("[except] app/KaCanvasGridOverlay.cpp:185"));
       return QPointF();
     }
   };

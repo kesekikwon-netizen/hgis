@@ -50,6 +50,7 @@ QColor groupColor(const QString& id) {
       id == QLatin1String("easy_draw") || id == QLatin1String("saveedit") ||
       id == QLatin1String("snap") || id == QLatin1String("select") ||
       id == QLatin1String("arrow") || id == QLatin1String("stop") ||
+      id == QLatin1String("undo") || id == QLatin1String("redo") ||
       id == QLatin1String("trash")) return palette.record;
   return palette.map;
 }
@@ -707,6 +708,30 @@ void dBuffer(QPainter& p) {
   p.drawRoundedRect(QRectF(14, 14, 36, 36), 4, 4);
 }
 
+void dUndo(QPainter& p) {
+  prep(p, 3.2);
+  QPainterPath arc;
+  arc.moveTo(46, 20);
+  arc.arcTo(QRectF(14, 16, 36, 32), 20, 220);
+  p.drawPath(arc);
+  fillInk(p);
+  QPolygonF head;
+  head << QPointF(14, 16) << QPointF(16, 34) << QPointF(32, 24);
+  p.drawPolygon(head);
+}
+
+void dRedo(QPainter& p) {
+  prep(p, 3.2);
+  QPainterPath arc;
+  arc.moveTo(18, 20);
+  arc.arcTo(QRectF(14, 16, 36, 32), 160, -220);
+  p.drawPath(arc);
+  fillInk(p);
+  QPolygonF head;
+  head << QPointF(50, 16) << QPointF(48, 34) << QPointF(32, 24);
+  p.drawPolygon(head);
+}
+
 void dEasyDraw(QPainter& p) {
   prep(p, 3.0);
   QPolygonF path;
@@ -772,6 +797,8 @@ QIcon icon(const QString& id) {
   else if (id == QLatin1String("draw_area")) ic = bake(dToolArea);
   else if (id == QLatin1String("snap")) ic = bake(dSnap);
   else if (id == QLatin1String("easy_draw")) ic = bake(dEasyDraw);
+  else if (id == QLatin1String("undo")) ic = bake(dUndo);
+  else if (id == QLatin1String("redo")) ic = bake(dRedo);
   else if (id == QLatin1String("buffer")) ic = bake(dBuffer);
   else if (id == QLatin1String("artifact")) ic = bake(dArtifact);
   else if (id == QLatin1String("select") || id == QLatin1String("arrow")) ic = bake(dSelect);

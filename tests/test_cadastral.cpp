@@ -14,6 +14,9 @@
 #include <qgslayertree.h>
 #include <qgslabelingresults.h>
 #include <qgsmaprendererparalleljob.h>
+#include <qgsmaprenderersequentialjob.h>
+#include <qgstextformat.h>
+#include <QFont>
 #include <qgsmapsettings.h>
 #include <qgsmapcanvas.h>
 #include <qgspallabeling.h>
@@ -601,6 +604,99 @@ private slots:
     QVERIFY(placedLabels > 0);
     qInfo().noquote() << "CADASTRAL_LIVE count=" << layer.featureCount()
                      << "CRS=" << layer.crs().authid() << "path=" << prepared.gpkgPath;
+  }
+
+  void prepareBreakdown_clipDedupFasterThanWkbHash() {
+    QTemporaryDir input;
+    QTemporaryDir output;
+    QVERIFY(input.isValid() && output.isValid());
+    QList<Parcel> parcels;
+    constexpr int cols = 120;
+    constexpr int rows = 80;
+    parcels.reserve(cols * rows);
+    for (int r = 0; r < rows; ++r) {
+      for (int c = 0; c < cols; ++c) {
+        parcels.append({r * cols + c + 1, QString::number(r * cols + c + 1),
+                        box(200000. + c * 10., 550000. + r * 10., 8., 8.)});
+      }
+    }
+    const QString source = writeParcels(input.filePath(QStringLiteral("grid.gpkg")), parcels);
+    QVERIFY(!source.isEmpty());
+    const QgsGeometry scope = box(200000., 550000., 800., 400.);
+
+    QElapsedTimer oldTimer;
+    oldTimer.start();
+    QSet<QString> oldKeys;
+    for (const Parcel& parcel : parcels) {
+      QgsGeometry canonical = parcel.geometry;
+      canonical.convertToMultiType();
+      canonical.normalize();
+      oldKeys.insert(QString::fromLatin1(
+          QCryptographicHash::hash(canonical.asWkb(), QCryptographicHash::Sha256).toHex()));
+    }
+    const qint64 oldMs = qMax<qint64>(1, oldTimer.elapsed());
+
+    QElapsedTimer newTimer;
+    newTimer.start();
+    QSet<QString> newKeys;
+    for (const Parcel& parcel : parcels) {
+      const QgsRectangle box = parcel.geometry.boundingBox();
+      const int points =
+          parcel.geometry.constGet() ? static_cast<int>(parcel.geometry.constGet()->nCoordinates()) : 0;
+      newKeys.insert(QStringLiteral("%1:%2:%3:%4:%5:%6:%7")
+                         .arg(pnu(parcel.id))
+                         .arg(qRound64(box.xMinimum() * 1000.0))
+                         .arg(qRound64(box.yMinimum() * 1000.0))
+                         .arg(qRound64(box.xMaximum() * 1000.0))
+                         .arg(qRound64(box.yMaximum() * 1000.0))
+                         .arg(qRound64(parcel.geometry.area() * 1000.0))
+                         .arg(points));
+    }
+    const qint64 newMs = newTimer.elapsed();
+    qInfo() << "CADASTRAL_BREAKDOWN old_wkb_hash_ms=" << oldMs << "cheap_key_ms=" << newMs
+            << "keys=" << oldKeys.size();
+    QVERIFY2(newMs * 10 <= oldMs * 7,
+             qPrintable(QStringLiteral("cheap key %1ms is not 30% faster than WKB hash %2ms")
+                            .arg(newMs)
+                            .arg(oldMs)));
+
+    CadastralImport::PrepareBreakdown timing;
+    QElapsedTimer prepareTimer;
+    prepareTimer.start();
+    const auto result =
+        CadastralImport::prepare({source}, scope, sourceCrs(), {}, output.path(), {}, {}, &timing);
+    const qint64 prepareMs = prepareTimer.elapsed();
+    QVERIFY2(result.isReady(), qPrintable(result.error));
+    QVERIFY2(timing.written >= 3200 && timing.written <= 3600,
+             qPrintable(QStringLiteral("written=%1").arg(timing.written)));
+    QVERIFY(timing.candidates >= timing.written);
+    QVERIFY(timing.hashMs >= 0);
+    QVERIFY(timing.clipMs >= 0);
+    QVERIFY(timing.indexMs >= 0);
+
+    QgsVectorLayer layer(outputUri(result), QStringLiteral("timed"), QStringLiteral("ogr"));
+    QVERIFY(layer.isValid());
+    QCOMPARE(layer.featureCount(), timing.written);
+    QCOMPARE(layer.hasSpatialIndex(), Qgis::SpatialIndexPresence::Present);
+
+    QElapsedTimer fontTimer;
+    fontTimer.start();
+    QVERIFY(CadastralImport::applyStyle(&layer));
+    QgsMapSettings settings;
+    settings.setLayers({&layer});
+    settings.setDestinationCrs(sourceCrs());
+    settings.setOutputSize(QSize(800, 600));
+    settings.setOutputDpi(96.);
+    settings.setExtent(scope.boundingBox());
+    QgsMapRendererSequentialJob job(settings);
+    job.start();
+    job.waitForFinished();
+    QVERIFY(!job.renderedImage().isNull());
+    const qint64 fontMs = fontTimer.elapsed();
+    QCOMPARE(layer.labeling()->settings().format().font().family(), QStringLiteral("Malgun Gothic"));
+    qInfo() << "CADASTRAL_BREAKDOWN prepare_ms=" << prepareMs << "hash_ms=" << timing.hashMs
+            << "clip_ms=" << timing.clipMs << "index_ms=" << timing.indexMs << "font_ms=" << fontMs
+            << "candidates=" << timing.candidates << "written=" << timing.written;
   }
 };
 

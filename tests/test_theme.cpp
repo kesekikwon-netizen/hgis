@@ -33,6 +33,7 @@ private slots:
   void initTestCase();
   void ribbonButtons_renderAtIntendedSize();
   void ribbonOverflow_preservesControlsAndKeyboard();
+  void ribbon_tabEnterNewSurveyToSave();
   void domainIcons_useDistinctColors();
   void iconStates_preserveMeaningAndDisableColor();
   void explicitIconTint_remainsMonochrome();
@@ -45,6 +46,7 @@ private slots:
   void embeddedNotEmpty();
   void diskMatchesEmbedded();
   void noUrl();
+  void versionAndLaunchScripts_exist();
   void gisExcludePresent();
   void requiredSelectorsPresent();
   void toolbarCheckedHasDistinctTreatment();
@@ -139,6 +141,57 @@ const char* const themedIconIds[] = {
     "contour", "dem", "soil", "paleo", "geology", "river", "georef", "buffer",
     "check", "pdf", "export", "more",
 };
+}
+
+void TestTheme::ribbon_tabEnterNewSurveyToSave() {
+  KaBeginnerRibbon ribbon;
+  ribbon.addGroup(QStringLiteral("survey"), QStringLiteral("조사파일"));
+  ribbon.addGroup(QStringLiteral("record"), QStringLiteral("기록"));
+  ribbon.addGroup(QStringLiteral("out"), QStringLiteral("내보내기"));
+  struct Cmd {
+    const char* group;
+    const char* text;
+    QKeySequence key;
+  };
+  const Cmd cmds[] = {
+      {"survey", "새 조사", QKeySequence::New},
+      {"survey", "조사 열기", QKeySequence::Open},
+      {"survey", "저장", QKeySequence::Save},
+      {"survey", "다른 이름", QKeySequence::SaveAs},
+      {"record", "그리기", QKeySequence(QStringLiteral("Ctrl+D"))},
+      {"record", "선택", QKeySequence(QStringLiteral("Ctrl+1"))},
+      {"out", "도면 만들기", QKeySequence(QStringLiteral("Ctrl+L"))},
+      {"out", "5179 내보내기", QKeySequence(QStringLiteral("Ctrl+E"))},
+  };
+  QList<QAction*> actions;
+  QList<QToolButton*> buttons;
+  for (const auto& cmd : cmds) {
+    auto* action = new QAction(QString::fromUtf8(cmd.text), &ribbon);
+    action->setShortcut(cmd.key);
+    QVERIFY2(!action->shortcut().isEmpty(), cmd.text);
+    auto* button = ribbon.addAction(QString::fromLatin1(cmd.group), action);
+    QVERIFY(button);
+    actions.append(action);
+    buttons.append(button);
+  }
+  ribbon.applyTabOrder();
+  ribbon.resize(1100, ribbon.sizeHint().height());
+  ribbon.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&ribbon));
+  QCOMPARE(ribbon.tabButtons().size(), 8);
+  QCOMPARE(ribbon.tabButtons().at(0), buttons.at(0));
+  QCOMPARE(ribbon.tabButtons().at(2), buttons.at(2));
+  QSignalSpy newSpy(actions.at(0), &QAction::triggered);
+  QSignalSpy saveSpy(actions.at(2), &QAction::triggered);
+  buttons.at(0)->setFocus(Qt::TabFocusReason);
+  QCOMPARE(QApplication::focusWidget(), static_cast<QWidget*>(buttons.at(0)));
+  QTest::keyClick(buttons.at(0), Qt::Key_Enter);
+  QTRY_COMPARE(newSpy.count(), 1);
+  QTest::keyClick(QApplication::focusWidget(), Qt::Key_Tab);
+  QTest::keyClick(QApplication::focusWidget(), Qt::Key_Tab);
+  QCOMPARE(QApplication::focusWidget(), static_cast<QWidget*>(buttons.at(2)));
+  QTest::keyClick(QApplication::focusWidget(), Qt::Key_Enter);
+  QTRY_COMPARE(saveSpy.count(), 1);
 }
 
 void TestTheme::ribbonOverflow_preservesControlsAndKeyboard() {
@@ -711,6 +764,19 @@ void TestTheme::diskMatchesEmbedded() {
 void TestTheme::noUrl() {
   QVERIFY2(!KaTheme::embeddedStyleSheet().contains(QLatin1String("url(")),
            "QSS must not use url()");
+}
+
+void TestTheme::versionAndLaunchScripts_exist() {
+  QFile ver(QStringLiteral("VERSION"));
+  QVERIFY2(ver.exists() && ver.open(QIODevice::ReadOnly | QIODevice::Text),
+           "CTest WORKING_DIRECTORY must be the repo root");
+  const QString text = QString::fromUtf8(ver.readAll()).trimmed();
+  QVERIFY2(QRegularExpression(QStringLiteral(R"(^\d+\.\d+\.\d+$)")).match(text).hasMatch(),
+           qPrintable(text));
+  QVERIFY2(QFile::exists(QStringLiteral("scripts/start-ka-hgis.vbs")), "start-ka-hgis.vbs");
+  QVERIFY2(QFile::exists(QStringLiteral("scripts/run-ka-hgis.ps1")), "run-ka-hgis.ps1");
+  QVERIFY2(QFile::exists(QStringLiteral("VERSION_QGIS_PIN.txt")), "VERSION_QGIS_PIN.txt");
+  QVERIFY2(QFile::exists(QStringLiteral("THIRD_PARTY_NOTICES.md")), "THIRD_PARTY_NOTICES.md");
 }
 
 void TestTheme::gisExcludePresent() {

@@ -1,3 +1,4 @@
+#include "KaSessionLog.h"
 #include "KaSafeQgis.h"
 #include "KaPortableRuntime.h"
 
@@ -187,6 +188,7 @@ bool kaWriteQgisProjectAtomic(QgsProject* project, const QString& path, QString*
             "작업 화면 저장 중 오류가 발생했습니다. 작업을 유지한 채 다시 저장하거나 다른 이름으로 저장해 주세요.\n%1")
             .arg(QString::fromUtf8(ex.what())));
   } catch (...) {
+    KaSessionLog::line(QStringLiteral("[except] core/KaSafeQgis.cpp:189"));
     return fail(QStringLiteral(
         "작업 화면 저장 중 오류가 발생했습니다. 작업을 유지한 채 다시 저장하거나 다른 이름으로 저장해 주세요."));
   }

@@ -10,6 +10,7 @@
 #endif
 
 #include <QtTest>
+#include <QStringConverter>
 #include <QColor>
 #include <QDir>
 #include <QFile>
@@ -65,15 +66,19 @@
 #include <qgshillshaderenderer.h>
 #include <QPainter>
 
+#include <qgis.h>
 #include <qgsapplication.h>
 #include <qgsproject.h>
+#include <qgssnappingconfig.h>
 #include <qgsvectorlayer.h>
 #include <qgsvectordataprovider.h>
 #include <qgscoordinatetransform.h>
 #include <qgsrasterlayer.h>
 #include <qgsfeature.h>
+#include <qgsfeatureid.h>
 #include <qgsrectangle.h>
 #include <qgsgeometry.h>
+#include <QUndoStack>
 #include <qgspointxy.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgsvectorfilewriter.h>
@@ -175,9 +180,15 @@ private slots:
   void layerOps_isolateSurfaceSurvey_satelliteAndUserSiteOnly();
   void editBufferCommitSurvivesReopen();
   void undoCommittedFeature_removesLastAdded();
+  void mapEditUndoRedo_drawMoveDeleteRestoresFeature();
+  void snapSettings_surviveProjectWriteAndReopen();
+  void topologicalVertexMove_movesSharedVertexOnBothFeatures();
+  void featureForm_cancelKeepsGeometryAndOkWritesNameNumber();
   void captureVertexDrag_preservesEditsAndReportsOutcome_data();
   void captureVertexDrag_preservesEditsAndReportsOutcome();
   void importControlCsvWritesFeatures();
+  void importControlCsv_keepsKoreanAxesAndEncoding();
+  void suggestControlPointAxisSwap_matchesCsvRule();
   void osmBasemapValidWithExtent();
   void layerTreeReorderAndRemovalTest();
   void layerTreeDragReorderChangesOrder();
@@ -304,6 +315,32 @@ static bool projectHasLayerNamedLike(QgsProject* proj, const QString& base) {
       return true;
   }
   return false;
+}
+
+static QString readLayerOpsSources() {
+  QString out;
+  for (const QString& path : {QStringLiteral("src/core/LayerOps.cpp"),
+                              QStringLiteral("src/core/BasemapOps.cpp"),
+                              QStringLiteral("src/core/LabelOps.cpp"),
+                              QStringLiteral("src/core/ControlPointCsv.cpp")}) {
+    QFile f(path);
+    if (f.open(QIODevice::ReadOnly | QIODevice::Text))
+      out += QString::fromUtf8(f.readAll());
+  }
+  return out;
+}
+
+static QString readMainWindowSources() {
+  QString out;
+  for (const QString& path : {QStringLiteral("src/app/MainWindow.cpp"),
+                              QStringLiteral("src/app/MainWindowExport.cpp"),
+                              QStringLiteral("src/app/MainWindowEditing.cpp"),
+                              QStringLiteral("src/app/MainWindowSession.cpp")}) {
+    QFile f(path);
+    if (f.open(QIODevice::ReadOnly | QIODevice::Text))
+      out += QString::fromUtf8(f.readAll());
+  }
+  return out;
 }
 
 static QString rulesFile() {
@@ -1022,10 +1059,8 @@ void TestWorkflow::thematicOverlay_secondToggleHidesLayer() {
 
 void TestWorkflow::mapTools_secondClickReturnsToPan() {
   // ArcGIS Explore / QGIS pan: 선택·줄자를 다시 누르면 팬으로 돌아간다.
-  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
-           "run from source tree (ctest WORKING_DIRECTORY)");
-  const QString src = QString::fromUtf8(f.readAll());
+  const QString src = readMainWindowSources();
+  QVERIFY2(!src.isEmpty(), "run from source tree (ctest WORKING_DIRECTORY)");
   auto bodyOf = [&](const QString& sig) {
     const int fn = src.indexOf(sig);
     if (fn < 0) return QString();
@@ -1334,9 +1369,8 @@ void TestWorkflow::vertexEdit_snapsAndOffersAddDeleteOnLine() {
   QVERIFY2(!pressBody.contains(QLatin1String("deleteVertexAt(idx)")),
            "우클릭에서 점을 바로 지우면 메뉴가 안 나옴");
 
-  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString mwSrc = QString::fromUtf8(mw.readAll());
+  const QString mwSrc = readMainWindowSources();
+  QVERIFY2(!mwSrc.isEmpty(), "MainWindow.cpp + Export + Editing");
   const int snap = mwSrc.indexOf(QLatin1String("void MainWindow::applySnapConfig"));
   QVERIFY2(snap >= 0, "applySnapConfig");
   const int snapEnd = mwSrc.indexOf(QLatin1String("void MainWindow::"), snap + 10);
@@ -1563,10 +1597,8 @@ void TestWorkflow::elevationMap_is3857ReferenceToggleNotTiffDialog() {
 void TestWorkflow::elevationMap_xyzOnlySkipsAbortWhilePanning() {
   // crash-20260901-102801: 고도맵(WMS GetMap) + OTF QgsRasterProjector +
   // 팬 중 TileDownloadManager deleteLater → 0xc0000005. 프로그램이 꺼진다.
-  QFile ops(QStringLiteral("src/core/LayerOps.cpp"));
-  QVERIFY2(ops.open(QIODevice::ReadOnly | QIODevice::Text),
-           "run from source tree (ctest WORKING_DIRECTORY)");
-  const QString opsSrc = QString::fromUtf8(ops.readAll());
+  const QString opsSrc = readLayerOpsSources();
+  QVERIFY2(!opsSrc.isEmpty(), "run from source tree (ctest WORKING_DIRECTORY)");
   const int fn = opsSrc.indexOf(QLatin1String("bool LayerOps::addElevationHillshadeMap"));
   QVERIFY2(fn >= 0, "addElevationHillshadeMap");
   const int next = opsSrc.indexOf(QLatin1String("\nbool LayerOps::"), fn + 10);
@@ -1663,9 +1695,8 @@ void TestWorkflow::demColorRelief_is3857XyzNotTerrainMap() {
   QVERIFY2(!dem->source().contains(QLatin1String("opentopomap"), Qt::CaseInsensitive),
            "DEM must not be the OpenTopoMap terrain layer");
 
-  QFile ops(QStringLiteral("src/core/LayerOps.cpp"));
-  QVERIFY2(ops.open(QIODevice::ReadOnly | QIODevice::Text), "LayerOps.cpp");
-  const QString opsSrc = QString::fromUtf8(ops.readAll());
+  const QString opsSrc = readLayerOpsSources();
+  QVERIFY2(!opsSrc.isEmpty(), "LayerOps.cpp + BasemapOps + LabelOps + ControlPointCsv");
   const int fn = opsSrc.indexOf(QLatin1String("bool LayerOps::addDemColorReliefMap"));
   QVERIFY2(fn >= 0, "addDemColorReliefMap");
   const int next = opsSrc.indexOf(QLatin1String("\nbool LayerOps::"), fn + 10);
@@ -2124,9 +2155,8 @@ void TestWorkflow::demNgiiImg_loadsWithMeterLegend() {
   QVERIFY2(!toggle.contains(QLatin1String("getOpenFileName")),
            "DEM body click stays one-click, not the NGII file picker");
 
-  QFile ops(QStringLiteral("src/core/LayerOps.cpp"));
-  QVERIFY2(ops.open(QIODevice::ReadOnly | QIODevice::Text), "LayerOps.cpp");
-  const QString opsSrc = QString::fromUtf8(ops.readAll());
+  const QString opsSrc = readLayerOpsSources();
+  QVERIFY2(!opsSrc.isEmpty(), "LayerOps.cpp + BasemapOps + LabelOps + ControlPointCsv");
   const int addFn = opsSrc.indexOf(QLatin1String("bool LayerOps::addDemElevationRaster"));
   QVERIFY2(addFn >= 0, "addDemElevationRaster");
   const int addNext = opsSrc.indexOf(QLatin1String("\nbool LayerOps::"), addFn + 10);
@@ -2236,10 +2266,8 @@ void TestWorkflow::sheetScaleBarUsesInkFill() {
 }
 
 void TestWorkflow::layoutOpenDoesNotAutoStartCoordPoint() {
-  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
-           "run from source tree (ctest WORKING_DIRECTORY)");
-  const QString src = QString::fromUtf8(f.readAll());
+  const QString src = readMainWindowSources();
+  QVERIFY2(!src.isEmpty(), "run from source tree (ctest WORKING_DIRECTORY)");
   const int fn = src.indexOf(QLatin1String("void MainWindow::openLayoutDesigner"));
   QVERIFY2(fn >= 0, "openLayoutDesigner must exist");
   const int next = src.indexOf(QLatin1String("void MainWindow::"), fn + 10);
@@ -2766,6 +2794,228 @@ void TestWorkflow::undoCommittedFeature_removesLastAdded() {
   delete vl;
 }
 
+void TestWorkflow::mapEditUndoRedo_drawMoveDeleteRestoresFeature() {
+  auto* vl = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                QStringLiteral("구역"), QStringLiteral("memory"));
+  QVERIFY(vl->isValid());
+  LayerOps::markSurveyLayer(vl, QStringLiteral("survey_area"));
+  QgsProject project;
+  project.addMapLayer(vl);
+
+  QgsPolylineXY ring;
+  ring << QgsPointXY(200000, 450000) << QgsPointXY(200080, 450000)
+       << QgsPointXY(200080, 450080) << QgsPointXY(200000, 450080)
+       << QgsPointXY(200000, 450000);
+  const QgsGeometry drawn = QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring);
+  QString err;
+  QgsFeature added(vl->fields());
+  added.setGeometry(drawn);
+  QVERIFY2(LayerOps::runEditCommand(vl, QStringLiteral("그리기"), [&]() {
+    return vl->addFeature(added);
+  }, &err), qPrintable(err));
+  QCOMPARE(int(vl->featureCount()), 1);
+  QgsFeatureId fid = *vl->allFeatureIds().constBegin();
+  QCOMPARE(vl->getFeature(fid).geometry().asWkb(), drawn.asWkb());
+  QVERIFY(vl->undoStack() && vl->undoStack()->canUndo());
+  QCOMPARE(LayerOps::preferredUndoLayer(&project, vl), vl);
+  QVERIFY(LayerOps::undoLayerEdits(vl));
+  QCOMPARE(int(vl->featureCount()), 0);
+  QVERIFY(LayerOps::redoLayerEdits(vl));
+  QCOMPARE(int(vl->featureCount()), 1);
+  fid = *vl->allFeatureIds().constBegin();
+  QCOMPARE(vl->getFeature(fid).geometry().asWkb(), drawn.asWkb());
+
+  QgsPolylineXY movedRing = ring;
+  for (auto& pt : movedRing) pt.setX(pt.x() + 10.0);
+  QgsGeometry moved = QgsGeometry::fromPolygonXY(QgsPolygonXY() << movedRing);
+  QVERIFY2(LayerOps::runEditCommand(vl, QStringLiteral("정점 이동"), [&]() {
+    return vl->changeGeometry(fid, moved);
+  }, &err), qPrintable(err));
+  QCOMPARE(vl->getFeature(fid).geometry().asWkb(), moved.asWkb());
+  QVERIFY(LayerOps::undoLayerEdits(vl));
+  QCOMPARE(vl->getFeature(fid).geometry().asWkb(), drawn.asWkb());
+
+  QVERIFY2(LayerOps::runEditCommand(vl, QStringLiteral("삭제"), [&]() {
+    return vl->deleteFeature(fid);
+  }, &err), qPrintable(err));
+  QCOMPARE(int(vl->featureCount()), 0);
+  QVERIFY(LayerOps::undoLayerEdits(vl));
+  QCOMPARE(int(vl->featureCount()), 1);
+  const QgsFeatureId restored = *vl->allFeatureIds().constBegin();
+  QCOMPARE(vl->getFeature(restored).geometry().asWkb(), drawn.asWkb());
+}
+
+void TestWorkflow::snapSettings_surviveProjectWriteAndReopen() {
+  QgsProject project;
+  project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* area = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("조사구역"), QStringLiteral("memory"));
+  QVERIFY(area->isValid());
+  LayerOps::markSurveyLayer(area, QStringLiteral("survey_area"));
+  project.addMapLayer(area);
+  auto* ref = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                 QStringLiteral("지질"), QStringLiteral("memory"));
+  QVERIFY(ref->isValid());
+  LayerOps::markReferenceLayer(ref);
+  project.addMapLayer(ref);
+
+  LayerOps::SnapSettings input;
+  input.enabled = false;
+  input.tolerancePx = 24.0;
+  input.target = LayerOps::SnapTarget::CurrentLayer;
+  input.topological = false;
+  LayerOps::applySnapSettings(&project, input);
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  const QString qgz = QDir(dir.path()).filePath(QStringLiteral("snap.qgz"));
+  QVERIFY2(project.write(qgz), "project write");
+  QgsProject opened;
+  QVERIFY2(opened.read(qgz), "project read");
+  const auto restored = LayerOps::readSnapSettings(&opened);
+  QCOMPARE(restored.enabled, false);
+  QCOMPARE(restored.tolerancePx, 24.0);
+  QCOMPARE(restored.target, LayerOps::SnapTarget::CurrentLayer);
+  QCOMPARE(restored.topological, false);
+  QCOMPARE(opened.topologicalEditing(), false);
+
+  input.enabled = true;
+  input.target = LayerOps::SnapTarget::SurveyLayers;
+  LayerOps::applySnapSettings(&project, input);
+  QCOMPARE(project.snappingConfig().mode(), Qgis::SnappingMode::AdvancedConfiguration);
+  QVERIFY(project.snappingConfig().individualLayerSettings(area).enabled());
+  QVERIFY(!project.snappingConfig().individualLayerSettings(ref).enabled());
+
+  auto* extra = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                   QStringLiteral("유구"), QStringLiteral("memory"));
+  QVERIFY(extra->isValid());
+  LayerOps::markSurveyLayer(extra, QStringLiteral("feature_poly"));
+  project.addMapLayer(extra);
+  LayerOps::applySnapSettings(&project, input);
+  QVERIFY2(project.snappingConfig().individualLayerSettings(extra).enabled(),
+           "later survey layer must join AdvancedConfiguration");
+  QVERIFY(!project.snappingConfig().individualLayerSettings(ref).enabled());
+}
+
+void TestWorkflow::topologicalVertexMove_movesSharedVertexOnBothFeatures() {
+  QgsProject project;
+  project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* poly = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("유구"), QStringLiteral("memory"));
+  QVERIFY(poly->isValid());
+  LayerOps::markSurveyLayer(poly, QStringLiteral("feature_poly"));
+  project.addMapLayer(poly);
+  LayerOps::SnapSettings snap;
+  snap.topological = true;
+  LayerOps::applySnapSettings(&project, snap);
+  QVERIFY(project.topologicalEditing());
+
+  QgsPolylineXY left;
+  left << QgsPointXY(148090, 98110) << QgsPointXY(148100, 98110)
+       << QgsPointXY(148100, 98120) << QgsPointXY(148090, 98120)
+       << QgsPointXY(148090, 98110);
+  QgsPolylineXY right;
+  right << QgsPointXY(148100, 98110) << QgsPointXY(148110, 98110)
+        << QgsPointXY(148110, 98120) << QgsPointXY(148100, 98120)
+        << QgsPointXY(148100, 98110);
+  QVERIFY(poly->startEditing());
+  QgsFeature a(poly->fields());
+  a.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << left));
+  QgsFeature b(poly->fields());
+  b.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << right));
+  QVERIFY(poly->addFeature(a));
+  QVERIFY(poly->addFeature(b));
+
+  QgsFeature leftF;
+  QgsFeature rightF;
+  QgsFeatureIterator it = poly->getFeatures();
+  QgsFeature cur;
+  while (it.nextFeature(cur)) {
+    if (cur.geometry().boundingBox().xMinimum() < 148095) leftF = cur;
+    else rightF = cur;
+  }
+  QVERIFY(leftF.isValid());
+  QVERIFY(rightF.isValid());
+  int at = -1, before = -1, after = -1;
+  double d2 = 0;
+  leftF.geometry().closestVertex(QgsPointXY(148100, 98120), at, before, after, d2);
+  QVERIFY2(at >= 0 && d2 < 1e-6, "shared corner");
+
+  QString err;
+  QVERIFY2(LayerOps::applyVertexMove(poly, static_cast<qint64>(leftF.id()), at, 148105, 98125,
+                                     true, &err),
+           qPrintable(err));
+  const QgsGeometry leftAfter = poly->getFeature(leftF.id()).geometry();
+  const QgsGeometry rightAfter = poly->getFeature(rightF.id()).geometry();
+  int rightAt = -1;
+  rightAfter.closestVertex(QgsPointXY(148105, 98125), rightAt, before, after, d2);
+  QVERIFY2(rightAt >= 0 && d2 <= 1e-6,
+           qPrintable(QStringLiteral("neighbor must move, d2=%1").arg(d2)));
+  int leftAt = -1;
+  leftAfter.closestVertex(QgsPointXY(148105, 98125), leftAt, before, after, d2);
+  QVERIFY2(leftAt >= 0 && d2 <= 1e-6, "dragged vertex must move");
+
+  project.setTopologicalEditing(false);
+  int leftShared = -1;
+  poly->getFeature(leftF.id()).geometry().closestVertex(QgsPointXY(148100, 98110), leftShared,
+                                                        before, after, d2);
+  QVERIFY2(leftShared >= 0 && d2 <= 1e-6, "remaining shared corner");
+  QVERIFY2(LayerOps::applyVertexMove(poly, static_cast<qint64>(leftF.id()), leftShared, 148102,
+                                     98108, false, &err),
+           qPrintable(err));
+  int neighborStay = -1;
+  double neighborD2 = 0;
+  poly->getFeature(rightF.id()).geometry().closestVertex(QgsPointXY(148100, 98110), neighborStay,
+                                                         before, after, neighborD2);
+  QVERIFY2(neighborStay >= 0 && neighborD2 <= 1e-6,
+           "topology off must leave the other feature");
+}
+
+void TestWorkflow::featureForm_cancelKeepsGeometryAndOkWritesNameNumber() {
+  auto* layer = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                   QStringLiteral("유구"), QStringLiteral("memory"));
+  QVERIFY(layer->isValid());
+  QVERIFY(layer->dataProvider()->addAttributes(
+      {QgsField(QStringLiteral("kind"), QMetaType::Type::QString),
+       QgsField(QStringLiteral("feature_no"), QMetaType::Type::QString)}));
+  layer->updateFields();
+  LayerOps::markSurveyLayer(layer, QStringLiteral("feature_poly"));
+  const auto fields = LayerOps::featureFormFields(layer);
+  QCOMPARE(fields.nameField, QStringLiteral("kind"));
+  QCOMPARE(fields.numberField, QStringLiteral("feature_no"));
+
+  QVERIFY(layer->startEditing());
+  QgsFeature kept(layer->fields());
+  kept.setGeometry(QgsGeometry::fromRect(QgsRectangle(148090, 98110, 148100, 98120)));
+  QgsFeature named(layer->fields());
+  named.setGeometry(QgsGeometry::fromRect(QgsRectangle(148100, 98110, 148110, 98120)));
+  QVERIFY(layer->addFeature(kept));
+  QVERIFY(layer->addFeature(named));
+  QCOMPARE(int(layer->featureCount()), 2);
+
+  QString err;
+  QVERIFY2(LayerOps::applyFeatureFormValues(layer, static_cast<qint64>(named.id()),
+                                            QStringLiteral("주거지"), QStringLiteral("1호"), &err),
+           qPrintable(err));
+  QCOMPARE(layer->getFeature(named.id()).attribute(QStringLiteral("kind")).toString(),
+           QStringLiteral("주거지"));
+  QCOMPARE(layer->getFeature(named.id()).attribute(QStringLiteral("feature_no")).toString(),
+           QStringLiteral("1호"));
+  QVERIFY(layer->getFeature(kept.id()).geometry().area() > 0);
+  QCOMPARE(layer->getFeature(kept.id()).attribute(QStringLiteral("kind")).toString(), QString());
+  QCOMPARE(int(layer->featureCount()), 2);
+
+  const QString src = readMainWindowSources();
+  QVERIFY2(!src.isEmpty(), "MainWindow.cpp + Export + Editing");
+  const int cap = src.indexOf(QStringLiteral("void MainWindow::onGeometryCaptured"));
+  QVERIFY2(cap >= 0, "onGeometryCaptured");
+  const int capEnd = src.indexOf(QStringLiteral("void MainWindow::"), cap + 10);
+  const QString body = src.mid(cap, capEnd > cap ? capEnd - cap : 2500);
+  QVERIFY2(body.contains(QLatin1String("addFeature")), "도형을 먼저 넣는다");
+  QVERIFY2(body.contains(QLatin1String("KaFeatureFormDialog")), "그리기 직후 이름·번호 폼");
+  QVERIFY2(body.indexOf(QLatin1String("addFeature")) < body.indexOf(QLatin1String("KaFeatureFormDialog")),
+           "폼은 도형을 넣은 뒤에만");
+}
+
 void TestWorkflow::captureVertexDrag_preservesEditsAndReportsOutcome_data() {
   QTest::addColumn<QString>("canvasCrs");
   QTest::addColumn<QString>("layerCrs");
@@ -2919,6 +3169,119 @@ void TestWorkflow::importControlCsvWritesFeatures() {
   oneOnly.insert(QStringLiteral("control_points_count"), 1);
   const auto incomplete = WorkflowGuide::evaluate(oneOnly, true, 0, false);
   QVERIFY(!incomplete.at(static_cast<int>(WorkflowStep::ControlPoints)).complete);
+}
+
+void TestWorkflow::importControlCsv_keepsKoreanAxesAndEncoding() {
+  const QString dir = QDir::temp().filePath(QStringLiteral("ka_csv_xy_") +
+                                            QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QDir().mkpath(dir);
+  QString err;
+  const QString gpkg = SurveyProjectFactory::createNewSurvey(dir, QStringLiteral("csvxy"), &err,
+                                                             QStringLiteral("EPSG:5186"));
+  QVERIFY2(!gpkg.isEmpty(), qPrintable(err));
+  QgsProject project;
+  auto* area = new QgsVectorLayer(QStringLiteral("%1|layername=survey_area").arg(gpkg),
+                                  QStringLiteral("조사구역"), QStringLiteral("ogr"));
+  auto* cp = new QgsVectorLayer(QStringLiteral("%1|layername=control_points").arg(gpkg),
+                                QStringLiteral("control_points"), QStringLiteral("ogr"));
+  QVERIFY(area->isValid());
+  QVERIFY(cp->isValid());
+  project.addMapLayer(area);
+  QVERIFY(area->startEditing());
+  QgsFeature zone(area->fields());
+  zone.setGeometry(QgsGeometry::fromRect(QgsRectangle(148078, 98110, 148110, 98134)));
+  QVERIFY(area->addFeature(zone));
+  QVERIFY(area->commitChanges());
+
+  const QString swappedPath = QDir(dir).filePath(QStringLiteral("korean-xy.csv"));
+  {
+    QFile file(swappedPath);
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
+    QTextStream stream(&file);
+    stream.setEncoding(QStringConverter::Utf8);
+    stream << "point_id,X,Y\n";
+    stream << "K1,98120,148100\n";
+  }
+  QString previewError;
+  const auto preview = LayerOps::previewControlPointsCsv(cp, swappedPath, &project, &previewError);
+  QVERIFY2(preview.ok, qPrintable(previewError));
+  QVERIFY2(preview.swapSuggested, qPrintable(preview.summary));
+  QVERIFY(!preview.geographic);
+  QString importError;
+  QCOMPARE(LayerOps::importControlPointsCsv(cp, swappedPath, &importError, true), 1);
+  QgsFeature korean;
+  QVERIFY(cp->getFeatures().nextFeature(korean));
+  const QgsPointXY placed = korean.geometry().asPoint();
+  QVERIFY2(QgsPointXY(148100, 98120).sqrDist(placed) < 1.0, qPrintable(placed.toString()));
+
+  const QString cp949Path = QDir(dir).filePath(QStringLiteral("cp949.csv"));
+  {
+    QStringEncoder encoder(QStringLiteral("CP949"));
+    QVERIFY(encoder.isValid());
+    QFile file(cp949Path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QVERIFY(file.write(encoder.encode(QStringLiteral("point_id,x,y\n기준1,148100,98120\n"))) > 0);
+  }
+  QCOMPARE(LayerOps::importControlPointsCsv(cp, cp949Path, &importError, false), 1);
+  bool foundName = false;
+  QgsFeature named;
+  QgsFeatureIterator namedRows = cp->getFeatures();
+  while (namedRows.nextFeature(named)) {
+    if (named.attribute(QStringLiteral("point_id")).toString() == QStringLiteral("기준1")) {
+      foundName = true;
+      break;
+    }
+  }
+  QVERIFY(foundName);
+
+  const QString degreePath = QDir(dir).filePath(QStringLiteral("degrees.csv"));
+  {
+    QFile file(degreePath);
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
+    QTextStream stream(&file);
+    stream.setEncoding(QStringConverter::Utf8);
+    stream << "point_id,lon,lat\nJ1,126.48,33.45\n";
+  }
+  const auto degrees = LayerOps::previewControlPointsCsv(cp, degreePath, &project, &previewError);
+  QVERIFY2(degrees.ok && degrees.geographic, qPrintable(degrees.summary));
+  QCOMPARE(LayerOps::importControlPointsCsv(cp, degreePath, &importError, false), 1);
+  QgsCoordinateTransform toWork(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")), cp->crs(),
+                                project.transformContext());
+  const QgsPointXY expected = toWork.transform(126.48, 33.45);
+  bool foundDegree = false;
+  QgsFeature degreeFeature;
+  QgsFeatureIterator degreeRows = cp->getFeatures();
+  while (degreeRows.nextFeature(degreeFeature)) {
+    if (degreeFeature.attribute(QStringLiteral("point_id")).toString() != QStringLiteral("J1")) continue;
+    foundDegree = true;
+    QVERIFY(expected.sqrDist(degreeFeature.geometry().asPoint()) < 1.0);
+  }
+  QVERIFY(foundDegree);
+}
+
+void TestWorkflow::suggestControlPointAxisSwap_matchesCsvRule() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  QString err;
+  const QString gpkg = SurveyProjectFactory::createNewSurvey(dir.path(), QStringLiteral("축안내"),
+                                                             &err, QStringLiteral("EPSG:5186"));
+  QVERIFY2(!gpkg.isEmpty(), qPrintable(err));
+  QgsProject project;
+  project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* area = LayerOps::ensureDomainLayer(&project, gpkg, QStringLiteral("survey_area"),
+                                           QStringLiteral("조사구역"), &err);
+  QVERIFY2(area, qPrintable(err));
+  QVERIFY(area->startEditing());
+  QgsFeature zone(area->fields());
+  zone.setGeometry(QgsGeometry::fromRect(QgsRectangle(148078, 98110, 148110, 98134)));
+  QVERIFY(area->addFeature(zone));
+  QVERIFY(area->commitChanges());
+  QVERIFY(LayerOps::controlPointAxisHint().contains(QStringLiteral("X를 동쪽")));
+  QVERIFY(LayerOps::controlPointAxisHint().contains(QStringLiteral("X=북쪽")));
+  QCOMPARE(LayerOps::controlPointMapXy(98120, 148100, true), QgsPointXY(148100, 98120));
+  const auto suggestion = LayerOps::suggestControlPointAxisSwap(&project, 98120, 148100);
+  QVERIFY2(suggestion.ok && suggestion.swapSuggested, qPrintable(suggestion.summary));
+  QVERIFY(suggestion.summary.contains(QStringLiteral("X·Y가 바뀐 것 같습니다")));
 }
 
 void TestWorkflow::osmBasemapValidWithExtent() {
@@ -3588,10 +3951,8 @@ void TestWorkflow::refreshXyzBasemapTiles_doesNotAbortInFlightWmsJob() {
   QVERIFY2(!canvas.isParallelRenderingEnabled(),
            "XYZ refresh must force sequential; ParallelJob + WMS deleteLater AV");
 
-  QFile f(QStringLiteral("src/core/LayerOps.cpp"));
-  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
-           "run from source tree (ctest WORKING_DIRECTORY)");
-  const QString src = QString::fromUtf8(f.readAll());
+  const QString src = readLayerOpsSources();
+  QVERIFY2(!src.isEmpty(), "run from source tree (ctest WORKING_DIRECTORY)");
   const int fn = src.indexOf(QLatin1String("void LayerOps::refreshXyzBasemapTiles"));
   QVERIFY2(fn >= 0, "refreshXyzBasemapTiles must exist");
   const int next = src.indexOf(QLatin1String("\nbool LayerOps::"), fn + 10);
@@ -3613,10 +3974,8 @@ void TestWorkflow::zoomToLayer_redrawsBasemapAtNewExtent() {
   // 사용자 보고: 그리기를 끝내거나 SHP 를 고른 뒤 레이어 우클릭 → [이 레이어로 이동]
   // 하면 옮긴 자리에 위성이 안 보이고, 줌인·줌아웃하거나 점을 찍고 지워야 나타났다.
   // 옮긴 범위로 타일을 다시 받아 오라고 시켜야 한다.
-  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text),
-           "run from source tree (ctest WORKING_DIRECTORY)");
-  const QString app = QString::fromUtf8(mw.readAll());
+  const QString app = readMainWindowSources();
+  QVERIFY2(!app.isEmpty(), "run from source tree (ctest WORKING_DIRECTORY)");
   const int fn = app.indexOf(QLatin1String("void MainWindow::zoomSelectedLayerMax"));
   QVERIFY2(fn >= 0, "zoomSelectedLayerMax must exist");
   const int next = app.indexOf(QLatin1String("\nvoid MainWindow::"), fn + 10);
@@ -3656,9 +4015,8 @@ void TestWorkflow::shapeEditing_livesInsideSelectTool() {
   QVERIFY2(src.contains(QLatin1String("clearTarget")),
            "선택 해제·도구 종료 시 수정점을 치워야 한다");
 
-  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString app = QString::fromUtf8(mw.readAll());
+  const QString app = readMainWindowSources();
+  QVERIFY2(!app.isEmpty(), "MainWindow.cpp + Export + Editing");
   QVERIFY2(!app.contains(QLatin1String("startVertexEditTool")),
            "도형수정을 따로 켜는 항목을 두지 말 것 — 도형선택에 들어 있다");
   QVERIFY2(app.contains(QLatin1String("m_featureSelectTool->setSnapEnabled")),
@@ -4439,13 +4797,12 @@ void TestWorkflow::layoutOpacityRail_staysPutWhenThePageMoves() {
 void TestWorkflow::uiComboActions_doNotBustTileCacheWhileDrawing() {
   // 툴바 지형맵·DEM·토양·지질·수계·검색·레이어순서·줌이 겹치면
   // refreshAllLayers가 지적 WMS 캐시를 버리고 UI 스레드가 멈춘다.
-  QFile ops(QStringLiteral("src/core/LayerOps.cpp"));
-  QVERIFY2(ops.open(QIODevice::ReadOnly | QIODevice::Text), "LayerOps.cpp");
-  const QString opsSrc = QString::fromUtf8(ops.readAll());
+  const QString opsSrc = readLayerOpsSources();
+  QVERIFY2(!opsSrc.isEmpty(), "LayerOps.cpp + BasemapOps + LabelOps + ControlPointCsv");
 
   int fn = opsSrc.indexOf(QLatin1String("bool LayerOps::zoomToLayerMax"));
   QVERIFY2(fn >= 0, "zoomToLayerMax");
-  int next = opsSrc.indexOf(QLatin1String("\nbool LayerOps::isolateAndZoomToLayer"), fn + 10);
+  int next = opsSrc.indexOf(QLatin1String("\nbool LayerOps::"), fn + 10);
   QVERIFY2(next > fn, "zoomToLayerMax body");
   const QString zoom = opsSrc.mid(fn, next - fn);
   QVERIFY2(!zoom.contains(QLatin1String("refreshAllLayers")),
@@ -4476,7 +4833,9 @@ void TestWorkflow::uiComboActions_doNotBustTileCacheWhileDrawing() {
 
   fn = opsSrc.indexOf(QLatin1String("void LayerOps::zoomToKorea"));
   QVERIFY2(fn >= 0, "zoomToKorea");
-  next = opsSrc.indexOf(QLatin1String("\nQString LayerOps::convertToShp5179"), fn + 10);
+  next = opsSrc.indexOf(QLatin1String("\nQString LayerOps::"), fn + 10);
+  if (next < fn)
+    next = opsSrc.size();
   QVERIFY2(next > fn, "zoomToKorea body");
   QVERIFY2(!opsSrc.mid(fn, next - fn).contains(QLatin1String("refreshAllLayers")),
            "전체 보기도 타일 캐시를 버리면 안 됨");
@@ -4556,9 +4915,8 @@ void TestWorkflow::startupView_doesNotRestackXyzRefreshWhileWmsDownloads() {
   QVERIFY2(after.contains(QLatin1String("refreshXyzBasemapTiles")),
            "basemap add must use the safe XYZ refresh");
 
-  QFile ops(QStringLiteral("src/core/LayerOps.cpp"));
-  QVERIFY2(ops.open(QIODevice::ReadOnly | QIODevice::Text), "LayerOps.cpp");
-  const QString opsSrc = QString::fromUtf8(ops.readAll());
+  const QString opsSrc = readLayerOpsSources();
+  QVERIFY2(!opsSrc.isEmpty(), "LayerOps.cpp + BasemapOps + LabelOps + ControlPointCsv");
   const int clampFn = opsSrc.indexOf(QLatin1String("bool LayerOps::clampCanvasToKorea"));
   QVERIFY2(clampFn >= 0, "clampCanvasToKorea");
   const int clampNext = opsSrc.indexOf(QLatin1String("\nvoid LayerOps::"), clampFn + 10);
@@ -4611,9 +4969,8 @@ void TestWorkflow::applyCanvasScreenDpi_outputSizeFollowsWideWidget() {
 }
 
 void TestWorkflow::convertSelectedTo5179_sourceDoesNotAddToMap() {
-  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString src = QString::fromUtf8(mw.readAll());
+  const QString src = readMainWindowSources();
+  QVERIFY2(!src.isEmpty(), "MainWindow.cpp + MainWindowExport.cpp");
   const int fn = src.indexOf(QLatin1String("void MainWindow::convertSelectedTo5179"));
   QVERIFY2(fn >= 0, "convertSelectedTo5179");
   const int next = src.indexOf(QLatin1String("\nvoid MainWindow::"), fn + 10);
@@ -5372,10 +5729,8 @@ void TestWorkflow::newSurvey_removesUserLayersKeepsXyzBasemap() {
 }
 
 void TestWorkflow::layoutOpensAsMainWindowTabNotSeparateWindow() {
-  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
-           "run from source tree (ctest WORKING_DIRECTORY)");
-  const QString src = QString::fromUtf8(f.readAll());
+  const QString src = readMainWindowSources();
+  QVERIFY2(!src.isEmpty(), "run from source tree (ctest WORKING_DIRECTORY)");
   const int fn = src.indexOf(QLatin1String("void MainWindow::openLayoutDesigner"));
   QVERIFY2(fn >= 0, "openLayoutDesigner must exist");
   const int next = src.indexOf(QLatin1String("void MainWindow::"), fn + 10);
@@ -5409,10 +5764,11 @@ void TestWorkflow::startupLoadsSatelliteAndCadastralWithoutToolbarIcons() {
            "main toolbar must not keep 위성 icon");
   QVERIFY2(!src.contains(QLatin1String("addIcon(QStringLiteral(\"cadastral\"), QStringLiteral(\"지적\")")),
            "main toolbar must not keep 지적 icon");
-  const int newAt = src.indexOf(QLatin1String("void MainWindow::newSurvey"));
+  const QString sessionSrc = readMainWindowSources();
+  const int newAt = sessionSrc.indexOf(QLatin1String("void MainWindow::newSurvey"));
   QVERIFY2(newAt >= 0, "newSurvey");
-  const int newEnd = src.indexOf(QLatin1String("void MainWindow::"), newAt + 10);
-  const QString newBody = src.mid(newAt, newEnd - newAt);
+  const int newEnd = sessionSrc.indexOf(QLatin1String("void MainWindow::"), newAt + 10);
+  const QString newBody = sessionSrc.mid(newAt, newEnd - newAt);
   const int applyAt = newBody.indexOf(QLatin1String("applyStartupMap()"));
   const int ensureAt = newBody.indexOf(QLatin1String("ensureDefaultBasemaps()"));
   QVERIFY2(applyAt >= 0 && ensureAt > applyAt,
@@ -5990,9 +6346,8 @@ void TestWorkflow::companionQgz_roundtripKeepsFifteenUserLayers() {
 }
 
 void TestWorkflow::openSurveyGpkg_usesSafeProjectRead() {
-  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString src = QString::fromUtf8(mw.readAll());
+  const QString src = readMainWindowSources();
+  QVERIFY2(!src.isEmpty(), "MainWindow.cpp + Session");
   QVERIFY2(src.contains(QLatin1String("kaSafeReadQgisProject")),
            "조사 열기는 QgsProject::read 직접 호출이 아니라 SEH 안전 읽기를 써야 한다");
   QVERIFY2(src.contains(QLatin1String("zoomToProjectDataLayers")),
@@ -6639,23 +6994,20 @@ void TestWorkflow::leftoverRestore_keepsUserFillColorNotFactoryDomainStyle() {
 }
 
 void TestWorkflow::restoreLastSurvey_prefersEmbeddedWorkspaceWhenSafe() {
-  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString src = QString::fromUtf8(mw.readAll());
+  const QString src = readMainWindowSources();
+  QVERIFY2(!src.isEmpty(), "MainWindow.cpp + Session");
   QVERIFY2(src.contains(QLatin1String("OpenSurveyMode::PreferWorkspace")),
            "조사 열기는 안전하면 내장 작업공간(색·심볼)을 읽어야 한다");
-  QFile ops(QStringLiteral("src/core/LayerOps.cpp"));
-  QVERIFY2(ops.open(QIODevice::ReadOnly | QIODevice::Text), "LayerOps.cpp");
-  const QString opsSrc = QString::fromUtf8(ops.readAll());
+  const QString opsSrc = readLayerOpsSources();
+  QVERIFY2(!opsSrc.isEmpty(), "LayerOps.cpp + BasemapOps + LabelOps + ControlPointCsv");
   QVERIFY2(opsSrc.contains(QLatin1String("saveGpkgDefaultStyles")) &&
                opsSrc.contains(QLatin1String("saveStyleToDatabaseV2")),
            "저장 때 GPKG layer_styles 에 색을 남겨 LayersOnly 폴백도 복원해야 한다");
 }
 
 void TestWorkflow::restoreLastSurvey_bootUsesLayersOnlyToAvoidWmsAv() {
-  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString src = QString::fromUtf8(mw.readAll());
+  const QString src = readMainWindowSources();
+  QVERIFY2(!src.isEmpty(), "MainWindow.cpp + Session");
   const int fn = src.indexOf(QLatin1String("void MainWindow::restoreLastSurvey()"));
   QVERIFY2(fn >= 0, "restoreLastSurvey 가 있어야 한다");
   const int next = src.indexOf(QLatin1String("void MainWindow::"), fn + 10);
@@ -6670,9 +7022,8 @@ void TestWorkflow::restoreLastSurvey_bootUsesLayersOnlyToAvoidWmsAv() {
 }
 
 void TestWorkflow::finishOpenedProject_doesNotBareRefreshWhileWms() {
-  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString src = QString::fromUtf8(mw.readAll());
+  const QString src = readMainWindowSources();
+  QVERIFY2(!src.isEmpty(), "MainWindow.cpp + Session");
   const int fn = src.indexOf(QLatin1String("void MainWindow::finishOpenedProject"));
   QVERIFY2(fn >= 0, "finishOpenedProject 가 있어야 한다");
   const int next = src.indexOf(QLatin1String("bool MainWindow::openSurveyGpkg"), fn + 10);

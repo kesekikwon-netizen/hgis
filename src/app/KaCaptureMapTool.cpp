@@ -1,3 +1,4 @@
+#include "KaCrashGuard.h"
 #include "KaCaptureMapTool.h"
 #include "core/LayerOps.h"
 #include <qgsmapcanvas.h>
@@ -124,9 +125,11 @@ bool KaCaptureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, b
   try {
     *out = e->mapPoint();
   } catch (...) {
+    KaCrashGuard::logLine(QStringLiteral("[except] app/KaCaptureMapTool.cpp:127"));
     try {
       *out = toMapCoordinates(e->pos());
     } catch (...) {
+      KaCrashGuard::logLine(QStringLiteral("[except] app/KaCaptureMapTool.cpp:129"));
       return false;
     }
   }
@@ -429,6 +432,7 @@ void KaCaptureMapTool::finish() {
           return;
         }
       } catch (...) {
+        KaCrashGuard::logLine(QStringLiteral("[except] app/KaCaptureMapTool.cpp:431"));
         m_finishing = false;
         emit captureCanceled();
         return;

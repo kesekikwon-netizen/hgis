@@ -7,11 +7,13 @@
 #include <QFontMetrics>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
 #include <QResizeEvent>
 #include <QScreen>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QShowEvent>
 #include <QSizePolicy>
 #include <QTimer>
@@ -103,6 +105,7 @@ QToolButton* KaBeginnerRibbon::addAction(const QString& groupId, QAction* action
     action->setText(twoLine(action->text()));
   b->setDefaultAction(action);
   applyTwoLine(b);
+  b->installEventFilter(this);
   row->addWidget(b);
   connect(b, &QToolButton::clicked, m_overflowMenu, &QMenu::close);
   return b;
@@ -115,6 +118,7 @@ void KaBeginnerRibbon::addWidget(const QString& groupId, QWidget* widget) {
   if (auto* b = qobject_cast<QToolButton*>(widget)) {
     b->setText(twoLine(b->text()));
     applyTwoLine(b);
+    b->installEventFilter(this);
     connect(b, &QToolButton::clicked, m_overflowMenu, &QMenu::close);
   }
   row->addWidget(widget);
@@ -174,6 +178,39 @@ void KaBeginnerRibbon::applyTwoLine(QToolButton* button) {
 
 QFrame* KaBeginnerRibbon::group(const QString& id) const {
   return m_groups.value(id, nullptr);
+}
+
+QList<QToolButton*> KaBeginnerRibbon::tabButtons() const {
+  QList<QToolButton*> out;
+  for (const QString& id : m_groupOrder) {
+    QHBoxLayout* row = m_btnRows.value(id);
+    if (!row) continue;
+    for (int i = 0; i < row->count(); ++i) {
+      QLayoutItem* item = row->itemAt(i);
+      auto* button = item ? qobject_cast<QToolButton*>(item->widget()) : nullptr;
+      if (button && button->focusPolicy() != Qt::NoFocus) out.append(button);
+    }
+  }
+  return out;
+}
+
+void KaBeginnerRibbon::applyTabOrder() {
+  const QList<QToolButton*> buttons = tabButtons();
+  for (int i = 0; i + 1 < buttons.size(); ++i)
+    QWidget::setTabOrder(buttons.at(i), buttons.at(i + 1));
+}
+
+bool KaBeginnerRibbon::eventFilter(QObject* watched, QEvent* event) {
+  if (event && event->type() == QEvent::KeyPress) {
+    const auto* key = static_cast<const QKeyEvent*>(event);
+    if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
+      if (auto* button = qobject_cast<QToolButton*>(watched); button && button->isEnabled()) {
+        button->animateClick();
+        return true;
+      }
+    }
+  }
+  return QWidget::eventFilter(watched, event);
 }
 
 QSize KaBeginnerRibbon::sizeHint() const {
@@ -236,9 +273,32 @@ void KaBeginnerRibbon::updateOverflow() {
       frame->show();
     } else {
       m_row->removeWidget(frame);
+      frame->layout()->activate();
+      const QSize content = frame->sizeHint().expandedTo(frame->minimumSizeHint()).expandedTo(QSize(120, 80));
       if (scroll->widget() != frame) scroll->setWidget(frame);
-      const QSize room = screen()->availableGeometry().size() - QSize(48, 100);
-      scroll->setFixedSize(frame->sizeHint().expandedTo(QSize(120, 80)).boundedTo(room) + QSize(20, 20));
+      // A resizable scroll area shrinks the group, then its own bars cover the
+      // last chip row. Keep the group's real size and scroll only past the screen.
+      scroll->setWidgetResizable(false);
+      scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+      scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+      QSize room(1600, 900);
+      if (QScreen* display = screen())
+        room = display->availableGeometry().size() - QSize(64, 140);
+      QSize view = content;
+      if (view.width() > room.width()) {
+        view.setWidth(std::max(120, room.width()));
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+      }
+      if (view.height() > room.height()) {
+        view.setHeight(std::max(80, room.height()));
+        scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+      }
+      if (scroll->verticalScrollBarPolicy() == Qt::ScrollBarAlwaysOn)
+        view.rwidth() += scroll->verticalScrollBar()->sizeHint().width();
+      if (scroll->horizontalScrollBarPolicy() == Qt::ScrollBarAlwaysOn)
+        view.rheight() += scroll->horizontalScrollBar()->sizeHint().height();
+      scroll->setFixedSize(view);
+      frame->resize(content);
       frame->show();
     }
     m_groupMenus.value(id)->menuAction()->setVisible(!onRibbon);

@@ -29,22 +29,70 @@ bool hasEmbeddedProject(const QString& gpkgPath);
 // 실패하면 원본과 기존 대상 파일을 유지한다. 원본·대상이 같으면 아무것도 바꾸지 않는다.
 bool copySurvey(const QString& sourceGpkg, const QString& targetGpkg, QString* errorOut = nullptr);
 
+// 검증된 다음 세대 GPKG로 원본을 원자적으로 교체한다. 실패하면 원본 바이트를 유지한다.
+bool publishSurveyGeneration(const QString& generationGpkg, const QString& targetGpkg,
+                             QString* errorOut = nullptr);
+
 // 커밋하지 않은 현재 벡터 편집을 새 복구 GPKG에 보관한다. 원본 레이어/작업공간은 바꾸지
 // 않으며 매번 별도 폴더를 만든다. 래스터는 외부 참조로 유지하고 조판은 포함하지 않는다.
-// 성공 시 복구 파일 경로, 실패 시 빈 문자열을 반환한다.
+// onlyLayerIds가 비어 있지 않으면 그 레이어만 담는다. 성공 시 복구 파일 경로, 실패 시 빈 문자열.
 QString writeRecoverySnapshot(QgsProject* project, const QString& recoveryDirectory,
-                              QString* errorOut = nullptr);
+                              QString* errorOut = nullptr,
+                              const QStringList& onlyLayerIds = {});
+
+// 복구사본/pending.txt에 최신 사본 경로를 남긴다. 조사 파일은 쓰지 않는다.
+bool noteRecoveryPending(const QString& recoveryDirectory, const QString& snapshotPath,
+                         QString* errorOut = nullptr);
+// pending.txt가 가리키는 파일이 있으면 그 절대 경로, 없으면 빈 문자열.
+QString pendingRecoverySnapshot(const QString& recoveryDirectory);
+void clearRecoveryPending(const QString& recoveryDirectory);
+// 조사복구_* 폴더를 최신 keep개만 남긴다. protectPath가 들어 있는 폴더는 지우지 않는다.
+int pruneRecoverySnapshots(const QString& recoveryDirectory, int keep, const QString& protectPath);
 
 struct AbsorbResult {
   QStringList imported;   // .gpkg 안으로 들여온 레이어 이름
   QStringList failed;     // 들여오지 못한 레이어 이름(원래 경로를 그대로 둔다)
   QStringList skippedRaster;  // 래스터는 아직 바깥에 남는다(스크린샷 등)
+  QStringList skippedReference;  // 참조 지도 벡터는 조사 파일에 복사하지 않는다
 };
 
 // 조사 .gpkg 바깥에 있는 파일 기반·메모리 벡터 레이어를 .gpkg 안으로 복사하고
 // 레이어가 그 사본을 가리키게 바꾼다. 원본 파일은 지우지 않는다.
 // 배경지도(xyz/wms)처럼 파일이 아닌 레이어는 건드리지 않는다.
-AbsorbResult absorbExternalVectors(QgsProject* project, const QString& gpkgPath);
+AbsorbResult absorbExternalVectors(QgsProject* project, const QString& gpkgPath,
+                                   const QString& alsoSurveyGpkg = {});
+
+// 다음 세대 GPKG에 편집·흡수·내장 쓰기를 한 뒤 검증하고 원본을 교체한다.
+// 한 단계라도 실패하면 saved=false 이고 원본 바이트와 미저장 편집을 유지한다.
+struct PersistAttempt {
+    bool saved = false;
+    QString recoveryPath;
+    QString error;
+    QStringList committedLayers;
+    QStringList failedLayers;
+    QStringList skippedRaster;
+    QStringList skippedReference;
+  };
+PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
+                                const QString& recoveryDirectory);
+
+// 조사 GPKG 안에 들어 있는 참조 벡터 레이어 이름. 도메인 키는 제외한다.
+QStringList embeddedReferenceVectorNames(QgsProject* project, const QString& gpkgPath);
+
+struct ExtractAttempt {
+  bool extracted = false;
+  QString error;
+  QStringList moved;
+  QStringList failed;
+  QString outputDirectory;
+  qint64 bytesBefore = 0;
+  qint64 bytesAfter = 0;
+};
+
+// 조사 파일 안 참조 벡터를 바깥 GPKG로 옮기고 원본 테이블을 지운 뒤 검증·교체한다.
+// 호출자가 사용자 확인을 마친 뒤에만 부른다. 도메인 레이어는 건드리지 않는다.
+ExtractAttempt extractEmbeddedReferenceVectors(QgsProject* project, const QString& gpkgPath,
+                                               const QString& outputDirectory);
 
 // 프로젝트를 .gpkg 안에 기록한다.
 bool writeEmbedded(QgsProject* project, const QString& gpkgPath, QString* errorOut = nullptr);

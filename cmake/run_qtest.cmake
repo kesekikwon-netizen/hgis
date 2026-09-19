@@ -4,7 +4,8 @@
 # 콘솔·파이프·cmd 리다이렉트 모두 0줄이고 -o 파일로만 나온다. 그래서 감싸지 않으면
 # ctest 로그에 "<end of output>" 만 남아 실패 원인을 알 수 없다.
 #
-# 사용: cmake -DKA_TEST_EXE=<exe> -DKA_TEST_LOG=<log> -P cmake/run_qtest.cmake
+# 사용: cmake -DKA_TEST_EXE=<exe> -DKA_TEST_LOG=<log> [-DKA_TEST_FILTER="fn1 fn2"] -P cmake/run_qtest.cmake
+# KA_TEST_FILTER 는 QtTest 함수 이름. https://doc.qt.io/qt-6/qtest-overview.html
 
 if(NOT KA_TEST_EXE)
   message(FATAL_ERROR "KA_TEST_EXE 가 필요하다")
@@ -23,7 +24,12 @@ get_filename_component(_ka_test_name "${KA_TEST_LOG}" NAME_WE)
 set(ENV{KA_HGIS_LOG_DIR} "${_ka_log_dir}/app-logs/${_ka_test_name}")
 file(MAKE_DIRECTORY "$ENV{KA_HGIS_LOG_DIR}")
 
-execute_process(COMMAND "${KA_TEST_EXE}" -o "${KA_TEST_LOG},txt" RESULT_VARIABLE _ka_result)
+set(_ka_cmd "${KA_TEST_EXE}" -o "${KA_TEST_LOG},txt")
+if(DEFINED KA_TEST_FILTER AND NOT KA_TEST_FILTER STREQUAL "")
+  separate_arguments(_ka_filter NATIVE_COMMAND "${KA_TEST_FILTER}")
+  list(APPEND _ka_cmd ${_ka_filter})
+endif()
+execute_process(COMMAND ${_ka_cmd} RESULT_VARIABLE _ka_result)
 
 if(NOT _ka_result EQUAL 0)
   # 실패했을 때만 전체 결과를 남긴다. 통과 로그까지 찍으면 ctest 출력이 파묻힌다.

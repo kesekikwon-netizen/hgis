@@ -10,10 +10,18 @@ class QgsMapCanvas;
 namespace CadastralImport {
 using Progress = std::function<void(int, const QString&)>;
 using Cancel = std::function<bool()>;
+struct PrepareBreakdown {
+  qint64 hashMs = 0;
+  qint64 clipMs = 0;
+  qint64 indexMs = 0;
+  qint64 written = 0;
+  qint64 candidates = 0;
+};
 // Worker-only inputs: no live project/layer objects cross the thread boundary.
 PreparedReferenceMap prepare(const QStringList& sources, const QgsGeometry& scope,
     const QgsCoordinateReferenceSystem& crs, const QgsCoordinateTransformContext& context,
-    const QString& directory, const Cancel& cancel = {}, const Progress& progress = {});
+    const QString& directory, const Cancel& cancel = {}, const Progress& progress = {},
+    PrepareBreakdown* breakdown = nullptr);
 bool applyStyle(QgsVectorLayer* layer, const QColor& color = Qt::black, bool labels = true);
 QgsVectorLayer* addPrepared(QgsProject* project, QgsMapCanvas* canvas,
     const PreparedReferenceMap& prepared, QString* error = nullptr);

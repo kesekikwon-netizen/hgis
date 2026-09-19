@@ -4,6 +4,7 @@
 #include <QList>
 #include <QVector>
 #include <QColor>
+#include <functional>
 #include <qgsfeatureid.h>
 class QgsProject;
 class QgsVectorLayer;
@@ -63,6 +64,17 @@ public:
   static bool applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerKey = {});
   static bool applyAreaM2Labels(QgsVectorLayer* layer);
   static QString detectNameField(const QgsVectorLayer* layer);
+  struct FeatureFormFields {
+    int nameIndex = -1;
+    int numberIndex = -1;
+    QString nameField;
+    QString numberField;
+  };
+  // Name = survey_name/site_name/name/kind. Number = feature_no/artifact_no/section_id/point_id.
+  static FeatureFormFields featureFormFields(const QgsVectorLayer* layer);
+  // Writes name/number into the edit buffer. Does not commit. Empty text clears the field.
+  static bool applyFeatureFormValues(QgsVectorLayer* layer, qint64 featureId, const QString& name,
+                                     const QString& number, QString* errorOut = nullptr);
   static bool applyNameAttributeLabels(QgsVectorLayer* layer, const QString& fieldName = QString(),
                                        double fontSizePt = 5.0, bool showArea = false);
   static bool setLabelFontSize(QgsVectorLayer* layer, double fontSizePt);
@@ -268,8 +280,23 @@ public:
 
   static bool removeConfirmedLayers(QgsProject* project, QgsMapCanvas* canvas, const QStringList& layerIds);
 
+  struct ControlCsvPreview {
+    bool ok = false;
+    int count = 0;
+    bool geographic = false;
+    bool swapSuggested = false;
+    QString encoding;
+    QString summary;
+  };
+  // 조사구역이 있으면 한국 측량 관례(X=북쪽, Y=동쪽)로 읽은 점이 더 가까운지 본다.
+  // 경위도는 EPSG:4326으로 보고, 가져오기는 호출자가 swapAxes를 고른 뒤에 한다.
+  static ControlCsvPreview previewControlPointsCsv(QgsVectorLayer* controlPoints, const QString& csvPath,
+                                                   QgsProject* project, QString* errorOut = nullptr);
+  static QString controlPointAxisHint();
+  static QgsPointXY controlPointMapXy(double x, double y, bool swapAxes);
+  static ControlCsvPreview suggestControlPointAxisSwap(QgsProject* project, double x, double y);
   static int importControlPointsCsv(QgsVectorLayer* controlPoints, const QString& csvPath,
-                                    QString* errorOut = nullptr);
+                                    QString* errorOut = nullptr, bool swapAxes = false);
 
   static QgsLayerTreeGroup* ensureLegendGroup(QgsProject* project, const QString& groupName);
   static void placeInLegendGroup(QgsProject* project, QgsMapLayer* layer, const QString& groupName,
@@ -323,15 +350,42 @@ public:
   // GPKG layer_styles 기본 심볼. leftover/LayersOnly 가 공장색으로 덮지 않게 한다.
   static bool loadGpkgDefaultStyle(QgsVectorLayer* layer);
   static int saveGpkgDefaultStyles(QgsProject* project, const QString& gpkgPath);
+  // 조사 파일에 작업공간을 쓴 뒤, 아직 유효해 보이는 OGR 레이어도
+  // GetNextRawFeature 가 실패하면 도형이 지도에서 사라진다. 커밋되지 않은 편집은 유지한다.
+  static int reloadSurveyGpkgReaders(QgsProject* project, const QString& gpkgPath);
   static QgsVectorLayer* createUserPolygonLayer(QgsProject* project, const QString& gpkgPath,
                                                 const QString& titleKo, const QString& crsAuthId,
                                                 QString* errorOut = nullptr);
   static void applyLegendCrsLabel(QgsMapLayer* layer);
   static bool undoCommittedFeature(QgsVectorLayer* layer, qint64 featureId, QString* errorOut = nullptr);
+  // startEditing + begin/endEditCommand. Does not commit; QGIS undoStack keeps the command.
+  static bool runEditCommand(QgsVectorLayer* layer, const QString& title,
+                             const std::function<bool()>& change, QString* errorOut = nullptr);
+  static QgsVectorLayer* preferredUndoLayer(QgsProject* project, QgsVectorLayer* preferred = nullptr);
+  static QgsVectorLayer* preferredRedoLayer(QgsProject* project, QgsVectorLayer* preferred = nullptr);
+  static bool undoLayerEdits(QgsVectorLayer* layer);
+  static bool redoLayerEdits(QgsVectorLayer* layer);
   // Deletes every saved feature and writes GPKG. After this, ensureDomainLayer
   // must reopen the same table empty — legend-only remove leaves the polygons.
   static bool purgeCommittedFeatures(QgsVectorLayer* layer, QString* errorOut = nullptr);
   // Moves one vertex of a saved feature. Does not commit; caller writes GPKG.
   static bool moveFeatureVertex(QgsVectorLayer* layer, qint64 featureId, int vertex,
                                 double x, double y, QString* errorOut = nullptr);
+
+  enum class SnapTarget { CurrentLayer, SurveyLayers };
+  struct SnapSettings {
+    bool enabled = true;
+    double tolerancePx = 16.0;
+    SnapTarget target = SnapTarget::SurveyLayers;
+    bool topological = true;
+  };
+  // Writes QgsSnappingConfig plus ka_hgis/snap_target. SurveyLayers uses AdvancedConfiguration
+  // on non-reference vectors only. CurrentLayer uses ActiveLayer.
+  // topological writes QgsProject::setTopologicalEditing and ka_hgis/topological.
+  static void applySnapSettings(QgsProject* project, const SnapSettings& settings);
+  static SnapSettings readSnapSettings(const QgsProject* project);
+  // Moves one vertex. If topological, also moves other features' vertices at the
+  // same place (1 mm). Does not commit. Layer must already be editable.
+  static bool applyVertexMove(QgsVectorLayer* layer, qint64 featureId, int vertex,
+                              double x, double y, bool topological, QString* errorOut = nullptr);
 };

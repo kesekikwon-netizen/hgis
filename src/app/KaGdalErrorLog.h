@@ -13,6 +13,9 @@ namespace KaGdalErrorLog {
 // Call once after QGIS/GDAL initialization.
 void install();
 
+// Restore the previous CPL handler. Safe to call when not installed.
+void uninstall();
+
 // The session log line for a GDAL message, or an empty string when the message
 // is not worth recording. Only failures are recorded; warnings such as field
 // width truncation are left to the console.

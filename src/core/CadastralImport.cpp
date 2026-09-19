@@ -1,6 +1,9 @@
 #include "CadastralImport.h"
+#include "KaSessionLog.h"
 #include "LayerOps.h"
 #include <QCryptographicHash>
+#include <QElapsedTimer>
+#include <QFont>
 #include <QDir>
 #include <QDomDocument>
 #include <QFile>
@@ -41,12 +44,33 @@ QByteArray hashFile(const QString& path, const CadastralImport::Cancel& cancel) 
   }
   return hash.result().toHex();
 }
+
+// Same-PNU equivalent rings share mm bbox, 0.001 m² area and vertex count.
+// Distinct parts of one PNU almost always differ in envelope. Full WKB hash
+// on every candidate was the clip-loop cost on 45만→4.9만 필지.
+QString cheapParcelKey(const QString& id, const QgsGeometry& geometry) {
+  const QgsRectangle box = geometry.boundingBox();
+  const int points = geometry.constGet() ? static_cast<int>(geometry.constGet()->nCoordinates()) : 0;
+  return QStringLiteral("%1:%2:%3:%4:%5:%6:%7")
+      .arg(id)
+      .arg(qRound64(box.xMinimum() * 1000.0))
+      .arg(qRound64(box.yMinimum() * 1000.0))
+      .arg(qRound64(box.xMaximum() * 1000.0))
+      .arg(qRound64(box.yMaximum() * 1000.0))
+      .arg(qRound64(geometry.area() * 1000.0))
+      .arg(points);
+}
 }
 
 PreparedReferenceMap CadastralImport::prepare(const QStringList& sources, const QgsGeometry& scope,
     const QgsCoordinateReferenceSystem& crs, const QgsCoordinateTransformContext& context,
-    const QString& directory, const Cancel& cancel, const Progress& progress) {
+    const QString& directory, const Cancel& cancel, const Progress& progress,
+    PrepareBreakdown* breakdown) {
   PreparedReferenceMap result;
+  PrepareBreakdown localBreakdown;
+  PrepareBreakdown& timing = breakdown ? *breakdown : localBreakdown;
+  QElapsedTimer phase;
+  phase.start();
   result.tableName = QStringLiteral("cadastral");
   auto stopped = [&]() {
     if (cancel && cancel()) { result.status = PreparedReferenceMap::Status::Cancelled; return true; }
@@ -85,6 +109,7 @@ PreparedReferenceMap CadastralImport::prepare(const QStringList& sources, const 
       identity.addData(file.toUtf8()); identity.addData(hash);
     }
   }
+  timing.hashMs = phase.restart();
   const QString path = QDir(directory).filePath(QString::fromLatin1(identity.result().toHex()) + QStringLiteral(".gpkg"));
   QLockFile lock(path + QStringLiteral(".lock"));
   if (!lock.tryLock(0)) { result.error = QStringLiteral("같은 범위의 지적도를 준비 중입니다."); return result; }
@@ -114,10 +139,12 @@ PreparedReferenceMap CadastralImport::prepare(const QStringList& sources, const 
   if (!writer || writer->hasError() != QgsVectorFileWriter::NoError) {
     result.error = QStringLiteral("지적도 표시 파일을 만들지 못했습니다."); return result;
   }
+  timing.indexMs = phase.restart();
   std::unique_ptr<QgsGeometryEngine> inside(QgsGeometry::createGeometryEngine(scope.constGet()));
   inside->prepareGeometry();
   QSet<QString> seen;
   qint64 written = 0;
+  qint64 candidates = 0;
   try {
     int sourceIndex = 0;
     for (const auto& source : ordered) {
@@ -130,10 +157,11 @@ PreparedReferenceMap CadastralImport::prepare(const QStringList& sources, const 
       const int jibun = input.fields().lookupField(QStringLiteral("JIBUN"));
       const int pnu = input.fields().lookupField(QStringLiteral("PNU"));
       if (jibun < 0) { result.error = QStringLiteral("지적도 원본에 지번(JIBUN) 항목이 없습니다."); return result; }
+      const bool sameCrs = input.crs() == crs;
       const QgsCoordinateTransform toSource(crs, input.crs(), context);
       const QgsCoordinateTransform toWork(input.crs(), crs, context);
       QgsFeatureRequest request;
-      request.setFilterRect(toSource.transformBoundingBox(scope.boundingBox()));
+      request.setFilterRect(sameCrs ? scope.boundingBox() : toSource.transformBoundingBox(scope.boundingBox()));
       QgsAttributeList attributes{jibun}; if (pnu >= 0) attributes.append(pnu);
       request.setSubsetOfAttributes(attributes);
       auto features = input.getFeatures(request);
@@ -142,15 +170,14 @@ PreparedReferenceMap CadastralImport::prepare(const QStringList& sources, const 
         if (stopped()) return result;
         QgsGeometry geometry = feature.geometry();
         if (geometry.isEmpty()) continue;
-        if (geometry.transform(toWork) != Qgis::GeometryOperationResult::Success) {
+        ++candidates;
+        if (!sameCrs && geometry.transform(toWork) != Qgis::GeometryOperationResult::Success) {
           result.error = QStringLiteral("필지 좌표를 조사 좌표계로 변환하지 못했습니다."); return result;
         }
         if (!inside->intersects(geometry.constGet())) continue;
         const QString id = pnu >= 0 ? feature.attribute(pnu).toString().trimmed() : QString();
-        // The same parcel ID can legitimately contain distinct polygon parts.
-        // Deduplicate only identical geometry, never erase another part by ID.
-        QgsGeometry canonical = geometry; canonical.convertToMultiType(); canonical.normalize();
-        const QString key = id + ':' + QString::fromLatin1(QCryptographicHash::hash(canonical.asWkb(), QCryptographicHash::Sha256).toHex());
+        // Same PNU may have several parts. Equivalent rings share envelope/area/vertices.
+        const QString key = cheapParcelKey(id, geometry);
         if (seen.contains(key)) continue;
         seen.insert(key);
         geometry.convertToMultiType();
@@ -164,10 +191,14 @@ PreparedReferenceMap CadastralImport::prepare(const QStringList& sources, const 
   } catch (const QgsCsException&) {
     result.error = QStringLiteral("지적도와 조사 좌표계 사이의 변환에 실패했습니다."); return result;
   }
+  timing.clipMs = phase.restart();
+  timing.candidates = candidates;
   if (writer->hasError() != QgsVectorFileWriter::NoError || !writer->flushBuffer()) {
     result.error = QStringLiteral("지적도 저장을 완료하지 못했습니다."); return result;
   }
   writer.reset();
+  timing.indexMs += phase.restart();
+  timing.written = written;
   if (stopped()) return result;
   if (!written) { result.error = QStringLiteral("조사 주변 범위와 겹치는 필지가 없습니다."); return result; }
   {
@@ -194,6 +225,12 @@ PreparedReferenceMap CadastralImport::prepare(const QStringList& sources, const 
   const auto hash = hashFile(path, {});
   if (digest.open(QIODevice::WriteOnly)) { digest.write(hash); digest.commit(); }
   result.status = PreparedReferenceMap::Status::Ready;
+  KaSessionLog::line(QStringLiteral("[cadastral] hash=%1ms clip=%2ms index=%3ms n=%4/%5")
+                         .arg(timing.hashMs)
+                         .arg(timing.clipMs)
+                         .arg(timing.indexMs)
+                         .arg(timing.written)
+                         .arg(timing.candidates));
   if (progress) progress(100, QStringLiteral("주변 필지 %1개를 준비했습니다.").arg(written));
   return result;
 }
@@ -206,7 +243,14 @@ bool CadastralImport::applyStyle(QgsVectorLayer* layer, const QColor& color, boo
   layer->setRenderer(new QgsSingleSymbolRenderer(symbol.release()));
   QgsPalLayerSettings settings;
   settings.fieldName = QStringLiteral("JIBUN"); settings.isExpression = false;
-  QgsTextFormat format; format.setSize(8); format.setSizeUnit(Qgis::RenderUnit::Points); format.setColor(color);
+  QgsTextFormat format;
+  // Named family avoids a first-use Windows font-list scan (field 11.4s).
+  // https://qgis.org/pyqgis/master/core/QgsTextFormat.html setFont
+  QFont font(QStringLiteral("Malgun Gothic"));
+  format.setFont(font);
+  format.setSize(8);
+  format.setSizeUnit(Qgis::RenderUnit::Points);
+  format.setColor(color);
   settings.setFormat(format); settings.placement = Qgis::LabelPlacement::OverPoint;
   // At small scales only boundaries draw; dense labels needlessly dominate PAL.
   settings.scaleVisibility = true; settings.minimumScale = 10000.; settings.maximumScale = 0.;

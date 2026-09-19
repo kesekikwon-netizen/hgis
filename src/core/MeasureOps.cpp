@@ -1,3 +1,4 @@
+#include "KaSessionLog.h"
 #include "MeasureOps.h"
 
 #include <cmath>
@@ -70,6 +71,7 @@ double lineLengthMeters(const QVector<QgsPointXY>& pts,
       return v;
   } catch (const std::exception&) {
   } catch (...) {
+    KaSessionLog::line(QStringLiteral("[except] core/MeasureOps.cpp:72"));
   }
   return fallbackLength(pts);
 }
@@ -89,6 +91,7 @@ double polygonAreaSquareMeters(const QVector<QgsPointXY>& pts,
       return v;
   } catch (const std::exception&) {
   } catch (...) {
+    KaSessionLog::line(QStringLiteral("[except] core/MeasureOps.cpp:91"));
   }
   return std::abs(g.area());
 }
@@ -108,6 +111,7 @@ double polygonPerimeterMeters(const QVector<QgsPointXY>& pts,
       return v;
   } catch (const std::exception&) {
   } catch (...) {
+    KaSessionLog::line(QStringLiteral("[except] core/MeasureOps.cpp:110"));
   }
   return lineLengthMeters(pts, crs, ctx);
 }

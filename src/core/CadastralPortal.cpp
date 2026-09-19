@@ -1,5 +1,6 @@
 #include "CadastralPortal.h"
 #include "KaPortableRuntime.h"
+#include "KaSecretStore.h"
 #include "KoreaRegionCatalog.h"
 #include "TopographicArchive.h"
 #include <QDir>
@@ -107,7 +108,7 @@ QString shortProvince(const QString& text) {
 CadastralPortal::Credentials CadastralPortal::credentials() {
   QSettings settings(accountPath(), QSettings::IniFormat); settings.setFallbacksEnabled(false);
   return {settings.value(QStringLiteral("vworld_account/username")).toString(),
-          settings.value(QStringLiteral("vworld_account/password")).toString()};
+          KaSecretStore::readPassword(settings, QStringLiteral("vworld_account"), true)};
 }
 
 bool CadastralPortal::saveCredentials(const Credentials& account, QString* error) {
@@ -118,7 +119,8 @@ bool CadastralPortal::saveCredentials(const Credentials& account, QString* error
     {
       QSettings settings(draft, QSettings::IniFormat); settings.setFallbacksEnabled(false);
       settings.setValue(QStringLiteral("vworld_account/username"), account.username.trimmed());
-      settings.setValue(QStringLiteral("vworld_account/password"), account.password); settings.sync();
+      if (!KaSecretStore::writePassword(settings, QStringLiteral("vworld_account"), account.password, error)) return false;
+      settings.sync();
       if (settings.status() != QSettings::NoError) { if (error) *error = QStringLiteral("계정 설정을 기록하지 못했습니다."); return false; }
     }
     QFile in(draft); QSaveFile out(path); out.setDirectWriteFallback(false);

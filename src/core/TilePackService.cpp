@@ -1,3 +1,4 @@
+#include "KaSessionLog.h"
 #include "TilePackService.h"
 
 #include <cmath>
@@ -118,6 +119,7 @@ bool build(const Options& opt, double minX, double minY, double maxX, double max
               std::clamp(fraction, 0.0, 1.0) * progress->span);
         return TRUE;
       } catch (...) {
+        KaSessionLog::line(QStringLiteral("[except] core/TilePackService.cpp:120"));
         return FALSE;
       }
     }

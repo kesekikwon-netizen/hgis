@@ -1,3 +1,4 @@
+#include "KaCrashGuard.h"
 #include "KaTopographicImportDialog.h"
 #include "core/LayerOps.h"
 #include <QComboBox>
@@ -210,7 +211,8 @@ public:
     QgsFeedback feedback;
     connect(&feedback, &QgsFeedback::progressChanged, &feedback, [this](double p) { setProgress(p); });
     try { m_result = TopographicCatalog::scan(m_folder, &feedback, {}, [this] { return isCanceled(); }); }
-    catch (...) { m_result.error = QStringLiteral("수치지형도 파일을 확인하지 못했습니다. 원본은 변경하지 않았습니다."); }
+    catch (...) {
+      KaCrashGuard::logLine(QStringLiteral("[except] app/KaTopographicImportDialog.cpp:213")); m_result.error = QStringLiteral("수치지형도 파일을 확인하지 못했습니다. 원본은 변경하지 않았습니다."); }
     return !isCanceled() && m_result.error.isEmpty();
   }
   void finished(bool) override {

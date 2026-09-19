@@ -7,6 +7,7 @@
 #include <QHeaderView>
 #include <QScrollBar>
 #include <QScrollArea>
+#include <QSplitter>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QDir>
@@ -170,6 +171,69 @@ private slots:
     drag(400);
     QTRY_VERIFY(tree.columnWidth(1) >= 88);
     QVERIFY(tree.columnWidth(0) + tree.columnWidth(1) <= tree.viewport()->width() + 1);
+  }
+
+  void listKeepsFiveRowsAtFieldWindowSizes_data() {
+    QTest::addColumn<QSize>("window");
+    QTest::newRow("1366x768-100") << QSize(1366, 768);
+    QTest::newRow("1920x1080-100") << QSize(1920, 1080);
+    QTest::newRow("1920x1080-150") << QSize(1280, 720);
+    QTest::newRow("1920x1080-200") << QSize(960, 540);
+  }
+
+  void listKeepsFiveRowsAtFieldWindowSizes() {
+    QFETCH(QSize, window);
+    QgsProject project;
+    auto* group = project.layerTreeRoot()->addGroup(QStringLiteral("조사 데이터"));
+    for (int i = 0; i < 8; ++i) add(project, group, QStringLiteral("행%1").arg(i));
+    QWidget host;
+    auto* split = new QSplitter(Qt::Vertical, &host);
+    split->setObjectName(QStringLiteral("leftSplit"));
+    split->setChildrenCollapsible(false);
+    auto* layers = new QFrame(split);
+    auto* layersLay = new QVBoxLayout(layers);
+    layersLay->setContentsMargins(6, 6, 6, 6);
+    auto* cap = new QToolButton(layers);
+    cap->setObjectName(QStringLiteral("sidebarFilesToggle"));
+    cap->setText(QStringLiteral("파일함"));
+    cap->setCheckable(true);
+    cap->setChecked(true);
+    auto* tree = new KaLayerInformationView(layers);
+    KaLayerInformationModel model(&project, false);
+    tree->setModel(&model);
+    KaLayerInformationModel::configureView(tree);
+    tree->expandAll();
+    auto* panel = new KaLayerInformationPanel(&model, tree, layers);
+    layersLay->addWidget(cap);
+    layersLay->addWidget(tree, 1);
+    layersLay->addWidget(panel);
+    auto* files = new QFrame(split);
+    files->setObjectName(QStringLiteral("sidebarFilesScroll"));
+    files->setMinimumHeight(200);
+    auto* filesLay = new QVBoxLayout(files);
+    filesLay->addWidget(new QLabel(QStringLiteral("파일함"), files), 1);
+    split->addWidget(layers);
+    split->addWidget(files);
+    split->setCollapsible(1, true);
+    split->setSizes({380, 260});
+    connect(cap, &QToolButton::toggled, files, &QWidget::setVisible);
+    auto* hostLay = new QVBoxLayout(&host);
+    hostLay->setContentsMargins(0, 0, 0, 0);
+    hostLay->addWidget(new QLabel(QStringLiteral("ribbon"), &host));
+    hostLay->addWidget(split, 1);
+    hostLay->addWidget(new QLabel(QStringLiteral("status"), &host));
+    host.resize(qMin(360, window.width()), window.height());
+    host.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&host));
+    KaLayerInformationView::protectSidebarList(split, tree, cap, files, panel);
+    QTRY_VERIFY(tree->viewport()->height() >= tree->minimumListHeight() - tree->header()->height());
+    const int row = qMax(22, tree->sizeHintForRow(0));
+    QVERIFY2(tree->viewport()->height() >= row * KaLayerInformationView::kMinVisibleRows,
+             qPrintable(QStringLiteral("viewport=%1 row=%2 window=%3x%4")
+                            .arg(tree->viewport()->height())
+                            .arg(row)
+                            .arg(window.width())
+                            .arg(window.height())));
   }
 
   void unknownFieldsRequireExplicitChoice() {

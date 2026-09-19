@@ -1,3 +1,272 @@
+## 2026-09-19 7-4 시험 지도
+
+- `docs/testing-map.md` 축 A–J. G는 `theme_qss` `versionAndLaunchScripts_exist`. theme_qss Passed 0.80초.
+- Archify showcase 9/9 → `build/qa/7-4-20260919/`. 커밋·푸시·포터블 없음. 다음: 8-3 또는 8-5 (8-1·8-2·8-4 결정 대기).
+
+## 2026-09-19 7-3 save_open 분할
+
+- 9개 CTest, TIMEOUT 60, RESOURCE_LOCK. 최장 31.84초. 240초 우산 제거.
+- `openWhileDrawing` 폼 exec 정지 → `captureAndDismissForm`. window/topo/drawing/open Passed.
+- edit/roundtrip/open_invalid/commit/saveas는 슬롯 실패(시간 아님). Archify 9/9. 다음: 7-4.
+
+## 2026-09-19 7-2 CTest 5회
+
+- 스크립트 `scripts/ctest-flake.ps1`. 5회(save_open 제외) 51/55 5/5 통과. 불안정 0.
+- 고정 실패: `catch_log`(SurveySession 무로그 catch), import/scope/reference exe 미빌드. `save_open_window`는 240초 타임아웃(7-3).
+- Archify showcase 9/9 → `build/qa/7-2-20260919/`. 커밋·푸시·포터블 없음. 다음: 7-3.
+
+## 2026-09-19 6-5 낡은 문서 정리
+
+- `PO_GOAL_*` 10개 + `HANDOFF_TOPOGRAPHIC_GROK.md` → `docs/archive/`. 현행 색인 `docs/README.md`.
+- HANDOFF 두 파일 L477·L485, design chrome 문서 링크를 archive로. 현행 HANDOFF는 보관하지 않음.
+- 문서만. Graft/clangd/CMake/CTest N/A. Archify showcase 9/9 visual-check pass → `build/qa/6-5-20260919/`.
+- 커밋·푸시·포터블·사용자 앱 없음. 다음: 7-2 (7-1은 결정 5로 건너뜀).
+
+## 2026-09-19 6-4 LayerOps 분할
+
+- `LayerOps::` 본문을 `BasemapOps.cpp` / `LabelOps.cpp` / `ControlPointCsv.cpp`로 옮김. `LayerOps.h` API 유지. `LayerOps.cpp` 2930줄(≤3000).
+- CTest: theme 0.81s, dem 2.16s, parallel 11.55s, storage 38.60s, workflow Passed. smoke-quit 종료 0.
+- clangd addVworldSatelliteMap h:136 오류 0. Graft L1036. Archify showcase 9/9 visual-check pass → `build/qa/6-4-20260919/`.
+- EXE SHA256 4C80BF5A0D54649A2C468836D37FCE0CD1026DD6139A60B5572DCFE6559C437B. 커밋·푸시·포터블·사용자 앱 없음. 다음: 6-5.
+
+## 2026-09-19 6-3 SurveySession persistWork
+
+- `SurveySession::persistWork`가 `persistWorkspace` + 동반 QGZ. UI는 `MainWindow::persistSurveyWork`. 열기/저장 본문 `MainWindowSession.cpp`. `MainWindow.cpp` 5477줄(≤5500).
+- CTest: storage_safety 38.48s, recent 0.14s, workflow ~65s, theme 0.85s Passed. smoke-quit 종료 0. `save_open_window`는 7-3.
+- clangd persistWork h:31, persistSurveyWork h:141, 오류 0. Graft L19/L782. Archify showcase 9/9 visual-check pass → `build/qa/6-3-20260919/`.
+- EXE SHA256 23934E4108BA93D023139B9F1BDBFC447AACC761A7CD374948366399855854AF. 커밋·푸시·포터블·사용자 앱 없음. 다음: 6-4.
+
+## 2026-09-19 6-1·6-2 MainWindow 제출/편집 분할
+
+- 제출·조판은 `MainWindowExport.cpp`(637줄). 그리기·스냅·속성은 `MainWindowEditing.cpp`(1389줄). `MainWindow.cpp` 7127줄(6-1 7500 이하, 6-2 6500은 6-3).
+- CTest: theme/export/storage/workflow/dem_trench/terrain Passed. `save_open_window` 240초 Timeout(7-3). smoke-quit 종료 0.
+- clangd exportShpPackage h:163, beginEdit h:337, 오류 0. Graft L265/L853. Archify 6-1 showcase 9/9 visual-check pass. 6-2는 label 간격 1건으로 HTML 미전달.
+- EXE SHA256 910224A0C77FE2904FE10D1109DA50BD07543554DDE66F5ED4EF05673891BFD6. 커밋·푸시·포터블·사용자 앱 없음. 다음: 6-3.
+
+## 2026-09-19 5-3 건너뜀 · 5-4 GUI 기록 서식
+
+- 5-3: 시작 게이지는 사용자 승인 항목. `KaStartupSplash` 미수정. 이유 `build/qa/5-3-20260919/REPORT.md`.
+- 5-4: 서식 `docs/user/gui-scenario-checklist.md` (화면·조작·관측). 기록 1부 `docs/user/gui-scenario-records/2026-09-19.md`는 빈 칸·사용자 확인 대기. C++ 빌드 없음.
+- 커밋·푸시·포터블·사용자 앱·원본 GPKG 없음. 6-1은 시작하지 않음. 다음: 6-1.
+
+## 2026-09-19 5-2 리본 Tab/Enter로 새 조사→저장
+
+- 핵심 8명령 단축키: Ctrl+N/O/S, Ctrl+Shift+S, Ctrl+D, Ctrl+1, Ctrl+L, Ctrl+E. `applyTabOrder` + Enter→`animateClick`.
+- CTest `theme_qss` Passed 1.10초, `ribbon_tabEnterNewSurveyToSave` PASS. smoke-quit 종료 0.
+- clangd applyTabOrder L197→h:25 오류 0. Graft L24/L25. Archify showcase 9/9 visual-check pass → `build/qa/5-2-20260919/`.
+- EXE SHA256 F0BB7C592F85A8813CC3FCA0E513CF495747C5D8506F42BBB16B98FBB054E85F. 커밋·푸시·포터블·사용자 앱 없음. 다음: 5-3 건너뛰고 5-4.
+
+## 2026-09-19 5-1 작은 창에서도 레이어 목록 5행
+
+- 파일함 minHeight 200이 목록을 1px로 밀던 경로를 제거. `protectSidebarList`가 부족하면 파일함·표시 설정을 접고 `setSizes(목록, 0)`.
+- CTest `layer_information` Passed 3.53초. 네 창 크기(1366×768/100, 1920×1080/100·150논리·200논리) 모두 PASS. smoke-quit 종료 0.
+- clangd protectSidebarList L40→h:25 오류 0. Graft L24/L71. Archify showcase 9/9 visual-check pass → `build/qa/5-1-20260919/`.
+- EXE SHA256 B11EED9B1A7AE1A724CF74E6142CBB05A29896944EE3E91D9F68F8A685865FB3. 커밋·푸시·포터블·사용자 앱 없음. 다음: 5-2. 5-3은 승인 대기.
+
+## 2026-09-19 4-5 세션 로그 10MB 회전·덤프 경로 안내
+
+- 기본 상한 `KaSessionLog::kDefaultMaxBytes` = 10MiB. 초과 시 `session.old.log`로 회전(기존 파일은 remove 후 rename, https://doc.qt.io/qt-6/qfile.html). 시험은 `KA_HGIS_LOG_MAX_BYTES=2048`.
+- `KaCrashGuard::dumpHint()` / 정보 창 / 부트 로그에 session.log·crash-*.log·crash-*.dmp 경로.
+- CTest `catch_log` Passed 0.30초, `gdal_error_log` Passed 0.29초. smoke-quit 종료 0. clangd maxBytes L19→h:16, dumpHint L241→h:22, 오류 0. Graft L16/L17. Archify showcase 9/9 visual-check pass → `build/qa/4-5-20260919/`.
+- EXE SHA256 196063651FA27133F300062CB8866F583182E35D92ED31341D61B314F17D2744. 커밋·푸시·포터블·사용자 앱 없음. 다음: 5-1.
+
+## 2026-09-19 4-4 지적 준비 교차 중복제거를 30% 이상 줄임
+
+- 합성 9600필지: 예전 WKB SHA256 76ms → cheap key 26ms (같은 자료 66% 단축). 준비 245ms = hash 15 / clip 173 / index 23. 지번 첫 렌더 736ms.
+- 지번 글꼴은 `QgsTextFormat::setFont(Malgun Gothic)`. 구미·칠곡 원본 ZIP은 쓰지 않음. 현장 46.5s는 재측정 없음.
+- CTest `cadastral` Passed 4.61초. clangd cheapParcelKey L51·setFont → qgstextformat.h:200 오류 0. Graft L51. Archify showcase 9/9 visual-check pass → `build/qa/4-4-20260919/`.
+- EXE SHA256 C72D8585FB6F3A7513072902BF7BAEE2B7F45B188A79E22249E71987925CF933. 커밋·푸시·포터블·사용자 앱 없음. 다음: 4-5.
+
+## 2026-09-19 4-3 catch(...)는 세션 로그에 남김
+
+- 코어는 `KaSessionLog::line`, 앱은 `KaCrashGuard::logLine` 래퍼. `src/`의 `catch (...)` 본문은 모두 로그(종료 핸들러는 `appendUtf8`).
+- CTest `catch_log` Passed 6.05초, `gdal_error_log` Passed 5.09초. 첫 `ka-hgis` 병렬 빌드는 C1060, `/m:1`로 성공.
+- clangd KaSessionLog.cpp:19 → KaSessionLog.h:9, LayerOps.cpp:1324 → L9, 오류 0. Graft L9/L10. Archify showcase 9/9 visual-check pass → `build/qa/4-3-20260919/`.
+- EXE SHA256 806A40897081DAE66709D4F04D642DD30DCAA6BCFCA3A2EB1B805667A7561EA8. 커밋·푸시·포터블·사용자 앱 없음. 다음: 4-4.
+
+## 2026-09-19 4-2 병렬 렌더는 재현 안 되어 꺼 둠
+
+- 자식 `QProcess --parallel-wms-child`가 로컬 XYZ를 붙잡고 `setParallelRenderingEnabled(true)` + `stopRendering`. `crashed=false` `exitCode=0`.
+- 제품은 `KaApplication.cpp:764` `qgis/parallel_rendering=false`, 캔버스는 `setParallelRenderingEnabled(false)` 유지. `true`로 바꾸지 않음.
+- CTest `parallel_render` Passed 10.97초. clangd KaApplication.cpp:764 → qgssettings.h:218 오류 0. Graft L764. Archify showcase 9/9 visual-check pass → `build/qa/4-2-20260919/`.
+- 제품 EXE는 3-5 빌드 유지. `gen-compile-commands.ps1` 미재생성. 커밋·푸시·포터블·사용자 앱 없음. 다음: 4-3.
+
+## 2026-09-19 4-1 15만 합성은 상한을 넘으면 실패
+
+- `ka_perf_tests`: 필지 SequentialJob 8000ms, 조사 열기(`addNonEmptyDomainLayers`) 1000ms, 조판 `renderPageToImage` 10000ms. 관측 약 3.6s / 0.18s / 4.1–5.1s.
+- CTest `perf_engine` Passed 16.10초. 합성 GPKG만.
+- clangd test_perf.cpp:160 → LayerOps.h:342. diagnostic_error_count=1(시험 파일). Graft L342. Archify showcase 9/9 visual-check pass → `build/qa/4-1-20260919/`.
+- 제품 EXE는 3-5 빌드 유지. 커밋·푸시·포터블·사용자 앱 없음. 다음: 4-2.
+
+## 2026-09-19 3-5 자기교차·빈 도형·0면적은 제출 차단
+
+- `ProjectStateBuilder`가 도메인 키 도형을 `isGeosValid`/`isEmpty`/`area`로 본다. 규칙은 `GEOMETRY_VALID`·`GEOMETRY_NOT_EMPTY`·`GEOMETRY_NONZERO_AREA`. 빈 도형은 자기교차로 치지 않는다.
+- CTest `export_survey_areas` Passed 2.85초, `checklist_engine` Passed 10.55초. 나비 자기교차·빈 도형·0면적 슬롯 포함.
+- clangd ProjectStateBuilder.cpp:86 → qgsgeometry.h:618, MainWindow.cpp:6011 → ProjectStateBuilder.h:6 오류 0. Graft L44 / L81 / L52. Archify showcase 9/9 visual-check pass → `build/qa/3-5-20260919/`.
+- EXE SHA256 9307FEC7DB2F6FD50D6FB53437A79C06D2DA699BC4A0D9D3B415481AE5DCC23F. `gen-compile-commands.ps1` 미재생성. 커밋·푸시·포터블·사용자 앱 없음. 다음: 4-1.
+
+## 2026-09-19 3-4 그리기 뒤 이름·번호는 선택
+
+- `KaFeatureFormDialog`는 `addFeature` 뒤에만 뜬다. 건너뛰기(취소)해도 도형은 남는다. 저장은 `applyFeatureFormValues`가 `changeAttributeValue`로 이름·번호를 쓴다. 파일 커밋은 조사 저장.
+- CTest `workflow_engine` Passed 62.56초. `featureForm_cancelKeepsGeometryAndOkWritesNameNumber` 포함.
+- clangd MainWindow.cpp:5344 → LayerOps.h:76 오류 0. Graft L76 / L375. Archify showcase 9/9 visual-check pass → `build/qa/3-4-20260919/`.
+- smoke-quit exit 0. EXE SHA256 40EF83DA82CFF271F9244A6EA9E0E3EC47B91D9B84F49C9E313CCF42857EB317.
+- 커밋·푸시·포터블·사용자 앱 없음. 다음: 3-5.
+
+## 2026-09-19 3-3 공유 경계는 위상 편집
+
+- 그리기 막대 「공유 경계」가 `QgsProject::setTopologicalEditing`과 `ka_hgis/topological`을 쓴다. 켜면 `applyVertexMove`가 같은 레이어 1mm 안 꼭짓점을 같이 옮긴다. 끄면 끈 도형만.
+- CTest `workflow_engine` Passed 63.27초. `topologicalVertexMove_movesSharedVertexOnBothFeatures` 포함.
+- clangd KaVertexEditTool.cpp:267 → LayerOps.h:378 오류 0. Graft L378–379. Archify showcase 9/9 visual-check pass → `build/qa/3-3-20260919/`.
+- smoke-quit exit 0. 바로가기 현재 Release. EXE SHA256 B60819103E829C899BEEDC4529D7B8023C4D0CB55E06808E25B2B376E58B4F23.
+- 커밋·푸시·포터블·사용자 앱 없음. 다음: 3-4.
+
+## 2026-09-19 3-2 자석 설정은 그리기 막대 한 곳
+
+- `KaSnapSettingsWidget`: 켬/끔·픽셀 허용치·현재 레이어/모든 조사 레이어. `applySnapSettings`가 `QgsSnappingConfig`+`ka_hgis/snap_target`. 참조 지도는 AdvancedConfiguration에서 뺌. 레이어 추가 때 다시 적용.
+- CTest `workflow_engine` Passed 62.65초. `snapSettings_surviveProjectWriteAndReopen` 포함.
+- clangd MainWindow.cpp:1170 → LayerOps.h:372 오류 0. Graft L372–373. Archify showcase 9/9 visual-check pass → `build/qa/3-2-20260919/`.
+- smoke-quit exit 0. 바로가기 `고고학 전용 HGIS.lnk` → `start-ka-hgis.vbs` → `launch.ps1` → 현재 Release.
+- EXE SHA256 0D5D610EFE282F1CEBAEFFE98D69E98D3972738A0761CC5849284ABD08179E75. `gen-compile-commands.ps1`는 vcvars 줄 길이로 실패, 기존 compile DB 사용. 커밋·푸시·포터블·사용자 앱 없음. 다음: 3-3.
+
+## 2026-09-19 3-1 지도 Undo/Redo는 레이어 undoStack
+
+- 그리기·정점·삭제는 `runEditCommand`로 버퍼에만 남긴다. 리본·Ctrl+Z/Y가 `undoLayerEdits`/`redoLayerEdits`로 `undoStack()`을 호출한다. 파일 쓰기는 조사 저장.
+- CTest `workflow_engine` Passed 61.52초. `mapEditUndoRedo_drawMoveDeleteRestoresFeature` 포함.
+- clangd MainWindowUndo.cpp:194 → LayerOps.h:355 오류 0. Graft L355–356. Archify showcase 9/9 visual-check pass → `build/qa/3-1-20260919/`.
+- smoke-quit exit 0. 바로가기 `고고학 전용 HGIS.lnk` → `start-ka-hgis.vbs` → `launch.ps1` → 현재 Release.
+- EXE SHA256 A3C00996FF8857A48451C1DF3ADC04CC5824757F2FF1F786D7D5CD6F15175FAB. 커밋·푸시·포터블·사용자 앱 없음. 다음: 3-2.
+
+## 2026-09-19 2-6 기준점 축 안내
+
+- GPS 기준점 수동 입력과 CSV가 같은 문구를 쓴다. QGIS X=동쪽·Y=북쪽. 측량 X=북·Y=동이면 `X·Y 교환`. 조사구역이 있으면 거리로 교환을 제안한다.
+- CTest `workflow_engine` Passed 61.36초. `suggestControlPointAxisSwap_matchesCsvRule` 포함.
+- clangd MainWindow.cpp:5935 → LayerOps.h:285 오류 0. Graft L283–285. Archify showcase 9/9 visual-check pass → `build/qa/2-6-20260919/`.
+- EXE SHA256 F5964AA2AEEFE7368437A6C1EFBAF08B5F8CB7BDACD735DEF83E9B5299DC54AF. smoke-quit·바로가기 확인은 안 함. 커밋·푸시·포터블·사용자 앱 없음. 다음: 3-1.
+
+## 2026-09-19 2-2 제출 SHP는 PROJ 5179와 1mm 안
+
+- `exportShp_matchesProjDirectWithinOneMillimetre`: 5186·5187 점을 `ExportService` SHP와 GDAL OSR(PROJ)로 비교, hypot ≤ 0.001m. CTest `export_survey_areas` Passed 2.42초.
+- 이 SDK에 cs2cs/proj.h 없음. 공식 GDAL OSR: https://gdal.org/en/stable/tutorials/osr_api_tut.html
+- 2-1 미확정(사용자 저장본 없음). 2-3·2-4·2-5는 결정 1·8 없어 건너뜀.
+- clangd ExportService.cpp:295 → qgscoordinatetransform.h:61 오류 0. Archify showcase 9/9 visual-check pass → `build/qa/2-2-20260919/`.
+- 커밋·푸시·포터블·사용자 앱 없음. 다음: 2-6.
+
+## 2026-09-19 1-4 참조 벡터를 조사 파일 밖으로
+
+- `더 많은 작업` → `참조 벡터를 조사 파일 밖으로…`. 확인 기본값 No. `extractEmbeddedReferenceVectors`가 sidecar `참조지도/`로 옮기고 세대 파일에서 테이블 삭제·VACUUM·교체. 도메인 키는 제외.
+- CTest `storage_safety` Passed 24.29초. `extractEmbeddedReferenceVectors_shrinksSurveyAndKeepsDomain` 포함. 합성 GPKG만.
+- clangd MainWindow.cpp:7510 → SurveyStorage.h:94 오류 0. Graft L748. Archify showcase 9/9 visual-check pass → `build/qa/1-4-20260919/`.
+- 첫 Release 빌드는 없는 타깃 `ka_hgis_core`로 MSB1009. `ka_core`로 재빌드 성공. 전체 CTest 첫 병렬 48/53은 전용 TEMP 폴더 5개 없음. 복구 후 해당 5개 Passed. `recent_surveys`는 `persistWorkspace`를 본다.
+- EXE SHA256 85866298E7ABD62AC79D8809B59F35AC64395151B85203FF36A80007E82EC78D. 커밋·푸시·포터블·사용자 앱 없음. 다음: 단계 2.
+
+## 2026-09-19 1-3 세대 파일에 쓴 뒤 원본을 교체
+
+- `publishSurveyGeneration` = 검증 + `copySurvey`. `persistWorkspace`는 `.ka-survey-gen`에 편집·흡수·내장 쓰기를 하고 성공할 때만 원본을 바꾼다. `writeProject` 예외 시 원본 해시·피처 수 유지.
+- CTest `storage_safety` Passed 21.81초. `persistWorkspace_writeExceptionKeepsPreviousGeneration` 포함. 합성 GPKG만.
+- clangd persistWorkspace L533 → 헤더 76 오류 0. Graft L533. Archify showcase 9/9 visual-check pass → `build/qa/1-3-20260919/`.
+- EXE SHA256 248E8F914042322C629CA66BB683E7D674DCADB8F14D420E3F0805627218C786. 커밋·푸시·포터블·사용자 앱 없음. 다음: 1-4.
+
+## 2026-09-19 1-2 부분 실패는 경고·복구 사본
+
+- `SurveyStorage::persistWorkspace`: 커밋→흡수→내장 쓰기. 한 단계 실패면 `saved=false`, 유효 벡터만 복구 사본. `persistSurveyWork`는 `Notice::Warning`만. Success 없음.
+- 시험 3개(`test_storage_safety.cpp`): 둘째 레이어 `setAllowCommit(false)`, GPKG `ReadLock`, 표시 없는 외부 SHP 삭제. CTest `storage_safety` Passed 20.71초. 합성 GPKG만.
+- clangd MainWindow.cpp:7429 → SurveyStorage.h:71 오류 0. Graft `persistWorkspace` L459. Archify showcase 9/9 visual-check pass → `build/qa/1-2-20260919/`.
+- EXE SHA256 C6647BC2ADBBB02EFC97B4C93D32B509F6FBC1130FD24800061DC3AE7193BF46. 커밋·푸시·포터블·사용자 앱 없음. 다음: 1-3 세대별 저장.
+
+## 2026-09-19 1-1 저장→재열기→제출 5186·5187
+
+- `tests/test_save_open.cpp` `saveReopenSubmit_preservesWorkAndPackage`. 합성 GPKG만. 원본 제주 파일 안 씀.
+- 재열기 후 피처 수·속성·작업 CRS·역할·가시성·외부 SHP 경로 유지. 제출 SHP는 5179, 하우스도르프 ≤1mm. PDF 전후 존재·크기 근접.
+- 단독 QTest 5186/5187 PASS 8.07초. CTest `save_open_window` Passed 143.52초/240.
+- clangd L2562 → ExportService.h:9. Graft 시험 L2493. Archify showcase 9/9 visual-check pass → `build/qa/1-1-20260919/`.
+- 커밋·푸시·포터블·사용자 앱 없음. 다음: 1-2 부분 실패 시험.
+
+## 2026-09-19 0-3 VERSION이 CMake·앱을 만든다
+
+- `VERSION` 2.0.0 → CMake `file(STRINGS)` → `project(VERSION)` → `KA_HGIS_VERSION="2.0.0"`. 정보 창·`setApplicationVersion`이 같은 매크로.
+- PIN: `QGIS 4.3.0-Master … A:\OSGeo4W`. EXE 3371DCDB… smoke 0, startup_splash PASS.
+- Graft 3파일, clangd setApplicationVersion → qcoreapplication.h:88 오류 0. Archify visual-check pass. `build/qa/0-3-20260919/REPORT.md`.
+- 0-4는 사용자 화면 대기로 건너뜀. §2 여덟 항은 결정 없어 건너뜀(`build/qa/section2-skip-20260919/`).
+- 다음: 1-1 저장→재열기→제출 연속 시험. 커밋 없음.
+
+## 2026-09-19 0-2 MainWindow 경고 4종 0
+
+- C4996 `messageReceived` → L1563 `messageReceivedWithFormat` (qgsmessagelog.h:93). C4456 `treeRoot` → `visibilityRoot`/`orderRoot`. C4505 `projectLayerNames` 심볼 없음.
+- MainWindow.cpp 강제 재컴파일, 해당 파일 경고 0. clangd L1563 → 헤더 93, 오류 0. Graft `messageReceivedWithFormat` 2곳.
+- Archify showcase 9/9 visual-check pass → `build/qa/0-2-20260919/`. 근거 REPORT.md. 커밋 없음.
+- 다음: 0-3 VERSION SSOT. 0-4는 사용자 화면.
+
+## 2026-09-19 0-1 기준선 + 메모리 참조는 흡수
+
+- 계획 0-1: Release CTest **53/53 Passed**, 실패·비활성·skip 0. 벽시계 169.14초. `save_open_window` 169.13초/제한 240. 표와 여섯 도구 근거: `build/qa/baseline-20260919/REPORT.md`.
+- 파일 참조 벡터(`isReferenceLayer`이고 provider ≠ memory)는 조사 GPKG에 넣지 않는다. **메모리 레이어는 참조 표시가 있어도 흡수**한다. persistSurveyWork가 커밋을 먼저 하므로 isModified만 보면 닫기 저장에서 빠진다. SurveyStorage.cpp:402.
+- 시험: `storage_safety` PASS. `closeSave_preservesMemoryReferenceVectorOnReopen` PASS. smoke-quit 종료 0. 원본 `제주 광령리.gpkg` 안 씀.
+- clangd: SurveyStorage.cpp:402 col 19 → LayerOps.h:299 오류 0. MainWindow.cpp:7428 col 43 → SurveyStorage.h:58 오류 0. Python 3.13. Graft `absorbExternalVectors` L380–445, freshness Refreshed:false.
+- Archify sequence showcase 9/9 → deliver spec c5276d30… artifact b64107f3… → visual-check pass. `build/qa/baseline-20260919/absorb-memory-ref.sequence.html`. Viewer UI 영어 fallback.
+- EXE SHA256 DE2AA95C760608329210838769ACEEE7749D52262A729975913E37A69DC83750 (2026-09-19 10:44:29). 커밋·푸시·포터블·사용자 앱 없음.
+- 다음: 0-2 MainWindow 경고 4종. 0-3은 파일상 이미 2.0.0/`A:\OSGeo4W`이나 항목에서 재확인. 0-4는 사용자 화면.
+
+## 2026-09-19 저장 때 파일 참조 벡터는 조사 파일에 넣지 않음
+
+- 표시 없는 외부 벡터는 그대로 조사 GPKG로 들어간다. `ka_hgis/layer_role=reference` 이거나 위성·지적 같은 참조 이름인 **파일** 벡터는 `skippedReference`에만 남기고 복사하지 않는다. 메모리 참조는 위 0-1 항목. 이미 조사 파일 안에 있는 수치지형도는 이번 저장에서 빼지 않는다. 원본 `제주 광령리.gpkg`는 쓰지 않았다.
+- 시험: `absorbLeavesReferenceVectorsOutsideTheSurvey` PASS. `surveyFileTravelsAloneWithAbsorbedShp` PASS (표시 없는 주변유적 SHP는 계속 흡수). clangd SurveyStorage.cpp:402 col 20 → LayerOps.h:299, diagnostic_error_count 0. Graft `absorbExternalVectors` L380. Archify sequence showcase 9/9, visual-check pass → build/tooling/tmp/reference-skip.sequence.html (spec 70860e78, artifact da171a33).
+- SHP 별칭도 이 실행 파일에 들어 있다. `survey_name`→`surv_name`, `artifact_no`→`artif_no`. GPKG 필드명은 그대로. 기관 필드 사전이 아니라 이 프로그램의 DBF 10바이트 이름이다. `ka_export_survey_areas_tests` 8 PASS (직전 빌드와 같은 ExportService).
+- EXE SHA256 E7AC4972827F9C448B5981E3CEC40C8E29256A2DC4373915A5054550158FAEE1 (2026-09-19 08:03:36). 바탕화면 바로가기로 다시 실행해야 보인다. 커밋·푸시·포터블 없음.
+- 여기서 멈춘 것: 제출 인코딩 기본값은 UTF-8 (`MainWindow.cpp` 6056, `docs/user/job-cards/07-제출.md`는 UTF-8 또는 EUC-KR). 받는 쪽 확인 전이라 바꾸지 않음. `--no-sandbox`는 2026-09-11 이 PC A/B에서 필요했음 (`KaPortableRuntime.cpp` 240). 병렬 렌더는 `ParallelJob` 크래시 때문에 끔 (`KaApplication.cpp` 761). GPL 문구와 `© 2026 동국문화재연구원`은 정보 창·스플래시에 이미 있음. 소스 제공 URL은 만들지 않음. LTR 전환·CI 러너(`vars.ENABLE_SELF_HOSTED_BUILD`)·다른 PC 시험·실제 제출 접수는 이 자리에서 못 함. 이 브랜치 PR 없음.
+
+## 2026-09-19 더 많은 작업의 찾기 창이 잘림
+
+- 창이 좁으면 찾기 그룹이 「더 많은 작업」 메뉴로 들어간다. 스크롤 영역이 그룹을 줄인 뒤 스크롤 막대가 시·도 칩 마지막 줄을 가렸다. 시·도를 누르면 주소 창이 그 메뉴의 자식이 되어 같이 이상해졌다.
+- 수정: 메뉴 안 그룹은 줄어들기 전 크기를 유지하고, 화면보다 클 때만 스크롤을 켠다. 주소 창은 본창에 붙이고 메뉴는 닫는다.
+- 시험: 넘친 찾기에서 부산 칩이 메뉴 안에 있고, 주소 창 부모가 메뉴가 아님. `ka_region_locator_tests` 32 PASS, `ribbonOverflow_preservesControlsAndKeyboard` PASS. 수정 전 메뉴 그림은 셋째 줄이 회색 막대에 잘렸고, 수정 후 17개 칩이 다 보였다. clangd KaRegionLocator.cpp:112 오류 0. Graft `updateOverflow` L206. smoke-quit SMOKE_EXIT=0. EXE SHA256 5176F0EC1FCC9ECCFE99D0B2681296DDF45F779FC9B32C256F9D799DE3517F5C (2026-09-19 07:56:41). 사용자 창은 누르지 않음. 커밋 없음.
+
+## 2026-09-19 계정 비밀번호는 DPAPI로만 저장
+
+- `vworld-account.ini`, `ngii-account.ini`, `heritage-account.ini`의 비밀번호는 현재 Windows 사용자 DPAPI(`CryptProtectData`, `CRYPTPROTECT_UI_FORBIDDEN`)로 `password_dpapi`에 넣는다. 평문 `password` 키는 지운다. 개인 파일을 읽을 때 옛 평문이 있으면 그때 옮긴다. `config/` 폴백 ini는 다시 쓰지 않는다. 빈 비밀번호는 두 키를 지워 이 PC 로그인을 끈다.
+- 공식 API: https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata
+- 시험: `ka_topographic_settings_tests` 3개 PASS (특수문자 왕복, 저장 파일에 `ngii/password` 없음, 번들 ini는 평문 유지). `credentialsStoreIsSeparateFromTheTopographicOne` PASS (`password=` 줄 없음). `logDescriptionNeverCarriesThePassword` PASS.
+- 근거: Graft `KaSecretStore.cpp` writePassword L63. clangd KaSecretStore.cpp:63 col 22 → KaSecretStore.h:12, diagnostic_error_count 0. `scripts/gen-compile-commands.ps1`은 PowerShell이 `command` 속성을 못 고쳐 실패했고, `build-clangd/compile_commands.json`에 기존 SDK include를 붙여 `build/compile_commands.json`을 다시 썼다. Archify sequence showcase 9/9 → build/tooling/tmp/dpapi-account.sequence.html (spec ead63a97, artifact a84a801f). smoke-quit 종료 코드 0. EXE SHA256 3CB84E25BEC44070B46CE209DA29034FDE7863D9C71CB01BBA932EBFB9F46CA6 (2026-09-19 07:39:08). 사용자 계정 ini와 원본 GPKG는 쓰지 않음. 커밋/푸시 없음.
+
+## 2026-09-19 전체 화면에서 지도가 비는 문제
+
+- 작은 창(1:2,920,505, 지적 본번·부번·위성)에서는 보이고, 전체 화면으로 키우면 지도가 비었다. 리사이즈 중에 `outputSize`·화면 배율을 바로 바꿔서, 끝난 그림이 새 격자와 어긋났다. QGIS `imageRect`는 그 격자로 그림을 놓는다.
+- 수정: 리사이즈 필터는 격자를 당장 바꾸지 않는다. QGIS가 500ms 뒤에 스스로 다시 그린 뒤, 700ms 시점에 아직 크기가 다르면 그때만 맞춘다. 그리는 중이면 최대 약 6초까지 기다린다.
+- 근거: 설치본이 아닌 master `qgsmapcanvas.cpp` resizeEvent(500ms refresh)·imageRect·refreshMap의 stopPreviewJobs. clangd MainWindow.cpp:3093 오류 0. Graft `scheduleMapDisplayRefresh` L3093. Archify sequence showcase 9/9 → build/tooling/tmp/maximize-map.sequence.html. smoke-quit SMOKE_EXIT=0. EXE SHA256 6730EE734936F2FC8CA6BD27D355AB8DD2E739BFE84FA31C3DB4C0060ABADCAD (2026-09-19 07:25:53). 전체 화면 클릭은 사용자 창에서 하지 않음. 커밋 없음.
+
+## 2026-09-19 미저장 작업은 복구사본에만 남김
+
+- 2분마다, 저장하지 않은 조사 도형만 `복구사본/조사복구_*/복구조사.gpkg`에 복사한다. 참조 지도는 빼되, 그 레이어에 커밋 안 된 편집이 있으면 포함한다. 원본 조사 파일에는 쓰지 않는다. 최신 3개만 남긴다.
+- 성공하면 `복구사본/pending.txt`를 쓴다. 저장에 성공하면 그 표시를 지운다. 다음 실행에서 표시가 있으면 「복구 사본 열기 / 나중에」를 묻는다. 자동으로 열지 않는다. 스모크와 테스트 프로세스에서는 묻지 않는다.
+- 시험: `recoverySnapshot_layerFilterSkipsUnlistedVectors` PASS, `recoveryPending_notesNewestAndPrunesOldCopies` PASS, `recoverySnapshot_preservesPendingEditsAndSource` central/east PASS. clangd SurveyStorage.cpp:200·MainWindow.cpp:7583 오류 0. Graft `noteRecoveryPending` L200. Archify sequence showcase 9/9 → build/tooling/tmp/recovery-snapshot.sequence.html. smoke-quit SMOKE_EXIT=0. EXE SHA256 80A7C8B258BBB231D27A60C30A678D4DC7411912865F52F05BE2BE802220630D (2026-09-19 07:09:06). 원본 GPKG는 쓰지 않음. 커밋/푸시 없음.
+
+## 2026-09-19 기준점 CSV 미리보기·축 교환·경위도·CP949
+
+- P0-1: 가져오기 전에 미리보기를 띄운다. 조사구역에서 1km보다 멀고 교환한 쪽이 1km 이상 더 가까우면 "X·Y가 바뀐 것 같습니다"를 제안한다. 자동 교환은 하지 않는다. 경위도 열은 EPSG:4326에서 작업 좌표계로 변환한다. CSV는 UTF-8을 먼저 읽고 실패하면 CP949, 그다음 EUC-KR이다.
+- 시험: `importControlCsv_keepsKoreanAxesAndEncoding` PASS, `importControlCsvWritesFeatures` PASS (csv-result2.txt, TEST_EXIT=0). 한국 관례 X=98120 Y=148100은 교환 제안 후 (148100, 98120). CP949 `기준1` 유지. lon/lat 126.48, 33.45는 4326 변환과 1m 이내.
+- 근거: Graft `previewControlPointsCsv` LayerOps.cpp L5651; clangd LayerOps.cpp:5651 col 40 → LayerOps.h:281 오류 0; Archify sequence showcase 9/9 errors 0 → build/tooling/tmp/control-csv.sequence.html. Release EXE SHA256 8F90727BD7A3971D8D214A70E46BF69F896FCDCF3C7C83EC77CCAC6AD5E82200 (2026-09-19 06:51:05). smoke-quit SMOKE_EXIT=0. 사용자 앱은 꺼져 있었고 원본 GPKG는 쓰지 않음. 커밋/푸시/포터블 없음.
+- 코드로 안 한 것: 제출 필드명(규격 문서 필요), 제출 인코딩 기본값(받는 쪽 미확인, 현재 UTF-8), 복구 스냅샷, 참조자료 분리, DPAPI. 비밀번호는 레지스트리가 아니라 `vworld-account.ini`·`ngii-account.ini`·`heritage-account.ini` 평문이다.
+
+## 2026-09-19 저장 후 조사구역 도형이 지도에서 사라짐
+
+- 증상: 저장을 누르면 조사구역 도형이 지도에서 사라진다. 원본 `제주 광령리.gpkg`는 읽기만 했고, 디스크 `survey_area`는 Polygon 1개로 남아 있었다. 세션 로그 06:03:34 저장 직후 `GetNextRawFeature(): sqlite3_step() : unable to open database file`이 반복됐다. `featureCount` 캐시는 1인데 이터레이터가 실패한다.
+- 수정: `SurveyStorage::writeEmbedded`가 프로젝트·스타일을 쓴 뒤 `LayerOps::reloadSurveyGpkgReaders`로 같은 GPKG의 OGR 레이어를 다시 연다. 커밋되지 않은 편집 버퍼는 건너뛴다. `persistSurveyWork`는 쓰기 전에 캔버스 렌더를 멈춘다.
+- 재현: 원본을 `build/tooling/tmp/jeju-repro`로 복사(파일명 유지)한 뒤 `save_fieldPackageKeepsSurveyAreaReadable`. 수정 전 저장 후 이터레이터 실패(TEST_EXIT=1). 수정 후 같은 검사 TEST_EXIT=0, GDAL unable-to-open 없음. `save_keepsDrawnSurveyArea` SMALL_EXIT=0.
+- 근거: Graft `reloadSurveyGpkgReaders` LayerOps.cpp L2371; clangd SurveyStorage.cpp:404 선언 LayerOps.h:328 오류 0, LayerOps.cpp:2380 `reloadData`는 qgsdataprovider.h:461 오류 0; Archify sequence showcase 9/9 errors 0 → build/tooling/tmp/save-survey-area.sequence.html. Release EXE SHA256 B7756D2FCAED5B8FBE5DA5C60AC42B0FE95A0D9B9D7EC291EF17EDDDF40715F9 (2026-09-19 06:28:57). 사용자 앱은 꺼져 있었고 원본 GPKG는 쓰지 않음. 커밋/포터블 없음.
+
+## 2026-09-19 GDAL 세션 로그 핸들러 안전성 보강 (리뷰 반영, Cursor 6도구 루프)
+
+- 커밋 f49fddc/f6f1613의 KaGdalErrorLog 리뷰(request-changes) 반영: CE_Fatal은 snprintf/fputs CRT 전용(Qt·mutex 금지), 핸들러 thread_local 재진입 가드+try/catch, `logLine` thread_local 가드+QRecursiveMutex, `uninstall()` 추가 후 `exitQgis()` 직전 호출, 메시지 개행은 `simplified()`로 한 줄화.
+- 테스트 3개 추가(uninstall 복원·재설치, spy previous 중첩 CPLError 재귀 없음, 개행 정규화). 첫 실행에서 `\r\n`→공백 2개 실패를 잡아 수정.
+- 근거: Graft `graft_file_api src/app/KaGdalErrorLog.cpp`·`graft_find_all` install L690/uninstall L847/exitQgis L848; clangd KaGdalErrorLog.cpp·KaCrashGuard.cpp 오류 0(test .cpp는 moc 미생성 1건); Archify sequence showcase 9/9 errors 0 → build/tooling/tmp/gdal-error-log.sequence.html; CMake VS2022 Release 빌드 성공; CTest gdal_error_log·checklist_engine·startup_splash·save_open_window 4/4 통과; `run-ka-hgis.ps1 --smoke-quit` exit 0.
+- 바탕화면 `고고학 전용 HGIS.lnk` → scripts/start-ka-hgis.vbs → launch.ps1 → build/Release/ka-hgis.exe 확인. EXE SHA256 73C9043A2E00BCF4F286122DF872FBA100EFF7C1F6A5366E5ADC389E151A64C8. 사용자 앱 조작/포터블/커밋 없음.
+
+## 2026-09-18 Cursor 하네스 전환
+
+- 개발 하네스를 OpenAI Codex에서 Cursor로 전환. Cursor가 저장소 문서의 권위 있는 Agent 하네스다.
+- USER Cursor MCP(`%USERPROFILE%\.cursor\mcp.json`)에 `hgis_graft` 등록·검증(도구 4개). 저장소 `.cursor/mcp.json` 없음. `.codex/config.toml`은 호환용.
+- `AGENTS.md`, `docs/developer-tools.md`를 Cursor Agent 기준으로 갱신. 제품 C++/CMake/스크립트/테스트/커밋 없음.
+
 ## 2026-09-16 사용자 요청 v2 포터블 제작
 
 - 배포 ZIP: A:/qgis/dist/ka-hgis-v2-portable-20260916.zip (375,871,305 bytes, 약376MB). 최신 레이어목록·다운로드UI·아이콘 포함. 실행은 압축전체해제 후 ka-hgis.exe.

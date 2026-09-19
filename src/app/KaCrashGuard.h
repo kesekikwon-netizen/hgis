@@ -17,4 +17,7 @@ public:
   // 로그 폴더 경로(%LOCALAPPDATA%\ka-hgis\logs). KA_HGIS_LOG_DIR 이 있으면 그 폴더를
   // 쓴다. 검사가 사용자의 실제 세션 로그와 충돌 폴더에 기록하지 않게 하려는 것이다.
   static QString logDir();
+
+  // session.log·crash-*.log·crash-*.dmp 위치를 한 줄로 안내한다.
+  static QString dumpHint();
 };

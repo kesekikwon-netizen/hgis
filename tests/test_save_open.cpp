@@ -20,6 +20,7 @@
 #include <QTimer>
 #include <QTabWidget>
 #include <QMessageBox>
+#include <QDialog>
 #include <QDialogButtonBox>
 #include <QLabel>
 #include <QMenu>
@@ -57,6 +58,8 @@
 #include "core/DemColorRampLegend.h"
 #include "core/HeritageStyle.h"
 #include "core/HeritageLayoutNumbers.h"
+#include "core/ExportService.h"
+#include "core/LayoutService.h"
 #include <qgsapplication.h>
 #include <qgscategorizedsymbolrenderer.h>
 #include <qgsfeature.h>
@@ -72,7 +75,9 @@
 #include <qgslayertreeregistrybridge.h>
 #include <qgslayertreeview.h>
 #include <qgslayout.h>
+#include <qgslayoutmanager.h>
 #include <qgslayoutitemmap.h>
+#include <qgsprintlayout.h>
 #include <qgslabelingresults.h>
 #include <qgslayoutitemlabel.h>
 #include <qgslayoutitemlegend.h>
@@ -163,6 +168,185 @@ private:
     bool ok = false;
     return QMetaObject::invokeMethod(&window, "persistSurveyWork", Qt::DirectConnection,
                                      Q_RETURN_ARG(bool, ok)) && ok;
+  }
+  static bool verticesWithinMm(const QgsGeometry& a, const QgsGeometry& b, double mm = 0.001) {
+    if (a.isNull() || b.isNull() || a.isEmpty() || b.isEmpty()) return false;
+    QgsVertexIterator ia = a.vertices();
+    QgsVertexIterator ib = b.vertices();
+    bool sequential = true;
+    while (ia.hasNext() && ib.hasNext()) {
+      const QgsPoint pa = ia.next();
+      const QgsPoint pb = ib.next();
+      if (QgsPointXY(pa).distance(QgsPointXY(pb)) > mm) sequential = false;
+    }
+    if (sequential && !ia.hasNext() && !ib.hasNext()) return true;
+    // SHP 링 시작점이 바뀌어도 모양은 같아야 한다.
+    const double hausdorff = a.hausdorffDistance(b);
+    return std::isfinite(hausdorff) && hausdorff >= 0.0 && hausdorff <= mm;
+  }
+  static QgsGeometry to5179(const QgsGeometry& geometry, const QgsCoordinateReferenceSystem& src,
+                            QgsProject* project) {
+    QgsGeometry copy(geometry);
+    if (!src.isValid() || src.authid() == QLatin1String("EPSG:5179")) return copy;
+    QgsCoordinateTransform transform(src, QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5179")),
+                                     project->transformContext());
+    if (copy.transform(transform) != Qgis::GeometryOperationResult::Success) return QgsGeometry();
+    return copy;
+  }
+  static QString fieldText(const QgsFeature& feature, const QStringList& names) {
+    for (const QString& name : names) {
+      const int index = feature.fields().indexOf(name);
+      if (index >= 0) return feature.attribute(index).toString();
+    }
+    return {};
+  }
+  static QgsFeature featureByField(QgsVectorLayer* layer, const QStringList& names, const QString& value) {
+    QgsFeature feature;
+    if (!layer) return feature;
+    QgsFeatureIterator it = layer->getFeatures();
+    while (it.nextFeature(feature)) {
+      if (fieldText(feature, names) == value) return feature;
+    }
+    return QgsFeature();
+  }
+  static bool addComposedUserSheet(QgsProject* project, QgsMapLayer* mapLayer, const QgsRectangle& extent) {
+    QString error;
+    if (LayoutService::createBlankSheet(project, 297.0, 210.0, QStringLiteral("user_sheet"), &error).isEmpty())
+      return false;
+    auto* layout = dynamic_cast<QgsPrintLayout*>(
+        project->layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+    if (!layout || !mapLayer) return false;
+    auto* map = new QgsLayoutItemMap(layout);
+    map->setId(QStringLiteral("ka_map"));
+    map->attemptSetSceneRect(QRectF(20.0, 20.0, 120.0, 80.0));
+    map->setCrs(project->crs().isValid() ? project->crs() : mapLayer->crs());
+    map->setKeepLayerSet(true);
+    map->setLayers(QList<QgsMapLayer*>{mapLayer});
+    map->zoomToExtent(extent);
+    if (map->scene() != layout) layout->addLayoutItem(map);
+    return LayoutService::isComposedStudioSheet(project);
+  }
+  QString makeRoundTripSurvey(const QString& name, const QString& authId) {
+    QString error;
+    const QString path = SurveyProjectFactory::createNewSurvey(m_files.path(), name, &error, authId);
+    if (path.isEmpty()) return {};
+    const bool east = authId.endsWith(QLatin1String("5187"));
+    const double ox = east ? 190000.0 : 200000.0;
+    const double oy = east ? 560000.0 : 450000.0;
+    QgsProject project;
+    project.setTitle(name);
+    project.setCrs(QgsCoordinateReferenceSystem(authId));
+
+    auto* surveyArea = LayerOps::ensureDomainLayer(&project, path, QStringLiteral("survey_area"),
+                                                   name, &error);
+    if (!surveyArea || !surveyArea->startEditing()) return {};
+    QgsFeature surveyFeature(surveyArea->fields());
+    surveyFeature.setAttribute(QStringLiteral("survey_name"), QStringLiteral("왕복조사"));
+    surveyFeature.setAttribute(QStringLiteral("site_name"), QStringLiteral("테스트유적"));
+    surveyFeature.setGeometry(QgsGeometry::fromRect(QgsRectangle(ox, oy, ox + 100.0, oy + 100.0)));
+    if (!surveyArea->addFeature(surveyFeature) || !surveyArea->commitChanges()) return {};
+
+    auto* featurePoly = LayerOps::ensureDomainLayer(&project, path, QStringLiteral("feature_poly"),
+                                                    QStringLiteral("유구 면"), &error);
+    if (!featurePoly || !featurePoly->startEditing()) return {};
+    QgsFeature polyFeature(featurePoly->fields());
+    polyFeature.setAttribute(QStringLiteral("kind"), QStringLiteral("수혈"));
+    polyFeature.setAttribute(QStringLiteral("period"), QStringLiteral("청동기"));
+    polyFeature.setAttribute(QStringLiteral("feature_no"), QStringLiteral("1"));
+    polyFeature.setGeometry(QgsGeometry::fromRect(QgsRectangle(ox + 20.0, oy + 20.0, ox + 40.0, oy + 40.0)));
+    if (!featurePoly->addFeature(polyFeature) || !featurePoly->commitChanges()) return {};
+
+    auto* featureLine = LayerOps::ensureDomainLayer(&project, path, QStringLiteral("feature_line"),
+                                                    QStringLiteral("유구 선"), &error);
+    if (!featureLine || !featureLine->startEditing()) return {};
+    QgsFeature lineFeature(featureLine->fields());
+    lineFeature.setAttribute(QStringLiteral("kind"), QStringLiteral("경계"));
+    lineFeature.setGeometry(QgsGeometry::fromPolylineXY(
+        {QgsPointXY(ox + 10.0, oy + 50.0), QgsPointXY(ox + 90.0, oy + 50.0)}));
+    if (!featureLine->addFeature(lineFeature) || !featureLine->commitChanges()) return {};
+    if (auto* lineNode = project.layerTreeRoot()->findLayer(featureLine->id()))
+      lineNode->setItemVisibilityChecked(false);
+
+    auto* control = LayerOps::ensureDomainLayer(&project, path, QStringLiteral("control_points"),
+                                                QStringLiteral("기준점"), &error);
+    if (!control || !control->startEditing()) return {};
+    for (int i = 0; i < 2; ++i) {
+      QgsFeature point(control->fields());
+      point.setAttribute(QStringLiteral("point_id"), QStringLiteral("G%1").arg(i + 1));
+      point.setAttribute(QStringLiteral("x"), ox + 30.0 + i * 40.0);
+      point.setAttribute(QStringLiteral("y"), oy + 30.0 + i * 50.0);
+      point.setAttribute(QStringLiteral("datum"), QStringLiteral("세계측지계"));
+      point.setAttribute(QStringLiteral("ellipsoid"), QStringLiteral("GRS80"));
+      point.setAttribute(QStringLiteral("projection"), QStringLiteral("UTM-K"));
+      point.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(ox + 30.0 + i * 40.0, oy + 30.0 + i * 50.0)));
+      if (!control->addFeature(point)) return {};
+    }
+    if (!control->commitChanges()) return {};
+
+    auto* artifact = LayerOps::ensureDomainLayer(&project, path, QStringLiteral("artifact_point"),
+                                                 QStringLiteral("유물"), &error);
+    if (!artifact || !artifact->startEditing()) return {};
+    QgsFeature artifactFeature(artifact->fields());
+    artifactFeature.setAttribute(QStringLiteral("kind"), QStringLiteral("토기"));
+    artifactFeature.setAttribute(QStringLiteral("period"), QStringLiteral("청동기"));
+    artifactFeature.setAttribute(QStringLiteral("artifact_no"), QStringLiteral("A-1"));
+    artifactFeature.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(ox + 25.0, oy + 35.0)));
+    if (!artifact->addFeature(artifactFeature) || !artifact->commitChanges()) return {};
+
+    QgsVectorLayer source(
+        QStringLiteral("Polygon?crs=%1&field=name:string").arg(authId),
+        QStringLiteral("fixture"), QStringLiteral("memory"));
+    QgsFeature referenceFeature(source.fields());
+    referenceFeature.setAttribute(0, QStringLiteral("외부경계"));
+    referenceFeature.setGeometry(QgsGeometry::fromRect(QgsRectangle(ox - 50.0, oy - 50.0, ox + 150.0, oy + 150.0)));
+    if (!source.isValid() || !source.dataProvider()->addFeature(referenceFeature)) return {};
+    const QString referencePath = m_files.filePath(name + QStringLiteral("-ref.shp"));
+    QgsVectorFileWriter::SaveVectorOptions options;
+    options.driverName = QStringLiteral("ESRI Shapefile");
+    options.fileEncoding = QStringLiteral("UTF-8");
+    if (QgsVectorFileWriter::writeAsVectorFormatV3(&source, referencePath, project.transformContext(),
+                                                   options) != QgsVectorFileWriter::NoError)
+      return {};
+    auto* reference = new QgsVectorLayer(referencePath, QStringLiteral("외부경계"), QStringLiteral("ogr"));
+    if (!reference->isValid()) {
+      delete reference;
+      return {};
+    }
+    LayerOps::markReferenceLayer(reference);
+    project.addMapLayer(reference);
+
+    const QgsRectangle sheetExtent(ox - 10.0, oy - 10.0, ox + 110.0, oy + 110.0);
+    if (!addComposedUserSheet(&project, surveyArea, sheetExtent)) return {};
+    if (!SurveyStorage::writeEmbedded(&project, path, &error)) return {};
+    return path;
+  }
+  static QgsVectorLayer* findExternalReference(QgsProject* project, const QString& referencePath) {
+    if (!project) return nullptr;
+    const QString want = QFileInfo(referencePath).absoluteFilePath();
+    for (auto* layer : project->mapLayers()) {
+      auto* vector = qobject_cast<QgsVectorLayer*>(layer);
+      if (!vector) continue;
+      const QString source = QFileInfo(vector->source().section(QLatin1Char('|'), 0, 0)).absoluteFilePath();
+      if (source.compare(want, Qt::CaseInsensitive) == 0) return vector;
+      if (LayerOps::isReferenceLayer(vector) && vector->providerType() == QLatin1String("ogr") &&
+          (vector->name().contains(QStringLiteral("외부")) || source.endsWith(QLatin1String("-ref.shp"), Qt::CaseInsensitive)))
+        return vector;
+    }
+    return nullptr;
+  }
+  static QgsVectorLayer* ensureFileReference(QgsProject* project, const QString& referencePath) {
+    if (auto* existing = findExternalReference(project, referencePath)) {
+      LayerOps::markReferenceLayer(existing);
+      return existing;
+    }
+    auto* reference = new QgsVectorLayer(referencePath, QStringLiteral("외부경계"), QStringLiteral("ogr"));
+    if (!reference->isValid()) {
+      delete reference;
+      return nullptr;
+    }
+    LayerOps::markReferenceLayer(reference);
+    project->addMapLayer(reference);
+    return reference;
   }
   static bool hasNoAutosaveTimer(MainWindow& window) {
     for (auto* timer : window.findChildren<QTimer*>(QString(), Qt::FindDirectChildrenOnly))
@@ -2096,6 +2280,15 @@ private slots:
     choose.start(20);
     return window.openSurveyGpkg(path);
   }
+  static void captureAndDismissForm(KaCaptureMapTool* capture, const QgsGeometry& geometry) {
+    QTimer dismiss;
+    QObject::connect(&dismiss, &QTimer::timeout, [] {
+      if (auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget()))
+        dialog->reject();
+    });
+    dismiss.start(20);
+    capture->geometryCaptured(geometry);
+  }
   void newSurvey_selectedCrsSurvivesSaveAndOpen() {
     QFETCH(QString, authId);
     const QString name = QStringLiteral("crs_%1").arg(authId.mid(5));
@@ -2301,6 +2494,200 @@ private slots:
     QVERIFY(renderer);
     QCOMPARE(renderer->symbol()->color(), QColor(217, 43, 43));
     QCOMPARE(QgsProject::instance()->crs().authid(), QStringLiteral("EPSG:5187"));
+  }
+  void saveReopenSubmit_preservesWorkAndPackage_data() {
+    QTest::addColumn<QString>("authId");
+    QTest::newRow("5186") << QStringLiteral("EPSG:5186");
+    QTest::newRow("5187") << QStringLiteral("EPSG:5187");
+  }
+  void saveReopenSubmit_preservesWorkAndPackage() {
+    QFETCH(QString, authId);
+    const QString name = QStringLiteral("왕복제출%1").arg(authId.mid(5));
+    const QString path = makeRoundTripSurvey(name, authId);
+    QVERIFY2(!path.isEmpty(), "synthetic save-reopen-submit survey");
+    const QString referencePath = m_files.filePath(name + QStringLiteral("-ref.shp"));
+    QVERIFY(QFile::exists(referencePath));
+
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    auto* project = QgsProject::instance();
+    QCOMPARE(project->crs().authid(), authId);
+    if (auto* canvas = window.findChild<QgsMapCanvas*>())
+      QCOMPARE(canvas->mapSettings().destinationCrs().authid(), authId);
+
+    auto* surveyArea = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
+    auto* featurePoly = LayerOps::findByLayerKey(project, QStringLiteral("feature_poly"));
+    auto* featureLine = LayerOps::findByLayerKey(project, QStringLiteral("feature_line"));
+    auto* control = LayerOps::findByLayerKey(project, QStringLiteral("control_points"));
+    auto* artifact = LayerOps::findByLayerKey(project, QStringLiteral("artifact_point"));
+    QVERIFY(surveyArea && featurePoly && featureLine && control && artifact);
+    QCOMPARE(surveyArea->crs().authid(), authId);
+    QCOMPARE(featurePoly->crs().authid(), authId);
+    QCOMPARE(LayerOps::layerKeyOf(surveyArea), QStringLiteral("survey_area"));
+    QVERIFY(!LayerOps::isReferenceLayer(surveyArea));
+    QCOMPARE(surveyArea->featureCount(), 1LL);
+    QCOMPARE(featurePoly->featureCount(), 1LL);
+    QCOMPARE(featureLine->featureCount(), 1LL);
+    QCOMPARE(control->featureCount(), 2LL);
+    QCOMPARE(artifact->featureCount(), 1LL);
+
+    auto* reference = ensureFileReference(project, referencePath);
+    QVERIFY2(reference && reference->isValid(), "file-backed reference must stay in the open survey");
+    LayerOps::markReferenceLayer(reference);
+    QVERIFY(LayerOps::isReferenceLayer(reference));
+    QCOMPARE(QFileInfo(reference->source().section(QLatin1Char('|'), 0, 0)).absoluteFilePath(),
+             QFileInfo(referencePath).absoluteFilePath());
+    QVERIFY(!reference->source().contains(path));
+    if (auto* lineNode = project->layerTreeRoot()->findLayer(featureLine->id()))
+      lineNode->setItemVisibilityChecked(false);
+    if (!LayoutService::isComposedStudioSheet(project))
+      QVERIFY(addComposedUserSheet(project, surveyArea, surveyArea->extent()));
+    auto* lineNode = project->layerTreeRoot()->findLayer(featureLine->id());
+    QVERIFY(lineNode);
+    QVERIFY(!lineNode->itemVisibilityChecked());
+    auto* areaNode = project->layerTreeRoot()->findLayer(surveyArea->id());
+    QVERIFY(areaNode && areaNode->itemVisibilityChecked());
+    QVERIFY(LayoutService::isComposedStudioSheet(project));
+
+    const QgsFeature beforeArea = featureByField(surveyArea, {QStringLiteral("survey_name")},
+                                                 QStringLiteral("왕복조사"));
+    const QgsFeature beforePoly = featureByField(featurePoly, {QStringLiteral("feature_no")},
+                                                 QStringLiteral("1"));
+    const QgsFeature beforeLine = featureByField(featureLine, {QStringLiteral("kind")},
+                                                 QStringLiteral("경계"));
+    const QgsFeature beforeG1 = featureByField(control, {QStringLiteral("point_id")},
+                                               QStringLiteral("G1"));
+    const QgsFeature beforeArt = featureByField(artifact, {QStringLiteral("artifact_no")},
+                                                QStringLiteral("A-1"));
+    QVERIFY(beforeArea.isValid() && beforePoly.isValid() && beforeLine.isValid());
+    QVERIFY(beforeG1.isValid() && beforeArt.isValid());
+    QCOMPARE(beforeArea.attribute(QStringLiteral("site_name")).toString(), QStringLiteral("테스트유적"));
+    QCOMPARE(beforePoly.attribute(QStringLiteral("kind")).toString(), QStringLiteral("수혈"));
+    QCOMPARE(beforePoly.attribute(QStringLiteral("period")).toString(), QStringLiteral("청동기"));
+    QCOMPARE(beforeArt.attribute(QStringLiteral("kind")).toString(), QStringLiteral("토기"));
+
+    const QString pkgBefore = m_files.filePath(name + QStringLiteral("-pkg-a"));
+    QString exportError;
+    QVERIFY2(!ExportService::exportSubmissionPackage(project, pkgBefore, QStringLiteral("UTF-8"),
+                                                    QStringLiteral("OK"), false, false, &exportError).isEmpty(),
+             qPrintable(exportError));
+    QVERIFY(QFile::exists(QDir(pkgBefore).filePath(QStringLiteral("조사도면.pdf"))));
+    QVERIFY(QFileInfo(QDir(pkgBefore).filePath(QStringLiteral("조사도면.pdf"))).size() > 500);
+
+    QVERIFY(saveNow(window));
+    QVERIFY(window.openSurveyGpkg(path));
+    project = QgsProject::instance();
+    QCOMPARE(project->crs().authid(), authId);
+    surveyArea = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
+    featurePoly = LayerOps::findByLayerKey(project, QStringLiteral("feature_poly"));
+    featureLine = LayerOps::findByLayerKey(project, QStringLiteral("feature_line"));
+    control = LayerOps::findByLayerKey(project, QStringLiteral("control_points"));
+    artifact = LayerOps::findByLayerKey(project, QStringLiteral("artifact_point"));
+    QVERIFY(surveyArea && featurePoly && featureLine && control && artifact);
+    QCOMPARE(surveyArea->featureCount(), 1LL);
+    QCOMPARE(featurePoly->featureCount(), 1LL);
+    QCOMPARE(featureLine->featureCount(), 1LL);
+    QCOMPARE(control->featureCount(), 2LL);
+    QCOMPARE(artifact->featureCount(), 1LL);
+    QCOMPARE(surveyArea->crs().authid(), authId);
+    QCOMPARE(LayerOps::layerKeyOf(surveyArea), QStringLiteral("survey_area"));
+    QVERIFY(!LayerOps::isReferenceLayer(surveyArea));
+    lineNode = project->layerTreeRoot()->findLayer(featureLine->id());
+    QVERIFY(lineNode);
+    QVERIFY2(!lineNode->itemVisibilityChecked(), "hidden feature_line must stay hidden");
+    QVERIFY(LayoutService::isComposedStudioSheet(project));
+
+    reference = findExternalReference(project, referencePath);
+    QVERIFY2(reference && reference->isValid() && LayerOps::isReferenceLayer(reference),
+             "file-backed reference must survive save and reopen");
+    QCOMPARE(QFileInfo(reference->source().section(QLatin1Char('|'), 0, 0)).absoluteFilePath(),
+             QFileInfo(referencePath).absoluteFilePath());
+    QVERIFY2(!reference->source().contains(path), "external SHP must not be absorbed into the survey GPKG");
+    QCOMPARE(reference->featureCount(), 1LL);
+
+    const QgsFeature afterArea = featureByField(surveyArea, {QStringLiteral("survey_name")},
+                                                QStringLiteral("왕복조사"));
+    const QgsFeature afterPoly = featureByField(featurePoly, {QStringLiteral("feature_no")},
+                                                QStringLiteral("1"));
+    const QgsFeature afterLine = featureByField(featureLine, {QStringLiteral("kind")},
+                                                QStringLiteral("경계"));
+    const QgsFeature afterG1 = featureByField(control, {QStringLiteral("point_id")},
+                                              QStringLiteral("G1"));
+    const QgsFeature afterArt = featureByField(artifact, {QStringLiteral("artifact_no")},
+                                               QStringLiteral("A-1"));
+    QVERIFY(afterArea.isValid() && afterPoly.isValid() && afterLine.isValid());
+    QVERIFY(afterG1.isValid() && afterArt.isValid());
+    QCOMPARE(afterArea.attribute(QStringLiteral("site_name")).toString(), QStringLiteral("테스트유적"));
+    QCOMPARE(afterPoly.attribute(QStringLiteral("kind")).toString(), QStringLiteral("수혈"));
+    QCOMPARE(afterPoly.attribute(QStringLiteral("period")).toString(), QStringLiteral("청동기"));
+    QCOMPARE(afterArt.attribute(QStringLiteral("artifact_no")).toString(), QStringLiteral("A-1"));
+    QVERIFY2(verticesWithinMm(afterArea.geometry(), beforeArea.geometry()), "survey_area moved");
+    QVERIFY2(verticesWithinMm(afterPoly.geometry(), beforePoly.geometry()), "feature_poly moved");
+    QVERIFY2(verticesWithinMm(afterLine.geometry(), beforeLine.geometry()), "feature_line moved");
+    QVERIFY2(verticesWithinMm(afterG1.geometry(), beforeG1.geometry()), "control G1 moved");
+    QVERIFY2(verticesWithinMm(afterArt.geometry(), beforeArt.geometry()), "artifact moved");
+
+    const QString pkgAfter = m_files.filePath(name + QStringLiteral("-pkg-b"));
+    QVERIFY2(!ExportService::exportSubmissionPackage(project, pkgAfter, QStringLiteral("UTF-8"),
+                                                    QStringLiteral("OK"), false, false, &exportError).isEmpty(),
+             qPrintable(exportError));
+    const QString pdfBefore = QDir(pkgBefore).filePath(QStringLiteral("조사도면.pdf"));
+    const QString pdfAfter = QDir(pkgAfter).filePath(QStringLiteral("조사도면.pdf"));
+    QVERIFY(QFile::exists(pdfAfter));
+    QVERIFY(QFileInfo(pdfAfter).size() > 500);
+    const qint64 pdfSizeBefore = QFileInfo(pdfBefore).size();
+    const qint64 pdfSizeAfter = QFileInfo(pdfAfter).size();
+    QVERIFY2(qAbs(pdfSizeBefore - pdfSizeAfter) <= qMax(qint64(4096), pdfSizeBefore / 10),
+             qPrintable(QStringLiteral("PDF size %1 vs %2").arg(pdfSizeBefore).arg(pdfSizeAfter)));
+    QVERIFY(!QFile::exists(QDir(pkgAfter).filePath(QStringLiteral("외부경계.shp"))));
+
+    const QStringList shpNames = {
+      QStringLiteral("survey_area.shp"), QStringLiteral("feature_poly.shp"),
+      QStringLiteral("feature_line.shp"), QStringLiteral("control_points.shp"),
+      QStringLiteral("artifact_point.shp")
+    };
+    for (const QString& shpName : shpNames) {
+      const QString beforePath = QDir(pkgBefore).filePath(shpName);
+      const QString afterPath = QDir(pkgAfter).filePath(shpName);
+      QVERIFY2(QFile::exists(beforePath) && QFile::exists(afterPath), qPrintable(shpName));
+      QgsVectorLayer beforeLayer(beforePath, shpName + QStringLiteral("-a"), QStringLiteral("ogr"));
+      QgsVectorLayer afterLayer(afterPath, shpName + QStringLiteral("-b"), QStringLiteral("ogr"));
+      QVERIFY2(beforeLayer.isValid() && afterLayer.isValid(), qPrintable(shpName));
+      QCOMPARE(beforeLayer.crs().authid(), QStringLiteral("EPSG:5179"));
+      QCOMPARE(afterLayer.crs().authid(), QStringLiteral("EPSG:5179"));
+      QCOMPARE(beforeLayer.featureCount(), afterLayer.featureCount());
+    }
+
+    QgsVectorLayer areaShp(QDir(pkgAfter).filePath(QStringLiteral("survey_area.shp")),
+                           QStringLiteral("sa"), QStringLiteral("ogr"));
+    QgsVectorLayer polyShp(QDir(pkgAfter).filePath(QStringLiteral("feature_poly.shp")),
+                           QStringLiteral("fp"), QStringLiteral("ogr"));
+    QgsVectorLayer artShp(QDir(pkgAfter).filePath(QStringLiteral("artifact_point.shp")),
+                          QStringLiteral("ap"), QStringLiteral("ogr"));
+    const QgsFeature shpArea = featureByField(&areaShp, {QStringLiteral("surv_name"), QStringLiteral("survey_name")},
+                                              QStringLiteral("왕복조사"));
+    const QgsFeature shpPoly = featureByField(&polyShp, {QStringLiteral("feature_no")}, QStringLiteral("1"));
+    const QgsFeature shpArt = featureByField(&artShp, {QStringLiteral("artif_no"), QStringLiteral("artifact_no")},
+                                             QStringLiteral("A-1"));
+    QVERIFY(shpArea.isValid() && shpPoly.isValid() && shpArt.isValid());
+    QCOMPARE(fieldText(shpArea, {QStringLiteral("surv_name"), QStringLiteral("survey_name")}),
+             QStringLiteral("왕복조사"));
+    QCOMPARE(shpPoly.attribute(QStringLiteral("kind")).toString(), QStringLiteral("수혈"));
+    QCOMPARE(fieldText(shpArt, {QStringLiteral("artif_no"), QStringLiteral("artifact_no")}),
+             QStringLiteral("A-1"));
+    const QgsGeometry area5179 = to5179(afterArea.geometry(), surveyArea->crs(), project);
+    const QgsGeometry poly5179 = to5179(afterPoly.geometry(), featurePoly->crs(), project);
+    const QgsGeometry art5179 = to5179(afterArt.geometry(), artifact->crs(), project);
+    QVERIFY2(verticesWithinMm(shpArea.geometry(), area5179),
+             qPrintable(QStringLiteral("survey_area SHP hausdorff=%1")
+                            .arg(shpArea.geometry().hausdorffDistance(area5179), 0, 'f', 6)));
+    QVERIFY2(verticesWithinMm(shpPoly.geometry(), poly5179),
+             qPrintable(QStringLiteral("feature_poly SHP hausdorff=%1")
+                            .arg(shpPoly.geometry().hausdorffDistance(poly5179), 0, 'f', 6)));
+    QVERIFY2(verticesWithinMm(shpArt.geometry(), art5179),
+             qPrintable(QStringLiteral("artifact SHP hausdorff=%1")
+                            .arg(shpArt.geometry().hausdorffDistance(art5179), 0, 'f', 6)));
   }
   void open_repairsRegistryOnlyLayers() {
     const QString path = makeSurvey(QStringLiteral("목록복구"), true);
@@ -2709,7 +3096,7 @@ private slots:
     QVERIFY(capture && canvas);
     QCOMPARE(canvas->mapTool(), capture);
     const QgsGeometry geometry = QgsGeometry::fromRect(QgsRectangle(190300, 560300, 190350, 560350));
-    capture->geometryCaptured(geometry);
+    captureAndDismissForm(capture, geometry);
     QCOMPARE(oldLayer->featureCount(), 1LL);
     canvas->setRenderFlag(false);
     QVERIFY(openWithAnswer(window, second, QMessageBox::Discard));
@@ -2718,11 +3105,11 @@ private slots:
     QCOMPARE(capture->pointCount(), 0);
     auto* layer = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
     QVERIFY(layer);
-    capture->geometryCaptured(geometry); // A late capture cannot use the deleted edit layer.
+    captureAndDismissForm(capture, geometry); // A late capture cannot use the deleted edit layer.
     QCOMPARE(layer->featureCount(), 1LL);
     window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"))->setCurrentLayer(layer);
     QVERIFY(QMetaObject::invokeMethod(&window, "startEditFeaturePoly", Qt::DirectConnection));
-    capture->geometryCaptured(geometry);
+    captureAndDismissForm(capture, geometry);
     auto* newDrawingLayer = LayerOps::findByLayerKey(project, QStringLiteral("feature_poly"));
     QVERIFY(newDrawingLayer);
     QCOMPARE(newDrawingLayer->featureCount(), 1LL);
@@ -2809,6 +3196,68 @@ private slots:
     QCOMPARE(second->featureCount(), 1LL);
     QCOMPARE(second->getFeature(*second->allFeatureIds().constBegin())
                  .attribute(QStringLiteral("name")).toString(), QStringLiteral("독립 구역"));
+  }
+  void save_keepsDrawnSurveyArea() {
+    const QString path = makeSurvey(QStringLiteral("저장후구역유지"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    auto* project = QgsProject::instance();
+    QString error;
+    auto* layer = LayerOps::createSurveyAreaLayer(project, path, QStringLiteral("그린 구역"),
+                                                 Qt::black, QColor(180, 83, 9, 70), 1.6, &error);
+    QVERIFY2(layer, qPrintable(error));
+    QVERIFY(layer->startEditing());
+    QgsFeature feature(layer->fields());
+    feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(190400, 560400, 190480, 560480)));
+    QVERIFY(layer->addFeature(feature));
+    QVERIFY(layer->commitChanges(false));
+    QCOMPARE(layer->featureCount(), 1LL);
+    const QString table = layer->source().section(QLatin1String("layername="), 1, 1)
+                              .section(QLatin1Char('|'), 0, 0);
+    QVERIFY(saveNow(window));
+    QCOMPARE(layer->featureCount(), 1LL);
+    QgsFeature live;
+    QVERIFY(layer->getFeatures().nextFeature(live));
+    QVERIFY2(!live.geometry().isEmpty(), "Saved survey-area geometry must stay readable on the open layer");
+    QgsVectorLayer stored(path + QStringLiteral("|layername=") + table, QStringLiteral("저장본"),
+                          QStringLiteral("ogr"));
+    QVERIFY(stored.isValid());
+    QCOMPARE(stored.featureCount(), 1LL);
+  }
+  void save_fieldPackageKeepsSurveyAreaReadable() {
+    const QString src = qEnvironmentVariable("KA_HGIS_REPRO_GPKG");
+    if (src.isEmpty() || !QFile::exists(src))
+      QSKIP("KA_HGIS_REPRO_GPKG is not set");
+    const QString path = m_files.filePath(QFileInfo(src).fileName());
+    QVERIFY(QFile::copy(src, path));
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY2(window.openSurveyGpkg(path), "field package must open");
+    QgsVectorLayer* layer = nullptr;
+    for (QgsVectorLayer* candidate : LayerOps::surveyAreaLayers(QgsProject::instance())) {
+      if (candidate && candidate->featureCount() > 0) {
+        layer = candidate;
+        break;
+      }
+    }
+    QVERIFY(layer);
+    const long long before = layer->featureCount();
+    QgsFeature seen;
+    QVERIFY(layer->getFeatures().nextFeature(seen));
+    QVERIFY(!seen.geometry().isEmpty());
+    QVERIFY(saveNow(window));
+    const QString providerError = layer->dataProvider() ? layer->dataProvider()->error().message() : QString();
+    QgsFeature after;
+    QVERIFY2(layer->isValid() && layer->getFeatures().nextFeature(after),
+             qPrintable(QStringLiteral("source=%1 valid=%2 count=%3 err=%4")
+                            .arg(layer->source())
+                            .arg(layer->isValid())
+                            .arg(layer->featureCount())
+                            .arg(providerError)));
+    QCOMPARE(layer->featureCount(), before);
+    QVERIFY(!after.geometry().isEmpty());
   }
   void newSurvey_existingNamePreservesUnsavedCurrentSurvey() {
     const QString name = QStringLiteral("새조사실패보존");

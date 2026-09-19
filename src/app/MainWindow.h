@@ -87,6 +87,7 @@ public:
   ~MainWindow() override;
   bool eventFilter(QObject* watched, QEvent* event) override;
   void showEvent(QShowEvent* event) override;
+  void changeEvent(QEvent* event) override;
   void closeEvent(QCloseEvent* event) override;
   enum class OpenSurveyMode { PreferWorkspace, LayersOnly };
   bool openSurveyGpkg(const QString& gpkgPath);
@@ -110,6 +111,7 @@ public:
   void editCurrentLayerAttributes(QgsMapLayer* layer = nullptr);
   void removeLayersFromTree(QgsLayerTreeView* tree);
   void undoMapAction();
+  void redoMapAction();
 
 private:
   enum class ReferenceMapKind { Soil, PaleoSoil, Geology, River };
@@ -137,6 +139,7 @@ private slots:
   // 작업공간을 조사 파일에 쓴다. 20초 타이머로 자동 호출하던 것을 없앴으므로,
   // 이제 「저장」과 닫기 확인에서만 불린다. 테스트도 이 이름으로 직접 부른다.
   bool persistSurveyWork();
+  void extractEmbeddedReferenceVectors();
   void openProject();
   void startEditSurveyArea();
   void startEditFeaturePoly();
@@ -261,7 +264,9 @@ private slots:
   void showMapWorkspace();
   void rememberSurvey(const QString& path, const QString& name);
   void undoLastAction();
+  void redoLastAction();
   void deleteSelectedFeatures();
+  void updateUndoRedoActions();
 
 private:
   void buildUi();
@@ -349,6 +354,9 @@ private:
   QString preferredSurveyDir() const;
   void rememberSurveyDir(const QString& path);
   void refreshWindowTitle();
+  void captureRecoverySnapshot();
+  void offerRecoverySnapshot();
+  void clearRecoveryOffer(const QString& recoveryDirectory);
   // 레이어 점호. 직전과 달라졌으면 무엇이 사라졌는지 세션 로그에 적고 되살린다.
   void auditLayerHealth();
   void logLayerCensus(const QString& tag);
@@ -406,6 +414,8 @@ private:
   KaMeasureMapTool* m_measureTool = nullptr;
   QAction* m_actMeasure = nullptr;
   QAction* m_actSelect = nullptr;
+  QAction* m_actUndo = nullptr;
+  QAction* m_actRedo = nullptr;
   QAction* m_actGeology = nullptr;
   QAction* m_actRiver = nullptr;
   QToolButton* m_btnDraw = nullptr;
@@ -481,9 +491,14 @@ private:
   quint64 m_surveyGeneration = 0;
   bool m_surveySessionReady = false;
   bool m_mapScreenBound = false;
+  int m_displayRefreshWaits = 0;
   QTimer* m_displayRefresh = nullptr;
   // 20초 자동 저장은 없앴다. 저장은 사용자가 「저장」을 누를 때만 일어나고,
   // 저장 안 된 작업은 창 제목 뒤 * 와 닫기 확인창으로 알린다.
+  // 2분 타이머는 원본을 쓰지 않고 복구사본/에만 미저장 조사 도형을 남긴다.
+  QTimer* m_recoverySnapshotTimer = nullptr;
+  bool m_recoverySnapshotBusy = false;
+  bool m_recoveryOfferDone = false;
   // 레이어 사라짐 추적. 직전 점호 결과와 다를 때만 로그를 남긴다.
   QTimer* m_layerWatchTimer = nullptr;
   QString m_lastLayerCensus;

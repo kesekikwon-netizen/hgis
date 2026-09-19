@@ -576,6 +576,22 @@ void KaTerrain3dLayoutStudio::undoLastChange() {
     m_status->setText(QStringLiteral("되돌릴 것이 없습니다."));
 }
 
+void KaTerrain3dLayoutStudio::redoLastChange() {
+  if (editingText())
+    return;
+  auto* ly = currentLayout();
+  if (ly && ly->undoStack() && ly->undoStack()->stack() && ly->undoStack()->stack()->canRedo()) {
+    ly->undoStack()->stack()->redo();
+    if (m_status)
+      m_status->setText(QStringLiteral("다시 실행했습니다."));
+    if (m_view)
+      m_view->viewport()->update();
+    return;
+  }
+  if (m_status)
+    m_status->setText(QStringLiteral("다시 실행할 것이 없습니다."));
+}
+
 bool KaTerrain3dLayoutStudio::eventFilter(QObject* watched, QEvent* event) {
   const bool onView = m_view && event && (watched == m_view || watched == m_view->viewport());
   if (onView && event->type() == QEvent::KeyPress) {
@@ -583,6 +599,11 @@ bool KaTerrain3dLayoutStudio::eventFilter(QObject* watched, QEvent* event) {
     if (ke->matches(QKeySequence::Undo) ||
         ((ke->modifiers() & Qt::ControlModifier) && ke->key() == Qt::Key_Z)) {
       undoLastChange();
+      return true;
+    }
+    if (ke->matches(QKeySequence::Redo) ||
+        ((ke->modifiers() & Qt::ControlModifier) && ke->key() == Qt::Key_Y)) {
+      redoLastChange();
       return true;
     }
     if (ke->key() == Qt::Key_Delete || ke->key() == Qt::Key_Backspace) {
@@ -597,6 +618,12 @@ void KaTerrain3dLayoutStudio::keyPressEvent(QKeyEvent* event) {
   if (event && (event->matches(QKeySequence::Undo) ||
                 ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_Z))) {
     undoLastChange();
+    event->accept();
+    return;
+  }
+  if (event && (event->matches(QKeySequence::Redo) ||
+                ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_Y))) {
+    redoLastChange();
     event->accept();
     return;
   }

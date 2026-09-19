@@ -14,6 +14,7 @@
 #include <QSignalBlocker>
 #include <QScrollBar>
 #include <QScrollArea>
+#include <QSplitter>
 #include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -27,6 +28,42 @@ int labelColumnWidth(const QgsLayerTreeView* view) {
   return qMax(88, view->fontMetrics().horizontalAdvance(QStringLiteral("이름·면적")) +
       view->style()->pixelMetric(QStyle::PM_IndicatorWidth, nullptr, view) + 18);
 }
+}
+
+int KaLayerInformationView::minimumListHeight() const {
+  const int hinted = sizeHintForRow(0);
+  const int row = qMax(22, hinted > 0 ? hinted : fontMetrics().height() + 10);
+  const int head = header() ? qMax(header()->sizeHint().height(), fontMetrics().height() + 6) : row;
+  return head + row * kMinVisibleRows + frameWidth() * 2;
+}
+
+void KaLayerInformationView::protectSidebarList(QSplitter* split, QgsLayerTreeView* tree,
+                                                QToolButton* filesToggle, QWidget* filesPane,
+                                                KaLayerInformationPanel* panel) {
+  if (!split || !tree) return;
+  const int hinted = tree->sizeHintForRow(0);
+  const int row = qMax(22, hinted > 0 ? hinted : tree->fontMetrics().height() + 10);
+  const int head = tree->header() ? qMax(tree->header()->sizeHint().height(),
+                                         tree->fontMetrics().height() + 6)
+                                  : row;
+  const int need = head + row * kMinVisibleRows + tree->frameWidth() * 2;
+  tree->setMinimumHeight(need);
+  if (split->count() > 1) split->setCollapsible(1, true);
+  if (filesPane) filesPane->setMinimumHeight(0);
+  const int chrome = 48;
+  const int handle = split->handleWidth();
+  const int treeH = tree->viewport() ? tree->viewport()->height() : tree->height();
+  const bool filesOpen = filesToggle && filesToggle->isChecked();
+  const bool tight = split->height() < need + chrome ||
+                     (filesOpen && split->height() < need + chrome + 160) ||
+                     (treeH > 0 && treeH < row * kMinVisibleRows);
+  if (tight && panel) panel->collapseDetails();
+  if (tight && filesToggle) filesToggle->setChecked(false);
+  if (tight && filesPane) filesPane->hide();
+  if (tight && split->count() >= 2) {
+    const int layers = qMax(need + chrome, split->height() - handle);
+    split->setSizes({layers, 0});
+  }
 }
 
 void KaLayerInformationView::resizeEvent(QResizeEvent* event) {
@@ -211,6 +248,11 @@ bool KaLayerInformationModel::eventFilter(QObject* watched, QEvent* event) {
     }
   }
   return QgsLayerTreeModel::eventFilter(watched, event);
+}
+
+void KaLayerInformationPanel::collapseDetails() {
+  if (auto* toggle = findChild<QToolButton*>(QStringLiteral("layerInformationToggle")))
+    toggle->setChecked(false);
 }
 
 KaLayerInformationPanel::KaLayerInformationPanel(KaLayerInformationModel* model, QgsLayerTreeView* view, QWidget* parent)

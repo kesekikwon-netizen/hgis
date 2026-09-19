@@ -8,6 +8,8 @@
     {"id": "REQ_DRAWING_FEATURE_DETAIL", "severity": "warn", "message_ko": "개별유구실측도가 없습니다.", "check_type": "layout_exists:feature_detail"},
     {"id": "REQ_DRAWING_SECTION", "severity": "warn", "message_ko": "층위도가 준비되지 않았습니다.", "check_type": "layout_exists:section"},
     {"id": "GEOMETRY_VALID", "severity": "error", "message_ko": "자기교차 등 유효하지 않은 도형이 있습니다. 제출 전에 수정하세요.", "check_type": "geometry_valid:domain"},
+    {"id": "GEOMETRY_NOT_EMPTY", "severity": "error", "message_ko": "빈 도형이 있습니다. 제출 전에 수정하세요.", "check_type": "geometry_nonempty:domain"},
+    {"id": "GEOMETRY_NONZERO_AREA", "severity": "error", "message_ko": "면적이 0인 폴리곤이 있습니다. 제출 전에 수정하세요.", "check_type": "geometry_nonzero_area:domain"},
     {"id": "SURVEY_POLYGON_ONLY", "severity": "error", "message_ko": "조사구역은 실제 폴리곤이어야 합니다.", "check_type": "geometry_type:survey_area=Polygon"},
     {"id": "SURVEY_NO_ABSTRACT_MARKER", "severity": "error", "message_ko": "조사구역 추상 심볼 표기 금지.", "check_type": "forbid_abstract_marker:survey_area"},
     {"id": "GCP_MIN_TWO", "severity": "error", "message_ko": "GPS/기준점 2개 미만입니다.", "check_type": "count_min:control_points:2"},

@@ -51,6 +51,10 @@ bool ChecklistEngine::evalOne(const Rule& r, const QJsonObject& state) {
     return state.value(QStringLiteral("has_kind_period")).toBool();
   if (ct.startsWith(QLatin1String("geometry_valid")))
     return state.value(QStringLiteral("geometries_valid")).toBool(true);
+  if (ct.startsWith(QLatin1String("geometry_nonempty")))
+    return state.value(QStringLiteral("geometries_nonempty")).toBool(true);
+  if (ct.startsWith(QLatin1String("geometry_nonzero_area")))
+    return state.value(QStringLiteral("geometries_nonzero_area")).toBool(true);
   if (ct.startsWith(QLatin1String("geometry_type:feature")))
     return state.value(QStringLiteral("geometries_valid")).toBool(true);
   if (ct.startsWith(QLatin1String("extent_within")))

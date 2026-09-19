@@ -22,6 +22,8 @@
 #include <qgsvectorlayereditbuffer.h>
 #include <qgsvectordataprovider.h>
 #include <algorithm>
+#include <functional>
+#include <QSet>
 
 struct KaRemovedLayers {
   struct Entry {
@@ -40,37 +42,18 @@ bool editingText() {
          qobject_cast<QTextEdit*>(focus) || qobject_cast<QPlainTextEdit*>(focus);
 }
 
-// The edit buffer belongs to the user. Undo must not commit other pending edits
-// or discard them when the provider cannot save this operation.
 bool editFeatures(QgsVectorLayer* layer, const QString& title,
                   const std::function<bool()>& change, QString* error) {
-  if (!layer || !layer->isValid() || LayerOps::isReferenceLayer(layer)) {
-    *error = QStringLiteral("도형이 있는 조사 레이어를 먼저 선택하세요.");
-    return false;
+  return LayerOps::runEditCommand(layer, title, change, error);
+}
+
+QgsVectorLayer* preferredMapLayer(MainWindow* window, QgsLayerTreeView* tree, QgsVectorLayer* editLayer) {
+  Q_UNUSED(window);
+  if (tree) {
+    if (auto* current = qobject_cast<QgsVectorLayer*>(tree->currentLayer()))
+      return current;
   }
-  if (layer->isEditCommandActive()) {
-    *error = QStringLiteral("진행 중인 도형 편집을 마친 뒤 다시 실행하세요.");
-    return false;
-  }
-  const bool hadPendingEdits = layer->isModified();
-  if (!layer->isEditable() && !layer->startEditing()) {
-    *error = QStringLiteral("편집을 시작하지 못했습니다. 파일의 쓰기 권한을 확인하세요.");
-    return false;
-  }
-  layer->beginEditCommand(title);
-  if (!change()) {
-    layer->destroyEditCommand();
-    *error = QStringLiteral("도형을 변경하지 못했습니다. 기존 편집은 유지됩니다.");
-    return false;
-  }
-  layer->endEditCommand();
-  if (!hadPendingEdits && !layer->commitChanges(false)) {
-    *error = QStringLiteral("화면에는 반영했지만 파일에 저장하지 못했습니다. 편집은 남아 있으니 조사 저장을 다시 시도하세요.\n%1")
-                 .arg(layer->commitErrors().join(QLatin1Char('\n')));
-  }
-  layer->updateExtents();
-  layer->triggerRepaint();
-  return true;
+  return editLayer;
 }
 }
 
@@ -157,7 +140,20 @@ void MainWindow::removeLayersFromTree(QgsLayerTreeView* tree) {
   updateNextActionStatus();
   if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
   if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
+  updateUndoRedoActions();
   statusBar()->showMessage(QStringLiteral("레이어를 목록에서 제거했습니다. Ctrl+Z로 복원할 수 있습니다. 원본 파일은 그대로입니다."), 6000);
+}
+
+void MainWindow::updateUndoRedoActions() {
+  QgsVectorLayer* preferred = preferredMapLayer(this, m_layerTree, m_editLayer);
+  const bool captureVertex = m_captureTool && m_canvas && m_canvas->mapTool() == m_captureTool &&
+                             m_captureTool->pointCount() > 0;
+  const bool canUndo = captureVertex ||
+                       LayerOps::preferredUndoLayer(QgsProject::instance(), preferred) ||
+                       !m_undoActions.isEmpty();
+  const bool canRedo = LayerOps::preferredRedoLayer(QgsProject::instance(), preferred);
+  if (m_actUndo) m_actUndo->setEnabled(canUndo);
+  if (m_actRedo) m_actRedo->setEnabled(canRedo);
 }
 
 void MainWindow::undoLastAction() {
@@ -170,6 +166,19 @@ void MainWindow::undoLastAction() {
   undoMapAction();
 }
 
+void MainWindow::redoLastAction() {
+  if (editingText()) return;
+  if (m_viewTabs && m_terrain3dLayoutStudio && m_viewTabs->currentWidget() == m_terrain3dLayoutStudio) {
+    m_terrain3dLayoutStudio->redoLastChange();
+    return;
+  }
+  if (m_viewTabs && m_drawingStudio && m_viewTabs->currentWidget() == m_drawingStudio) {
+    m_drawingStudio->handleRedoKey();
+    return;
+  }
+  redoMapAction();
+}
+
 void MainWindow::undoMapAction() {
   if (editingText() || m_isOpeningSurvey || m_closingWindow) return;
   if (m_captureTool && m_canvas && m_canvas->mapTool() == m_captureTool && m_captureTool->undoLastVertex()) {
@@ -180,11 +189,22 @@ void MainWindow::undoMapAction() {
     statusBar()->showMessage(m_alignTool->statusText(), 4000);
     return;
   }
+  auto* project = QgsProject::instance();
+  if (auto* layer = LayerOps::preferredUndoLayer(project, preferredMapLayer(this, m_layerTree, m_editLayer))) {
+    if (LayerOps::undoLayerEdits(layer)) {
+      project->setDirty(true);
+      if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
+      if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
+      if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
+      refreshWorkPanel();
+      statusBar()->showMessage(QStringLiteral("이전 상태로 되돌렸습니다."), 4000);
+      return;
+    }
+  }
   if (m_undoActions.isEmpty()) {
     statusBar()->showMessage(QStringLiteral("되돌릴 것이 없습니다."), 4000);
     return;
   }
-  auto* project = QgsProject::instance();
   const KaUndoAction action = m_undoActions.last();
   QString error;
   bool applied = false;
@@ -274,13 +294,29 @@ void MainWindow::undoMapAction() {
   else statusBar()->showMessage(QStringLiteral("이전 상태로 되돌렸습니다."), 4000);
 }
 
+void MainWindow::redoMapAction() {
+  if (editingText() || m_isOpeningSurvey || m_closingWindow) return;
+  auto* project = QgsProject::instance();
+  if (auto* layer = LayerOps::preferredRedoLayer(project, preferredMapLayer(this, m_layerTree, m_editLayer))) {
+    if (LayerOps::redoLayerEdits(layer)) {
+      project->setDirty(true);
+      if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
+      if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
+      if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
+      refreshWorkPanel();
+      statusBar()->showMessage(QStringLiteral("다시 실행했습니다."), 4000);
+      return;
+    }
+  }
+  statusBar()->showMessage(QStringLiteral("다시 실행할 것이 없습니다."), 4000);
+}
+
 void MainWindow::deleteSelectedFeatures() {
   if (editingText()) return;
   const auto selected = KaFeatureSelectTool::allSelectedFeatures(m_canvas);
-  KaUndoAction action;
-  action.type = KaUndoAction::FeatureDeleted;
   QSet<QString> done;
   QStringList errors;
+  int deleted = 0;
   for (const auto& item : selected) {
     auto* layer = item.layer.data();
     if (!layer || done.contains(layer->id()) || LayerOps::isReferenceLayer(layer)) continue;
@@ -298,18 +334,17 @@ void MainWindow::deleteSelectedFeatures() {
       for (const auto& feature : features) if (!layer->deleteFeature(feature.id())) return false;
       return true;
     }, &error)) {
-      for (const auto& feature : features) action.deletedFeatures.append({layer->id(), feature});
+      deleted += features.size();
       layer->removeSelection();
     }
     if (!error.isEmpty()) errors.append(layer->name() + QStringLiteral(": ") + error);
   }
-  if (!action.deletedFeatures.isEmpty()) {
-    m_undoActions.append(action);
+  if (deleted > 0) {
     QgsProject::instance()->setDirty(true);
     if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
     if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
     refreshWorkPanel();
-    statusBar()->showMessage(QStringLiteral("도형 %1개를 지웠습니다. Ctrl+Z로 복원할 수 있습니다.").arg(action.deletedFeatures.size()), 6000);
+    statusBar()->showMessage(QStringLiteral("도형 %1개를 지웠습니다. Ctrl+Z로 복원할 수 있습니다.").arg(deleted), 6000);
   }
   if (!errors.isEmpty()) notify(Notice::Warning, QStringLiteral("도형 삭제 확인"), errors.join(QLatin1Char('\n')));
 }

@@ -1,3 +1,4 @@
+#include "KaCrashGuard.h"
 #include "KaMeasureMapTool.h"
 #include "core/MeasureOps.h"
 
@@ -199,9 +200,11 @@ bool KaMeasureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, b
   try {
     *out = e->mapPoint();
   } catch (...) {
+    KaCrashGuard::logLine(QStringLiteral("[except] app/KaMeasureMapTool.cpp:202"));
     try {
       *out = toMapCoordinates(e->pos());
     } catch (...) {
+      KaCrashGuard::logLine(QStringLiteral("[except] app/KaMeasureMapTool.cpp:204"));
       return false;
     }
   }

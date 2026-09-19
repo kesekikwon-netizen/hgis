@@ -1,3 +1,4 @@
+#include "KaCrashGuard.h"
 #include "MainWindow.h"
 #include "KaReferenceDownloadJob.h"
 #include "core/DemDownloadService.h"
@@ -62,6 +63,7 @@ void MainWindow::startFileDownload(const QString& title,
       apply(result);
       if (window) window->syncThematicButtons();
     } catch (...) {
+      KaCrashGuard::logLine(QStringLiteral("[except] app/MainWindowDownloads.cpp:64"));
       if (window) window->notify(Notice::Warning, title + QStringLiteral(" 표시 실패"),
           QStringLiteral("자료를 받았지만 지도에 표시하지 못했습니다. 현재 작업을 저장한 뒤 파일함에서 다시 열어 주세요.\n%1").arg(result.rasterUri));
     }

@@ -1,5 +1,6 @@
 #include "TopographicSettings.h"
 #include "KaPortableRuntime.h"
+#include "KaSecretStore.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -14,15 +15,14 @@ QString personalPath() {
   const QString directory = KaPortableRuntime::userConfigDir();
   return directory.isEmpty() ? QString() : QDir(directory).filePath(QStringLiteral("ngii-account.ini"));
 }
-TopographicSettings::Credentials readIni(const QString& path) {
+TopographicSettings::Credentials readIni(const QString& path, bool migrate) {
   if (!QFileInfo(path).isFile()) return {};
   QSettings settings(path, QSettings::IniFormat);
   settings.setFallbacksEnabled(false);
   settings.sync();
-  TopographicSettings::Credentials result{
-    settings.value(QStringLiteral("ngii/username")).toString(),
-    settings.value(QStringLiteral("ngii/password")).toString()};
-  return settings.status() == QSettings::NoError ? result : TopographicSettings::Credentials{};
+  if (settings.status() != QSettings::NoError) return {};
+  return {settings.value(QStringLiteral("ngii/username")).toString(),
+          KaSecretStore::readPassword(settings, QStringLiteral("ngii"), migrate)};
 }
 }
 
@@ -37,9 +37,9 @@ TopographicSettings::Credentials TopographicSettings::readFromFiles(
     const QString& personalFile, const QStringList& fallbackFiles) {
   // Existence, not a non-empty password, controls priority. Saving empty values
   // disables this PC's default login instead of restoring the bundled account.
-  if (!personalFile.isEmpty() && QFileInfo::exists(personalFile)) return readIni(personalFile);
+  if (!personalFile.isEmpty() && QFileInfo::exists(personalFile)) return readIni(personalFile, true);
   for (const auto& fallback : fallbackFiles)
-    if (QFileInfo::exists(fallback)) return readIni(fallback);
+    if (QFileInfo::exists(fallback)) return readIni(fallback, false);
   return {};
 }
 
@@ -57,12 +57,13 @@ bool TopographicSettings::saveToFile(const QString& personalFile, const Credenti
   if (!staging.isValid()) return fail(QStringLiteral("계정 설정을 준비하지 못했습니다. 폴더 권한을 확인하세요."));
   const auto serialized = staging.filePath(QStringLiteral("account.ini"));
   {
-    // Delegate INI escaping and UTF-8 handling to Qt, including passwords which
-    // contain whitespace, semicolons, quotes, backslashes or an initial '@'.
+    // Username stays plain. The password is DPAPI ciphertext, so INI escaping
+    // never sees the secret. Empty password removes both keys.
     QSettings settings(serialized, QSettings::IniFormat);
     settings.setFallbacksEnabled(false);
     settings.setValue(QStringLiteral("ngii/username"), credentials.username);
-    settings.setValue(QStringLiteral("ngii/password"), credentials.password);
+    if (!KaSecretStore::writePassword(settings, QStringLiteral("ngii"), credentials.password, error))
+      return false;
     settings.sync();
     if (settings.status() != QSettings::NoError)
       return fail(QStringLiteral("계정 설정을 기록하지 못했습니다. 저장 공간과 폴더 권한을 확인하세요."));

@@ -1,5 +1,6 @@
 #include "HeritageIntranetSettings.h"
 #include "KaPortableRuntime.h"
+#include "KaSecretStore.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -16,16 +17,14 @@ QString personalPath() {
                              : QDir(directory).filePath(QStringLiteral("heritage-account.ini"));
 }
 
-HeritageIntranetSettings::Credentials readIni(const QString& path) {
+HeritageIntranetSettings::Credentials readIni(const QString& path, bool migrate) {
   if (!QFileInfo(path).isFile()) return {};
   QSettings settings(path, QSettings::IniFormat);
   settings.setFallbacksEnabled(false);
   settings.sync();
-  HeritageIntranetSettings::Credentials result{
-      settings.value(QStringLiteral("heritage/username")).toString(),
-      settings.value(QStringLiteral("heritage/password")).toString()};
-  return settings.status() == QSettings::NoError ? result
-                                                 : HeritageIntranetSettings::Credentials{};
+  if (settings.status() != QSettings::NoError) return {};
+  return {settings.value(QStringLiteral("heritage/username")).toString(),
+          KaSecretStore::readPassword(settings, QStringLiteral("heritage"), migrate)};
 }
 
 }  // namespace
@@ -41,9 +40,9 @@ HeritageIntranetSettings::Credentials HeritageIntranetSettings::readFromFiles(
     const QString& personalFile, const QStringList& fallbackFiles) {
   // 존재 여부가 우선순위를 정한다. 빈 값을 저장하면 이 PC의 기본 로그인을 끄는 것이지
   // 번들 계정으로 되돌아가는 것이 아니다. (TopographicSettings 와 같은 규칙)
-  if (!personalFile.isEmpty() && QFileInfo::exists(personalFile)) return readIni(personalFile);
+  if (!personalFile.isEmpty() && QFileInfo::exists(personalFile)) return readIni(personalFile, true);
   for (const auto& fallback : fallbackFiles)
-    if (QFileInfo::exists(fallback)) return readIni(fallback);
+    if (QFileInfo::exists(fallback)) return readIni(fallback, false);
   return {};
 }
 
@@ -81,12 +80,12 @@ bool HeritageIntranetSettings::saveToFile(const QString& personalFile,
     return fail(QStringLiteral("계정 설정을 준비하지 못했습니다. 폴더 권한을 확인하세요."));
   const auto serialized = staging.filePath(QStringLiteral("account.ini"));
   {
-    // INI 이스케이프와 UTF-8 처리는 Qt에 맡긴다. 비밀번호에 공백·세미콜론·따옴표·역슬래시가
-    // 들어가거나 '@' 로 시작해도 그대로 살아남아야 한다.
+    // 사용자 이름은 평문이다. 비밀번호는 DPAPI 암호문으로만 저장한다.
     QSettings settings(serialized, QSettings::IniFormat);
     settings.setFallbacksEnabled(false);
     settings.setValue(QStringLiteral("heritage/username"), credentials.username);
-    settings.setValue(QStringLiteral("heritage/password"), credentials.password);
+    if (!KaSecretStore::writePassword(settings, QStringLiteral("heritage"), credentials.password, error))
+      return false;
     settings.sync();
     if (settings.status() != QSettings::NoError)
       return fail(QStringLiteral("계정 설정을 기록하지 못했습니다. 저장 공간과 폴더 권한을 확인하세요."));

@@ -112,19 +112,30 @@ void TestRecent::closeEvent_asksBeforeDiscardingUnsavedWork() {
   QVERIFY2(fn.contains(QLatin1String("event->ignore()")),
            "취소를 고르면 창이 닫히면 안 된다");
 
-  QVERIFY2(src.contains(QLatin1String("bool MainWindow::persistSurveyWork()")),
+  QString persistSrc;
+  for (const QString& path : {QStringLiteral("src/app/MainWindow.cpp"),
+                              QStringLiteral("src/app/MainWindowSession.cpp"),
+                              QStringLiteral("src/core/SurveySession.cpp")}) {
+    QFile pf(path);
+    QVERIFY2(pf.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(path));
+    persistSrc += QString::fromUtf8(pf.readAll());
+  }
+  QVERIFY2(persistSrc.contains(QLatin1String("bool MainWindow::persistSurveyWork()")),
            "persistSurveyWork");
-  const int persist = src.indexOf(QLatin1String("bool MainWindow::persistSurveyWork()"));
-  const QString body = src.mid(persist, 900);
-  QVERIFY2(body.contains(QLatin1String("commitSurveyEdits")),
-           "저장은 편집 버퍼를 GPKG에 써야 한다");
-  QVERIFY2(src.contains(QLatin1String("lastPath")),
+  QVERIFY2(persistSrc.contains(QLatin1String("SurveySession::persistWork")),
+           "저장 UI는 SurveySession::persistWork 를 써야 한다");
+  QFile session(QStringLiteral("src/core/SurveySession.cpp"));
+  QVERIFY2(session.open(QIODevice::ReadOnly | QIODevice::Text), "SurveySession.cpp");
+  const QString sessionSrc = QString::fromUtf8(session.readAll());
+  QVERIFY2(sessionSrc.contains(QLatin1String("persistWorkspace")),
+           "저장은 다음 세대 GPKG에 쓰고 검증한 뒤 원본을 교체해야 한다");
+  QVERIFY2(persistSrc.contains(QLatin1String("lastPath")),
            "최근 목록용 lastPath는 유지한다");
-  QVERIFY2(src.contains(QLatin1String("m_surveySessionReady")),
+  QVERIFY2(persistSrc.contains(QLatin1String("m_surveySessionReady")),
            "열기에 실패한 홈 화면이 조사 파일을 덮어쓰면 안 된다");
 
   // 바탕화면이 OneDrive 로 리디렉션된 PC에서 새 조사가 그리로 가지 않아야 한다.
-  QVERIFY2(src.contains(QLatin1String("preferredSurveyDir()")),
+  QVERIFY2(persistSrc.contains(QLatin1String("preferredSurveyDir()")),
            "새 조사·다른 이름으로 저장은 마지막에 쓴 조사 폴더에서 시작해야 한다");
 }
 

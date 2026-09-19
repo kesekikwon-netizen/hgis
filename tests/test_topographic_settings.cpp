@@ -29,6 +29,13 @@ private slots:
     QVERIFY(fixture(personal, QStringLiteral("fixture-personal"), QStringLiteral("fixture-local")));
     value = TopographicSettings::readFromFiles(personal, {bundled, repo});
     QCOMPARE(value.username, QStringLiteral("fixture-personal"));
+    QCOMPARE(value.password, QStringLiteral("fixture-local"));
+    QSettings migrated(personal, QSettings::IniFormat); migrated.setFallbacksEnabled(false);
+    QVERIFY(migrated.contains(QStringLiteral("ngii/password_dpapi")));
+    QVERIFY(!migrated.contains(QStringLiteral("ngii/password")));
+    QSettings bundledSettings(bundled, QSettings::IniFormat); bundledSettings.setFallbacksEnabled(false);
+    QVERIFY(bundledSettings.contains(QStringLiteral("ngii/password")));
+    QVERIFY(!bundledSettings.contains(QStringLiteral("ngii/password_dpapi")));
     QString error;
     QVERIFY2(TopographicSettings::saveToFile(personal, {}, &error), qPrintable(error));
     value = TopographicSettings::readFromFiles(personal, {bundled, repo});
@@ -44,6 +51,9 @@ private slots:
     QVERIFY2(TopographicSettings::saveToFile(personal, expected, &error), qPrintable(error));
     const auto actual = TopographicSettings::readFromFiles(personal, {});
     QCOMPARE(actual.username, expected.username); QCOMPARE(actual.password, expected.password);
+    QSettings stored(personal, QSettings::IniFormat); stored.setFallbacksEnabled(false);
+    QVERIFY(stored.contains(QStringLiteral("ngii/password_dpapi")));
+    QVERIFY(!stored.contains(QStringLiteral("ngii/password")));
     QFile existing(personal); QVERIFY(existing.open(QIODevice::ReadOnly)); const auto before = existing.readAll(); existing.close();
     // A regular file cannot be used as the next file's parent directory.
     QVERIFY(!TopographicSettings::saveToFile(personal + QStringLiteral("/child.ini"), {}, &error));

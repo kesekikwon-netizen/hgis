@@ -1,4 +1,6 @@
+#include "KaCrashGuard.h"
 #include "KaVertexEditTool.h"
+#include "core/LayerOps.h"
 
 #include <cmath>
 #include <limits>
@@ -175,6 +177,7 @@ QgsPointXY KaVertexEditTool::snapMapPoint(QgsMapMouseEvent* e, bool* snapped) co
   try {
     pt = e->mapPoint();
   } catch (...) {
+    KaCrashGuard::logLine(QStringLiteral("[except] app/KaVertexEditTool.cpp:178"));
     pt = const_cast<KaVertexEditTool*>(this)->toMapCoordinates(e->pos());
   }
   if (!m_snapEnabled || !mCanvas->snappingUtils()) return pt;
@@ -254,16 +257,24 @@ void KaVertexEditTool::selectAt(const QgsPointXY& mapPt_) {
 bool KaVertexEditTool::moveVertexTo(int index, const QgsPointXY& to) {
   m_lastEditError.clear();
   if (!m_layer || m_fid < 0 || index < 0) return false;
-  QgsGeometry geom = selectedGeometry();
-  if (geom.isNull()) return false;
-  // 폴리곤의 첫 점과 닫는 점은 같은 자리여야 한다. 하나를 옮기면 짝도 옮긴다.
-  const int count = geom.constGet() ? static_cast<int>(geom.constGet()->nCoordinates()) : 0;
-  if (!geom.moveVertex(to.x(), to.y(), index)) return false;
-  if (geom.type() == Qgis::GeometryType::Polygon && count > 1) {
-    if (index == 0 && !geom.moveVertex(to.x(), to.y(), count - 1)) return false;
-    if (index == count - 1 && !geom.moveVertex(to.x(), to.y(), 0)) return false;
+  QgsFeature before;
+  if (!m_layer->getFeatures(QgsFeatureRequest(m_fid)).nextFeature(before)) {
+    m_lastEditError = QStringLiteral("수정할 도형을 찾지 못했습니다. 도형을 다시 선택하세요.");
+    emit statusMessage(m_lastEditError);
+    return false;
   }
-  return applyGeometryChange(geom, QStringLiteral("꼭짓점 이동"));
+  const bool topological = m_layer->project() && m_layer->project()->topologicalEditing();
+  QString error;
+  if (!LayerOps::runEditCommand(m_layer, QStringLiteral("꼭짓점 이동"), [&]() {
+        return LayerOps::applyVertexMove(m_layer, static_cast<qint64>(m_fid), index, to.x(),
+                                         to.y(), topological, nullptr);
+      }, &error)) {
+    m_lastEditError = error;
+    emit statusMessage(error);
+    return false;
+  }
+  emit featureGeometryEdited(m_layer, before);
+  return true;
 }
 
 bool KaVertexEditTool::deleteVertexAt(int index) {
@@ -309,31 +320,11 @@ bool KaVertexEditTool::applyGeometryChange(QgsGeometry geom, const QString& comm
   if (!layer->getFeatures(QgsFeatureRequest(m_fid)).nextFeature(before))
     return fail(QStringLiteral("수정할 도형을 찾지 못했습니다. 도형을 다시 선택하세요."));
   if (before.geometry().equals(geom)) return true;
-  const bool wasEditable = layer->isEditable();
-  const bool hadPendingChanges = layer->isModified();
-  if (!wasEditable && !layer->startEditing())
-    return fail(QStringLiteral("레이어를 편집할 수 없습니다. 파일의 쓰기 권한을 확인하세요."));
-  if (!layer) return false;
-
-  layer->beginEditCommand(commandText);
-  if (!layer) return false;
-  if (!layer->changeGeometry(before.id(), geom)) {
-    if (layer) layer->destroyEditCommand();
-    return fail(QStringLiteral("도형을 수정하지 못했습니다. 도형을 다시 선택한 뒤 시도하세요."));
-  }
-  if (!layer) return false;
-  layer->endEditCommand();
-  if (!layer) return false;
-
-  // Never commit someone else's pending edits as a side effect of moving a point.
-  // QGIS keeps the buffer after a failed commit, so keep its Undo snapshot too.
-  if (!hadPendingChanges && !layer->commitChanges(!wasEditable)) {
-    m_lastEditError = QStringLiteral(
-        "도형은 화면에 남아 있지만 파일에 저장하지 못했습니다. 조사 저장을 다시 시도하거나 Ctrl+Z로 되돌리세요.");
-    emit statusMessage(m_lastEditError);
-    if (layer) emit featureGeometryEdited(layer.data(), before);
-    return false;
-  }
+  QString error;
+  if (!LayerOps::runEditCommand(layer, commandText, [&]() {
+        return layer->changeGeometry(before.id(), geom);
+      }, &error))
+    return fail(error);
   if (!layer) return false;
   emit featureGeometryEdited(layer.data(), before);
   return true;

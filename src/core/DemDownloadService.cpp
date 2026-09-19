@@ -1,3 +1,4 @@
+#include "KaSessionLog.h"
 #include "DemDownloadService.h"
 
 #include <QDir>
@@ -72,6 +73,7 @@ struct Progress {
             std::clamp(fraction, 0.0, 1.0) * progress->span);
       return TRUE;
     } catch (...) {
+      KaSessionLog::line(QStringLiteral("[except] core/DemDownloadService.cpp:74"));
       // GDAL must not unwind through a C callback.
       progress->callbackFailed = true;
       return FALSE;
@@ -295,6 +297,7 @@ PreparedReferenceMap DemDownloadService::prepare(
     result.rasterUri = rasterPath;
     result.status = PreparedReferenceMap::Status::Ready;
   } catch (...) {
+    KaSessionLog::line(QStringLiteral("[except] core/DemDownloadService.cpp:297"));
     fail(QStringLiteral("DEM 내려받기를 완료하지 못했습니다. 인터넷 연결과 저장 공간을 확인한 뒤 다시 시도하세요. 기존 지도는 유지됩니다."));
   }
   return result;

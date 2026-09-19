@@ -1,4 +1,5 @@
 #include "KaApplication.h"
+#include "KaHgisVersion.h"
 #include "KaCrashGuard.h"
 #include "KaGdalErrorLog.h"
 #include "KaTheme.h"
@@ -662,7 +663,7 @@ int KaApplication::run(int argc, char** argv) {
   app.setApplicationName(QStringLiteral("ka-hgis"));
   app.setApplicationDisplayName(QStringLiteral("필드고고학GIS"));
   app.setOrganizationName(QStringLiteral("ka-hgis"));
-  app.setApplicationVersion(QStringLiteral("2"));
+  app.setApplicationVersion(QStringLiteral(KA_HGIS_VERSION));
   app.setStyle(QStringLiteral("Fusion"));
   app.setWindowIcon(KaIcons::appIcon());
   KaTheme::apply(&app);
@@ -746,9 +747,9 @@ int KaApplication::run(int argc, char** argv) {
   // QGIS 내부 경고(WMS 실패, 좌표계 문제 등)도 세션 로그로 남긴다.
   QObject::connect(
       QgsApplication::messageLog(),
-      qOverload<const QString&, const QString&, Qgis::MessageLevel>(
-          &QgsMessageLog::messageReceived),
-      &app, [](const QString& message, const QString& tag, Qgis::MessageLevel level) {
+      &QgsMessageLog::messageReceivedWithFormat,
+      &app, [](const QString& message, const QString& tag, Qgis::MessageLevel level,
+               Qgis::StringFormat) {
         if (level == Qgis::MessageLevel::Warning || level == Qgis::MessageLevel::Critical)
           KaCrashGuard::logLine(QStringLiteral("[qgis/%1] %2").arg(tag, message));
       });
@@ -844,6 +845,7 @@ int KaApplication::run(int argc, char** argv) {
     code = app.exec();
   }
 #if KA_HGIS_HAS_QGIS
+  KaGdalErrorLog::uninstall();
   QgsApplication::exitQgis();
 #endif
   if (qaPhase1) return qaCode;

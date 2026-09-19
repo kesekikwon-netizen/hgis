@@ -1,5 +1,6 @@
 #include <stdexcept>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QDomDocument>
 #include <QFile>
@@ -11,13 +12,18 @@
 #include "core/KaSafeQgis.h"
 #include "core/LayerOps.h"
 #include "core/SurveyProjectFactory.h"
+#include "core/SurveySession.h"
 #include "core/SurveyStorage.h"
 #include <qgsapplication.h>
 #include <qgsproject.h>
+#include <qgscoordinatereferencesystem.h>
 #include <qgsfeature.h>
 #include <qgsgeometry.h>
+#include <qgsrectangle.h>
+#include <qgspointxy.h>
 #include <qgslayertree.h>
 #include <qgsrasterlayer.h>
+#include <qgsvectorfilewriter.h>
 #include <qgsvectorlayer.h>
 
 #ifdef Q_OS_WIN
@@ -417,6 +423,466 @@ class TestStorageSafety : public QObject {
     QCOMPARE(project.fileName(), QStringLiteral("preserve-session.qgz"));
     QVERIFY(project.isDirty());
     QVERIFY(temporaryArtifacts(dir.path()).isEmpty());
+  }
+
+  void recoverySnapshot_layerFilterSkipsUnlistedVectors() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QgsProject project;
+    auto* keep = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5186&field=note:string"),
+                                    QStringLiteral("남길점"), QStringLiteral("memory"));
+    auto* skip = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5186&field=note:string"),
+                                    QStringLiteral("뺄점"), QStringLiteral("memory"));
+    QVERIFY(keep->isValid());
+    QVERIFY(skip->isValid());
+    project.addMapLayer(keep);
+    project.addMapLayer(skip);
+    QVERIFY(keep->startEditing());
+    QgsFeature kept(keep->fields());
+    kept.setAttribute(QStringLiteral("note"), QStringLiteral("a"));
+    kept.setGeometry(QgsGeometry::fromWkt(QStringLiteral("Point (190000 560000)")));
+    QVERIFY(keep->addFeature(kept));
+    QVERIFY(skip->startEditing());
+    QgsFeature dropped(skip->fields());
+    dropped.setAttribute(QStringLiteral("note"), QStringLiteral("b"));
+    dropped.setGeometry(QgsGeometry::fromWkt(QStringLiteral("Point (190010 560010)")));
+    QVERIFY(skip->addFeature(dropped));
+    const QString keepSource = keep->source();
+    const QString skipSource = skip->source();
+    QString error;
+    const QString path = SurveyStorage::writeRecoverySnapshot(
+        &project, dir.filePath(QStringLiteral("복구사본")), &error, {keep->id()});
+    QVERIFY2(!path.isEmpty(), qPrintable(error));
+    QCOMPARE(keep->source(), keepSource);
+    QCOMPARE(skip->source(), skipSource);
+    QVERIFY(keep->isModified());
+    QgsProject restored;
+    QVERIFY2(restored.read(SurveyStorage::projectUri(path)), qPrintable(restored.error()));
+    QCOMPARE(restored.mapLayersByName(QStringLiteral("남길점")).size(), 1);
+    QCOMPARE(restored.mapLayersByName(QStringLiteral("뺄점")).size(), 0);
+  }
+
+  void recoveryPending_notesNewestAndPrunesOldCopies() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString root = dir.filePath(QStringLiteral("복구사본"));
+    QVERIFY(QDir().mkpath(root));
+    QStringList snapshots;
+    for (int i = 0; i < 4; ++i) {
+      const QString folder = QDir(root).filePath(QStringLiteral("조사복구_20260101_00000%1_aaaaa%1").arg(i));
+      QVERIFY(QDir().mkpath(folder));
+      const QString snapshot = QDir(folder).filePath(QStringLiteral("복구조사.gpkg"));
+      QFile file(snapshot);
+      QVERIFY(file.open(QIODevice::ReadWrite));
+      QCOMPARE(file.write("x"), static_cast<qint64>(1));
+      QVERIFY(file.setFileTime(QDateTime(QDate(2026, 1, 1), QTime(0, i, 0)),
+                               QFileDevice::FileModificationTime));
+      file.close();
+      snapshots << snapshot;
+    }
+    QString error;
+    QVERIFY2(SurveyStorage::noteRecoveryPending(root, snapshots.last(), &error), qPrintable(error));
+    QCOMPARE(SurveyStorage::pendingRecoverySnapshot(root),
+             QDir::cleanPath(QFileInfo(snapshots.last()).absoluteFilePath()));
+    QVERIFY(SurveyStorage::pruneRecoverySnapshots(root, 3, snapshots.last()) >= 1);
+    int left = 0;
+    for (const QString& snapshot : snapshots)
+      if (QFileInfo::exists(snapshot)) ++left;
+    QCOMPARE(left, 3);
+    QVERIFY(QFileInfo::exists(snapshots.last()));
+    QVERIFY(!QFileInfo::exists(snapshots.first()));
+    SurveyStorage::clearRecoveryPending(root);
+    QVERIFY(SurveyStorage::pendingRecoverySnapshot(root).isEmpty());
+  }
+
+  void absorbLeavesReferenceVectorsOutsideTheSurvey() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QString error;
+    const QString gpkg = SurveyProjectFactory::createNewSurvey(
+        dir.path(), QStringLiteral("참조분리"), &error, QStringLiteral("EPSG:5186"));
+    QVERIFY2(!gpkg.isEmpty(), qPrintable(error));
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* scratch = new QgsVectorLayer(
+        QStringLiteral("Polygon?crs=EPSG:5186&field=name:string(20)"),
+        QStringLiteral("수치지형도"), QStringLiteral("memory"));
+    QVERIFY(scratch->isValid());
+    QgsFeature contour(scratch->fields());
+    contour.setAttribute(0, QStringLiteral("등고"));
+    contour.setGeometry(QgsGeometry::fromRect(QgsRectangle(0, 0, 10, 10)));
+    QVERIFY(scratch->dataProvider()->addFeature(contour));
+    const QString topoPath = QDir(dir.path()).filePath(QStringLiteral("수치지형도.gpkg"));
+    QgsVectorFileWriter::SaveVectorOptions opt;
+    opt.driverName = QStringLiteral("GPKG");
+    opt.layerName = QStringLiteral("수치지형도");
+    opt.fileEncoding = QStringLiteral("UTF-8");
+    QString writeError;
+    const QgsVectorFileWriter::WriterError code = QgsVectorFileWriter::writeAsVectorFormatV3(
+        scratch, topoPath, project.transformContext(), opt, &writeError);
+    QVERIFY2(code == QgsVectorFileWriter::NoError, qPrintable(writeError));
+    delete scratch;
+    auto* reference = new QgsVectorLayer(
+        QStringLiteral("%1|layername=수치지형도").arg(topoPath),
+        QStringLiteral("수치지형도"), QStringLiteral("ogr"));
+    QVERIFY(reference->isValid());
+    LayerOps::markReferenceLayer(reference);
+    project.addMapLayer(reference);
+    auto* memoryNote = new QgsVectorLayer(
+        QStringLiteral("Point?crs=EPSG:5186&field=note:string"),
+        QStringLiteral("현장참고점"), QStringLiteral("memory"));
+    QVERIFY(memoryNote->isValid());
+    LayerOps::markReferenceLayer(memoryNote);
+    QgsFeature note(memoryNote->fields());
+    note.setAttribute(0, QStringLiteral("다시 볼 점"));
+    note.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(1, 2)));
+    QVERIFY(memoryNote->dataProvider()->addFeature(note));
+    project.addMapLayer(memoryNote);
+    auto* brought = new QgsVectorLayer(
+        QStringLiteral("Polygon?crs=EPSG:5186&field=name:string(20)"),
+        QStringLiteral("가져온면"), QStringLiteral("memory"));
+    QVERIFY(brought->isValid());
+    QgsFeature extra(brought->fields());
+    extra.setGeometry(QgsGeometry::fromRect(QgsRectangle(1, 1, 2, 2)));
+    QVERIFY(brought->dataProvider()->addFeature(extra));
+    project.addMapLayer(brought);
+    const SurveyStorage::AbsorbResult result = SurveyStorage::absorbExternalVectors(&project, gpkg);
+    QVERIFY(result.imported.contains(QStringLiteral("가져온면")));
+    QVERIFY(result.imported.contains(QStringLiteral("현장참고점")));
+    QVERIFY(!result.imported.contains(QStringLiteral("수치지형도")));
+    QVERIFY(result.skippedReference.contains(QStringLiteral("수치지형도")));
+    QVERIFY(!result.skippedReference.contains(QStringLiteral("현장참고점")));
+  }
+
+  void persistWorkspace_secondLayerCommitFails_keepsEditsAndRecovery() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QString error;
+    const QString gpkg = SurveyProjectFactory::createNewSurvey(
+        dir.path(), QStringLiteral("부분커밋"), &error, QStringLiteral("EPSG:5186"));
+    QVERIFY2(!gpkg.isEmpty(), qPrintable(error));
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* area = LayerOps::ensureDomainLayer(&project, gpkg, QStringLiteral("survey_area"),
+                                             QStringLiteral("조사구역"), &error);
+    auto* line = LayerOps::ensureDomainLayer(&project, gpkg, QStringLiteral("feature_line"),
+                                             QStringLiteral("유구선"), &error);
+    QVERIFY2(area && line, qPrintable(error));
+    QVERIFY(area->startEditing());
+    QgsFeature areaFeature(area->fields());
+    areaFeature.setAttribute(QStringLiteral("note"), QStringLiteral("첫 레이어 면"));
+    areaFeature.setGeometry(QgsGeometry::fromRect(QgsRectangle(200000, 450000, 200010, 450010)));
+    QVERIFY(area->addFeature(areaFeature));
+    QVERIFY(line->startEditing());
+    QgsFeature lineFeature(line->fields());
+    lineFeature.setAttribute(QStringLiteral("note"), QStringLiteral("둘째 레이어 선"));
+    lineFeature.setGeometry(QgsGeometry::fromWkt(QStringLiteral("LineString (200000 450000, 200020 450020)")));
+    QVERIFY(line->addFeature(lineFeature));
+    line->setAllowCommit(false);
+    project.setDirty(true);
+    const QString recovery = dir.filePath(QStringLiteral("복구사본"));
+    const auto attempt = SurveyStorage::persistWorkspace(&project, gpkg, recovery);
+    QVERIFY(!attempt.saved);
+    QVERIFY(attempt.failedLayers.contains(QStringLiteral("유구선")));
+    QVERIFY2(!attempt.recoveryPath.isEmpty(), qPrintable(attempt.error));
+    QVERIFY(QFileInfo::exists(attempt.recoveryPath));
+    QVERIFY(line->isEditable() && line->isModified());
+    QCOMPARE(line->featureCount(), 1LL);
+    QVERIFY(project.isDirty());
+    QgsProject restored;
+    QVERIFY2(restored.read(SurveyStorage::projectUri(attempt.recoveryPath)), qPrintable(restored.error()));
+    const auto recoveredLine = restored.mapLayersByName(QStringLiteral("유구선"));
+    QCOMPARE(recoveredLine.size(), 1);
+    QCOMPARE(qobject_cast<QgsVectorLayer*>(recoveredLine.first())->featureCount(), 1LL);
+    line->setAllowCommit(true);
+    line->rollBack();
+    if (area->isModified()) area->rollBack();
+  }
+
+  void persistWorkspace_lockedGpkg_keepsEditsAndRecovery() {
+#ifdef Q_OS_WIN
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QString error;
+    const QString gpkg = SurveyProjectFactory::createNewSurvey(
+        dir.path(), QStringLiteral("잠긴조사"), &error, QStringLiteral("EPSG:5187"));
+    QVERIFY2(!gpkg.isEmpty(), qPrintable(error));
+    const QByteArray before = fileHash(gpkg);
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+    auto* scratch = new QgsVectorLayer(
+        QStringLiteral("Polygon?crs=EPSG:5187&field=note:string"),
+        QStringLiteral("가져온면"), QStringLiteral("memory"));
+    QVERIFY(scratch->isValid());
+    QVERIFY(scratch->startEditing());
+    QgsFeature extra(scratch->fields());
+    extra.setAttribute(0, QStringLiteral("잠금 중에도 남을 면"));
+    extra.setGeometry(QgsGeometry::fromRect(QgsRectangle(190000, 560000, 190010, 560010)));
+    QVERIFY(scratch->addFeature(extra));
+    project.addMapLayer(scratch);
+    project.setDirty(true);
+    ReadLock lock(gpkg);
+    QVERIFY(lock.valid());
+    const auto attempt = SurveyStorage::persistWorkspace(
+        &project, gpkg, dir.filePath(QStringLiteral("복구사본")));
+    QVERIFY(!attempt.saved);
+    QVERIFY2(!attempt.recoveryPath.isEmpty(), qPrintable(attempt.error));
+    QVERIFY(QFileInfo::exists(attempt.recoveryPath));
+    QCOMPARE(fileHash(gpkg), before);
+    QVERIFY(scratch->isValid());
+    QCOMPARE(scratch->featureCount(), 1LL);
+    QVERIFY(project.isDirty());
+    QgsProject restored;
+    QVERIFY2(restored.read(SurveyStorage::projectUri(attempt.recoveryPath)), qPrintable(restored.error()));
+    const auto recovered = restored.mapLayersByName(QStringLiteral("가져온면"));
+    QCOMPARE(recovered.size(), 1);
+    QCOMPARE(qobject_cast<QgsVectorLayer*>(recovered.first())->featureCount(), 1LL);
+#else
+    QSKIP("Windows sharing-lock failure contract");
+#endif
+  }
+
+  void persistWorkspace_missingExternal_keepsEditsAndRecovery() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QString error;
+    const QString gpkg = SurveyProjectFactory::createNewSurvey(
+        dir.path(), QStringLiteral("외부누락"), &error, QStringLiteral("EPSG:5186"));
+    QVERIFY2(!gpkg.isEmpty(), qPrintable(error));
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* area = LayerOps::ensureDomainLayer(&project, gpkg, QStringLiteral("survey_area"),
+                                             QStringLiteral("조사구역"), &error);
+    QVERIFY2(area, qPrintable(error));
+    QVERIFY(area->startEditing());
+    QgsFeature areaFeature(area->fields());
+    areaFeature.setAttribute(QStringLiteral("note"), QStringLiteral("조사 면"));
+    areaFeature.setGeometry(QgsGeometry::fromRect(QgsRectangle(200000, 450000, 200010, 450010)));
+    QVERIFY(area->addFeature(areaFeature));
+    QgsVectorLayer source(
+        QStringLiteral("Polygon?crs=EPSG:5186&field=name:string"),
+        QStringLiteral("fixture"), QStringLiteral("memory"));
+    QgsFeature boundary(source.fields());
+    boundary.setAttribute(0, QStringLiteral("외부경계"));
+    boundary.setGeometry(QgsGeometry::fromRect(QgsRectangle(199900, 449900, 200100, 450100)));
+    QVERIFY(source.isValid() && source.dataProvider()->addFeature(boundary));
+    const QString shp = QDir(dir.path()).filePath(QStringLiteral("외부경계.shp"));
+    QgsVectorFileWriter::SaveVectorOptions options;
+    options.driverName = QStringLiteral("ESRI Shapefile");
+    options.fileEncoding = QStringLiteral("UTF-8");
+    QString writeError;
+    QVERIFY2(QgsVectorFileWriter::writeAsVectorFormatV3(&source, shp, project.transformContext(),
+                                                        options, &writeError) == QgsVectorFileWriter::NoError,
+             qPrintable(writeError));
+    {
+      QgsVectorLayer probe(shp, QStringLiteral("외부경계"), QStringLiteral("ogr"));
+      QVERIFY(probe.isValid());
+    }
+    const QString base = QDir(dir.path()).filePath(QStringLiteral("외부경계"));
+    for (const QString& ext : {QStringLiteral(".shp"), QStringLiteral(".shx"), QStringLiteral(".dbf"),
+                               QStringLiteral(".prj"), QStringLiteral(".cpg"), QStringLiteral(".qpj")}) {
+      const QString sidecar = base + ext;
+      if (QFile::exists(sidecar))
+        QVERIFY2(QFile::remove(sidecar), qPrintable(sidecar));
+    }
+    QVERIFY(!QFileInfo::exists(shp));
+    auto* external = new QgsVectorLayer(shp, QStringLiteral("외부경계"), QStringLiteral("ogr"));
+    QVERIFY(!external->isValid());
+    QVERIFY(!LayerOps::isReferenceLayer(external));
+    project.addMapLayer(external);
+    project.setDirty(true);
+    const auto attempt = SurveyStorage::persistWorkspace(
+        &project, gpkg, dir.filePath(QStringLiteral("복구사본")));
+    QVERIFY(!attempt.saved);
+    QVERIFY(attempt.failedLayers.contains(QStringLiteral("외부경계")));
+    QVERIFY2(!attempt.recoveryPath.isEmpty(), qPrintable(attempt.error));
+    QVERIFY(QFileInfo::exists(attempt.recoveryPath));
+    QCOMPARE(area->featureCount(), 1LL);
+    QVERIFY(project.isDirty());
+    QgsProject restored;
+    QVERIFY2(restored.read(SurveyStorage::projectUri(attempt.recoveryPath)), qPrintable(restored.error()));
+    const auto recoveredArea = restored.mapLayersByName(QStringLiteral("조사구역"));
+    QCOMPARE(recoveredArea.size(), 1);
+    QCOMPARE(qobject_cast<QgsVectorLayer*>(recoveredArea.first())->featureCount(), 1LL);
+  }
+
+  void persistWorkspace_writeExceptionKeepsPreviousGeneration() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QString error;
+    const QString gpkg = SurveyProjectFactory::createNewSurvey(
+        dir.path(), QStringLiteral("세대저장"), &error, QStringLiteral("EPSG:5186"));
+    QVERIFY2(!gpkg.isEmpty(), qPrintable(error));
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* area = LayerOps::ensureDomainLayer(&project, gpkg, QStringLiteral("survey_area"),
+                                             QStringLiteral("조사구역"), &error);
+    QVERIFY2(area, qPrintable(error));
+    QVERIFY(area->startEditing());
+    QgsFeature first(area->fields());
+    first.setAttribute(QStringLiteral("note"), QStringLiteral("이전 세대"));
+    first.setGeometry(QgsGeometry::fromRect(QgsRectangle(200000, 450000, 200010, 450010)));
+    QVERIFY(area->addFeature(first));
+    const QString recovery = dir.filePath(QStringLiteral("복구사본"));
+    const auto firstSave = SurveyStorage::persistWorkspace(&project, gpkg, recovery);
+    QVERIFY2(firstSave.saved, qPrintable(firstSave.error));
+    QVERIFY(SurveyStorage::validateForOpen(gpkg, &error));
+    {
+      QgsVectorLayer disk(gpkg + QStringLiteral("|layername=survey_area"), QStringLiteral("disk"),
+                          QStringLiteral("ogr"));
+      QVERIFY(disk.isValid());
+      QCOMPARE(disk.featureCount(), 1LL);
+    }
+    const QByteArray before = fileHash(gpkg);
+    QVERIFY(!before.isEmpty());
+    if (!area->isEditable()) QVERIFY(area->startEditing());
+    QgsFeature second(area->fields());
+    second.setAttribute(QStringLiteral("note"), QStringLiteral("저장되면 안 되는 면"));
+    second.setGeometry(QgsGeometry::fromRect(QgsRectangle(200020, 450020, 200030, 450030)));
+    QVERIFY(area->addFeature(second));
+    QVERIFY(area->isModified());
+    QCOMPARE(area->featureCount(), 2LL);
+    project.setDirty(true);
+    connect(
+        &project, &QgsProject::writeProject, &project,
+        [](QDomDocument&) { throw std::runtime_error("synthetic generation write failure"); },
+        Qt::DirectConnection);
+    const auto attempt = SurveyStorage::persistWorkspace(&project, gpkg, recovery);
+    QVERIFY(!attempt.saved);
+    QCOMPARE(fileHash(gpkg), before);
+    QVERIFY2(SurveyStorage::validateForOpen(gpkg, &error), qPrintable(error));
+    {
+      QgsVectorLayer disk(gpkg + QStringLiteral("|layername=survey_area"), QStringLiteral("disk"),
+                          QStringLiteral("ogr"));
+      QVERIFY(disk.isValid());
+      QCOMPARE(disk.featureCount(), 1LL);
+    }
+    QVERIFY(area->isModified());
+    QCOMPARE(area->featureCount(), 2LL);
+    QVERIFY2(!attempt.recoveryPath.isEmpty(), qPrintable(attempt.error));
+  }
+
+  void persistWork_writesCompanionQgzWithoutMainWindow() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QString error;
+    const QString gpkg = SurveyProjectFactory::createNewSurvey(
+        dir.path(), QStringLiteral("세션저장"), &error, QStringLiteral("EPSG:5186"));
+    QVERIFY2(!gpkg.isEmpty(), qPrintable(error));
+    QVERIFY(!gpkg.contains(QStringLiteral("제주")));
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* area = LayerOps::ensureDomainLayer(&project, gpkg, QStringLiteral("survey_area"),
+                                             QStringLiteral("조사구역"), &error);
+    QVERIFY2(area, qPrintable(error));
+    QVERIFY(area->startEditing());
+    QgsFeature first(area->fields());
+    first.setAttribute(QStringLiteral("note"), QStringLiteral("세션면"));
+    first.setGeometry(QgsGeometry::fromRect(QgsRectangle(200000, 450000, 200010, 450010)));
+    QVERIFY(area->addFeature(first));
+    SurveySession::PersistInput in;
+    in.surveyPath = gpkg;
+    in.recoveryDirectory = dir.filePath(QStringLiteral("복구사본"));
+    const auto result = SurveySession::persistWork(&project, in);
+    QVERIFY2(result.saved, qPrintable(result.workspace.error));
+    QVERIFY(result.companionSaved);
+    QCOMPARE(result.companionQgzPath, SurveySession::companionQgzPathFor(gpkg));
+    QVERIFY(QFileInfo::exists(result.companionQgzPath));
+    QVERIFY2(SurveyStorage::validateForOpen(gpkg, &error), qPrintable(error));
+    QgsVectorLayer disk(gpkg + QStringLiteral("|layername=survey_area"), QStringLiteral("disk"),
+                        QStringLiteral("ogr"));
+    QVERIFY(disk.isValid());
+    QCOMPARE(disk.featureCount(), 1LL);
+  }
+
+  void persistWork_emptyPathDoesNotWrite() {
+    QgsProject project;
+    SurveySession::PersistInput in;
+    const auto result = SurveySession::persistWork(&project, in);
+    QVERIFY(!result.saved);
+    QVERIFY(result.workspace.error.contains(QStringLiteral("조사 경로")));
+  }
+
+  void extractEmbeddedReferenceVectors_shrinksSurveyAndKeepsDomain() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QString error;
+    const QString gpkg = SurveyProjectFactory::createNewSurvey(
+        dir.path(), QStringLiteral("참조추출"), &error, QStringLiteral("EPSG:5186"));
+    QVERIFY2(!gpkg.isEmpty(), qPrintable(error));
+    QVERIFY(!gpkg.contains(QStringLiteral("제주")));
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* area = LayerOps::ensureDomainLayer(&project, gpkg, QStringLiteral("survey_area"),
+                                             QStringLiteral("조사구역"), &error);
+    QVERIFY2(area, qPrintable(error));
+    QVERIFY(area->startEditing());
+    QgsFeature first(area->fields());
+    first.setAttribute(QStringLiteral("note"), QStringLiteral("조사면"));
+    first.setGeometry(QgsGeometry::fromRect(QgsRectangle(200000, 450000, 200010, 450010)));
+    QVERIFY(area->addFeature(first));
+    const QString recovery = dir.filePath(QStringLiteral("복구사본"));
+    const auto firstSave = SurveyStorage::persistWorkspace(&project, gpkg, recovery);
+    QVERIFY2(firstSave.saved, qPrintable(firstSave.error));
+
+    QgsVectorLayer memory(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("외부경계"),
+                          QStringLiteral("memory"));
+    QVERIFY(memory.isValid());
+    QVERIFY(memory.startEditing());
+    for (int i = 0; i < 4000; ++i) {
+      QgsFeature feature(memory.fields());
+      feature.setGeometry(QgsGeometry::fromRect(
+          QgsRectangle(201000 + i, 451000, 201001 + i, 451001)));
+      QVERIFY(memory.addFeature(feature));
+    }
+    QVERIFY(memory.commitChanges());
+    QgsVectorFileWriter::SaveVectorOptions opt;
+    opt.driverName = QStringLiteral("GPKG");
+    opt.layerName = QStringLiteral("외부경계");
+    opt.fileEncoding = QStringLiteral("UTF-8");
+    opt.actionOnExistingFile = QgsVectorFileWriter::CreateOrOverwriteLayer;
+    QString writeError;
+    QCOMPARE(QgsVectorFileWriter::writeAsVectorFormatV3(
+                 &memory, gpkg, project.transformContext(), opt, &writeError),
+             QgsVectorFileWriter::NoError);
+    auto* reference = new QgsVectorLayer(gpkg + QStringLiteral("|layername=외부경계"),
+                                         QStringLiteral("외부경계"), QStringLiteral("ogr"));
+    QVERIFY(reference->isValid());
+    QCOMPARE(reference->featureCount(), 4000LL);
+    project.addMapLayer(reference);
+    LayerOps::markReferenceLayer(reference);
+    LayerOps::markReferenceLayer(area);
+    const QStringList names = SurveyStorage::embeddedReferenceVectorNames(&project, gpkg);
+    QCOMPARE(names, QStringList{QStringLiteral("외부경계")});
+    QVERIFY(!names.contains(QStringLiteral("조사구역")));
+    const qint64 before = QFileInfo(gpkg).size();
+    QVERIFY(before > 0);
+    const QString output = dir.filePath(QStringLiteral("참조지도"));
+    const auto attempt = SurveyStorage::extractEmbeddedReferenceVectors(&project, gpkg, output);
+    QVERIFY2(attempt.extracted, qPrintable(attempt.error));
+    QCOMPARE(attempt.moved, QStringList{QStringLiteral("외부경계")});
+    QVERIFY(attempt.failed.isEmpty());
+    QVERIFY2(attempt.bytesAfter > 0 && attempt.bytesAfter < before,
+             qPrintable(QStringLiteral("before=%1 after=%2").arg(before).arg(attempt.bytesAfter)));
+    QVERIFY(QDir(output).exists());
+    QVERIFY(!QDir(output).entryList(QStringList{QStringLiteral("*.gpkg")}, QDir::Files).isEmpty());
+    QVERIFY(reference->isValid());
+    QVERIFY(!reference->source().contains(QFileInfo(gpkg).absoluteFilePath(), Qt::CaseInsensitive));
+    QCOMPARE(reference->featureCount(), 4000LL);
+    QVERIFY(area->isValid());
+    QCOMPARE(area->featureCount(), 1LL);
+    {
+      QgsVectorLayer domain(gpkg + QStringLiteral("|layername=survey_area"), QStringLiteral("disk"),
+                            QStringLiteral("ogr"));
+      QVERIFY(domain.isValid());
+      QCOMPARE(domain.featureCount(), 1LL);
+    }
+    {
+      QgsVectorLayer leftover(gpkg + QStringLiteral("|layername=외부경계"), QStringLiteral("gone"),
+                              QStringLiteral("ogr"));
+      QVERIFY(!leftover.isValid() || leftover.featureCount() == 0);
+    }
+    QVERIFY(SurveyStorage::embeddedReferenceVectorNames(&project, gpkg).isEmpty());
   }
 };
 

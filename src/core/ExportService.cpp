@@ -17,6 +17,7 @@
 #include <qgsprintlayout.h>
 #include <qgslayoutitemmap.h>
 #include <QMap>
+#include <QSet>
 #include <qgsvectorfilewriter.h>
 #include <qgsfeatureiterator.h>
 #include <qgsfield.h>
@@ -35,6 +36,77 @@ static bool isSectionSheetComposed(QgsProject* project) {
   if (!ly || ly->itemById(QStringLiteral("empty_hint")))
     return false;
   return LayoutService::isComposedStudioSheet(project, QStringLiteral("section_sheet"));
+}
+
+// DBF field names are 10 bytes. These two domain names are 11 characters.
+// The aliases are this program's SHP names, not an agency field dictionary.
+// https://gdal.org/en/latest/drivers/vector/shapefile.html
+static QString shapefileFieldName(const QString& name, QSet<QString>& used) {
+  QString mapped = name;
+  if (name.toUtf8().size() > 10) {
+    if (name == QLatin1String("survey_name")) mapped = QStringLiteral("surv_name");
+    else if (name == QLatin1String("artifact_no")) mapped = QStringLiteral("artif_no");
+    else mapped = QString::fromUtf8(name.toUtf8().left(10));
+  }
+  QString candidate = mapped;
+  int serial = 2;
+  while (used.contains(candidate) || candidate.isEmpty() || candidate.toUtf8().size() > 10) {
+    const QString suffix = QString::number(serial++);
+    candidate = QString::fromUtf8(mapped.toUtf8().left(qMax(1, 10 - suffix.size()))) + suffix;
+    if (serial > 99) break;
+  }
+  used.insert(candidate);
+  return candidate;
+}
+
+static std::unique_ptr<QgsVectorLayer> shapefileNamedLayer(QgsVectorLayer* source, const QString& layerKey,
+                                                          QStringList* notes, QString* errorOut) {
+  if (!source) return nullptr;
+  bool needsAlias = false;
+  for (const QgsField& field : source->fields()) {
+    if (field.name().toUtf8().size() > 10) needsAlias = true;
+  }
+  if (!needsAlias) return nullptr;
+  QSet<QString> used;
+  QgsFields fields;
+  QStringList fromNames;
+  for (const QgsField& field : source->fields()) {
+    const QString mapped = shapefileFieldName(field.name(), used);
+    if (mapped != field.name() && notes)
+      notes->append(QStringLiteral("%1 %2=%3").arg(layerKey, field.name(), mapped));
+    QgsField out(mapped, field.type());
+    out.setLength(field.length());
+    out.setPrecision(field.precision());
+    fields.append(out);
+    fromNames.append(field.name());
+  }
+  auto copy = std::make_unique<QgsVectorLayer>(
+      QStringLiteral("%1?crs=%2").arg(QgsWkbTypes::displayString(source->wkbType()),
+                                      source->crs().isValid() ? source->crs().authid() : QStringLiteral("EPSG:5187")),
+      layerKey, QStringLiteral("memory"));
+  if (!copy->isValid() || !copy->dataProvider()->addAttributes(fields.toList())) {
+    if (errorOut) *errorOut = QStringLiteral("%1 SHP 필드명을 만들지 못했습니다.").arg(layerKey);
+    return nullptr;
+  }
+  copy->updateFields();
+  QgsFeatureIterator it = source->getFeatures();
+  QgsFeature sourceFeature;
+  QgsFeatureList batch;
+  while (it.nextFeature(sourceFeature)) {
+    QgsFeature feature(copy->fields());
+    for (int i = 0; i < fromNames.size(); ++i) {
+      const int index = sourceFeature.fields().indexOf(fromNames.at(i));
+      if (index >= 0) feature.setAttribute(i, sourceFeature.attribute(index));
+    }
+    feature.setGeometry(sourceFeature.geometry());
+    batch.append(feature);
+  }
+  if (!batch.isEmpty() && !copy->dataProvider()->addFeatures(batch)) {
+    if (errorOut) *errorOut = QStringLiteral("%1 SHP 속성을 복사하지 못했습니다.").arg(layerKey);
+    return nullptr;
+  }
+  copy->updateExtents();
+  return copy;
 }
 
 bool ExportService::writeSha256Manifest(const QString& dir, QString* errorOut) {
@@ -136,6 +208,7 @@ QString ExportService::exportSubmissionPackage(QgsProject* project,
                        || encoding.compare(QStringLiteral("CP949"), Qt::CaseInsensitive) == 0)
                           ? QStringLiteral("CP949")
                           : QStringLiteral("UTF-8");
+  QStringList shpFieldNotes;
 
   if (project) {
     const QStringList names = {
@@ -207,6 +280,13 @@ QString ExportService::exportSubmissionPackage(QgsProject* project,
       }
 
       QgsVectorLayer* out = merged ? merged.get() : primary;
+      QString aliasError;
+      std::unique_ptr<QgsVectorLayer> aliased = shapefileNamedLayer(out, n, &shpFieldNotes, &aliasError);
+      if (!aliasError.isEmpty()) {
+        if (errorOut) *errorOut = aliasError;
+        return {};
+      }
+      if (aliased) out = aliased.get();
       const QString shp = dir.filePath(n + QStringLiteral(".shp"));
       QgsVectorFileWriter::SaveVectorOptions opts;
       opts.driverName = QStringLiteral("ESRI Shapefile");
@@ -280,6 +360,11 @@ QString ExportService::exportSubmissionPackage(QgsProject* project,
   ts << "shp_encoding: " << enc << "\n";
   ts << "intranet: upload each domain SHP (feature_poly.shp = one file; merge polygons in-app first if required)\n\n";
   ts << "checklist:\n" << checklistSummary << "\n";
+  if (!shpFieldNotes.isEmpty()) {
+    ts << "\nshp_field_names:\n";
+    for (const QString& note : shpFieldNotes)
+      ts << note << "\n";
+  }
   ts << "\nSee MANIFEST.sha256 for file hashes.\n";
   ts << QStringLiteral("도면 PDF는 도면만들기 용지(user_sheet 및 section_sheet)를 넣습니다.\n");
   if (QFile::exists(dir.filePath(QStringLiteral("조사도면.pdf")))) {

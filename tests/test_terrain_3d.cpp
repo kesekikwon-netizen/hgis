@@ -331,9 +331,13 @@ void TestTerrain3d::followup_tileNetworkAndMapStyleCards() {
 }
 
 void TestTerrain3d::terrainSheet_usesOwnSheetNotUserSheet() {
-  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString src = QString::fromUtf8(mw.readAll());
+  QString src;
+  for (const QString& path : {QStringLiteral("src/app/MainWindow.cpp"),
+                              QStringLiteral("src/app/MainWindowExport.cpp")}) {
+    QFile mw(path);
+    QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(path));
+    src += QString::fromUtf8(mw.readAll());
+  }
   QVERIFY2(!src.contains(QLatin1String("m_terrain3dStudio->runExportSheet()")),
            "툴바 도면출력은 PNG 저장이 아님");
   QVERIFY2(src.contains(QLatin1String("placeTerrain3dOnSheet")), "입체지형 → 조판");
@@ -504,9 +508,15 @@ void TestTerrain3d::studio_drapesVisibleMapOverlays() {
   QVERIFY2(body.contains(QString::fromUtf8("토양")), "토양도 입힘");
   QVERIFY2(body.contains(QLatin1String("survey_area")), "조사구역 폴리곤 입힘");
   QVERIFY2(body.contains(QLatin1String("prepend")), "조사구역을 입체 그림 맨 위에");
-  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  QVERIFY2(QString::fromUtf8(mw.readAll()).contains(QLatin1String("refreshDrape")),
+  QString mwSrc;
+  for (const QString& path : {QStringLiteral("src/app/MainWindow.cpp"),
+                              QStringLiteral("src/app/MainWindowExport.cpp"),
+                              QStringLiteral("src/app/MainWindowEditing.cpp")}) {
+    QFile mw(path);
+    QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(path));
+    mwSrc += QString::fromUtf8(mw.readAll());
+  }
+  QVERIFY2(mwSrc.contains(QLatin1String("refreshDrape")),
            "그린 뒤 입체 드레이프를 다시 입힘");
 }
 
@@ -551,9 +561,13 @@ void TestTerrain3d::distanceForVisibleWidth_invertsVisibleWidth() {
 }
 
 void TestTerrain3d::placeTerrain3d_detachesBeforeReplaceSheet() {
-  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString body = QString::fromUtf8(mw.readAll());
+  QString body;
+  for (const QString& path : {QStringLiteral("src/app/MainWindow.cpp"),
+                              QStringLiteral("src/app/MainWindowExport.cpp")}) {
+    QFile mw(path);
+    QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(path));
+    body += QString::fromUtf8(mw.readAll());
+  }
   const int fn = body.indexOf(QLatin1String("void MainWindow::placeTerrain3dOnSheet"));
   QVERIFY2(fn >= 0, "placeTerrain3dOnSheet");
   const int next = body.indexOf(QLatin1String("void MainWindow::"), fn + 8);

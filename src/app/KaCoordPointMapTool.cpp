@@ -1,3 +1,4 @@
+#include "KaCrashGuard.h"
 #include "KaCoordPointMapTool.h"
 
 #include <qgsmapcanvas.h>
@@ -228,6 +229,7 @@ bool KaCoordPointMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out
   try {
     *out = e->mapPoint();
   } catch (...) {
+    KaCrashGuard::logLine(QStringLiteral("[except] app/KaCoordPointMapTool.cpp:230"));
     *out = toMapCoordinates(e->pos());
   }
   bool snapped = false;

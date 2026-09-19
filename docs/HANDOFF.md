@@ -437,7 +437,7 @@ MainWindow는 당시 AppData 저장 경로와 지정유산 한 종류 대상을 
 복원 Release 빌드 완료. 사용자 지시로 진행 중이던 자동 검사를 중단했으며 전체 통과로 보고하지 않는다. 2026-09-13 12:22에 정상 실행 스크립트로 앱을 열었고 PID 37328의 실제 창을 확인했다. 이후 수정 시 자동 검사를 사용자보다 먼저 강행하지 말고, 빌드 후 앱을 바로 열어 사용자가 확인하도록 한다.
 커밋·푸시·포터블·dist/L 복사 및 실제 조사/유산 자료 변경 없음.
 
-# ka-hgis Handoff — product SSOT (v0.3.0)
+# ka-hgis Handoff — product SSOT (v2.0.0)
 
 ## 2026-09-13 주변유적 여섯 자료 실수신·지도·조판 검증
 
@@ -474,7 +474,7 @@ MainWindow는 당시 AppData 저장 경로와 지정유산 한 종류 대상을 
 
 ## 2026-09-10 수치지형도 10km 커버리지 적재
 
-받기 문구의 「도엽 N장」은 보관·준비 수이고, 범례는 조사창(수백 m)과 겹치는 SHP만 올리고 있었다. 적재 질의를 `coverageBounds`(화면 ∪ 중심 ±10km 정사각)로 바꿔 받은 이웃 도엽이 조사 줌에서도 올라간다. 20km 밖·100km 팬은 기존처럼 언로드. 제주 도두(도곽만)는 검토 보관·자동 적재 없음. 옛 창을 닫고 바탕 **고고학 전용 HGIS**. 상세: `docs/HANDOFF_TOPOGRAPHIC_GROK.md`.
+받기 문구의 「도엽 N장」은 보관·준비 수이고, 범례는 조사창(수백 m)과 겹치는 SHP만 올리고 있었다. 적재 질의를 `coverageBounds`(화면 ∪ 중심 ±10km 정사각)로 바꿔 받은 이웃 도엽이 조사 줌에서도 올라간다. 20km 밖·100km 팬은 기존처럼 언로드. 제주 도두(도곽만)는 검토 보관·자동 적재 없음. 옛 창을 닫고 바탕 **고고학 전용 HGIS**. 상세: `docs/archive/HANDOFF_TOPOGRAPHIC_GROK.md`.
 
 ## 2026-09-10 Win11 Bloom 크롬 테마
 
@@ -482,7 +482,7 @@ MainWindow는 당시 AppData 저장 경로와 지정유산 한 종류 대상을 
 
 ## 2026-09-10 수치지형도 축척 필터
 
-넓은 범위 이동이 7도엽 122개를 모두 열어 80.862초가 걸리던 원인을 화면 축척 필터로 줄였다. 1:25000보다 작으면 등고·도로·수계·경계만 올린다. 안동 재측정은 축소 19.044초/55레이어. 무조작 지도 소실은 QA에서 재현되지 않았고 현장 원인은 미확정이다. 상세: `docs/HANDOFF_TOPOGRAPHIC_GROK.md`.
+넓은 범위 이동이 7도엽 122개를 모두 열어 80.862초가 걸리던 원인을 화면 축척 필터로 줄였다. 1:25000보다 작으면 등고·도로·수계·경계만 올린다. 안동 재측정은 축소 19.044초/55레이어. 무조작 지도 소실은 QA에서 재현되지 않았고 현장 원인은 미확정이다. 상세: `docs/archive/HANDOFF_TOPOGRAPHIC_GROK.md`.
 
 ## 수치지형도 자동 받기 — 2026-09-09 최종 전송·지도 적재
 
@@ -606,7 +606,7 @@ Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, n
 1. GPKG survey store; **legend empty until draw/import** (`LayerOps::ensureDomainLayer` only). **새 조사** drops every non-basemap layer (keep WMS/XYZ 지적·위성 only)
 2. Domain keys: `survey_area`, `feature_poly`, `feature_line`, `section_line`, `control_points`, `artifact_point`
 3. **참조 지도** (위성/지적) vs **조사 데이터**
-4. Digitize: startEditing → addFeature → commit (keep tool). After a polygon is finished, drag a saved vertex to reshape. **Ctrl+Z** undoes last vertex, then last saved feature. **No autosave** — `persistSurveyWork` runs only from `저장` (Ctrl+S) and from the close prompt (저장 / 저장 안 함 / 취소, `surveyHasUnsavedChanges`). Unsaved work shows as ` *` after the window title. `저장` also brings external vectors into the survey GPKG. Both commit edits before saving the embedded workspace. Failed commits retain the edit buffer and stop workspace saving. No QGZ dialog on 저장. 새 조사·다른 이름으로 저장 start in `preferredSurveyDir()` (last survey folder), never the Desktop — a Desktop redirected into OneDrive is what put field data there.
+4. Digitize: startEditing → addFeature → edit command (keep tool, **no immediate commit**). Snap UI (그리기 막대) writes `QgsSnappingConfig` plus `ka_hgis/snap_target` (현재 레이어 / 모든 조사 레이어) and `QgsProject::setTopologicalEditing` (공유 경계). Save/reopen keeps on/off, pixel tolerance, target, and topology. Dragging a shared vertex moves both adjacent 유구면 when 공유 경계 is on. After draw, optional `KaFeatureFormDialog` asks 이름/번호; Cancel keeps the geometry. After a polygon is finished, drag a vertex to reshape. **Ctrl+Z / 되돌리기** uses the layer `undoStack()` (then in-progress vertex, then layer-add/remove). **Ctrl+Y / 다시 실행** redoes the stack. File write is `persistSurveyWork` from `저장`. **No autosave** — `persistSurveyWork` runs only from `저장` (Ctrl+S) and from the close prompt (저장 / 저장 안 함 / 취소, `surveyHasUnsavedChanges`). Unsaved work shows as ` *` after the window title. `저장` also brings external vectors into the survey GPKG. `persistWorkspace` writes a next-generation GPKG, validates it, then atomically replaces the original (`publishSurveyGeneration`). A write exception or publish failure leaves the previous generation on disk. **참조 벡터를 조사 파일 밖으로…** (`더 많은 작업`) asks first (default No) then `extractEmbeddedReferenceVectors` copies marked reference tables to `참조지도/`, drops them from a generation GPKG, VACUUMs, and publishes. Domain keys are never extracted. Original field files are not used unless the user confirms. GPS 기준점 수동 입력과 CSV는 같은 축 안내를 쓴다: QGIS X=동쪽·Y=북쪽, 한국 측량 X=북쪽·Y=동쪽이면 `X·Y 교환`. Failed commit, absorb, or embedded write keeps the edit buffer, writes a recovery snapshot, returns `saved=false`, and shows Warning — never Success. No QGZ dialog on 저장. 새 조사·다른 이름으로 저장 start in `preferredSurveyDir()` (last survey folder), never the Desktop — a Desktop redirected into OneDrive is what put field data there.
 4a. **저장·다시 열기**: the GPKG contains survey vectors and an embedded QGIS workspace; the companion QGZ is a secondary copy. Reopening restores missing legend nodes while preserving existing visibility, names and styles. **다른 이름으로 저장** includes committed SQLite WAL changes and keeps each layer's actual table name (including `survey_area_2`). External photos/rasters still require their source files. A failed workspace restore suppresses automatic workspace overwrite and routes explicit saving to a different file.
 5. **도면 만들기** = `KaDrawingStudio` (not QGIS Layout Designer). Samples for north/scale/legend/CRS. **Ctrl+Z** removes last placed item. 좌표점은 지도 칸만, 우클릭/Delete/Ctrl+Z로 마지막 점 삭제. 축척·이동 후 땅 XY에서 다시 앉힘. 자석은 조사 벡터 꼭짓점·선(지적 WMS 그림은 불가). 전문 도곽(+ 십자·테두리 좌표 자)은 **격자 설정에서 켤 때만**. 도면만들기 기본·PDF는 맵 테두리만(축척자·방위·CRS는 유지). 자동 도면(`fillLayout`)은 표제란(도면명·조사명·축척·좌표계·작성일) 포함. 도면의 래스터(위성·지적·지질)는 조각 렌더 없이 한 번에 그린다(`LayoutService::applySingleRasterPassRendering`) — QGIS 기본 조각 렌더는 조각 하나가 비면 위성이 반만 나온 것처럼 보인다
 5c. **단면도** = `KaSectionDrawingStudio` 전용 탭. 열면 A3/A4 용지와 표고·거리 눈금이 이미 있다. 좌측 **GeoTIFF 추가**만 쓰고 위성·지적·조사 벡터는 목록에 넣지 않는다. CRS는 EPSG:5187/5186 선택(재투영 없음, 거리×표고 m). PDF는 `SectionLayoutService::exportSectionPdf`(300 DPI, forceVector, AlwaysText)
@@ -617,7 +617,7 @@ Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, n
 5i. **입체지형** = 리본 진입 **삭제**(사용자 포기). 엔진/`terrain3d_sheet` 코드는 남김. 제출 5179 아님.
 5e. **레이어 글자** = 벡터 우클릭 「글자 끄기/켜기」(`LayerOps::setLabelsVisible`). 지적 WMS의 지번 글자는 그림에 박혀 있어 레이어를 통째로 꺼야 함.
 5f. **시굴격자 비율** = 조사구역 레이어 우클릭 → 시굴격자 → 시굴(10%) / 표본(2%). 폭 2 m 고정, 길이·간격 배분(`buildForTargetRatio`). 선택한(없으면 마지막) 구역만.
-6. Work CRS default **EPSG:5187 (동부)**; 5186 also OK. **export SHP+PDF+MANIFEST = EPSG:5179**. 리본 「인트라넷 내보내기 5179」/「5179변환」은 파일만 쓰고 지도·범례에 올리지 않는다. Checklist error hard-blocks 제출
+6. Work CRS default **EPSG:5187 (동부)**; 5186 also OK. **export SHP+PDF+MANIFEST = EPSG:5179**. 리본 「인트라넷 내보내기 5179」/「5179변환」은 파일만 쓰고 지도·범례에 올리지 않는다. Checklist error hard-blocks 제출. Self-intersect (`GEOMETRY_VALID`), empty (`GEOMETRY_NOT_EMPTY`), and zero-area polygons (`GEOMETRY_NONZERO_AREA`) are error blockers.
 7a. **축척 칸은 하나** — 편집 가능한 `scaleCombo` 하나뿐(입력줄이 그 안의 `scaleEdit`). 예전의 별도 QLineEdit + 프리셋 QComboBox 두 개 구성으로 되돌리지 말 것. `MainWindow::scaleDenominatorFromUi` 가 "2000"·"1:2000" 을 모두 읽는다. 프리셋은 1:100 부터.
 7. 초보자 리본 6그룹(조사파일/기록/배경/정합·분석/산출/찾기). 질문형 짧은 라벨. Text menu bar **hidden**. **파일함은 기본 표시**(더보기로 숨길 수 있음). 작업 제어 dock은 더보기. 조판 위 「보기」 리본 없음 — 줌·이동은 마우스, 용지 맞춤은 열 때 자동.
 
@@ -629,13 +629,14 @@ Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, n
 | --- | --- |
 | VWorld 위성 | Stored API key → `api.vworld.kr` WMTS **first**; xdworld only if no key |
 | VWorld 지적 | Frozen tiled WMS `crs=EPSG:3857` + KEY. **`DOMAIN` 은 보내지 않는다** — 붙이면 같은 키·같은 Referer 라도 `INCORRECT_KEY`. 인증은 Referer 헤더가 한다(`KaApplication` requestPreprocessor + `http-header:referer`). 같은 이유로 수계도 WFS 에서도 뺐다. Do not put 5186/5187/5179 in WMS CRS list. GDAL_WMS 설정은 `%LOCALAPPDATA%\ka-hgisworld-cadastral.xml` (임시폴더 아님 — 비워지면 레이어가 깨졌다) |
-| Digitize / attrs | `KaCaptureMapTool`, `KaAttributeMapTool`, `ensureDomainLayer`. 그리기: 조사구역/유구면/유구선/단면선/기준점. 레이어 삭제·그린 도형 삭제는 `purgeCommittedFeatures`(GPKG 비움). 도형수정 자석=`snapToMap`, 선 우클릭 점추가/점삭제. 시굴격자 자동배치는 **선택한(없으면 마지막) survey_area만** — leftover union 금지. 자석은 벡터 꼭짓점·선만(지적 WMS 그림에는 안 붙음) |
+| Digitize / attrs | `KaCaptureMapTool`, `KaAttributeMapTool`, `ensureDomainLayer`. 그리기: 조사구역/유구면/유구선/단면선/기준점. 레이어 삭제·그린 도형 삭제는 `purgeCommittedFeatures`(GPKG 비움). 도형수정 자석=`snapToMap`, 선 우클릭 점추가/점삭제. 시굴격자 자동배치는 **선택한(없으면 마지막) survey_area만** — leftover union 금지. 그리기 막대 `KaSnapSettingsWidget`: 켬/끔·픽셀 허용치·현재 레이어/모든 조사 레이어. `LayerOps::applySnapSettings`가 `QgsSnappingConfig`+`ka_hgis/snap_target`을 쓰고, 조사 레이어만 AdvancedConfiguration에 넣는다(참조 지도 제외). 레이어 추가·조사 열기·그리기 시작 때 다시 적용. 「공유 경계」는 `QgsProject::setTopologicalEditing`. 켜면 맞닿은 유구의 같은 꼭짓점(1mm)을 같이 옮긴다. 그리기 직후 `KaFeatureFormDialog`로 이름/번호(선택, 취소해도 도형 유지). 자석은 벡터 꼭짓점·선만(지적 WMS 그림에는 안 붙음) |
 | Layout studio | `src/app/KaDrawingStudio.*` — 160 mm scale bar, PNG north = sample, CRS label |
 | Section studio | `src/app/KaSectionDrawingStudio.*` + `src/core/SectionLayoutService.*` — A3/A4 landscape, GeoTIFF body, elevation/distance ticks, vector PDF |
 | Terrain 3D tab | `src/app/KaTerrain3dStudio.*` + `src/core/Terrain3dService.*` — 전용 **입체지형** 탭. **지금 지도 화면**을 고해상 메시+Google 위성으로. DEM 파일 열기는 보조. `qgis_3d` 없음 |
 | Launch | `scripts/start-ka-hgis.vbs` + `launch.ps1` (Job Object safe) |
 | Chrome theme | `KaTheme` + `data/theme/ka-hgis.qss` sky 3D / black 2px regions |
-| Tests | `tests/test_workflow.cpp` (satellite key-first, undo feature, scale bar width, …) |
+| Tests | `tests/test_workflow.cpp` (satellite key-first, undo feature, scale bar width, …). 제출 도형 검수는 `test_export_survey_areas.cpp`의 자기교차·빈 도형·0면적 슬롯. 15만 합성 성능은 `tests/test_perf.cpp` (`perf_engine`: 렌더 8000ms / 조사 열기 1000ms / 조판 10000ms). 병렬 렌더 재현은 `tests/test_parallel_render.cpp` (`parallel_render`: 자식 ParallelJob+WMS 보류; 재현 안 됨, 제품 `qgis/parallel_rendering=false` 유지). `catch (...)` 세션 로그는 `tests/test_catch_log.cpp` (`catch_log`). 지적 준비 분해는 `tests/test_cadastral.cpp` `prepareBreakdown_clipDedupFasterThanWkbHash`. 세션 로그 10MB 회전·덤프 안내는 `tests/test_catch_log.cpp` `sessionLog_rotatesWhenOverMax` / `tests/test_gdal_error_log.cpp` `dumpHint_namesCrashDump`. 작은 창 레이어 목록 5행은 `tests/test_layer_information.cpp` `listKeepsFiveRowsAtFieldWindowSizes`. 리본 Tab/Enter 새 조사→저장은 `tests/test_theme.cpp` `ribbon_tabEnterNewSurveyToSave` |
+| User QA | 화면·조작·관측 서식 `docs/user/gui-scenario-checklist.md`. 2026-09-19 기록 1부 `docs/user/gui-scenario-records/2026-09-19.md`는 사용자 확인 대기 |
 
 ---
 
@@ -650,7 +651,8 @@ Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, n
 ## 4. Layout / build
 
 ```
-src/app/MainWindow.*        chrome, digitize, export
+src/app/MainWindow.*        chrome, digitize
+src/app/MainWindowExport.cpp 제출/내보내기 (5179 SHP+PDF+MANIFEST, 검수 hard-block)
 src/app/KaDrawingStudio.*   조판
 src/app/KaSectionDrawingStudio.* 단면도 탭
 src/core/SectionLayoutService.* 단면 눈금·조판·PDF

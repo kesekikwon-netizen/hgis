@@ -1,24 +1,26 @@
-# ka-hgis Codex Agent Rules
+# ka-hgis Cursor Agent Rules
 
 This repository is **ka-hgis**: a standalone C++20/Qt6 desktop HGIS for Korean archaeology field drawings. It links against OSGeo4W `qgis-dev` through `qgis_core` and `qgis_gui`. It is not a QGIS fork.
 
+Cursor reads this `AGENTS.md` as the workspace rule.
+
 Reply in the user's language, usually Korean. Code, paths, and identifiers may remain English; user-visible UI strings should follow existing Korean `QStringLiteral` patterns.
 
-## Codex Runtime
+## Cursor Runtime
 
-- Use native Codex App/CLI settings, skills, MCP tools, hooks, and subagents when they are available and useful.
-- Prefer the user's current GPT-6 Codex global profile for this project. Do not keep project-level Grok, Antigravity, Cursor-only, or old fixed model presets as required execution paths.
-- Legacy `.grok`, `.cursor`, `.agents` dispatch/history files, and Orca files may remain for history or compatibility, but they are not the authoritative harness for new Codex work. The explicitly maintained `.agents/skills/ka-hgis-gis/` is a current Codex project skill.
+- Use Cursor native Agent, subagents (Task), MCP, hooks, and skills when they are available and useful.
+- Prefer a fixed model chosen in the Cursor model picker (not Auto) for consistency. Do not treat Auto or ad-hoc model switching as a required execution path.
+- Legacy `.codex/`, `.grok`, and `.agents` dispatch/history files may remain for history or compatibility; they are not the authoritative harness. Current project skills remain `.agents/skills/ka-hgis-gis/`, [Archify](.agents/skills/archify/SKILL.md), and [문화재인트라넷](.agents/skills/heritage-intranet/SKILL.md).
 - Do not introduce OpenCode, Sisyphus, hidden auto-push, or hardcoded personal credentials.
-- Work directly for small and local changes. Use Codex native subagents only for bounded independent research, review, or verification when that improves correctness or throughput.
+- Work directly for small and local changes. Use Cursor Task subagents only for bounded independent research, review, or verification when that improves correctness or throughput.
 - Commit only when the user explicitly asks.
 
 ### Verified developer tools
 
-- **Mandatory development workflow (user requirement, 2026-09-15): `Codex + AGENTS.md + clangd + Graft + Archify + CMake/CTest`.** Use all six for product-code implementation and fixes, including small changes. Read the current repository instructions/state first; use Codex native execution, Graft retrieval confirmed against source, clangd declaration/definition navigation and diagnostics, an Archify view of the affected behavior, and the required CMake/CTest checks. Record concrete inputs, artifacts and results in the task plan or QA report; naming a tool is not evidence of using it.
+- **Mandatory development workflow (user requirement, 2026-09-15; harness switched to Cursor 2026-09-18): `Cursor Agent + AGENTS.md + clangd + Graft + Archify + CMake/CTest`.** Use all six for product-code implementation and fixes, including small changes. Read the current repository instructions/state first; use Cursor Agent execution, Graft retrieval confirmed against source, clangd declaration/definition navigation and diagnostics, an Archify view of the affected behavior, and the required CMake/CTest checks. Record concrete inputs, artifacts and results in the task plan or QA report; naming a tool is not evidence of using it.
 - Setup and evidence: [developer-tools.md](docs/developer-tools.md). Keep the existing source, compiler and tests authoritative.
 - For C++ changes, use the real `build/compile_commands.json`; regenerate with `scripts/gen-compile-commands.ps1` after CMake/SDK changes. Use [clangd navigation](docs/clangd-navigation.md) for a concrete call location's declaration/definition and clangd checks for compiler diagnostics.
-- For each product-code task, use project MCP `hgis_graft` to narrow candidate files or definitions; a focused file API query is sufficient for a small known-file edit. Its four tools cover `src/` and `tests/` and refresh the local structural index before retrieval. Confirm parser spans/signatures in source; use `rg` for full text coverage and Qt signal/slot wiring.
+- For each product-code task, use project MCP `hgis_graft` to narrow candidate files or definitions; a focused file API query is sufficient for a small known-file edit. Graft is exposed to Cursor via the USER-level MCP config (`%USERPROFILE%\.cursor\mcp.json`, server `hgis_graft`), not a repo-level `.cursor/mcp.json`. Codex registration in `.codex/config.toml` remains for compatibility. Its four tools cover `src/` and `tests/` and refresh the local structural index before retrieval. Confirm parser spans/signatures in source; use `rg` for full text coverage and Qt signal/slot wiring.
 - Do not enable Graft call tracing or claim complete impact coverage: HGIS C++ cross-file edges remain incomplete even with Windows LSP discovery repaired. Do not run upstream `graft init`, install its hooks, or use graph-first instructions over these rules. The pinned adapter omits updater, model-backed indexing and promotional output.
 - For each product-code task, use the installed project [Archify skill](.agents/skills/archify/SKILL.md) via `scripts/archify.ps1` to inspect the affected structure or flow; see [setup](docs/archify-setup.md). Keep the diagram scoped to the change. Reuse an existing diagram only after checking its evidence against current source; update it when needed and run validate/deliver/visual-check. Cite current source for every relationship and distinguish planned components. Also use this workflow for architecture explanations and multi-module refactor reviews. A diagram's validation does not validate C++ semantics.
 - If a required tool is unavailable, attempt the documented setup/recovery without changing pinned revisions. Source-based investigation may continue, but explicitly record the missing required check and report verification as incomplete; never silently omit the tool or invent its results. The existing documentation-only verification rule below still applies to changes that do not alter product code or C++ build behavior.
@@ -27,7 +29,7 @@ Reply in the user's language, usually Korean. Code, paths, and identifiers may r
 
 ### Project-local GIS specialization
 
-- Global Codex settings supply general C++ guidance, GPT-6 and C++ tools. GIS rules belong only to this repository; do not copy them to global AGENTS.md or global skills.
+- Cursor user rules and global settings supply general C++ guidance. GIS rules belong only to this repository; do not copy them to global user rules or global skills.
 - Use [ka-hgis-gis](.agents/skills/ka-hgis-gis/SKILL.md) for HGIS implementation, diagnosis and review. It routes to relevant evidence and tests without requiring a GIS investigation for an unrelated edit.
 - Use [문화재인트라넷](.agents/skills/heritage-intranet/SKILL.md) for nearby-heritage intranet downloads, related legends and recovery; it records the confirmed success contract and the stale-object-file restore failure.
 - Resolve historical documentation against current user requirements, `.codex/NOW.md`, current handoffs and actual code. The original ADR's C++17/LTR baseline and the schema's legacy 5179 default do not override the current C++20/Qt6/qgis-dev build or selected survey CRS.
@@ -35,7 +37,7 @@ Reply in the user's language, usually Korean. Code, paths, and identifiers may r
 
 Read these before non-trivial product or GIS work:
 
-1. `.codex/NOW.md` - current Codex session state and most recent field constraints.
+1. `.codex/NOW.md` - current session state / most recent field constraints (historically Codex-maintained; still the live state file).
 2. `HANDOFF.md` and `docs/HANDOFF.md` - product truth; edit both together when the handoff changes.
 3. `docs/adr/0001-standalone-cpp-qgis-libs.md` - Architecture B, no QGIS fork.
 4. `docs/domain/data-model.md` - GPKG layers and fields.
@@ -167,5 +169,5 @@ Do not ask the user to diagnose EPSG, WMS, QGIS provider, or CRS behavior.
 - Reintroducing automatic startup restore.
 - Hardcoding VWorld keys.
 - Adding DXF as primary submit output.
-- Reintroducing Grok/Antigravity/Cursor-only requirements as Codex prerequisites.
+- Reintroducing Codex/Grok/Antigravity-only requirements as prerequisites; Cursor is the harness.
 - Forcing large agent graphs for local one-file fixes.

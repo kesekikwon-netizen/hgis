@@ -14,10 +14,16 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QFormLayout;
+class QSplitter;
+class QToolButton;
 
 class KaLayerInformationView : public QgsLayerTreeView {
 public:
+  static constexpr int kMinVisibleRows = 5;
   explicit KaLayerInformationView(QWidget* parent = nullptr) : QgsLayerTreeView(parent) {}
+  int minimumListHeight() const;
+  static void protectSidebarList(QSplitter* split, QgsLayerTreeView* tree, QToolButton* filesToggle,
+                                 QWidget* filesPane, class KaLayerInformationPanel* panel);
 protected:
   void resizeEvent(QResizeEvent* event) override;
 private:
@@ -62,6 +68,7 @@ class KaLayerInformationPanel : public QWidget {
 public:
   KaLayerInformationPanel(KaLayerInformationModel* model, QgsLayerTreeView* view,
                           QWidget* parent = nullptr);
+  void collapseDetails();
 private:
   void refresh();
   QPointer<KaLayerInformationModel> m_model;

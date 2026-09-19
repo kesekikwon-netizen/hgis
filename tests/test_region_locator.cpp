@@ -5,11 +5,13 @@
 #include <QFontDatabase>
 #include <QGridLayout>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPushButton>
 #include <QScreen>
 #include <QToolButton>
 #include <algorithm>
 
+#include "app/KaBeginnerRibbon.h"
 #include "app/KaRegionLocator.h"
 #include "app/KaTheme.h"
 #include "core/KoreaRegionCatalog.h"
@@ -185,6 +187,61 @@ private slots:
     QVERIFY(address.contains(QStringLiteral("123-4")));
     QVERIFY(!locator->m_popup->isVisible());
     QVERIFY(!(*it)->isChecked());
+  }
+
+  void overflowFindMenuKeepsRegionPopupOnScreen() {
+    KaBeginnerRibbon ribbon;
+    ribbon.addGroup(QStringLiteral("survey"), QStringLiteral("조사파일"));
+    ribbon.addGroup(QStringLiteral("find"), QStringLiteral("찾기"));
+    auto* locator = new KaRegionLocator(&ribbon);
+    ribbon.addWidget(QStringLiteral("find"), locator);
+    auto* extra = new QToolButton(&ribbon);
+    extra->setText(QStringLiteral("웹자료"));
+    ribbon.addWidget(QStringLiteral("find"), extra);
+    ribbon.resize(120, ribbon.sizeHint().height());
+    ribbon.show();
+    QCoreApplication::processEvents();
+    auto* overflow = ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
+    auto* menu = ribbon.findChild<QMenu*>(QStringLiteral("ribbonOverflowMenu"));
+    auto* find = ribbon.findChild<QMenu*>(QStringLiteral("ribbonOverflowGroup_find"));
+    QVERIFY(overflow && overflow->isVisible());
+    QVERIFY(menu && find && find->menuAction()->isVisible());
+    menu->popup(overflow->mapToGlobal(QPoint(0, overflow->height())));
+    menu->setActiveAction(find->menuAction());
+    QTest::keyClick(menu, Qt::Key_Right);
+    QTRY_VERIFY(find->isVisible());
+    QTRY_VERIFY(locator->isVisible());
+    const auto chips = locator->findChildren<QToolButton*>();
+    auto it = std::find_if(chips.begin(), chips.end(), [](QToolButton* button) {
+      return button->text() == QStringLiteral("부산");
+    });
+    QVERIFY(it != chips.end());
+    QVERIFY2((*it)->height() <= 28 && (*it)->width() <= 48,
+             qPrintable(QStringLiteral("chip %1x%2 menu %3x%4 locator %5x%6")
+                            .arg((*it)->width()).arg((*it)->height())
+                            .arg(find->width()).arg(find->height())
+                            .arg(locator->width()).arg(locator->height())));
+    const QPoint chipBottom = (*it)->mapTo(find, (*it)->rect().bottomRight());
+    QVERIFY2(find->rect().contains(chipBottom),
+             qPrintable(QStringLiteral("chip clipped at %1,%2 menu %3x%4")
+                            .arg(chipBottom.x()).arg(chipBottom.y())
+                            .arg(find->width()).arg(find->height())));
+    (*it)->click();
+    QCoreApplication::processEvents();
+    QVERIFY(locator->m_popup);
+    QVERIFY2(locator->m_popup->isVisible(), "address popup closed as soon as the overflow menu opened it");
+    QVERIFY2(!qobject_cast<QMenu*>(locator->m_popup->parentWidget()),
+             qPrintable(QStringLiteral("popup parent=%1")
+                            .arg(locator->m_popup->parentWidget()
+                                     ? locator->m_popup->parentWidget()->metaObject()->className()
+                                     : "null")));
+    const QRect available = QGuiApplication::primaryScreen()->availableGeometry();
+    QVERIFY2(available.contains(locator->m_popup->frameGeometry()),
+             qPrintable(QStringLiteral("popup=%1,%2 %3x%4")
+                            .arg(locator->m_popup->x()).arg(locator->m_popup->y())
+                            .arg(locator->m_popup->width()).arg(locator->m_popup->height())));
+    QVERIFY(locator->m_city && locator->m_city->isVisibleTo(locator->m_popup));
+    locator->closePanel();
   }
 
   void emptyLotKeepsRegionSearch() {

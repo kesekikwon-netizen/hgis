@@ -431,6 +431,8 @@ private slots:
     const QString text = QString::fromUtf8(f.readAll());
     QVERIFY(text.contains(QStringLiteral("[heritage]")));
     QVERIFY(!text.contains(QStringLiteral("[ngii]")));
+    QVERIFY(text.contains(QStringLiteral("password_dpapi=")));
+    QVERIFY(!text.contains(QStringLiteral("\npassword=")));
   }
 
   void logDescriptionNeverCarriesThePassword() {

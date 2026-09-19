@@ -31,6 +31,8 @@ QJsonObject ProjectStateBuilder::empty() {
   st.insert(QStringLiteral("survey_is_polygon"), false);
   st.insert(QStringLiteral("features_within_survey"), true);
   st.insert(QStringLiteral("geometries_valid"), true);
+  st.insert(QStringLiteral("geometries_nonempty"), true);
+  st.insert(QStringLiteral("geometries_nonzero_area"), true);
   st.insert(QStringLiteral("layout_exists:site_location"), false);
   st.insert(QStringLiteral("layout_exists:feature_plan"), false);
   st.insert(QStringLiteral("layout_exists:feature_detail"), false);
@@ -69,16 +71,43 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
 
   bool surveyPoly = false;
   bool geosValid = true;
+  bool noEmpty = true;
+  bool noZeroArea = true;
   QgsRectangle surveyExtent;
   bool hasSurveyExt = false;
+
+  // QgsGeometry::isGeosValid / isEmpty / area
+  // https://qgis.org/pyqgis/master/core/QgsGeometry.html
+  const auto inspectGeometry = [&](const QgsGeometry& g) {
+    if (g.isNull() || g.isEmpty()) {
+      noEmpty = false;
+      return;
+    }
+    if (!g.isGeosValid())
+      geosValid = false;
+    if (QgsWkbTypes::geometryType(g.wkbType()) == Qgis::GeometryType::Polygon &&
+        !(g.area() > 0.0))
+      noZeroArea = false;
+  };
+
+  for (const QString& key : LayerOps::domainLayerKeys()) {
+    const auto layers = LayerOps::domainLayersForKey(project, key);
+    for (auto* layer : layers) {
+      if (!layer || layer->featureCount() <= 0) continue;
+      QgsFeatureIterator it = layer->getFeatures();
+      QgsFeature f;
+      while (it.nextFeature(f))
+        inspectGeometry(f.geometry());
+    }
+  }
+
   for (auto* saLayer : sas) {
     if (saLayer->featureCount() <= 0) continue;
     QgsFeatureIterator it = saLayer->getFeatures();
     QgsFeature f;
     while (it.nextFeature(f)) {
       const QgsGeometry g = f.geometry();
-      if (g.isNull()) continue;
-      if (!g.isGeosValid()) geosValid = false;
+      if (g.isNull() || g.isEmpty()) continue;
       const Qgis::GeometryType gt = QgsWkbTypes::geometryType(g.wkbType());
       if (gt == Qgis::GeometryType::Polygon) surveyPoly = true;
       if (!hasSurveyExt) { surveyExtent = g.boundingBox(); hasSurveyExt = true; }
@@ -99,28 +128,17 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
       const QString period = f.attribute(QStringLiteral("period")).toString().trimmed();
       if (kind.isEmpty() || period.isEmpty()) hasKindPeriod = false;
       const QgsGeometry g = f.geometry();
-      if (!g.isNull() && !g.isGeosValid()) geosValid = false;
-      if (hasSurveyExt && !g.isNull()) {
+      if (hasSurveyExt && !g.isNull() && !g.isEmpty()) {
         if (!surveyExtent.contains(g.boundingBox()) && !surveyExtent.intersects(g.boundingBox())) {
           st.insert(QStringLiteral("features_within_survey"), false);
         }
       }
     }
   }
-  // 선과 단면선도 자기교차 같은 무효 도형이 그대로 제출되면 안 된다.
-  for (const auto& layers : {fls, sls}) {
-    for (auto* layer : layers) {
-      if (layer->featureCount() <= 0) continue;
-      QgsFeatureIterator it = layer->getFeatures();
-      QgsFeature f;
-      while (it.nextFeature(f)) {
-        const QgsGeometry g = f.geometry();
-        if (!g.isNull() && !g.isGeosValid()) geosValid = false;
-      }
-    }
-  }
   st.insert(QStringLiteral("has_kind_period"), hasKindPeriod);
   st.insert(QStringLiteral("geometries_valid"), geosValid);
+  st.insert(QStringLiteral("geometries_nonempty"), noEmpty);
+  st.insert(QStringLiteral("geometries_nonzero_area"), noZeroArea);
 
   bool d=false,e=false,p=false,o=false,a=false;
   for (auto* cp : cps) {

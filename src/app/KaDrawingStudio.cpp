@@ -1036,6 +1036,7 @@ void KaDrawingStudio::buildUi() {
   leftSplit->setObjectName(QStringLiteral("studioLeftSplit"));
   leftSplit->setHandleWidth(8);
   leftSplit->setChildrenCollapsible(false);
+  leftSplit->setCollapsible(1, true);
   leftSplit->installEventFilter(this);
 
   auto* layerBox = new QFrame(leftSplit);
@@ -1150,10 +1151,10 @@ void KaDrawingStudio::buildUi() {
   filesScroll->setObjectName(QStringLiteral("sidebarFilesScroll"));
   filesScroll->setWidgetResizable(true);
   filesScroll->setFrameShape(QFrame::NoFrame);
-  filesScroll->setMinimumHeight(60);
+  filesScroll->setMinimumHeight(0);
   m_filesPanel = new KaFileBrowserPanel(filesScroll);
   m_filesPanel->setObjectName(QStringLiteral("studioFilesPanel"));
-  m_filesPanel->setMinimumHeight(200);
+  m_filesPanel->setMinimumHeight(0);
   filesScroll->setWidget(m_filesPanel);
   connect(filesToggle, &QToolButton::toggled, filesScroll, &QWidget::setVisible);
   connect(m_filesPanel, &KaFileBrowserPanel::fileActivated, this, [this, mainWin](const QString& path) {
@@ -1992,6 +1993,7 @@ void KaDrawingStudio::placeCoordCallout(const QPointF& layoutPt) {
         const QgsCoordinateTransform xf(mapCrs, vl->crs(), proj->transformContext());
         req = xf.transformBoundingBox(req);
       } catch (...) {
+        KaCrashGuard::logLine(QStringLiteral("[except] app/KaDrawingStudio.cpp:1994"));
         continue;
       }
     }
@@ -2006,6 +2008,7 @@ void KaDrawingStudio::placeCoordCallout(const QPointF& layoutPt) {
           const QgsCoordinateTransform xf(vl->crs(), mapCrs, proj->transformContext());
           g.transform(xf);
         } catch (...) {
+          KaCrashGuard::logLine(QStringLiteral("[except] app/KaDrawingStudio.cpp:2008"));
           continue;
         }
       }
@@ -3316,6 +3319,7 @@ QgsRectangle KaDrawingStudio::surveyExtentOnMap(QgsLayoutItemMap* map) const {
         xf.setBallparkTransformsAreAppropriate(true);
         e = xf.transformBoundingBox(e);
       } catch (...) {
+        KaCrashGuard::logLine(QStringLiteral("[except] app/KaDrawingStudio.cpp:3318"));
         continue;
       }
     }
@@ -3452,9 +3456,11 @@ void KaDrawingStudio::removeSelectedLayers() {
 
 bool KaDrawingStudio::eventFilter(QObject* watched, QEvent* event) {
   if (event && event->type() == QEvent::Resize && watched->objectName() == QLatin1String("studioLeftSplit")) {
-    if (auto* splitter = qobject_cast<QSplitter*>(watched); splitter && splitter->height() < 430) {
-      if (auto* toggle = findChild<QToolButton*>(QStringLiteral("sidebarFilesToggle")))
-        toggle->setChecked(false);
+    if (auto* splitter = qobject_cast<QSplitter*>(watched)) {
+      KaLayerInformationView::protectSidebarList(
+          splitter, m_layerTree, findChild<QToolButton*>(QStringLiteral("sidebarFilesToggle")),
+          findChild<QWidget*>(QStringLiteral("sidebarFilesScroll")),
+          findChild<KaLayerInformationPanel*>(QStringLiteral("layerInformationPanel")));
     }
   }
   const bool onTree = m_layerTree && event && (watched == m_layerTree || watched == m_layerTree->viewport());
@@ -3487,6 +3493,12 @@ bool KaDrawingStudio::eventFilter(QObject* watched, QEvent* event) {
         ((ke->modifiers() & Qt::ControlModifier) && ke->key() == Qt::Key_Z)) {
       if (auto* main = qobject_cast<MainWindow*>(window())) main->undoMapAction();
       else undoLastChange();
+      return true;
+    }
+    if (ke->matches(QKeySequence::Redo) ||
+        ((ke->modifiers() & Qt::ControlModifier) && ke->key() == Qt::Key_Y)) {
+      if (auto* main = qobject_cast<MainWindow*>(window())) main->redoMapAction();
+      else handleRedoKey();
       return true;
     }
     if (ke->key() == Qt::Key_Delete || ke->key() == Qt::Key_Backspace) {
@@ -3642,10 +3654,29 @@ void KaDrawingStudio::handleUndoKey() {
   undoLastChange();
 }
 
+void KaDrawingStudio::handleRedoKey() {
+  auto* ly = layout();
+  if (ly && ly->undoStack() && ly->undoStack()->stack() && ly->undoStack()->stack()->canRedo()) {
+    ly->undoStack()->stack()->redo();
+    updateInspector(nullptr);
+    if (m_status)
+      m_status->setText(QStringLiteral("다시 실행했습니다."));
+    return;
+  }
+  if (m_status)
+    m_status->setText(QStringLiteral("다시 실행할 것이 없습니다."));
+}
+
 void KaDrawingStudio::keyPressEvent(QKeyEvent* event) {
   if (event && (event->matches(QKeySequence::Undo) ||
                 ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_Z))) {
     handleUndoKey();
+    event->accept();
+    return;
+  }
+  if (event && (event->matches(QKeySequence::Redo) ||
+                ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_Y))) {
+    handleRedoKey();
     event->accept();
     return;
   }
@@ -3730,6 +3761,7 @@ void KaDrawingStudio::centerOnMapCanvas() {
       const QgsCoordinateTransform xf(src, dst, m_project->transformContext());
       ext = xf.transformBoundingBox(ext);
     } catch (...) {
+      KaCrashGuard::logLine(QStringLiteral("[except] app/KaDrawingStudio.cpp:3757"));
     }
   }
   // Tab activation requests this more than once. Resetting an identical view
@@ -3778,6 +3810,7 @@ void KaDrawingStudio::centerSurveyInMap() {
         const QgsCoordinateTransform xf(layer->crs(), map->crs(), m_project->transformContext());
         target = xf.transformBoundingBox(target);
       } catch (...) {
+        KaCrashGuard::logLine(QStringLiteral("[except] app/KaDrawingStudio.cpp:3805"));
       }
     }
     if (target.isFinite() && target.width() > 0.0 && target.width() < 2000000.0) {

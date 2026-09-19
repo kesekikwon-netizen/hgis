@@ -8,19 +8,25 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonObject>
 #include <QTemporaryDir>
+#include <QVector>
 #include <QtTest>
 
 #include <qgsapplication.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgsfeature.h>
 #include <qgsgeometry.h>
+#include <qgspointxy.h>
 #include <qgsproject.h>
 #include <qgsrectangle.h>
 #include <qgsvectordataprovider.h>
 #include <qgsvectorlayer.h>
+
+#include <cmath>
+#include <ogr_spatialref.h>
 
 namespace {
 
@@ -61,6 +67,14 @@ long long featureCountOf(const QString& shpPath) {
   return written.isValid() ? written.featureCount() : -1;
 }
 
+bool errorRuleFailed(const QVector<CheckResult>& results, const char* id) {
+  for (const CheckResult& result : results) {
+    if (result.id == QLatin1String(id))
+      return !result.passed && result.severity == QLatin1String("error");
+  }
+  return false;
+}
+
 }  // namespace
 
 class TestExportSurveyAreas : public QObject {
@@ -71,6 +85,11 @@ private slots:
   void referenceLayerNamedLikeDomainStaysOut();
   void legacyLayerWithoutKeyStillExports();
   void invalidGeometryInSecondLayerBlocksSubmission();
+  void emptyGeometryBlocksSubmission();
+  void zeroAreaPolygonBlocksSubmission();
+  void longFieldNamesFitTheShapefile();
+  void exportShp_matchesProjDirectWithinOneMillimetre_data();
+  void exportShp_matchesProjDirectWithinOneMillimetre();
 };
 
 // 구역 레이어가 둘이면 두 도형이 모두 제출 SHP 에 들어가야 한다.
@@ -218,11 +237,231 @@ void TestExportSurveyAreas::invalidGeometryInSecondLayerBlocksSubmission() {
 
   ChecklistEngine engine;
   QVERIFY2(engine.loadRules(rulesFile()), qPrintable(rulesFile()));
-  bool blocked = false;
-  for (const CheckResult& result : engine.evaluate(state))
-    if (result.id == QLatin1String("GEOMETRY_VALID"))
-      blocked = !result.passed && result.severity == QLatin1String("error");
-  QVERIFY2(blocked, "GEOMETRY_VALID 규칙이 제출을 막지 않았다");
+  QVERIFY2(errorRuleFailed(engine.evaluate(state), "GEOMETRY_VALID"),
+           "GEOMETRY_VALID 규칙이 제출을 막지 않았다");
+}
+
+// 빈 도형(NULL / EMPTY)은 자기교차와 다른 제출 차단 항목이어야 한다.
+void TestExportSurveyAreas::emptyGeometryBlocksSubmission() {
+  QgsProject project;
+  project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+  auto* survey = addSurveyAreaLayer(&project, QStringLiteral("조사구역"));
+  QVERIFY(survey);
+  QVERIFY(addSquare(survey, QStringLiteral("1구역"), 200000, 450000));
+
+  auto* features = addSurveyAreaLayer(&project, QStringLiteral("유구_면"),
+                                      QStringLiteral("feature_poly"));
+  QVERIFY(features);
+  QgsFeature empty(features->fields());
+  empty.setAttribute(QStringLiteral("name"), QStringLiteral("빈 도형"));
+  empty.setGeometry(QgsGeometry());
+  QVERIFY(empty.geometry().isNull());
+  QVERIFY(empty.geometry().isEmpty());
+  QgsFeatureList batch{empty};
+  QVERIFY(features->dataProvider()->addFeatures(batch));
+  features->updateExtents();
+
+  const QJsonObject state = ProjectStateBuilder::fromProject(&project);
+  QVERIFY2(!state.value(QStringLiteral("geometries_nonempty")).toBool(true),
+           "빈 도형을 검수가 놓쳤다");
+  QVERIFY2(state.value(QStringLiteral("geometries_valid")).toBool(false),
+           "빈 도형을 자기교차로 잘못 집계했다");
+
+  ChecklistEngine engine;
+  QVERIFY2(engine.loadRules(rulesFile()), qPrintable(rulesFile()));
+  const auto results = engine.evaluate(state);
+  QVERIFY2(errorRuleFailed(results, "GEOMETRY_NOT_EMPTY"),
+           "GEOMETRY_NOT_EMPTY 규칙이 제출을 막지 않았다");
+  QVERIFY2(!errorRuleFailed(results, "GEOMETRY_VALID"),
+           "빈 도형이 GEOMETRY_VALID 로 표시되면 안 된다");
+}
+
+// 면적 0 폴리곤은 별도 제출 차단 항목이어야 한다.
+void TestExportSurveyAreas::zeroAreaPolygonBlocksSubmission() {
+  QgsProject project;
+  project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+  auto* survey = addSurveyAreaLayer(&project, QStringLiteral("조사구역"));
+  QVERIFY(survey);
+  QVERIFY(addSquare(survey, QStringLiteral("1구역"), 200000, 450000));
+
+  auto* features = addSurveyAreaLayer(&project, QStringLiteral("유구_면"),
+                                      QStringLiteral("feature_poly"));
+  QVERIFY(features);
+  const QgsGeometry collapsed = QgsGeometry::fromWkt(QStringLiteral(
+      "POLYGON((200100 450100, 200150 450100, 200200 450100, 200100 450100))"));
+  QVERIFY(!collapsed.isNull());
+  QVERIFY(!collapsed.isEmpty());
+  QVERIFY2(!(collapsed.area() > 0.0),
+           qPrintable(QStringLiteral("collapsed area=%1").arg(collapsed.area())));
+  QgsFeature zero(features->fields());
+  zero.setAttribute(QStringLiteral("name"), QStringLiteral("0면적"));
+  zero.setGeometry(collapsed);
+  QgsFeatureList batch{zero};
+  QVERIFY(features->dataProvider()->addFeatures(batch));
+  features->updateExtents();
+
+  const QJsonObject state = ProjectStateBuilder::fromProject(&project);
+  QVERIFY2(!state.value(QStringLiteral("geometries_nonzero_area")).toBool(true),
+           "0면적 폴리곤을 검수가 놓쳤다");
+
+  ChecklistEngine engine;
+  QVERIFY2(engine.loadRules(rulesFile()), qPrintable(rulesFile()));
+  QVERIFY2(errorRuleFailed(engine.evaluate(state), "GEOMETRY_NONZERO_AREA"),
+           "GEOMETRY_NONZERO_AREA 규칙이 제출을 막지 않았다");
+}
+
+void TestExportSurveyAreas::longFieldNamesFitTheShapefile() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QgsProject project;
+  project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+  auto* area = new QgsVectorLayer(
+      QStringLiteral("Polygon?crs=EPSG:5187&field=survey_name:string(80)&field=site_name:string(40)"),
+      QStringLiteral("조사구역"), QStringLiteral("memory"));
+  QVERIFY(area->isValid());
+  LayerOps::markSurveyLayer(area, QStringLiteral("survey_area"));
+  project.addMapLayer(area);
+  QgsFeature areaFeature(area->fields());
+  areaFeature.setAttribute(QStringLiteral("survey_name"), QStringLiteral("광령리"));
+  areaFeature.setGeometry(QgsGeometry::fromRect(QgsRectangle(200000, 450000, 200050, 450050)));
+  QgsFeatureList areaFeatures{areaFeature};
+  QVERIFY(area->dataProvider()->addFeatures(areaFeatures));
+
+  auto* points = new QgsVectorLayer(
+      QStringLiteral("Point?crs=EPSG:5187&field=artifact_no:string(40)&field=kind:string(20)"),
+      QStringLiteral("유물"), QStringLiteral("memory"));
+  QVERIFY(points->isValid());
+  LayerOps::markSurveyLayer(points, QStringLiteral("artifact_point"));
+  project.addMapLayer(points);
+  QgsFeature point(points->fields());
+  point.setAttribute(QStringLiteral("artifact_no"), QStringLiteral("A-12"));
+  point.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(200010, 450010)));
+  QgsFeatureList pointFeatures{point};
+  QVERIFY(points->dataProvider()->addFeatures(pointFeatures));
+
+  const QString output = temporary.filePath(QStringLiteral("submission"));
+  QString error;
+  QCOMPARE(ExportService::exportSubmissionPackage(&project, output, QStringLiteral("UTF-8"),
+                                                  QStringLiteral("OK"), true, false, &error),
+           output);
+  QVERIFY2(error.isEmpty(), qPrintable(error));
+
+  QgsVectorLayer writtenArea(QDir(output).filePath(QStringLiteral("survey_area.shp")),
+                             QStringLiteral("area"), QStringLiteral("ogr"));
+  QgsVectorLayer writtenPoint(QDir(output).filePath(QStringLiteral("artifact_point.shp")),
+                              QStringLiteral("point"), QStringLiteral("ogr"));
+  QVERIFY(writtenArea.isValid());
+  QVERIFY(writtenPoint.isValid());
+  for (const QgsField& field : writtenArea.fields())
+    QVERIFY2(field.name().toUtf8().size() <= 10, qPrintable(field.name()));
+  for (const QgsField& field : writtenPoint.fields())
+    QVERIFY2(field.name().toUtf8().size() <= 10, qPrintable(field.name()));
+  QVERIFY(writtenArea.fields().indexOf(QStringLiteral("surv_name")) >= 0);
+  QVERIFY(writtenArea.fields().indexOf(QStringLiteral("survey_name")) < 0);
+  QVERIFY(writtenPoint.fields().indexOf(QStringLiteral("artif_no")) >= 0);
+  QgsFeature readArea;
+  QVERIFY(writtenArea.getFeatures().nextFeature(readArea));
+  QCOMPARE(readArea.attribute(QStringLiteral("surv_name")).toString(), QStringLiteral("광령리"));
+  QgsFeature readPoint;
+  QVERIFY(writtenPoint.getFeatures().nextFeature(readPoint));
+  QCOMPARE(readPoint.attribute(QStringLiteral("artif_no")).toString(), QStringLiteral("A-12"));
+  QFile readme(QDir(output).filePath(QStringLiteral("README_submit.txt")));
+  QVERIFY(readme.open(QIODevice::ReadOnly));
+  const QString text = QString::fromUtf8(readme.readAll());
+  QVERIFY(text.contains(QStringLiteral("survey_area survey_name=surv_name")));
+  QVERIFY(text.contains(QStringLiteral("artifact_point artifact_no=artif_no")));
+}
+
+// GDAL OSR가 부르는 PROJ(proj.db)와 제출 SHP 좌표를 비교한다.
+// cs2cs.exe는 이 SDK에 없고, proj.h도 공개 헤더로 없다.
+// 공식: https://gdal.org/en/stable/tutorials/osr_api_tut.html
+//        https://proj.org/en/stable/development/quickstart.html
+bool projDirectTo5179(int sourceEpsg, double x, double y, double* outX, double* outY,
+                      QString* error) {
+  OGRSpatialReference source;
+  OGRSpatialReference target;
+  if (source.importFromEPSG(sourceEpsg) != OGRERR_NONE ||
+      target.importFromEPSG(5179) != OGRERR_NONE) {
+    if (error) *error = QStringLiteral("EPSG:%1 또는 EPSG:5179를 열지 못했습니다.").arg(sourceEpsg);
+    return false;
+  }
+  source.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+  target.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+  OGRCoordinateTransformation* transform = OGRCreateCoordinateTransformation(&source, &target);
+  if (!transform) {
+    if (error) *error = QStringLiteral("EPSG:%1 → EPSG:5179 변환을 만들지 못했습니다.").arg(sourceEpsg);
+    return false;
+  }
+  *outX = x;
+  *outY = y;
+  const bool ok = transform->Transform(1, outX, outY) == TRUE;
+  OGRCoordinateTransformation::DestroyCT(transform);
+  if (!ok) {
+    if (error) *error = QStringLiteral("EPSG:%1 (%2, %3) 변환이 실패했습니다.").arg(sourceEpsg).arg(x).arg(y);
+    return false;
+  }
+  return std::isfinite(*outX) && std::isfinite(*outY);
+}
+
+void TestExportSurveyAreas::exportShp_matchesProjDirectWithinOneMillimetre_data() {
+  QTest::addColumn<QString>("crs");
+  QTest::addColumn<int>("epsg");
+  QTest::addColumn<double>("x");
+  QTest::addColumn<double>("y");
+  QTest::newRow("central-5186") << QStringLiteral("EPSG:5186") << 5186 << 198000.0 << 451000.0;
+  QTest::newRow("east-5187") << QStringLiteral("EPSG:5187") << 5187 << 200010.0 << 450010.0;
+}
+
+void TestExportSurveyAreas::exportShp_matchesProjDirectWithinOneMillimetre() {
+  QFETCH(QString, crs);
+  QFETCH(int, epsg);
+  QFETCH(double, x);
+  QFETCH(double, y);
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QgsProject project;
+  project.setCrs(QgsCoordinateReferenceSystem(crs));
+  auto* points = new QgsVectorLayer(
+      QStringLiteral("Point?crs=%1&field=name:string(20)").arg(crs),
+      QStringLiteral("기준점"), QStringLiteral("memory"));
+  QVERIFY(points->isValid());
+  LayerOps::markSurveyLayer(points, QStringLiteral("control_points"));
+  project.addMapLayer(points);
+  QgsFeature feature(points->fields());
+  feature.setAttribute(QStringLiteral("name"), QStringLiteral("proj-check"));
+  feature.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(x, y)));
+  QgsFeatureList features{feature};
+  QVERIFY(points->dataProvider()->addFeatures(features));
+
+  const QString output = temporary.filePath(QStringLiteral("submission"));
+  QString error;
+  QCOMPARE(ExportService::exportSubmissionPackage(&project, output, QStringLiteral("UTF-8"),
+                                                  QStringLiteral("OK"), true, false, &error),
+           output);
+  QVERIFY2(error.isEmpty(), qPrintable(error));
+
+  QgsVectorLayer written(QDir(output).filePath(QStringLiteral("control_points.shp")),
+                         QStringLiteral("written"), QStringLiteral("ogr"));
+  QVERIFY(written.isValid());
+  QCOMPARE(written.crs().authid(), QStringLiteral("EPSG:5179"));
+  QgsFeature exported;
+  QVERIFY(written.getFeatures().nextFeature(exported));
+  const QgsPointXY shp = exported.geometry().asPoint();
+
+  double projX = 0;
+  double projY = 0;
+  QVERIFY2(projDirectTo5179(epsg, x, y, &projX, &projY, &error), qPrintable(error));
+  const double dx = shp.x() - projX;
+  const double dy = shp.y() - projY;
+  const double metres = std::hypot(dx, dy);
+  QVERIFY2(metres <= 0.001,
+           qPrintable(QStringLiteral("%1 SHP=(%2,%3) PROJ=(%4,%5) d=%6m")
+                          .arg(crs)
+                          .arg(shp.x(), 0, 'f', 6)
+                          .arg(shp.y(), 0, 'f', 6)
+                          .arg(projX, 0, 'f', 6)
+                          .arg(projY, 0, 'f', 6)
+                          .arg(metres, 0, 'f', 6)));
 }
 
 #include "test_export_survey_areas.moc"

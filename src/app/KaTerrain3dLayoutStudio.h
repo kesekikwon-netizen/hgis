@@ -30,6 +30,7 @@ public:
   void detachSheet();
   void deleteSelectedItems();
   void undoLastChange();
+  void redoLastChange();
 
 public slots:
   void exportPdf();

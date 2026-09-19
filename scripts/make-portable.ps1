@@ -53,6 +53,7 @@ function Copy-Dlls([string]$src, [string]$dst) {
 
 Copy-Item $exe $out -Force
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $out
+Copy-Item -LiteralPath (Join-Path $root 'THIRD_PARTY_NOTICES.md') -Destination $out
 $noticeDir = Join-Path $out 'licenses'
 New-Item -ItemType Directory -Force -Path $noticeDir | Out-Null
 foreach ($notice in @('LICENSE', 'AUTHORS', 'CONTRIBUTORS')) {
@@ -209,7 +210,7 @@ Visual Studio 설치도 필요 없습니다. Windows 화면 배율과 현재 모
   - VWorld 지도·주소 검색은 더보기 → VWorld API 키에서 유효한 키를 입력하세요.
   - 주변유적·수치지형도 다운로드 계정도 더보기 메뉴에서 입력하세요. 인터넷이 필요합니다.
   - 설정은 포터블 config 폴더에 저장됩니다. 계정을 입력한 폴더를 공유할 때 주의하세요.
-  - GNU GPL v2 이상 (QGIS 라이브러리 링크). 자세한 공지는 앱 정보 창.
+  - GNU GPL v2 이상 (QGIS 라이브러리 링크). 자세한 공지는 앱 정보 창과 THIRD_PARTY_NOTICES.md.
 
 제작: 동국문화재연구원  ·  만든이: youngin kwon
 소스: https://github.com/kwonyoungin11/hgis

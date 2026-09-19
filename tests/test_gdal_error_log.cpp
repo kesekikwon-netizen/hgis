@@ -11,7 +11,13 @@
 
 #include <cpl_error.h>
 
+#include <atomic>
+#include <cstring>
+
 namespace {
+
+std::atomic<int> g_spyHits{0};
+std::atomic<int> g_nestedHits{0};
 
 QString sessionLog() {
   QFile log(QDir(KaCrashGuard::logDir()).filePath(QStringLiteral("session.log")));
@@ -19,11 +25,28 @@ QString sessionLog() {
   return QString::fromUtf8(log.readAll());
 }
 
+CPLErrorHandler currentHandler() { return CPLGetErrorHandler(nullptr); }
+
+void CPL_STDCALL spyPrevious(CPLErr, CPLErrorNum, const char*) { g_spyHits.fetch_add(1); }
+
+void CPL_STDCALL spyNested(CPLErr, CPLErrorNum, const char* message) {
+  g_nestedHits.fetch_add(1);
+  if (message && std::strcmp(message, "nested-from-spy") != 0)
+    CPLError(CE_Failure, CPLE_AppDefined, "%s", "nested-from-spy");
+}
+
 }  // namespace
 
 class GdalErrorLogTest : public QObject {
   Q_OBJECT
 private slots:
+  void dumpHint_namesCrashDump() {
+    const QString hint = KaCrashGuard::dumpHint();
+    QVERIFY2(hint.contains(QStringLiteral(".dmp")), qPrintable(hint));
+    QVERIFY2(hint.contains(QStringLiteral("session.log")), qPrintable(hint));
+    QVERIFY2(hint.contains(QStringLiteral("10MB")), qPrintable(hint));
+  }
+
   void onlyFailuresAreRecorded() {
     QVERIFY(KaGdalErrorLog::describe(CE_Warning, 1, QStringLiteral("Field width truncated")).isEmpty());
     QVERIFY(KaGdalErrorLog::describe(CE_Debug, 0, QStringLiteral("debug")).isEmpty());
@@ -31,6 +54,8 @@ private slots:
                                       QStringLiteral("In GetNextRawFeature(): unable to open database file")),
              QStringLiteral("[gdal] ERROR 1: In GetNextRawFeature(): unable to open database file"));
     QVERIFY(KaGdalErrorLog::describe(CE_Fatal, 3, QStringLiteral("x")).startsWith(QStringLiteral("[gdal] FATAL 3")));
+    QCOMPARE(KaGdalErrorLog::describe(CE_Failure, 1, QStringLiteral("a\r\nb")),
+             QStringLiteral("[gdal] ERROR 1: a b"));
   }
 
   void failuresReachTheSessionLogAndRepeatsFold() {
@@ -48,6 +73,38 @@ private slots:
     // 120 identical failures become one line plus repeat counts, not 120 lines.
     QCOMPARE(text.count(QStringLiteral("unable to open database file")), 1);
     QVERIFY(text.contains(QStringLiteral("반복")));
+    KaGdalErrorLog::uninstall();
+  }
+
+  void uninstallRestoresPreviousAndInstallWorksAgain() {
+    g_spyHits.store(0);
+    CPLSetErrorHandler(spyPrevious);
+    KaGdalErrorLog::install();
+    const CPLErrorHandler ours = currentHandler();
+    QVERIFY(ours != spyPrevious);
+
+    KaGdalErrorLog::uninstall();
+    QVERIFY(currentHandler() != ours);
+    QCOMPARE(reinterpret_cast<void*>(currentHandler()), reinterpret_cast<void*>(spyPrevious));
+
+    CPLError(CE_Failure, CPLE_AppDefined, "%s", "after-uninstall");
+    QVERIFY(g_spyHits.load() >= 1);
+
+    KaGdalErrorLog::install();
+    QCOMPARE(reinterpret_cast<void*>(currentHandler()), reinterpret_cast<void*>(ours));
+    CPLError(CE_Failure, CPLE_AppDefined, "%s", "after-reinstall");
+    QVERIFY(sessionLog().contains(QStringLiteral("after-reinstall")));
+    KaGdalErrorLog::uninstall();
+  }
+
+  void nestedCplErrorFromPreviousDoesNotRecurse() {
+    g_nestedHits.store(0);
+    CPLSetErrorHandler(spyNested);
+    KaGdalErrorLog::install();
+    CPLError(CE_Failure, CPLE_AppDefined, "%s", "outer-from-test");
+    QCOMPARE(g_nestedHits.load(), 1);
+    QVERIFY(sessionLog().contains(QStringLiteral("outer-from-test")));
+    KaGdalErrorLog::uninstall();
   }
 };
 

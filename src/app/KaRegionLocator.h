@@ -45,4 +45,5 @@ private:
   QLineEdit* m_lot = nullptr;
   QString m_sido;
   QAbstractButton* m_activeChip = nullptr;
+  bool m_suppressDeactivate = false;
 };

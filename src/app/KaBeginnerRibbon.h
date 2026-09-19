@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QList>
 #include <QWidget>
 
 class QAction;
@@ -20,6 +21,8 @@ public:
   QToolButton* addAction(const QString& groupId, QAction* action);
   void addWidget(const QString& groupId, QWidget* widget);
   QFrame* group(const QString& id) const;
+  QList<QToolButton*> tabButtons() const;
+  void applyTabOrder();
   static QString twoLine(const QString& text);
   static void applyTwoLine(QToolButton* button);
   QSize sizeHint() const override;
@@ -28,6 +31,7 @@ public:
 protected:
   void resizeEvent(QResizeEvent* event) override;
   void showEvent(QShowEvent* event) override;
+  bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
   QHBoxLayout* buttonRow(const QString& groupId) const;

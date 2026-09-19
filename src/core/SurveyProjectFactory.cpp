@@ -1,3 +1,4 @@
+#include "KaSessionLog.h"
 #include "SurveyProjectFactory.h"
 #include "KaSafeQgis.h"
 #include "SurveyStorage.h"
@@ -215,6 +216,7 @@ QString SurveyProjectFactory::createNewSurvey(const QString& directory,
                       .arg(QString::fromUtf8(ex.what()));
     return {};
   } catch (...) {
+    KaSessionLog::line(QStringLiteral("[except] core/SurveyProjectFactory.cpp:217"));
     if (errorOut)
       *errorOut = QStringLiteral(
           "새 조사 준비 중 오류가 발생했습니다. 기존 조사는 그대로 두었습니다. 다른 이름이나 폴더로 다시 시도해 "

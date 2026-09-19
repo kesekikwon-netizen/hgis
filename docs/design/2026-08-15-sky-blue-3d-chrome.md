@@ -804,7 +804,7 @@ set_tests_properties(checklist_engine workflow_engine theme_qss PROPERTIES
 
 ### E. 7단계 레일 복원
 
-- 단점: HANDOFF / PO_GOAL_ORIG_1.
+- 단점: HANDOFF / docs/archive/PO_GOAL_ORIG_1.
 - 결정: 기각. 도면 샘플 스트립은 레일이 아니므로 유지.
 
 ---
@@ -881,7 +881,7 @@ set_tests_properties(checklist_engine workflow_engine theme_qss PROPERTIES
 - 낡은 IA: `docs/ux/ia-beginner.md`, `docs/ux/mainwindow-wireframe.md`
 - 수동 QA: `docs/user/gui-scenario-checklist.md`
 - GIS 검증: `.grok/rules/10-gis-verify.md`, `docs/vendor/qgis-manual-3.44/`
-- 레일 제거: `docs/PO_GOAL_ORIG_1.md`, `docs/PO_GOAL_ORIG_3.md`
+- 레일 제거: `docs/archive/PO_GOAL_ORIG_1.md`, `docs/archive/PO_GOAL_ORIG_3.md`
 - 코드: `KaApplication.cpp` L438–454, `MainWindow.cpp` `applyPhase1Theme` L502–632 (`qApp` L630–631), `buildMenus` L274–398, `buildUi` L656–674, `rulesPath` L264–271, `kaPaintColorButton` L2036–2047, `DontUseNativeDialog` L2054–2056, `kaMakeArrowSpin` L2097–2109; `KaDrawingStudio.cpp` L676–678, L694–700, L752, L909–920, L931
 - 시트 크롬(비범위): `LayoutService::standardSheetChrome`, `KaDrawingStudio::applyStandardChromePositions`
 
