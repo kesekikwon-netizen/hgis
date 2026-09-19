@@ -17,6 +17,7 @@
 #include <QPainterPath>
 #include <QPen>
 #include <QRectF>
+#include <QStandardPaths>
 #include <QStringList>
 #include <QStyleOptionGraphicsItem>
 #include <QTimer>
@@ -51,6 +52,7 @@
 #include <qgslayoututils.h>
 #include <qgslegendrenderer.h>
 #include <qgslegendsettings.h>
+#include <qgslegendstyle.h>
 #include <qgsrendercontext.h>
 #include <qgis.h>
 #include <qgslayertree.h>
@@ -272,7 +274,14 @@ static QString writeLayoutNorthArrowPng() {
   p.setBrush(Qt::white);
   p.drawPath(right);
   p.end();
-  const QString path = QDir::temp().filePath(QStringLiteral("ka-hgis-layout-north.png"));
+  QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+  if (dir.isEmpty())
+    dir = QDir::tempPath();
+  dir = QDir(dir).filePath(QStringLiteral("north"));
+  if (!QDir().mkpath(dir))
+    dir = QDir::tempPath();
+  const QString path = QDir::fromNativeSeparators(
+      QDir(dir).filePath(QStringLiteral("ka-hgis-layout-north.png")));
   if (!img.save(path, QByteArrayLiteral("PNG").constData()))
     return {};
   return QFile::exists(path) ? path : QString();
@@ -510,6 +519,7 @@ static void fillLayout(QgsPrintLayout* layout, QgsProject* project,
     north->setLinkedMap(map);
     north->attemptSetSceneRect(QRectF(sideX + (sideW - 16.0) * 0.5, mapTop, 16.0, 22.0));
     layout->addLayoutItem(north);
+    north->refreshPicture();
   } else {
     auto* north = new QgsLayoutItemLabel(layout);
     north->setText(QStringLiteral("N\n↑"));
@@ -1424,9 +1434,17 @@ void LayoutService::flowSheetLegend(QgsLayoutItemLegend* legend) {
   legend->setResizeToContents(false);
   legend->setSplitLayer(true);
   legend->setEqualColumnWidth(true);
+  // QGIS 기본 안쪽 여백은 2mm×2. 번호 원과 짧은 이름이 왼쪽 정렬이면 오른쪽이
+  // 비어 보인다. 칸을 늘리거나 줄일 때도 이 여백이 그대로 남는다.
+  legend->setBoxSpace(1.0);
+  legend->setColumnSpace(1.5);
+  legend->setStyleMargin(Qgis::LegendComponent::SymbolLabel, QgsLegendStyle::Left, 1.0);
+  legend->setStyleMargin(Qgis::LegendComponent::SymbolLabel, QgsLegendStyle::Right, 0.4);
   auto settings = legend->legendSettings();
-  const double points = legend->styleFont(Qgis::LegendComponent::SymbolLabel).pointSizeF();
-  const double minColumn = 55. * qMax(7., points) / 9.;
+  const double points = qMax(5., legend->styleFont(Qgis::LegendComponent::SymbolLabel).pointSizeF());
+  // 예전 55mm@9pt(7pt 바닥)는 70–100mm 칸에서도 한 열만 써서 오른쪽이 비었다.
+  // 번호 원(~5mm)과 짧은 이름에 맞춘 열 폭. 긴 이름은 줄바꿈한다.
+  const double minColumn = 32. * points / 9.;
   const double available = qMax(1., width - 2. * settings.boxSpace());
   int rows = 0;
   for (auto* node : legend->model()->rootGroup()->findLayers())
@@ -1439,7 +1457,7 @@ void LayoutService::flowSheetLegend(QgsLayoutItemLegend* legend) {
   do {
     settings.setColumnCount(columns);
     const double columnWidth = (available - (columns - 1) * settings.columnSpace()) / columns;
-    wrap = qMax(1., columnWidth - settings.symbolSize().width() - 4.);
+    wrap = qMax(1., columnWidth - settings.symbolSize().width() - 1.5);
     settings.setAutoWrapLinesAfter(wrap);
     QgsLegendRenderer renderer(legend->model(), settings);
     measured = renderer.minimumSize(&context);

@@ -311,6 +311,31 @@ void MainWindow::redoMapAction() {
   statusBar()->showMessage(QStringLiteral("다시 실행할 것이 없습니다."), 4000);
 }
 
+void MainWindow::deleteFeaturesOrSelectedReferenceLayers() {
+  if (editingText()) return;
+  const auto selected = KaFeatureSelectTool::allSelectedFeatures(m_canvas);
+  for (const auto& item : selected) {
+    if (item.layer && !LayerOps::isReferenceOrBasemapLayer(item.layer.data())) {
+      deleteSelectedFeatures();
+      return;
+    }
+  }
+  QgsMapLayer* current = nullptr;
+  if (m_layerTree) current = m_layerTree->currentLayer();
+  if (!current && m_canvas) current = m_canvas->currentLayer();
+  QList<QgsMapLayer*> treeSelected;
+  if (m_layerTree) treeSelected = m_layerTree->selectedLayers();
+  if (treeSelected.isEmpty() && current) treeSelected << current;
+  for (QgsMapLayer* layer : treeSelected) {
+    if (!layer || !LayerOps::isReferenceOrBasemapLayer(layer)) continue;
+    if (m_layerTree && m_layerTree->selectedLayers().isEmpty())
+      m_layerTree->setCurrentLayer(layer);
+    removeSelectedLayers();
+    return;
+  }
+  deleteSelectedFeatures();
+}
+
 void MainWindow::deleteSelectedFeatures() {
   if (editingText()) return;
   const auto selected = KaFeatureSelectTool::allSelectedFeatures(m_canvas);

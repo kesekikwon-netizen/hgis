@@ -201,6 +201,8 @@ private slots:
   void addBasemapVworld();
   void addBasemapVworldSat();
   void addBasemapVworldCadastral();
+  void addDaedongyeojidoMap();
+  void addHistoryGisMap1919();
   void downloadCadastral();
   void configureCadastralAccount();
   void configureCadastralStyle();
@@ -266,6 +268,7 @@ private slots:
   void undoLastAction();
   void redoLastAction();
   void deleteSelectedFeatures();
+  void deleteFeaturesOrSelectedReferenceLayers();
   void updateUndoRedoActions();
 
 private:
@@ -298,6 +301,7 @@ private:
   // 주제도 아이콘의 눌림 상태를 범례에서 되읽는다. 레이어를 지우거나 체크를
   // 끄면 아이콘도 꺼져야 한다(범례가 진실).
   void syncThematicButtons();
+  void updateHistoricalMapButtons();
   // 조사구역 안 DEM 표고로 오르막 방위를 낸다(트렌치 장축 = 등고선 직교).
   TrenchGridGenerator::SlopeAspect terrainAspectForArea(const QByteArray& areaWkb,
                                                        const QString& areaCrs);
@@ -394,8 +398,9 @@ private:
   QString m_workCrs = QStringLiteral("EPSG:5187");
 #if KA_HGIS_HAS_QGIS
   void healTileLayer(QgsRasterLayer* layer);
-  void notifyBasemapFailure(bool timedOut);
-  bool m_basemapNoticePending = false;
+  void notifyBasemapFailure(bool timedOut, const QString& reason);
+  // 배경지도 실패 안내는 세션에 한 번만. 예전에는 30초마다 다시 떠서 현장에서 계속 가렸다.
+  bool m_basemapNoticeShown = false;
 #endif
   // 타일 자동 복구 상태: 레이어별 재시도 횟수(화면 이동 시 초기화)와 예약 중 표시.
   QHash<QString, int> m_tileHealCount;
@@ -423,6 +428,8 @@ private:
   QToolButton* m_btnTerrain = nullptr;
   QToolButton* m_btnDem = nullptr;
   QToolButton* m_btnPaleo = nullptr;
+  QToolButton* m_btnDaedong = nullptr;
+  QToolButton* m_btnMap1919 = nullptr;
   QgsMapToolEmitPoint* m_trenchOriginTool = nullptr;
   class KaTrenchMoveTool* m_trenchMoveTool = nullptr;
   class KaTrenchDialog* m_trenchDlg = nullptr;
@@ -482,6 +489,7 @@ private:
   bool m_restoreLastSurveyEnabled = false;
   bool m_isLoadingBasemaps = false;
   bool m_isOpeningSurvey = false;
+  bool m_canvasSyncQueued = false;
   bool m_closingWindow = false;
   bool m_canZoomPrevious = false;
   bool m_canZoomNext = false;

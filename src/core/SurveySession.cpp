@@ -1,6 +1,7 @@
 #include "core/SurveySession.h"
 
 #include "core/KaSafeQgis.h"
+#include "core/KaSessionLog.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -39,6 +40,7 @@ SurveySession::PersistResult SurveySession::persistWork(QgsProject* project,
     }
     out.saved = true;
   } catch (...) {
+    KaSessionLog::line(QStringLiteral("[except] core/SurveySession.cpp:41"));
     out.saved = false;
     out.companionSaved = false;
     if (out.workspace.error.isEmpty())

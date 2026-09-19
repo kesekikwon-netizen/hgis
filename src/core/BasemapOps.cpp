@@ -1033,6 +1033,18 @@ void LayerOps::refreshXyzBasemapTiles(QgsMapCanvas* canvas) {
   refreshCanvasNowOrLater(canvas);
 }
 
+// api.vworld.kr은 등록된 키로도 국토 밖 타일에 FileNotFound "서비스 제공영역이
+// 아닙니다"를, WMS 범례 요청에는 INVALID_RANGE(GetLegendGraphic 미지원)를 준다.
+// 둘 다 HTTP 200이라 provider_wms는 "Tile request error (Status: 200 …)"로 기록한다.
+bool LayerOps::mapServerMessageIsBenign(const QString& message) {
+  if (message.isEmpty()) return false;
+  static constexpr const char* kBenign[] = {"legend", "Status: 200", "canceled", "cancelled",
+                                            "aborted"};
+  for (const char* needle : kBenign)
+    if (message.contains(QLatin1String(needle), Qt::CaseInsensitive)) return true;
+  return message.contains(QStringLiteral("범례")) || message.contains(QStringLiteral("제공영역"));
+}
+
 bool LayerOps::addVworldSatelliteMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut) {
   if (!project) return false;
   pruneDuplicateSatelliteLayers(project);
@@ -1365,6 +1377,89 @@ bool LayerOps::addVworldContourMap(QgsProject* project, QgsMapCanvas* canvas, co
       makeVworldWmsUri(apiKey, QStringLiteral("lt_c_upisuq"), QString(), QStringLiteral("EPSG:3857")),
   };
   return addBasemapWithFallbacks(project, canvas, uris, QStringLiteral("VWorld 등고선"), errorOut);
+}
+
+bool LayerOps::historyGisApiKeyUsable(const QString& apiKey) {
+  return !apiKey.trimmed().isEmpty();
+}
+
+QString LayerOps::historyGisWmtsUri(const QString& apiKey, const QString& layerId) {
+  const QString key = apiKey.trimmed();
+  const QString layer = layerId.trimmed().isEmpty() ? QStringLiteral("history:map1919")
+                                                    : layerId.trimmed();
+  // Official KVP GetCapabilities: https://hgis.history.go.kr/api/intro.do
+  // QGIS 3.44 WMTS KVP: append SERVICE=WMTS&REQUEST=GetCapabilities
+  // https://docs.qgis.org/3.44/en/docs/user_manual/working_with_ogc/ogc_client_support.html
+  QUrl caps(QStringLiteral("https://hgis.history.go.kr/openapi/get.do"));
+  QUrlQuery query;
+  query.addQueryItem(QStringLiteral("Service"), QStringLiteral("WMTS"));
+  query.addQueryItem(QStringLiteral("Request"), QStringLiteral("GetCapabilities"));
+  query.addQueryItem(QStringLiteral("apiKey"), key);
+  caps.setQuery(query);
+  const QString encUrl = QString::fromLatin1(QUrl::toPercentEncoding(caps.toString(QUrl::FullyEncoded)));
+  return QStringLiteral(
+             "contextualWMSLegend=0&crs=EPSG:5179&dpiMode=7&format=image/png"
+             "&layers=%1&styles&tileMatrixSet=EPSG:5179&url=%2")
+      .arg(layer, encUrl);
+}
+
+bool LayerOps::addHistoryGisMap1919(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey,
+                                    QString* errorOut) {
+  if (!historyGisApiKeyUsable(apiKey)) {
+    if (errorOut) {
+      *errorOut = QStringLiteral(
+          "1919 조선지형도는 국사편찬위원회 역사지리정보DB API 키가 필요합니다. "
+          "더보기 → API 키 입력에서 키를 저장하세요. "
+          "https://hgis.history.go.kr/api/intro.do");
+    }
+    return false;
+  }
+  const QString key = apiKey.trimmed();
+  const QString name = QStringLiteral("1919 조선지형도 1:5만");
+  const QStringList uris = {
+      historyGisWmtsUri(key, QStringLiteral("history:map1919")),
+      historyGisWmtsUri(key, QStringLiteral("map1919")),
+  };
+  if (!addBasemapWithFallbacks(project, canvas, uris, name, errorOut))
+    return false;
+  for (QgsMapLayer* l : project->mapLayers()) {
+    if (l && legendTitlesMatch(l->name(), name))
+      LayerOps::placeInLegendGroup(project, l, QStringLiteral("참조 지도"));
+  }
+  return true;
+}
+
+QString LayerOps::daedongyeojidoWmsUri(const QString& layerId) {
+  const QString layer = layerId.trimmed().isEmpty()
+                            ? QStringLiteral("korea_oldmap_ddymap_kyu")
+                            : layerId.trimmed();
+  // Official NGII 국토정보플랫폼 역사지도 WMS. No API key.
+  // Viewer: https://map.ngii.go.kr/ms/map/NlipMap.do?tabGb=daedong
+  // GetCapabilities 1.3.0/1.1.1 and GetMap PNG confirmed 200 without key (2026-09-20).
+  // QGIS 3.44 WMS URI: crs&format&layers&styles&url
+  // https://docs.qgis.org/3.44/en/docs/pyqgis_developer_cookbook/loadlayer.html
+  // WMS 1.1.1: yesterday's 1.3.0 XY GetMap was empty; 1.1.1 returned a real PNG.
+  QUrl caps(QStringLiteral("https://map.ngii.go.kr/spcemapserver/korea_old_map/ows"));
+  const QString encUrl = QString::fromLatin1(QUrl::toPercentEncoding(caps.toString(QUrl::FullyEncoded)));
+  return QStringLiteral(
+             "contextualWMSLegend=0&crs=EPSG:5179&dpiMode=7&format=image/png"
+             "&transparent=true&version=1.1.1&layers=%1&styles&url=%2")
+      .arg(layer, encUrl);
+}
+
+bool LayerOps::addDaedongyeojidoMap(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut) {
+  const QString name = QStringLiteral("대동여지도");
+  const QStringList uris = {
+      daedongyeojidoWmsUri(QStringLiteral("korea_oldmap_ddymap_kyu")),
+      daedongyeojidoWmsUri(QStringLiteral("korea_oldmap_addAlphaChannel")),
+  };
+  if (!addBasemapWithFallbacks(project, canvas, uris, name, errorOut))
+    return false;
+  for (QgsMapLayer* l : project->mapLayers()) {
+    if (l && legendTitlesMatch(l->name(), name))
+      LayerOps::placeInLegendGroup(project, l, QStringLiteral("참조 지도"));
+  }
+  return true;
 }
 
 bool LayerOps::addElevationHillshadeMap(QgsProject* project, QgsMapCanvas* canvas,

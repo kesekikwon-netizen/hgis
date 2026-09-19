@@ -22,6 +22,7 @@
 #include <QAbstractButton>
 #include <QCoreApplication>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QDockWidget>
 #include <QFile>
@@ -74,6 +75,7 @@ void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sou
     m_workCrs = QgsProject::instance()->crs().authid();
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
 
+  LayerOps::repairPersistedFileSources(QgsProject::instance());
   LayerOps::restoreMissingLayerTreeNodes(QgsProject::instance());
   auto* project = QgsProject::instance();
   for (auto* layer : project->mapLayers()) {
@@ -103,6 +105,7 @@ void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sou
     });
   }
   ensureDefaultBasemaps();
+  LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   rememberSurvey(gpkgPath, QFileInfo(gpkgPath).completeBaseName());
   setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(gpkgPath).completeBaseName()));
   showMapWorkspace();
@@ -120,6 +123,17 @@ void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sou
   logLayerCensus(QStringLiteral("열기직후"));
   m_lastLayerKeys.clear();
   auditLayerHealth();
+  QTimer::singleShot(0, this, [this]() {
+    if (!m_surveySessionReady || m_closingWindow || m_isOpeningSurvey) return;
+    const int repaired = LayerOps::repairPersistedFileSources(QgsProject::instance());
+    if (repaired > 0 && m_canvas)
+      LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+    for (QgsMapLayer* layer : QgsProject::instance()->mapLayers()) {
+      auto* vector = qobject_cast<QgsVectorLayer*>(layer);
+      if (vector && vector->isEditable() && vector->isModified()) return;
+    }
+    markSurveySaved();
+  });
 #else
   Q_UNUSED(gpkgPath); Q_UNUSED(sourceLabel); Q_UNUSED(elapsedMs);
 #endif
@@ -299,6 +313,17 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
   logLayerCensus(QStringLiteral("열기직후"));
   m_lastLayerKeys.clear();
   auditLayerHealth();
+  QTimer::singleShot(0, this, [this]() {
+    if (!m_surveySessionReady || m_closingWindow || m_isOpeningSurvey) return;
+    const int repaired = LayerOps::repairPersistedFileSources(QgsProject::instance());
+    if (repaired > 0 && m_canvas)
+      LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+    for (QgsMapLayer* layer : QgsProject::instance()->mapLayers()) {
+      auto* vector = qobject_cast<QgsVectorLayer*>(layer);
+      if (vector && vector->isEditable() && vector->isModified()) return;
+    }
+    markSurveySaved();
+  });
   if (m_workspaceRestoreFailed) {
     m_workspaceRestoreFailed = false;
     QMessageBox::warning(
@@ -834,7 +859,16 @@ bool MainWindow::persistSurveyWork() {
     statusBar()->showMessage(companionSaved
         ? QStringLiteral("조사 데이터와 작업 구성을 저장했습니다: %1").arg(file.fileName())
         : QStringLiteral("GPKG 저장 완료. QGZ 사본은 다시 저장해야 합니다."), 8000);
-    QTimer::singleShot(0, this, [this]() { auditLayerHealth(); });
+    QCoreApplication::sendPostedEvents(QgsProject::instance());
+    markSurveySaved();
+    QTimer::singleShot(0, this, [this]() {
+      if (m_closingWindow || m_isOpeningSurvey) return;
+      for (QgsMapLayer* layer : QgsProject::instance()->mapLayers()) {
+        auto* vector = qobject_cast<QgsVectorLayer*>(layer);
+        if (vector && vector->isEditable() && vector->isModified()) return;
+      }
+      markSurveySaved();
+    });
   } catch (...) {
     KaCrashGuard::logLine(QStringLiteral("[save] 저장 예외로 중단 — 현재 작업 유지"));
     notify(Notice::Warning, QStringLiteral("저장을 마치지 못했습니다"),
@@ -1687,22 +1721,56 @@ QString MainWindow::vworldApiKeyOrPrompt() {
 }
 
 void MainWindow::configureVworldKey() {
-  bool ok = false;
-  const QString cur = VworldSettings::loadApiKey();
-  const QString key = QInputDialog::getText(
-      this, QStringLiteral("VWorld API 키"),
-      QStringLiteral("vworld.kr 인증키 (SSOT: VWorld/ApiKey)\n배경지도·검색 공통"),
-      QLineEdit::Normal, cur, &ok);
-  if (!ok) return;
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("API 키 입력"));
+  dlg.setMinimumWidth(460);
+  auto* form = new QFormLayout(&dlg);
+  form->setSpacing(12);
+  form->setContentsMargins(20, 20, 20, 16);
+  auto* vworldEdit = new QLineEdit(&dlg);
+  vworldEdit->setText(VworldSettings::loadApiKey());
+  vworldEdit->setPlaceholderText(QStringLiteral("vworld.kr 인증키"));
+  auto* vworldHint = new QLabel(
+      QStringLiteral("위성·지적·검색 공통 (SSOT: VWorld/ApiKey)"), &dlg);
+  vworldHint->setWordWrap(true);
+  auto* historyEdit = new QLineEdit(&dlg);
+  historyEdit->setText(VworldSettings::loadHistoryGisApiKey());
+  historyEdit->setPlaceholderText(QStringLiteral("hgis.history.go.kr 인증키"));
+  auto* historyHint = new QLabel(
+      QStringLiteral("1919 조선지형도 전용. VWorld 키로는 인증되지 않습니다.\n"
+                     "https://hgis.history.go.kr/api/intro.do"),
+      &dlg);
+  historyHint->setWordWrap(true);
+  historyHint->setOpenExternalLinks(true);
+  form->addRow(QStringLiteral("VWorld API 키"), vworldEdit);
+  form->addRow(vworldHint);
+  form->addRow(QStringLiteral("역사지리정보DB API 키"), historyEdit);
+  form->addRow(historyHint);
+  auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+  buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("저장"));
+  buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("취소"));
+  form->addRow(buttons);
+  connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+  connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  if (dlg.exec() != QDialog::Accepted) return;
+  const QString key = vworldEdit->text().trimmed();
+  const QString historyKey = historyEdit->text().trimmed();
   VworldSettings::saveApiKey(key);
-  if (!key.trimmed().isEmpty()) {
+  VworldSettings::saveHistoryGisApiKey(historyKey);
+  updateHistoricalMapButtons();
+  if (!key.isEmpty()) {
     ensureDefaultBasemaps();
     if (m_canvas)
       LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   }
-  statusBar()->showMessage(key.isEmpty()
-      ? QStringLiteral("VWorld 키 삭제됨")
-      : QStringLiteral("VWorld API 키 저장됨 — 위성과 지적을 올립니다"), 6000);
+  QStringList saved;
+  if (!key.isEmpty())
+    saved.append(QStringLiteral("VWorld"));
+  if (!historyKey.isEmpty())
+    saved.append(QStringLiteral("역사지리정보DB"));
+  statusBar()->showMessage(saved.isEmpty()
+      ? QStringLiteral("API 키 삭제됨")
+      : QStringLiteral("%1 키 저장됨").arg(saved.join(QStringLiteral("·"))), 6000);
 }
 
 QString MainWindow::rulesPath() const {

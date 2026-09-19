@@ -70,6 +70,33 @@ static QStringList temporaryArtifacts(const QString& path) {
                               QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot);
 }
 
+static QString writeHeritageGpkg(const QString& dest, QgsProject* project, QString* errorOut) {
+  QgsVectorLayer memory(QStringLiteral("Polygon?crs=EPSG:5186&field=name:string"),
+                        QStringLiteral("heritage"), QStringLiteral("memory"));
+  if (!memory.isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("memory layer");
+    return {};
+  }
+  QgsFeature feature(memory.fields());
+  feature.setAttribute(0, QStringLiteral("국가지정유산"));
+  feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(200000, 450000, 200100, 450100)));
+  if (!memory.dataProvider()->addFeature(feature)) {
+    if (errorOut) *errorOut = QStringLiteral("add feature");
+    return {};
+  }
+  QgsVectorFileWriter::SaveVectorOptions options;
+  options.driverName = QStringLiteral("GPKG");
+  options.layerName = QStringLiteral("heritage");
+  options.fileEncoding = QStringLiteral("UTF-8");
+  QString writeError;
+  if (QgsVectorFileWriter::writeAsVectorFormatV3(&memory, dest, project->transformContext(), options,
+                                                 &writeError) != QgsVectorFileWriter::NoError) {
+    if (errorOut) *errorOut = writeError;
+    return {};
+  }
+  return dest + QStringLiteral("|layername=heritage");
+}
+
 class TestStorageSafety : public QObject {
   Q_OBJECT
  private slots:
@@ -883,6 +910,86 @@ class TestStorageSafety : public QObject {
       QVERIFY(!leftover.isValid() || leftover.featureCount() == 0);
     }
     QVERIFY(SurveyStorage::embeddedReferenceVectorNames(&project, gpkg).isEmpty());
+  }
+
+  void repairPersisted_restoresDroppedWindowsHome() {
+    const QString localRoot = QDir::home().filePath(QStringLiteral("AppData/Local"));
+    if (!QDir(localRoot).exists())
+      QSKIP("Windows AppData/Local 이 없습니다.");
+    QTemporaryDir cache(QDir(localRoot).filePath(QStringLiteral("ka-hgis-rpr-XXXXXX")));
+    QVERIFY2(cache.isValid(), qPrintable(cache.path()));
+    QTemporaryDir surveyDir;
+    QVERIFY(surveyDir.isValid());
+    QString error;
+    const QString gpkg = SurveyProjectFactory::createNewSurvey(
+        surveyDir.path(), QStringLiteral("경로복구"), &error, QStringLiteral("EPSG:5186"));
+    QVERIFY2(!gpkg.isEmpty(), qPrintable(error));
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    project.setFileName(gpkg);
+    project.setPresetHomePath(QFileInfo(gpkg).absolutePath());
+    const QString dest = QDir(cache.path()).filePath(QStringLiteral("heritage.gpkg"));
+    const QString source = writeHeritageGpkg(dest, &project, &error);
+    QVERIFY2(!source.isEmpty(), qPrintable(error));
+    const QString good = QDir::fromNativeSeparators(QFileInfo(dest).absoluteFilePath());
+    QString broken = good;
+    const QString home = QDir::fromNativeSeparators(QFileInfo(QDir::homePath()).absoluteFilePath());
+    const QString user = QFileInfo(home).fileName();
+    QVERIFY(broken.contains(QStringLiteral("/") + user + QStringLiteral("/")));
+    broken.replace(QStringLiteral("/") + user + QStringLiteral("/"), QStringLiteral("/"));
+    QVERIFY(broken.startsWith(QStringLiteral("C:/Users/AppData/"), Qt::CaseInsensitive));
+    QVERIFY(!QFileInfo::exists(broken));
+    auto* layer = new QgsVectorLayer(broken + QStringLiteral("|layername=heritage"),
+                                     QStringLiteral("국가지정유산"), QStringLiteral("ogr"));
+    QVERIFY(!layer->isValid());
+    LayerOps::markReferenceLayer(layer);
+    project.addMapLayer(layer);
+    QCOMPARE(LayerOps::repairPersistedFileSources(&project), 1);
+    QVERIFY(layer->isValid());
+    QCOMPARE(layer->featureCount(), 1LL);
+    QVERIFY(QDir::fromNativeSeparators(layer->source()).startsWith(good, Qt::CaseInsensitive));
+  }
+
+  void persistWorkspace_keepsExternalHeritagePathOnReopen() {
+    const QString localRoot = QDir::home().filePath(QStringLiteral("AppData/Local"));
+    if (!QDir(localRoot).exists())
+      QSKIP("Windows AppData/Local 이 없습니다.");
+    QTemporaryDir cache(QDir(localRoot).filePath(QStringLiteral("ka-hgis-pst-XXXXXX")));
+    QVERIFY2(cache.isValid(), qPrintable(cache.path()));
+    QTemporaryDir surveyDir;
+    QVERIFY(surveyDir.isValid());
+    QString error;
+    const QString gpkg = SurveyProjectFactory::createNewSurvey(
+        surveyDir.path(), QStringLiteral("참조유지"), &error, QStringLiteral("EPSG:5186"));
+    QVERIFY2(!gpkg.isEmpty(), qPrintable(error));
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* area = LayerOps::ensureDomainLayer(&project, gpkg, QStringLiteral("survey_area"),
+                                             QStringLiteral("조사구역"), &error);
+    QVERIFY2(area, qPrintable(error));
+    const QString dest = QDir(cache.path()).filePath(QStringLiteral("heritage.gpkg"));
+    const QString source = writeHeritageGpkg(dest, &project, &error);
+    QVERIFY2(!source.isEmpty(), qPrintable(error));
+    auto* reference = new QgsVectorLayer(source, QStringLiteral("국가지정유산"), QStringLiteral("ogr"));
+    QVERIFY(reference->isValid());
+    LayerOps::markReferenceLayer(reference);
+    project.addMapLayer(reference);
+    LayerOps::placeInLegendGroup(&project, reference, QString::fromUtf8(LayerOps::kGroupReference));
+    const auto attempt = SurveyStorage::persistWorkspace(&project, gpkg, surveyDir.filePath(QStringLiteral("복구")));
+    QVERIFY2(attempt.saved, qPrintable(attempt.error));
+    QgsProject reopened;
+    QVERIFY2(SurveyStorage::readEmbedded(&reopened, gpkg), qPrintable(reopened.error()));
+    QCOMPARE(LayerOps::repairPersistedFileSources(&reopened), 0);
+    const auto layers = reopened.mapLayersByName(QStringLiteral("국가지정유산"));
+    QCOMPARE(layers.size(), 1);
+    auto* restored = qobject_cast<QgsVectorLayer*>(layers.first());
+    QVERIFY(restored && restored->isValid());
+    QCOMPARE(restored->featureCount(), 1LL);
+    const QString restoredFile =
+        QDir::fromNativeSeparators(restored->source().section(QLatin1Char('|'), 0, 0));
+    QVERIFY2(!restoredFile.contains(QStringLiteral("/Users/AppData/"), Qt::CaseInsensitive),
+             qPrintable(restoredFile));
+    QVERIFY(QFileInfo::exists(restoredFile));
   }
 };
 

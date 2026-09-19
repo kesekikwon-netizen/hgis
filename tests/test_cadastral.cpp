@@ -19,8 +19,8 @@
 #include <QFont>
 #include <qgsmapsettings.h>
 #include <qgsmapcanvas.h>
-#include <qgspallabeling.h>
 #include <qgsproject.h>
+#include <qgspallabeling.h>
 #include <qgssinglesymbolrenderer.h>
 #include <qgssymbol.h>
 #include <qgsvectorfilewriter.h>
@@ -85,6 +85,81 @@ QString outputUri(const PreparedReferenceMap& result) {
 class CadastralTest : public QObject {
   Q_OBJECT
 private slots:
+  // VWorld 정상 응답으로는 배경지도 실패 안내를 띄우지 않는다.
+  void mapServerMessageIsBenign_data() {
+    QTest::addColumn<QString>("message");
+    QTest::addColumn<bool>("benign");
+    QTest::newRow("범례 미지원")
+        << QStringLiteral("Returned legend image is flawed [URL: https://api.vworld.kr/req/wms"
+                          "?SERVICE=WMS&REQUEST=GetLegendGraphic]")
+        << true;
+    QTest::newRow("국토 밖 타일")
+        << QStringLiteral("Tile request error (Status: 200; Content-Type: application/xml;"
+                          "charset=UTF-8; Length: 436)")
+        << true;
+    QTest::newRow("렌더 취소") << QStringLiteral("Rendering was canceled") << true;
+    QTest::newRow("연결 거절")
+        << QStringLiteral("Tile request error (Status: 403; Content-Type: text/html)") << false;
+    QTest::newRow("응답 없음")
+        << QStringLiteral("Connection to server refused") << false;
+    QTest::newRow("시간 초과") << QStringLiteral("요청 시간 초과 · api.vworld.kr") << false;
+    QTest::newRow("빈 메시지") << QString() << false;
+  }
+
+  void mapServerMessageIsBenign() {
+    QFETCH(QString, message);
+    QFETCH(bool, benign);
+    QCOMPARE(LayerOps::mapServerMessageIsBenign(message), benign);
+  }
+
+  void historyGis1919_emptyKeyDisablesAddAndLeavesNoLayer() {
+    QVERIFY(!LayerOps::historyGisApiKeyUsable(QString()));
+    QVERIFY(!LayerOps::historyGisApiKeyUsable(QStringLiteral("   ")));
+    QgsProject proj;
+    QString err;
+    QVERIFY(!LayerOps::addHistoryGisMap1919(&proj, nullptr, QString(), &err));
+    QVERIFY(err.contains(QStringLiteral("역사지리정보DB")));
+    QVERIFY(err.contains(QStringLiteral("API 키")));
+    QVERIFY(proj.mapLayers().isEmpty());
+    QVERIFY(!err.contains(QStringLiteral("840e2e2c"), Qt::CaseInsensitive));
+  }
+
+  void historyGis1919_placeholderKeyBuildsOfficialUriWithoutSampleSecret() {
+    const QString key = QStringLiteral("TEST-KEY-1919");
+    QVERIFY(LayerOps::historyGisApiKeyUsable(key));
+    const QString uri =
+        LayerOps::historyGisWmtsUri(key, QStringLiteral("history:map1919"));
+    QVERIFY2(uri.contains(QStringLiteral("hgis.history.go.kr")), qPrintable(uri.left(200)));
+    QVERIFY2(uri.contains(QStringLiteral("GetCapabilities")), qPrintable(uri.left(200)));
+    QVERIFY2(uri.contains(QStringLiteral("TEST-KEY-1919")), qPrintable(uri.left(200)));
+    QVERIFY2(uri.contains(QStringLiteral("history:map1919")), qPrintable(uri.left(200)));
+    QVERIFY2(uri.contains(QStringLiteral("EPSG:5179")), qPrintable(uri.left(200)));
+    QVERIFY2(uri.contains(QStringLiteral("tileMatrixSet=EPSG:5179")), qPrintable(uri.left(200)));
+    QVERIFY2(!uri.contains(QStringLiteral("840e2e2c"), Qt::CaseInsensitive),
+             "must not embed the official sample key");
+    const QString fallback = LayerOps::historyGisWmtsUri(key, QStringLiteral("map1919"));
+    QVERIFY(fallback.contains(QStringLiteral("layers=map1919")));
+    QVERIFY(!fallback.contains(QStringLiteral("840e2e2c"), Qt::CaseInsensitive));
+  }
+
+  void daedongyeojido_buildsOfficialNgiiWmsUriWithoutKey() {
+    const QString uri = LayerOps::daedongyeojidoWmsUri();
+    QVERIFY2(uri.contains(QStringLiteral("map.ngii.go.kr")), qPrintable(uri.left(200)));
+    QVERIFY2(uri.contains(QStringLiteral("korea_old_map")), qPrintable(uri.left(200)));
+    QVERIFY2(uri.contains(QStringLiteral("korea_oldmap_ddymap_kyu")), qPrintable(uri.left(200)));
+    QVERIFY2(uri.contains(QStringLiteral("EPSG:5179")), qPrintable(uri.left(200)));
+    QVERIFY2(uri.contains(QStringLiteral("version=1.1.1")), qPrintable(uri.left(200)));
+    QVERIFY(!uri.contains(QStringLiteral("apiKey="), Qt::CaseInsensitive));
+    QVERIFY(!uri.contains(QStringLiteral("apikey="), Qt::CaseInsensitive));
+    QVERIFY(!uri.contains(QStringLiteral("840e2e2c"), Qt::CaseInsensitive));
+    QVERIFY(!uri.contains(QStringLiteral("mt1.google.com")));
+    QVERIFY(!uri.contains(QStringLiteral("kakao")));
+    const QString fallback =
+        LayerOps::daedongyeojidoWmsUri(QStringLiteral("korea_oldmap_addAlphaChannel"));
+    QVERIFY(fallback.contains(QStringLiteral("layers=korea_oldmap_addAlphaChannel")));
+    QVERIFY(!fallback.contains(QStringLiteral("apiKey="), Qt::CaseInsensitive));
+  }
+
   void focusesOnlyExactPnuWithoutEditing_data() {
     QTest::addColumn<QString>("destination");
     QTest::newRow("5186") << QStringLiteral("EPSG:5186");

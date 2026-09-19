@@ -140,6 +140,10 @@ public:
   static void ensureTileNetworkIdentity();
   // Show / DevicePixelRatioChange: 4K·혼합 DPI에서 XYZ 타일을 다시 받는다.
   static bool canvasDisplayEventNeedsTileRefresh(int eventType);
+  // VWorld는 정상 동작 중에도 예외 XML을 HTTP 200으로 돌려준다: 범례
+  // (GetLegendGraphic 미지원)와 국토 밖 타일("서비스 제공영역이 아닙니다").
+  // 이런 메시지와 취소된 렌더는 연결 실패가 아니므로 배경지도 실패로 알리지 않는다.
+  static bool mapServerMessageIsBenign(const QString& message);
 
   static bool addVworldCadastralMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut = nullptr);
   // VWorld GetCapabilities only publish 4326 (and 900913/3857). 5186/5187/5179
@@ -149,6 +153,18 @@ public:
   static bool addVworldHybridMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut = nullptr);
 
   static bool addVworldContourMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut = nullptr);
+
+  // 국사편찬위원회 역사지리정보DB WMTS. VWorld 키로는 인증되지 않는다.
+  // https://hgis.history.go.kr/api/intro.do
+  static bool historyGisApiKeyUsable(const QString& apiKey);
+  static QString historyGisWmtsUri(const QString& apiKey, const QString& layerId);
+  static bool addHistoryGisMap1919(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey,
+                                   QString* errorOut = nullptr);
+  // 국토지리정보원 국토정보플랫폼 역사지도 WMS. API 키 없음.
+  // https://map.ngii.go.kr/ms/map/NlipMap.do?tabGb=daedong
+  static QString daedongyeojidoWmsUri(const QString& layerId = {});
+  static bool addDaedongyeojidoMap(QgsProject* project, QgsMapCanvas* canvas,
+                                   QString* errorOut = nullptr);
 
   // 지형맵: OpenTopoMap XYZ only (EPSG:3857). Never VWorld WMS GetMap —
   // WMS + OTF(QgsRasterProjector) + pan aborts TileDownloadManager (Windows AV).
@@ -239,6 +255,10 @@ public:
   // 되살린 레이어 이름은 revived에, 끝내 못 살린 것은 stillBroken에 담는다.
   static int reviveInvalidLayers(QgsProject* project, QStringList* revived = nullptr,
                                  QStringList* stillBroken = nullptr);
+  // 예전 저장이 .ka-survey-gen-* 기준으로 상대 경로를 적어, 다시 열면
+  // C:/Users/AppData/... 처럼 사용자 폴더가 빠진 절대 경로가 되는 경우를
+  // 홈·조사 폴더·로컬 주변유적 캐시에서 다시 찾는다.
+  static int repairPersistedFileSources(QgsProject* project);
   // 저장된 작업공간의 VWorld 주소에는 그때 쓰던 인증키가 통째로 박혀 있다. 키를 새로
   // 발급받아도 예전 조사를 열면 만료된 키로 타일을 받아 배경지도가 백지가 된다.
   // 여는 순간 현재 키로 갈아 끼운다. 바꾼 레이어 수를 돌려준다.

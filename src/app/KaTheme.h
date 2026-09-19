@@ -31,7 +31,7 @@ struct IconPalette {
 const IconPalette& iconPalette();
 
 struct ButtonMetrics {
-  int ribbonIconSize = 40;
+  int ribbonIconSize = 32;
   int ribbonFontSize = 13;
   int ribbonMinWidth = 64;
   int ribbonHeight = 82;

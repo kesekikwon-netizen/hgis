@@ -34,6 +34,8 @@
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFile>
+#include <QFileInfo>
+#include <QStandardPaths>
 #include <QIODevice>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -78,6 +80,7 @@
 #include <QVBoxLayout>
 
 #include <qgis.h>
+#include <qgsapplication.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgscoordinatetransform.h>
 #include <qgspointxy.h>
@@ -268,10 +271,42 @@ QString writeNorthPng(int kind) {
   p.scale(static_cast<double>(s) / 72.0, static_cast<double>(s) / 72.0);
   paintNorthMark(p, kind);
   p.end();
-  const QString path = QDir::temp().filePath(QStringLiteral("ka-hgis-north-%1.png").arg(kind));
+  QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+  if (dir.isEmpty())
+    dir = QDir::tempPath();
+  dir = QDir(dir).filePath(QStringLiteral("north"));
+  if (!QDir().mkpath(dir))
+    dir = QDir::tempPath();
+  const QString path = QDir::fromNativeSeparators(
+      QDir(dir).filePath(QStringLiteral("ka-hgis-north-%1.png").arg(kind)));
   if (!img.save(path, "PNG"))
     return {};
   return QFile::exists(path) ? path : QString();
+}
+
+QString qgisNorthArrowSvg() {
+  const QString rel = QStringLiteral("arrows/NorthArrow_02.svg");
+  const QStringList roots = QgsApplication::svgPaths();
+  for (const QString& root : roots) {
+    const QString path = QDir::fromNativeSeparators(QDir(root).absoluteFilePath(rel));
+    if (QFile::exists(path))
+      return path;
+  }
+  return {};
+}
+
+bool northPictureNeedsRebuild(QgsLayoutItem* item) {
+  auto* pic = dynamic_cast<QgsLayoutItemPicture*>(item);
+  if (!pic)
+    return false;
+  if (pic->isMissingImage())
+    return true;
+  const QString path = pic->evaluatedPath();
+  if (path.isEmpty())
+    return true;
+  if (path.startsWith(QLatin1String(":/")))
+    return true;
+  return !QFileInfo::exists(path);
 }
 
 QString koreanCrsLabel(const QgsCoordinateReferenceSystem& crs) {
@@ -825,8 +860,12 @@ KaDrawingStudio::KaDrawingStudio(QgsProject* project, QgsMapCanvas* mapCanvas,
   }
   if (!savedLayout) ensureBlankLayout();
   buildUi();
-  if (savedLayout) zoomPaperVisible();
-  else autoPlaceDefaultSheet();
+  if (savedLayout) {
+    zoomPaperVisible();
+    ensureStandardDecorations();
+  } else {
+    autoPlaceDefaultSheet();
+  }
   connect(&m_heritageNumbers, &HeritageLayoutNumbers::visibleEntriesChanged, this, [this]() {
     if (property("ka_interacting").toBool()) {
       setProperty("ka_visible_legend_pending", true);
@@ -1294,7 +1333,7 @@ void KaDrawingStudio::buildUi() {
   legendLay->addWidget(m_legendTitle);
   auto* fontRow = new QHBoxLayout;
   m_legendFont = new QSpinBox(m_cardLegend);
-  m_legendFont->setRange(7, 24);
+  m_legendFont->setRange(5, 24);
   m_legendFont->setValue(10);
   m_legendFont->setSuffix(QStringLiteral(" pt"));
   connect(m_legendFont, QOverload<int>::of(&QSpinBox::valueChanged), this,
@@ -2371,6 +2410,10 @@ void KaDrawingStudio::applyCrsGrid(QgsLayoutItemMap* map) {
 void KaDrawingStudio::showEvent(QShowEvent* event) {
   QMainWindow::showEvent(event);
   syncMapFromLayers();
+  if (auto* north = findItemById(layout(), kIdNorth)) {
+    if (northPictureNeedsRebuild(north))
+      placeNorth(QRectF(north->pos(), north->rect().size()), false);
+  }
   if (m_paperFitPending) {
     m_paperFitPending = false;
     QTimer::singleShot(0, this, [this]() { zoomPaperVisible(); });
@@ -2659,7 +2702,8 @@ void KaDrawingStudio::applyLegendSettings() {
   legend->setStyleFont(Qgis::LegendComponent::Title, titleFont);
   legend->setStyleFont(Qgis::LegendComponent::Group, bodyFont);
   legend->setStyleFont(Qgis::LegendComponent::Subgroup, bodyFont);
-  legend->setStyleFont(Qgis::LegendComponent::SymbolLabel, QFont(QStringLiteral("Malgun Gothic"), qMax(7, pt - 1)));
+  legend->setStyleFont(Qgis::LegendComponent::SymbolLabel,
+                       QFont(QStringLiteral("Malgun Gothic"), qMax(5, pt - 1)));
   if (auto* map = mapItem()) {
     legend->setLinkedMap(map);
   }
@@ -2730,8 +2774,16 @@ void KaDrawingStudio::placeNorth(const QRectF& layoutRect, bool selectAfter) {
     if (auto* map = mapItem())
       pic->setLinkedMap(map);
     pic->attemptSetSceneRect(r);
-    pic->refreshPicture();
     ly->addLayoutItem(pic);
+    pic->refreshPicture();
+    if (pic->isMissingImage()) {
+      const QString svg = qgisNorthArrowSvg();
+      if (!svg.isEmpty()) {
+        pic->setPicturePath(svg, Qgis::PictureFormat::SVG);
+        pic->setMode(Qgis::PictureFormat::SVG);
+        pic->refreshPicture();
+      }
+    }
   }
   if (auto* item = findItemById(ly, kIdNorth)) {
     item->setItemRotation(rotation, false);
@@ -2940,8 +2992,12 @@ void KaDrawingStudio::ensureStandardDecorations() {
     m_pendingNorthSvg = QStringLiteral("arrows/NorthArrow_02.svg");
   if (m_pendingScaleBarStyle.isEmpty())
     m_pendingScaleBarStyle = QStringLiteral("Double Box");
-  if (!findItemById(ly, kIdNorth))
+  if (auto* north = findItemById(ly, kIdNorth)) {
+    if (northPictureNeedsRebuild(north))
+      placeNorth(QRectF(north->pos(), north->rect().size()), false);
+  } else {
     placeNorth(defaultItemRect(kIdNorth), false);
+  }
   if (!findItemById(ly, kIdScaleBar))
     placeScaleBar(defaultItemRect(kIdScaleBar), false);
   if (!findItemById(ly, kIdScale))

@@ -79,11 +79,12 @@ private slots:
       QVERIFY(splash.grab().save(QDir(output).filePath(QStringLiteral("startup-v2.png"))));
     }
     const QString credits = KaStartupSplash::creditsText();
-    for (const QString& text : {QStringLiteral("권영인"), QStringLiteral("조유량"),
-                                QStringLiteral("박종환"), QStringLiteral("동국문화재연구원"),
+    for (const QString& text : {QStringLiteral("권영인"), QStringLiteral("동국문화재연구원"),
                                 QStringLiteral("v2"), QStringLiteral("GPL"),
                                 QStringLiteral("VWorld"), QStringLiteral("국가유산")})
       QVERIFY2(credits.contains(text), qPrintable(text));
+    QVERIFY2(!credits.contains(QStringLiteral("조유량")), "splash must not list 조유량");
+    QVERIFY2(!credits.contains(QStringLiteral("박종환")), "splash must not list 박종환");
     QCOMPARE(splash.accessibleDescription(), credits);
     const QString attribution = KaStartupSplash::attributionText();
     for (const QString& library : {QStringLiteral("QGIS"), QStringLiteral("Qt"),

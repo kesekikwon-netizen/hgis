@@ -81,6 +81,7 @@
 #include <qgslabelingresults.h>
 #include <qgslayoutitemlabel.h>
 #include <qgslayoutitemlegend.h>
+#include <qgslayoutitempicture.h>
 #include <qgslayoutitemscalebar.h>
 #include <qgslayoutexporter.h>
 #include <QDoubleSpinBox>
@@ -1036,6 +1037,8 @@ private slots:
     auto* ly = view->currentLayout();
     auto* map = dynamic_cast<QgsLayoutItemMap*>(ly->itemById(QStringLiteral("ka_map")));
     QVERIFY(map);
+    if (auto* north = dynamic_cast<QgsLayoutItemPicture*>(ly->itemById(QStringLiteral("ka_north"))))
+      QVERIFY2(!north->isMissingImage(), qPrintable(north->evaluatedPath()));
     auto* size = studio.findChild<QDoubleSpinBox*>(QStringLiteral("decorationSize"));
     QVERIFY(QMetaObject::invokeMethod(&studio, "useSelectTool"));
     auto* selectTool = studio.findChild<QgsLayoutViewToolSelect*>();
@@ -1150,6 +1153,47 @@ private slots:
       QVERIFY(page.save(QDir(output).filePath(QStringLiteral("decoration-resized.png"))));
       QVERIFY(studio.grab().save(QDir(output).filePath(QStringLiteral("decoration-editor.png"))));
     }
+  }
+  void drawingStudio_northArrowRendersOnOpen() {
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    QgsMapCanvas canvas;
+    canvas.setRenderFlag(false);
+    canvas.setDestinationCrs(project.crs());
+    canvas.setExtent(QgsRectangle(155000, 451000, 156000, 452000));
+    QString northPath;
+    {
+      KaDrawingStudio studio(&project, &canvas, 297., 210.);
+      studio.setAttribute(Qt::WA_DontShowOnScreen);
+      studio.show();
+      QCoreApplication::processEvents();
+      auto* view = studio.findChild<QgsLayoutView*>();
+      QVERIFY(view && view->currentLayout());
+      QTRY_VERIFY(view->currentLayout()->itemById(QStringLiteral("ka_north")));
+      auto* pic = dynamic_cast<QgsLayoutItemPicture*>(
+          view->currentLayout()->itemById(QStringLiteral("ka_north")));
+      QVERIFY(pic);
+      QVERIFY2(!pic->isMissingImage(), qPrintable(pic->evaluatedPath()));
+      northPath = pic->evaluatedPath();
+      QVERIFY(!northPath.isEmpty());
+      if (QFile::exists(northPath))
+        QVERIFY(QFile::remove(northPath));
+      pic->setPicturePath(QStringLiteral("C:/ka-hgis-missing-north.png"), Qgis::PictureFormat::Raster);
+      pic->setMode(Qgis::PictureFormat::Raster);
+      pic->refreshPicture();
+      QVERIFY(pic->isMissingImage());
+    }
+    KaDrawingStudio reopen(&project, &canvas, 297., 210.);
+    reopen.setAttribute(Qt::WA_DontShowOnScreen);
+    reopen.show();
+    QCoreApplication::processEvents();
+    auto* view = reopen.findChild<QgsLayoutView*>();
+    QVERIFY(view && view->currentLayout());
+    auto* pic = dynamic_cast<QgsLayoutItemPicture*>(
+        view->currentLayout()->itemById(QStringLiteral("ka_north")));
+    QVERIFY(pic);
+    QVERIFY2(!pic->isMissingImage(), qPrintable(pic->evaluatedPath()));
+    QVERIFY(QFile::exists(pic->evaluatedPath()));
   }
   void drawingStudio_heritageRefreshRequestsCoalesceAndReuseOnRevisit() {
     constexpr int categoryCount = 200;
@@ -1979,6 +2023,35 @@ private slots:
     QVERIFY(layer->rollBack());
   }
 
+  void layerDeleteKeyRemovesReferenceFromMap() {
+    const QString path = makeSurvey(QStringLiteral("delete_key_ref"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    auto* project = QgsProject::instance();
+    auto* reference = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5186&field=note:string"),
+                                         QStringLiteral("현장참고점"), QStringLiteral("memory"));
+    QVERIFY(tree && canvas && reference && reference->isValid());
+    LayerOps::markReferenceLayer(reference);
+    project->addMapLayer(reference);
+    LayerOps::placeInLegendGroup(project, reference, QString::fromUtf8(LayerOps::kGroupReference));
+    const QString id = reference->id();
+    window.show();
+    QApplication::setActiveWindow(&window);
+    tree->setCurrentLayer(reference);
+    canvas->setFocus();
+    QApplication::processEvents();
+    QTest::keyClick(canvas, Qt::Key_Delete);
+    QVERIFY2(!project->mapLayer(id), "지도에서 Delete 를 눌러도 참조 지도가 남아 있습니다.");
+    QTest::keyClick(&window, Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(project->mapLayer(id));
+    QVERIFY(project->layerTreeRoot()->findLayer(id));
+  }
+
   void ctrlZRestoresVertexEditsAndGroupedFeatureDeletion() {
     const QString path = makeSurvey(QStringLiteral("vertex_undo"));
     QVERIFY(!path.isEmpty());
@@ -2336,9 +2409,11 @@ private slots:
     QCOMPARE(canvas->mapSettings().destinationCrs().authid(), authId);
     QCOMPARE(chip->text(), QStringLiteral("작업 %1").arg(authId.mid(5)));
     QCOMPARE(upload->text(), QStringLiteral("→ 제출 5179"));
-    QgsVectorLayer stored(path + QStringLiteral("|layername=survey_area"), name, QStringLiteral("ogr"));
-    QVERIFY(stored.isValid());
-    QCOMPARE(stored.crs().authid(), authId);
+    {
+      QgsVectorLayer stored(path + QStringLiteral("|layername=survey_area"), name, QStringLiteral("ogr"));
+      QVERIFY(stored.isValid());
+      QCOMPARE(stored.crs().authid(), authId);
+    }
     QVERIFY(saveNow(window));
     const QString other = authId.endsWith(QLatin1String("5186"))
         ? QStringLiteral("EPSG:5187") : QStringLiteral("EPSG:5186");

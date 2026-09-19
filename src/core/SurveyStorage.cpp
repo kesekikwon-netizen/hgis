@@ -13,6 +13,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QScopeGuard>
+#include <QThread>
 #include <QSet>
 #include <QTemporaryDir>
 
@@ -258,6 +259,71 @@ bool validateForOpen(const QString& gpkgPath, QString* errorOut) {
   return valid;
 }
 
+// 다 쓴 사본으로 원본을 교체한다. Windows 는 백신·색인이나 방금 닫힌 핸들이 대상
+// 파일을 잠깐 잡고 있으면 첫 시도를 "액세스가 거부되었습니다"로 거부한다. 사본은
+// 그대로 두고 교체만 짧게 다시 시도한다. 잠금과 무관한 실패는 즉시 알린다.
+bool replaceWithStaged(const QString& staged, const QString& target, QString* errorOut) {
+  for (int attempt = 0; attempt < 20; ++attempt) {
+    if (attempt) QThread::msleep(attempt < 10 ? 100 : 300);
+#ifdef Q_OS_WIN
+    const QString from = QDir::toNativeSeparators(staged);
+    const QString to = QDir::toNativeSeparators(target);
+    if (MoveFileExW(reinterpret_cast<LPCWSTR>(from.utf16()), reinterpret_cast<LPCWSTR>(to.utf16()),
+                    MOVEFILE_REPLACE_EXISTING))
+      return true;
+    const DWORD code = GetLastError();
+    if (errorOut) {
+      wchar_t* text = nullptr;
+      FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                         FORMAT_MESSAGE_IGNORE_INSERTS,
+                     nullptr, code, 0, reinterpret_cast<LPWSTR>(&text), 0, nullptr);
+      *errorOut = text ? QString::fromWCharArray(text).trimmed()
+                       : QStringLiteral("교체 오류 %1").arg(static_cast<int>(code));
+      if (text) LocalFree(text);
+    }
+    if (code != ERROR_ACCESS_DENIED && code != ERROR_SHARING_VIOLATION &&
+        code != ERROR_LOCK_VIOLATION)
+      return false;
+#else
+    if (QFile::exists(target) && !QFile::remove(target)) {
+      if (errorOut) *errorOut = QStringLiteral("기존 파일을 비우지 못했습니다.");
+      continue;
+    }
+    if (QFile::rename(staged, target)) return true;
+    if (errorOut) *errorOut = QStringLiteral("이름을 바꾸지 못했습니다.");
+#endif
+  }
+  return false;
+}
+
+// 이름 교체를 끝까지 거부당하면(대상 파일을 잡은 쪽이 쓰기는 허용하는 경우) 같은
+// 파일에 내용을 그대로 덮어쓴다. 사본은 이 쓰기가 끝날 때까지 남겨 두므로, 중간에
+// 끊겨도 옆의 .ka-new 파일에 검증된 새 세대가 온전히 남는다.
+bool overwriteInPlace(const QString& staged, const QString& target, QString* errorOut) {
+  QFile source(staged);
+  QFile destination(target);
+  if (!source.open(QIODevice::ReadOnly) ||
+      !destination.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    if (errorOut) *errorOut = destination.errorString();
+    return false;
+  }
+  while (!source.atEnd()) {
+    const QByteArray data = source.read(1024 * 1024);
+    if (source.error() != QFileDevice::NoError || destination.write(data) != data.size()) {
+      if (errorOut) *errorOut = destination.errorString();
+      return false;
+    }
+  }
+  const bool flushed = destination.flush();
+  destination.close();
+  source.close();
+  if (!flushed) {
+    if (errorOut) *errorOut = QStringLiteral("덮어쓴 내용을 끝까지 기록하지 못했습니다.");
+    return false;
+  }
+  return QFileInfo(target).size() == QFileInfo(staged).size();
+}
+
 bool copySurvey(const QString& sourceGpkg, const QString& targetGpkg, QString* errorOut) {
   if (errorOut) errorOut->clear();
   const auto fail = [errorOut](const QString& message) {
@@ -296,18 +362,48 @@ bool copySurvey(const QString& sourceGpkg, const QString& targetGpkg, QString* e
   GDALClose(dataset);
   if (!copied || QFileInfo(snapshot).size() <= 0)
     return fail(QStringLiteral("조사 파일 사본을 만들지 못했습니다: %1").arg(copyError));
+  // 대상 옆에 새 세대를 먼저 다 쓴다. 다 쓰기 전에는 원본을 건드리지 않는다.
+  const QString staged = target.absoluteFilePath() + QStringLiteral(".ka-new");
+  QFile::remove(staged);
+  const auto dropStaged = [&staged] { QFile::remove(staged); };
   QFile input(snapshot);
-  QSaveFile output(target.absoluteFilePath());
-  if (!input.open(QIODevice::ReadOnly) || !output.open(QIODevice::WriteOnly))
+  QFile output(staged);
+  if (!input.open(QIODevice::ReadOnly) || !output.open(QIODevice::WriteOnly)) {
+    dropStaged();
     return fail(QStringLiteral("저장 대상에 쓸 수 없습니다: %1").arg(output.errorString()));
+  }
   while (!input.atEnd()) {
     const QByteArray data = input.read(1024 * 1024);
-    if (input.error() != QFileDevice::NoError || output.write(data) != data.size())
+    if (input.error() != QFileDevice::NoError || output.write(data) != data.size()) {
+      output.close();
+      dropStaged();
       return fail(QStringLiteral("조사 파일 사본을 기록하지 못했습니다."));
+    }
   }
-  if (targetHasJournal())
+  const bool flushed = output.flush();
+  output.close();
+  input.close();
+  if (!flushed) {
+    dropStaged();
+    return fail(QStringLiteral("조사 파일 사본을 끝까지 기록하지 못했습니다."));
+  }
+  if (targetHasJournal()) {
+    dropStaged();
     return fail(QStringLiteral("저장 도중 대상 조사 파일이 열려 저장을 멈췄습니다."));
-  if (!output.commit()) return fail(QStringLiteral("저장 파일을 교체하지 못했습니다: %1").arg(output.errorString()));
+  }
+  QString replaceError;
+  if (!replaceWithStaged(staged, target.absoluteFilePath(), &replaceError)) {
+    KaSessionLog::line(QStringLiteral("[save] 이름 교체 거부 — 같은 파일에 덮어쓴다: %1")
+                           .arg(replaceError));
+    QString overwriteError;
+    if (!overwriteInPlace(staged, target.absoluteFilePath(), &overwriteError)) {
+      return fail(QStringLiteral("저장 파일을 교체하지 못했습니다: %1 · 새로 만든 조사 파일은 "
+                                 "%2 에 남겨 두었습니다.")
+                      .arg(overwriteError.isEmpty() ? replaceError : overwriteError,
+                           QDir::toNativeSeparators(staged)));
+    }
+  }
+  dropStaged();
   return true;
 }
 
@@ -710,7 +806,8 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
     }
   } catch (...) {
     KaSessionLog::line(QStringLiteral("[except] core/SurveyStorage.cpp:709"));
-    recover(QStringLiteral("저장 중 오류가 발생했습니다. 원본 조사 파일은 그대로입니다."));
+    recover(QStringLiteral("저장 중 오류가 발생했습니다. 원본 조사 파일은 그대로입니다. "
+                           "창을 닫지 말고 다시 저장하세요."));
     return attempt;
   }
 
@@ -876,9 +973,18 @@ bool writeEmbedded(QgsProject* project, const QString& gpkgPath, QString* errorO
     }
   });
   project->setFileName(abs);
-  project->setPresetHomePath(QFileInfo(abs).absolutePath());
+  QString home = QFileInfo(abs).absolutePath();
+  // 다음 세대는 surveyDir/.ka-survey-gen-*/survey.gpkg 다. 여기서 상대 경로를
+  // 계산하면 ../ 가 하나 더 붙어, 다시 열 때 C:/Users/AppData/... 로 풀린다.
+  // https://docs.qgis.org/3.44/en/docs/user_manual/introduction/qgis_configuration.html
+  if (QDir(home).dirName().startsWith(QLatin1String(".ka-survey-gen-")))
+    home = QFileInfo(home).absolutePath();
+  project->setPresetHomePath(home);
+  const Qgis::FilePathType previousPathType = project->filePathStorage();
+  project->setFilePathStorage(Qgis::FilePathType::Absolute);
   const QString uri = projectUri(gpkgPath);
   if (!project->write(uri)) {
+    project->setFilePathStorage(previousPathType);
     if (errorOut) *errorOut = project->error();
     return false;
   }

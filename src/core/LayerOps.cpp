@@ -29,6 +29,7 @@
 #include <QColor>
 #include <QFont>
 #include <QDir>
+#include <QStandardPaths>
 #include <QDomDocument>
 #include <QUrlQuery>
 #include <QSet>
@@ -1345,7 +1346,8 @@ bool LayerOps::isReferenceLayer(const QgsMapLayer* layer) {
          n.contains(QStringLiteral("고도맵")) || n.contains(QStringLiteral("지형맵")) ||
          n == QLatin1String("DEM") || n.contains(QStringLiteral("OpenTopoMap")) ||
          n.contains(QStringLiteral("고지형")) || n == QLatin1String("위성") ||
-         n.startsWith(QLatin1String("지적"));
+         n.startsWith(QLatin1String("지적")) || n.contains(QStringLiteral("대동여지도")) ||
+         n.contains(QStringLiteral("1919 조선지형도"));
 }
 
 bool LayerOps::isBasemapLayer(const QgsMapLayer* layer) {
@@ -2151,6 +2153,135 @@ QString LayerOps::layerCensus(QgsProject* project) {
   return QStringLiteral("총 %1 · %2").arg(parts.size()).arg(parts.join(QStringLiteral(" | ")));
 }
 
+// persistWorkspace가 .ka-survey-gen-* 에서 상대 경로를 쓰면 ../ 가 하나 더
+// 붙는다. 조사 폴더에서 풀면 C:/Users/<계정>/AppData 가 C:/Users/AppData 가 된다.
+static QString kaRestoreDroppedHomeComponent(const QString& file) {
+  const QString clean = QDir::fromNativeSeparators(file);
+  const QString home = QDir::fromNativeSeparators(QFileInfo(QDir::homePath()).absoluteFilePath());
+  if (home.size() < 4) return {};
+  const QString usersDir = QFileInfo(home).path();
+  if (!usersDir.endsWith(QLatin1String("/Users"), Qt::CaseInsensitive)) return {};
+  const QString prefix = usersDir + QLatin1Char('/');
+  if (!clean.startsWith(prefix, Qt::CaseInsensitive)) return {};
+  const QString rest = clean.mid(prefix.size());
+  const QString user = QFileInfo(home).fileName();
+  if (user.isEmpty() || rest.startsWith(user + QLatin1Char('/'), Qt::CaseInsensitive)) return {};
+  return QDir::cleanPath(home + QLatin1Char('/') + rest);
+}
+
+static QString kaResolvePersistedSource(const QString& source, const QString& home,
+                                        const QString& surveyGpkg) {
+  const int pipe = source.indexOf(QLatin1Char('|'));
+  const QString file = pipe < 0 ? source : source.left(pipe);
+  const QString extra = pipe < 0 ? QString() : source.mid(pipe);
+  if (file.isEmpty()) return source;
+  const auto exists = [](const QString& path) {
+    return !path.isEmpty() && QFileInfo::exists(QDir::cleanPath(path));
+  };
+  if (exists(file)) return source;
+  if (const QString restored = kaRestoreDroppedHomeComponent(file); exists(restored))
+    return restored + extra;
+  if (home.isEmpty()) return source;
+  const QString fromHome = QDir::cleanPath(QDir(home).absoluteFilePath(file));
+  if (exists(fromHome)) return fromHome + extra;
+  // persistWorkspace가 .ka-survey-gen 하위에 쓰던 시절의 상대 경로.
+  const QString fromGenerationHome = QDir::cleanPath(
+      QDir(QDir(home).filePath(QStringLiteral(".ka-survey-gen-home"))).absoluteFilePath(file));
+  if (exists(fromGenerationHome)) return fromGenerationHome + extra;
+  QString rel = file;
+  for (int i = 0; i < 4; ++i) {
+    if (!rel.startsWith(QLatin1String("../")) && !rel.startsWith(QLatin1String("..\\")))
+      break;
+    rel = rel.mid(3);
+    const QString stripped = QDir::cleanPath(QDir(home).absoluteFilePath(rel));
+    if (exists(stripped)) return stripped + extra;
+  }
+  // 저장은 검증한 다음 세대(.ka-survey-gen-*)에 작업공간을 쓰므로, 그때 계산한 상대
+  // 경로는 조사 폴더에서 읽으면 한 칸 어긋난 절대 경로로 풀린다. 조사 폴더를 기준으로
+  // 뒤쪽 조각부터(가장 구체적인 것부터) 같은 파일을 찾는다. 조사 폴더를 옮긴 경우도
+  // 같은 방법으로 붙는다.
+  const QStringList parts =
+      QDir::fromNativeSeparators(file).split(QLatin1Char('/'), Qt::SkipEmptyParts);
+  for (int start = 1; start < parts.size(); ++start) {
+    const QString tail = QStringList(parts.mid(start)).join(QLatin1Char('/'));
+    if (tail.isEmpty() || tail.startsWith(QLatin1String(".."))) continue;
+    const QString candidate = QDir::cleanPath(QDir(home).absoluteFilePath(tail));
+    if (exists(candidate)) return candidate + extra;
+  }
+  // 저장 때 조사 파일 안으로 흡수된 레이어는 세대 파일 이름을 가리킨 채 남는다.
+  // 테이블 이름이 있으면 조사 파일에서 같은 테이블을 찾게 한다.
+  if (!surveyGpkg.isEmpty() && exists(surveyGpkg) &&
+      extra.contains(QLatin1String("layername="), Qt::CaseInsensitive) &&
+      file.endsWith(QLatin1String(".gpkg"), Qt::CaseInsensitive))
+    return QDir::cleanPath(surveyGpkg) + extra;
+  return source;
+}
+
+int LayerOps::repairPersistedFileSources(QgsProject* project) {
+  if (!project) return 0;
+  const QString fileName = project->fileName();
+  QString surveyGpkg;
+  if (fileName.startsWith(QLatin1String("geopackage:"), Qt::CaseInsensitive))
+    surveyGpkg = fileName.mid(11).section(QLatin1Char('?'), 0, 0);
+  else if (fileName.endsWith(QLatin1String(".gpkg"), Qt::CaseInsensitive))
+    surveyGpkg = fileName;
+  else if (!fileName.isEmpty()) {
+    // 동반 .qgz 로 열었으면 같은 이름의 조사 파일이 옆에 있다.
+    const QFileInfo info(fileName);
+    const QString sibling = info.dir().filePath(info.completeBaseName() + QStringLiteral(".gpkg"));
+    if (QFileInfo::exists(sibling)) surveyGpkg = sibling;
+  }
+  // 기준 폴더는 지금 연 조사 파일이 있는 곳이 먼저다. 저장한 작업공간의
+  // presetHomePath 는 저장에 쓰고 지운 세대 폴더(.ka-survey-gen-*)로 남아 있어,
+  // 그것만 믿으면 바깥 참조 지도를 영영 찾지 못한다.
+  QStringList bases;
+  const auto addBase = [&bases](const QString& path) {
+    const QString clean = QDir::cleanPath(path);
+    if (clean.isEmpty() || clean == QLatin1String(".") || bases.contains(clean)) return;
+    if (QFileInfo::exists(clean)) bases << clean;
+  };
+  if (!surveyGpkg.isEmpty()) addBase(QFileInfo(surveyGpkg).absolutePath());
+  addBase(project->presetHomePath());
+  if (!fileName.isEmpty() && !fileName.startsWith(QLatin1String("geopackage:"), Qt::CaseInsensitive))
+    addBase(QFileInfo(fileName).absolutePath());
+  const QString localData = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+  addBase(localData);
+  addBase(QDir(localData).filePath(QStringLiteral("ka-hgis")));
+  addBase(QDir::home().filePath(QStringLiteral("AppData/Local/ka-hgis")));
+  addBase(QDir::home().filePath(QStringLiteral("AppData/Local/ka-hgis/ka-hgis")));
+  int n = 0;
+  for (QgsMapLayer* layer : project->mapLayers()) {
+    if (!layer || layer->isValid()) continue;
+    QString provider = layer->providerType().toLower();
+    if (provider.isEmpty()) {
+      const QString file = layer->source().section(QLatin1Char('|'), 0, 0).toLower();
+      provider = (file.endsWith(QLatin1String(".tif")) || file.endsWith(QLatin1String(".xml")) ||
+                  file.endsWith(QLatin1String(".vrt")))
+                     ? QStringLiteral("gdal")
+                     : QStringLiteral("ogr");
+    }
+    if (provider != QLatin1String("ogr") && provider != QLatin1String("gdal")) continue;
+    const QString original = layer->source();
+    QString repaired = original;
+    for (const QString& base : bases) {
+      repaired = kaResolvePersistedSource(original, base, surveyGpkg);
+      if (repaired != original) break;
+    }
+    if (repaired == original) continue;
+    layer->setDataSource(repaired, layer->name(), provider);
+    if (!layer->isValid()) {
+      // 잘못 짚었으면 원래 경로로 되돌린다. 사용자가 원본을 찾을 단서를 잃지 않는다.
+      layer->setDataSource(original, layer->name(), provider);
+      continue;
+    }
+    if (auto* vector = qobject_cast<QgsVectorLayer*>(layer))
+      vector->updateExtents();
+    layer->triggerRepaint();
+    ++n;
+  }
+  return n;
+}
+
 int LayerOps::reviveInvalidLayers(QgsProject* project, QStringList* revived,
                                   QStringList* stillBroken) {
   if (!project) return 0;
@@ -2197,6 +2328,7 @@ void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoo
   // visibleLayersPaintOrder는 무효한 레이어를 화면 목록에서 뺀다. GPKG에 쓰는 동안
   // 잠깐 끊긴 레이어가 여기서 빠지면 다시 넣어 주는 곳이 없어 재시작 전까지 사라진
   // 채로 남는다. 목록을 만들기 전에 되살릴 수 있는 것은 되살린다.
+  repairPersistedFileSources(project);
   reviveInvalidLayers(project);
 
   QList<QgsMapLayer*> visible = visibleLayersPaintOrder(project);

@@ -27,7 +27,7 @@ QFont fitted(const QString& text, double pixels, bool bold, double width) {
 namespace KaSplashCredits {
 
 QString creators() {
-  return QStringLiteral("권영인 · 조유량 · 박종환");
+  return QStringLiteral("권영인");
 }
 
 QString copyrightLine() {

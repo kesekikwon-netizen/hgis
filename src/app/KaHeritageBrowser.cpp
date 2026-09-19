@@ -344,9 +344,11 @@ void KaHeritageBrowser::setStage(HeritageStage stage, const QString& message) {
   if (stage != HeritageStage::Download) m_downloadNavigation = false;
   // 화면이 자리잡을 시간을 준다. ajax 로 폼을 다시 그리는 사이트라
   // 바로 다음 동작을 하면 빈 값을 잡는다(2026-09-12: 1초 만에 골라 전국을 요청했다).
-  m_settle = 3;
+  // 지금은 각 단계 스크립트가 고른 값을 되읽어 확인하므로(시군은 ok:<시도>|<시군>)
+  // 빈 폼이면 그대로 기다린다. 그래서 첫 시도 대기는 줄이고 확인에 맡긴다.
+  m_settle = 2;
   // 자료 종류를 바꾸면 폼 전체가 새로 그려지고 시/군 목록도 다시 채워진다. 더 기다린다.
-  if (stage == HeritageStage::SelectRegion) m_settle = 6;
+  if (stage == HeritageStage::SelectRegion) m_settle = 4;
   logLine(QStringLiteral("단계 → %1 : %2")
               .arg(HeritageIntranetFlow::stageName(stage), message));
   m_stageLabel->setText(stage == HeritageStage::Done ? HeritageIntranetFlow::stageName(stage)
@@ -782,10 +784,12 @@ void KaHeritageBrowser::runStage() {
     if (m_pendingDownloads > 0) return;
     if (m_currentFiles.isEmpty()) {
       const qint64 elapsed = m_downloadWait.elapsed();
+      // 이 시간은 국가유산 서버가 ZIP 을 만드는 시간이다(측정 42~115초). 우리가 줄일
+      // 수 없으므로 무엇을 기다리는지 밝혀 둔다.
       const QString phase = m_downloadRequestObserved
-          ? QStringLiteral("요청 전송 확인 · 파일 응답 대기")
+          ? QStringLiteral("국가유산 서버가 파일을 만드는 중")
           : QStringLiteral("버튼 실행 완료 · 다운로드 요청 미확인");
-      m_detailLabel->setText(QStringLiteral("%1 — %2 · %3초 경과 · 중지 가능")
+      m_detailLabel->setText(QStringLiteral("%1 — %2 · %3초 경과(보통 40~120초) · 중지 가능")
                                 .arg(HeritageStyle::layerName(m_datasets.at(m_datasetIndex)), phase)
                                 .arg(elapsed / 1000));
       return;

@@ -246,7 +246,7 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
   QToolBar toolbar;
   toolbar.setAttribute(Qt::WA_DontShowOnScreen);
   toolbar.setObjectName(QStringLiteral("mainToolbar"));
-  toolbar.setIconSize(QSize(25, 25));
+  toolbar.setIconSize(QSize(20, 20));
   auto* ribbon = new KaBeginnerRibbon(&toolbar);
   ribbon->addGroup(QStringLiteral("survey"), QStringLiteral("조사파일"));
   ribbon->addGroup(QStringLiteral("record"), QStringLiteral("기록"));
@@ -301,7 +301,7 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
   bool testedTwoLines = false;
   for (QToolButton* button : buttons) {
     QVERIFY(qobject_cast<QFrame*>(button->parentWidget()));
-    QCOMPARE(button->iconSize(), QSize(40, 40));
+    QCOMPARE(button->iconSize(), QSize(32, 32));
     QCOMPARE(button->font().pixelSize(), 13);
     QCOMPARE(button->height(), commonHeight);
     QCOMPARE(button->toolButtonStyle(), Qt::ToolButtonTextUnderIcon);
@@ -309,7 +309,7 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
              "all fixture buttons must fit without toolbar overflow");
     const QFontMetrics fm(button->font());
     const QSize label = fm.size(Qt::TextShowMnemonic, button->text());
-    QVERIFY2(button->height() >= 40 + 4 + label.height() + 6,
+    QVERIFY2(button->height() >= 32 + 4 + label.height() + 6,
              qPrintable(button->text() + QStringLiteral(": icon and label must fit")));
     QVERIFY(button->width() >= label.width() + 6);
     testedTwoLines |= button->text().contains(QLatin1Char('\n'));
@@ -328,7 +328,7 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
     const qreal dpr = rendered.devicePixelRatio();
     QVERIFY2(qMax(ink.width(), ink.height()) / dpr >= 18.0,
              qPrintable(button->text() + QStringLiteral(": actual icon ink must exceed the old 16px box")));
-    QVERIFY2(ink.width() / dpr <= 42.0 && ink.height() / dpr <= 42.0,
+    QVERIFY2(ink.width() / dpr <= 34.0 && ink.height() / dpr <= 34.0,
              "pixel difference must be confined to the icon, not label/layout movement");
     qInfo().noquote() << button->text().replace(QLatin1Char('\n'), QLatin1Char('/'))
                      << "button" << button->size() << "icon ink (physical px)" << ink.size()
@@ -339,7 +339,7 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
   toolbar.setIconSize(QSize(24, 24));
   QCoreApplication::processEvents();
   for (QToolButton* button : buttons) {
-    QCOMPARE(button->iconSize(), QSize(40, 40));
+    QCOMPARE(button->iconSize(), QSize(32, 32));
     QCOMPARE(button->height(), commonHeight);
   }
   const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");

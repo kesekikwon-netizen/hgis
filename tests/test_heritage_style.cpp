@@ -1896,8 +1896,9 @@ private slots:
     LayoutService::flowSheetLegend(legend);
     const int narrowColumns = legend->columnCount();
     const double narrowHeight = legend->rect().height();
-    QCOMPARE(narrowColumns, 1);
-    QVERIFY(narrowHeight > 100.);
+    QCOMPARE(legend->boxSpace(), 1.);
+    QVERIFY(narrowColumns >= 2);
+    QVERIFY(narrowHeight > 80.);
     QVERIFY(qAbs(legend->rect().width() - 70.) < .1);
     QVERIFY(QLineF(legend->pos(), position).length() < .01);
     const QString qaDir = qEnvironmentVariable("KA_HGIS_QA_DIR");

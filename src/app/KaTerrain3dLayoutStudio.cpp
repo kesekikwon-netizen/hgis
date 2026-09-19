@@ -201,7 +201,7 @@ KaTerrain3dLayoutStudio::KaTerrain3dLayoutStudio(QgsProject* project, QWidget* p
   legendLay->addWidget(m_legendTitle);
   auto* fontRow = new QHBoxLayout;
   m_legendFont = new QSpinBox(cardLegend);
-  m_legendFont->setRange(7, 24);
+  m_legendFont->setRange(5, 24);
   m_legendFont->setValue(10);
   m_legendFont->setSuffix(QStringLiteral(" pt"));
   connect(m_legendFont, QOverload<int>::of(&QSpinBox::valueChanged), this,

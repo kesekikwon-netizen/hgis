@@ -1,3 +1,22 @@
+## 2026-09-20 배경 지도 대동여지도·1919 조선지형도
+
+- 리본 `배경 지도`에 **대동여지도**(키 없음), **1919 조선지형도 1:5만**(키 있을 때만 활성). 새 리본 없음. 더보기 **API 키 입력** 유지.
+- 대동여지도: 국토정보플랫폼 역사지도 WMS `https://map.ngii.go.kr/spcemapserver/korea_old_map/ows` 레이어 `korea_oldmap_ddymap_kyu`, EPSG:5179, WMS 1.1.1. 2026-09-20 GetCapabilities/GetMap PNG 200, 키·Referer 없음. 뷰어 `https://map.ngii.go.kr/ms/map/NlipMap.do?tabGb=daedong`. 가짜 Google/Kakao URI 없음.
+- 1919: 공식 `https://hgis.history.go.kr/api/intro.do` WMTS. VWorld 키로는 인증 안 됨. `HistoryGis/ApiKey`를 더보기 API 키 입력 둘째 칸에 저장. 예제 키 `840e2e2c-...` 소스 없음.
+- 레이어는 `markReferenceLayer` + 이름 매칭으로 참조. `placeInLegendGroup`은 기존처럼 그룹명을 쓰지 않음(ORIG-3).
+- CTest `cadastral` Passed 4.16초, `theme_qss` Passed 0.63초. Release `ka-hgis`·`ka_cadastral_tests` 빌드. EXE SHA256 03502542FFCB9024BA81518B694FE6A9B7BD00E4178C7492DFDA31BFEFE39DC0 (07:58:38).
+- clangd `daedongyeojidoWmsUri` L1432→h:165, `addDaedongyeojidoMap` L1450→h:166, MainWindow L3252→h:166. `diagnostic_error_count` 4/21(기존 compile DB INCLUDE). Graft LayerOps/BasemapOps/MainWindow 조회.
+- Archify workflow showcase 9/9 deliver visual-check pass → `build/qa/historical-maps-20260920/historical-maps.workflow.html`. Viewer UI 영어 fallback.
+- 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-20 스플래시 만든이 권영인만
+
+- 첫 화면 `KaSplashCredits::creators()`는 `권영인`만. 표제란 만든이와 footer `copyrightLine()`이 같은 값을 쓴다. 세 이름 문자열은 스플래시에 다시 넣지 않음.
+- About `MainWindow::showAbout` L5394는 `권영인 · 조유량 · 박종환` 유지. `KaStartPage`는 이름 없음.
+- CTest `startup_splash` Passed 17.91초. `ka_startup_splash_tests`·`ka_hgis_tests` Release 빌드. `ka-hgis.exe` 링크 성공(07:50:27). 고지도 심볼은 미수정.
+- clangd `creators` L29→h:22, `copyrightLine` L33→h:23, `.arg(creators())` L35→L29. Graft L29/L33/L42. Archify sequence showcase 9/9 visual-check pass → `build/qa/splash-credit-20260920/`.
+- 커밋·푸시·포터블·사용자 앱 없음.
+
 ## 2026-09-19 7-4 시험 지도
 
 - `docs/testing-map.md` 축 A–J. G는 `theme_qss` `versionAndLaunchScripts_exist`. theme_qss Passed 0.80초.

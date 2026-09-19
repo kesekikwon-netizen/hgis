@@ -611,7 +611,8 @@ if(KA_HGIS_BUILD_TESTS)
   endif()
   ka_add_qtest(topographic_browser ka_topographic_browser_tests)
   add_executable(ka_topographic_import_tests tests/test_topographic_import.cpp
-    src/app/KaTopographicImportDialog.cpp src/app/KaTopographicImportDialog.h)
+    src/app/KaTopographicImportDialog.cpp src/app/KaTopographicImportDialog.h
+    src/app/KaCrashGuard.cpp src/app/KaCrashGuard.h)
   target_link_libraries(ka_topographic_import_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_topographic_import_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(topographic_import ka_topographic_import_tests)
@@ -619,7 +620,8 @@ if(KA_HGIS_BUILD_TESTS)
     data/providers/ngii.qrc
     src/app/KaTopographicScopePanel.cpp src/app/KaTopographicScopePanel.h
     src/app/KaTopographicBrowser.cpp src/app/KaTopographicBrowser.h
-    src/app/KaTopographicImportDialog.cpp src/app/KaTopographicImportDialog.h)
+    src/app/KaTopographicImportDialog.cpp src/app/KaTopographicImportDialog.h
+    src/app/KaCrashGuard.cpp src/app/KaCrashGuard.h)
   target_link_libraries(ka_topographic_scope_tests PRIVATE ka_core Qt6::Test Qt6::WebEngineWidgets)
   set_target_properties(ka_topographic_scope_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(topographic_scope ka_topographic_scope_tests)
@@ -697,7 +699,8 @@ if(KA_HGIS_BUILD_TESTS)
   set_tests_properties(storage_safety PROPERTIES TIMEOUT 120)
 
   add_executable(ka_reference_download_tests tests/test_reference_download.cpp
-    src/app/KaReferenceDownloadJob.cpp)
+    src/app/KaReferenceDownloadJob.cpp
+    src/app/KaCrashGuard.cpp src/app/KaCrashGuard.h)
   target_link_libraries(ka_reference_download_tests PRIVATE ka_core Qt6::Test Qt6::Network)
   ka_add_qtest(reference_download ka_reference_download_tests)
   set_tests_properties(reference_download PROPERTIES TIMEOUT 60)
@@ -732,6 +735,7 @@ if(KA_HGIS_BUILD_TESTS)
     topographicDownloadKeepsMapVisibleAndUsesSurveyFolder)
   ka_add_qtest_filter(save_open_drawing ka_save_open_tests
     drawingStudio_decorationsMoveAndShrink
+    drawingStudio_northArrowRendersOnOpen
     drawingStudio_heritageRefreshRequestsCoalesceAndReuseOnRevisit
     drawingStudioAboveLabelsMapDrawsGeometryWithoutDuplicateNumberLabels
     drawingStudio_largeScaleChipsApplyToMapAndInput
@@ -743,6 +747,7 @@ if(KA_HGIS_BUILD_TESTS)
     changingLabelFontKeepsEveryLayerAndItsVisibility
     trenchPresetRespectsAreaAndDimensions
     layerDeleteKeyPreservesSourceAndUndoRestoresPendingEdits
+    layerDeleteKeyRemovesReferenceFromMap
     ctrlZRestoresVertexEditsAndGroupedFeatureDeletion
     layerContextMenu_usesClickedRowAndLeavesSourceIntact
     layerContextMenu_moveToBottomPreservesRegisteredLayer

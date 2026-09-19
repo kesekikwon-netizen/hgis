@@ -258,7 +258,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     else if (m_layerTree && focus && (focus == m_layerTree || m_layerTree->isAncestorOf(focus)))
       removeSelectedLayers();
     else
-      deleteSelectedFeatures();
+      deleteFeaturesOrSelectedReferenceLayers();
   });
   addAction(delAct);
   auto* fullAct = new QAction(QStringLiteral("전체 화면"), this);
@@ -368,7 +368,7 @@ void MainWindow::buildMenus() {
 
   auto* mainTb = addToolBar(QStringLiteral("주요"));
   mainTb->setObjectName(QStringLiteral("mainToolbar"));
-  mainTb->setIconSize(QSize(25, 25));
+  mainTb->setIconSize(QSize(20, 20));
   mainTb->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   mainTb->setMovable(false);
   mainTb->setFloatable(false);
@@ -448,7 +448,6 @@ void MainWindow::buildMenus() {
     undoLastAction();
   });
   addAction(actUndo);
-  Q_UNUSED(ribbon->addAction(QStringLiteral("record"), actUndo));
   m_actUndo = actUndo;
   auto* actRedo = new QAction(KaIcons::icon(QStringLiteral("redo")), QStringLiteral("다시 실행"), this);
   actRedo->setToolTip(QStringLiteral("되돌린 편집을 다시 적용합니다 (Ctrl+Y)"));
@@ -458,7 +457,6 @@ void MainWindow::buildMenus() {
     redoLastAction();
   });
   addAction(actRedo);
-  Q_UNUSED(ribbon->addAction(QStringLiteral("record"), actRedo));
   m_actRedo = actRedo;
   auto [actMeasure, btnMeasure] = addIcon(
       QStringLiteral("record"), QStringLiteral("measure"), QStringLiteral("거리 측정"),
@@ -592,6 +590,22 @@ void MainWindow::buildMenus() {
   cadastralMenu->addAction(QStringLiteral("선 색·지번 표시"), this, &MainWindow::configureCadastralStyle);
   btnCadastral->setMenu(cadastralMenu);
   btnCadastral->setPopupMode(QToolButton::MenuButtonPopup);
+  m_btnDaedong = new QToolButton(ribbon);
+  m_btnDaedong->setObjectName(QStringLiteral("btnDaedongyeojido"));
+  m_btnDaedong->setIcon(KaIcons::icon(QStringLiteral("map")));
+  m_btnDaedong->setText(QStringLiteral("대동여지도"));
+  m_btnDaedong->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+  m_btnDaedong->setToolTip(
+      QStringLiteral("대동여지도를 참조 지도로 올립니다. API 키가 필요 없습니다"));
+  connect(m_btnDaedong, &QToolButton::clicked, this, &MainWindow::addDaedongyeojidoMap);
+  ribbon->addWidget(QStringLiteral("basemap"), m_btnDaedong);
+  m_btnMap1919 = new QToolButton(ribbon);
+  m_btnMap1919->setObjectName(QStringLiteral("btnMap1919"));
+  m_btnMap1919->setIcon(KaIcons::icon(QStringLiteral("contour")));
+  m_btnMap1919->setText(QStringLiteral("1919 조선지형도\n1:5만"));
+  m_btnMap1919->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+  connect(m_btnMap1919, &QToolButton::clicked, this, &MainWindow::addHistoryGisMap1919);
+  ribbon->addWidget(QStringLiteral("basemap"), m_btnMap1919);
   auto [actGeology, btnGeology] = addIcon(
       QStringLiteral("basemap"), QStringLiteral("geology"), QStringLiteral("지질도"),
       QStringLiteral("KIGAM 1:5만 지질 색 위에 지형 음영을 겹칩니다. 다시 누르면 숨깁니다"),
@@ -756,7 +770,7 @@ void MainWindow::buildMenus() {
       if (d->isVisible()) d->raise();
     }
   });
-  moreMenu->addAction(QStringLiteral("VWorld API 키"), this, &MainWindow::configureVworldKey);
+  moreMenu->addAction(QStringLiteral("API 키 입력"), this, &MainWindow::configureVworldKey);
   moreMenu->addAction(QStringLiteral("수치지형도 아이디·비밀번호"), this, &MainWindow::configureTopographicAccount);
   moreMenu->addAction(QStringLiteral("국가유산 인트라넷 아이디·비밀번호"), this, &MainWindow::configureHeritageAccount);
   moreMenu->addAction(QStringLiteral("정보"), this, &MainWindow::showAbout);
@@ -765,6 +779,7 @@ void MainWindow::buildMenus() {
   ribbon->addWidget(QStringLiteral("find"), webBtn);
   ribbon->addWidget(QStringLiteral("find"), more);
   mainTb->addWidget(ribbon);
+  updateHistoricalMapButtons();
 
   m_subToolbar = addToolBar(QStringLiteral("세부도구"));
   m_subToolbar->setObjectName(QStringLiteral("subToolbar"));
@@ -1070,19 +1085,26 @@ void MainWindow::healTileLayer(QgsRasterLayer* layer) {
   });
 }
 
-void MainWindow::notifyBasemapFailure(bool timedOut) {
-  if (m_closingWindow || m_basemapNoticePending) return;
-  m_basemapNoticePending = true;
-  // 렌더러와 네트워크 콜백 안에서는 UI를 바꾸지 않는다. 타일별 오류도 한 번만 알린다.
+void MainWindow::notifyBasemapFailure(bool timedOut, const QString& reason) {
+  if (m_closingWindow) return;
+  // 서버가 답을 준 정상 응답(범례 미지원·국토 밖 타일)은 실패가 아니다.
+  if (LayerOps::mapServerMessageIsBenign(reason)) return;
+  // 원인은 매번 로그에 남기고, 화면 안내는 세션에 한 번만 띄운다. URL에는 인증키가
+  // 들어 있으므로 괄호 앞까지만 남긴다.
+  KaCrashGuard::logLine(QStringLiteral("[basemap] 배경지도 실패 — %1")
+                            .arg(reason.section(QLatin1Char('('), 0, 0).trimmed()));
+  if (m_basemapNoticeShown) return;
+  m_basemapNoticeShown = true;
+  // 렌더러와 네트워크 콜백 안에서는 UI를 바꾸지 않는다.
   QTimer::singleShot(0, this, [this, timedOut] {
     if (m_closingWindow) return;
     notify(Notice::Warning, QStringLiteral("배경지도를 불러오지 못했습니다"),
            (timedOut ? QStringLiteral("지도 서버의 응답이 늦어 요청을 중단했습니다. ")
                      : QStringLiteral("지도 서버에 연결하지 못했거나 서버가 요청을 거절했습니다. ")) +
                QStringLiteral("인터넷 연결과 배경지도 설정을 확인한 뒤 다시 켜 주세요. "
-                              "조사 도형을 그리거나 저장하는 작업은 계속할 수 있습니다."));
+                              "조사 도형을 그리거나 저장하는 작업은 계속할 수 있습니다. "
+                              "같은 안내는 다시 띄우지 않습니다."));
   });
-  QTimer::singleShot(30000, this, [this] { m_basemapNoticePending = false; });
 }
 #endif
 
@@ -1165,7 +1187,7 @@ void MainWindow::buildUi() {
           [this](const QString& err, QgsMapLayer* layer) {
             auto* raster = qobject_cast<QgsRasterLayer*>(layer);
             if (raster && raster->providerType() == QLatin1String("wms")) {
-              notifyBasemapFailure(err.contains(QLatin1String("timeout"), Qt::CaseInsensitive));
+              notifyBasemapFailure(err.contains(QLatin1String("timeout"), Qt::CaseInsensitive), err);
               healTileLayer(raster);
             } else {
               const QString name = layer ? layer->name() : QStringLiteral("선택한 지도");
@@ -1186,7 +1208,8 @@ void MainWindow::buildUi() {
                                    message.contains(QLatin1String("tile"), Qt::CaseInsensitive) ||
                                    message.contains(QStringLiteral("타일"));
             if (!tileIssue || !m_canvas) return;
-            notifyBasemapFailure(message.contains(QLatin1String("timeout"), Qt::CaseInsensitive));
+            notifyBasemapFailure(message.contains(QLatin1String("timeout"), Qt::CaseInsensitive),
+                                 message);
           });
   connect(QgsNetworkAccessManager::instance(),
           qOverload<QgsNetworkRequestParameters>(&QgsNetworkAccessManager::requestTimedOut),
@@ -1194,7 +1217,7 @@ void MainWindow::buildUi() {
             const QString host = request.request().url().host();
             if (host.endsWith(QLatin1String("vworld.kr"), Qt::CaseInsensitive) ||
                 host.endsWith(QLatin1String("kigam.re.kr"), Qt::CaseInsensitive))
-              notifyBasemapFailure(true);
+              notifyBasemapFailure(true, QStringLiteral("요청 시간 초과 · %1").arg(host));
           });
   connect(m_canvas, &QgsMapCanvas::extentsChanged, this, [this]() {
     m_tileHealCount.clear();
@@ -1904,6 +1927,7 @@ void MainWindow::ensureDefaultBasemaps() {
 #if KA_HGIS_HAS_QGIS
   QgsProject* proj = QgsProject::instance();
   if (!proj) return;
+  const bool dirtyBefore = proj->isDirty();
   // 저장된 조사의 위성·지적 주소에는 그때 쓰던 인증키가 박혀 있다. 키를 새로 받아도
   // 예전 조사를 열면 만료된 키로 타일을 받아 배경지도가 소리 없이 백지가 됐다.
   {
@@ -1963,6 +1987,9 @@ void MainWindow::ensureDefaultBasemaps() {
   else if (!hasSat)
     statusBar()->showMessage(satErr.isEmpty() ? QStringLiteral("위성을 올리지 못했습니다.") : satErr,
                              8000);
+  if (!dirtyBefore)
+    proj->setDirty(false);
+  updateHistoricalMapButtons();
 #endif
 }
 
@@ -2008,7 +2035,21 @@ void MainWindow::syncThematicButtons() {
   sync(nullptr, m_btnSoil, QStringLiteral("토양도(흙토람)"));
   sync(m_actGeology, nullptr, QStringLiteral("지질도(KIGAM 1:5만)"));
   sync(m_actRiver, nullptr, QStringLiteral("수계도(하천망)"));
+  updateHistoricalMapButtons();
 #endif
+}
+
+void MainWindow::updateHistoricalMapButtons() {
+  const bool hasHistoryKey =
+      LayerOps::historyGisApiKeyUsable(VworldSettings::loadHistoryGisApiKey());
+  if (m_btnMap1919) {
+    m_btnMap1919->setEnabled(hasHistoryKey);
+    m_btnMap1919->setToolTip(
+        hasHistoryKey
+            ? QStringLiteral("1919년 조선지형도 1:5만 (국사편찬위원회 WMTS, EPSG:5179)")
+            : QStringLiteral(
+                  "더보기 → API 키 입력에 역사지리정보DB 키를 저장하면 켤 수 있습니다"));
+  }
 }
 
 void MainWindow::loadBootBasemaps() {
@@ -2941,7 +2982,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
       if (!measuring && ke->key() == Qt::Key_Delete) {
         if (onCanvas) {
           if (m_captureTool && m_canvas->mapTool() == m_captureTool) return false;
-          deleteSelectedFeatures();
+          deleteFeaturesOrSelectedReferenceLayers();
         } else removeSelectedLayers();
         return true;
       }
@@ -3145,7 +3186,16 @@ void MainWindow::applyMapScaleFromUi() {
 void MainWindow::refreshMapCanvasNow() {
 #if KA_HGIS_HAS_QGIS
   if (m_isOpeningSurvey || !m_canvas) return;
-  if (m_canvas->isDrawing()) return;
+  if (m_canvas->isDrawing()) {
+    if (!m_canvasSyncQueued) {
+      m_canvasSyncQueued = true;
+      QTimer::singleShot(80, this, [this]() {
+        m_canvasSyncQueued = false;
+        refreshMapCanvasNow();
+      });
+    }
+    return;
+  }
   // 이미 열려 있던 조사는 레이어를 넣고 빼는 일이 없어 순서 규칙이 한 번도
   // 안 돌 수 있다. 화면을 새로 그릴 때마다 맞춰 둔다.
   LayerOps::applyLayerOrderToLabels(QgsProject::instance(), nullptr);
@@ -3193,6 +3243,29 @@ void MainWindow::addBasemapVworldCadastral() {
     if (m_canvas && m_canvas->scale() > 8000.0)
       m_canvas->zoomScale(5000.0, true);
   }
+#endif
+}
+
+void MainWindow::addDaedongyeojidoMap() {
+#if KA_HGIS_HAS_QGIS
+  QString err;
+  if (!LayerOps::addDaedongyeojidoMap(QgsProject::instance(), m_canvas, &err))
+    notify(Notice::Warning, QStringLiteral("대동여지도"),
+           QStringLiteral("대동여지도를 올리지 못했습니다."), err);
+  else
+    afterBasemapAdded(this, m_canvas, m_workCrs, QStringLiteral("대동여지도"));
+#endif
+}
+
+void MainWindow::addHistoryGisMap1919() {
+#if KA_HGIS_HAS_QGIS
+  const QString key = VworldSettings::loadHistoryGisApiKey();
+  QString err;
+  if (!LayerOps::addHistoryGisMap1919(QgsProject::instance(), m_canvas, key, &err))
+    notify(Notice::Warning, QStringLiteral("1919 조선지형도"),
+           QStringLiteral("1919 조선지형도를 올리지 못했습니다."), err);
+  else
+    afterBasemapAdded(this, m_canvas, m_workCrs, QStringLiteral("1919 조선지형도"));
 #endif
 }
 
@@ -5470,7 +5543,8 @@ HeritageImport::Result MainWindow::importHeritageDataset(HeritageDataset dataset
     return result;
   }
   LayerOps::applyLayerOrderToLabels(QgsProject::instance(), m_canvas);
-  if (m_canvas) m_canvas->refresh();
+  if (m_canvas)
+    LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   statusBar()->showMessage(QStringLiteral("%1 %2곳을 올렸습니다.")
                                .arg(HeritageStyle::layerName(dataset))
                                .arg(result.featureCount),

@@ -305,9 +305,8 @@ bool addDistanceRing(QgsProject* project, QgsMapCanvas* canvas, QgsVectorLayer* 
   project->addMapLayer(labLayer, true);
   LayerOps::placeInLegendGroup(project, labLayer, QString::fromUtf8(LayerOps::kGroupSurveyData));
 
-  if (canvas) {
-    canvas->refresh();
-  }
+  if (canvas)
+    LayerOps::syncMapCanvas(project, canvas, false);
   return true;
 }
 
