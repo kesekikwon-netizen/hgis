@@ -398,22 +398,22 @@ void MainWindow::buildMenus() {
     b->setIcon(KaIcons::icon(iconId));
   };
   auto [actNew, btnNew] = addIcon(QStringLiteral("survey"), QStringLiteral("new"),
-                                  QStringLiteral("새 조사"),
+                                  QStringLiteral("신규"),
                                   QStringLiteral("현장 조사 프로젝트를 새로 만듭니다"),
                                   &MainWindow::newSurvey);
   auto [actOpen, btnOpen] = addIcon(QStringLiteral("survey"), QStringLiteral("open"),
-                                    QStringLiteral("조사 열기"),
+                                    QStringLiteral("열기"),
                                     QStringLiteral("저장한 조사를 엽니다"), &MainWindow::openProject);
   auto [actSave, btnSave] = addIcon(QStringLiteral("survey"), QStringLiteral("save"),
                                     QStringLiteral("저장"),
                                     QStringLiteral("현재 조사를 저장합니다 (Ctrl+S)"), &MainWindow::saveProject);
   actNew->setShortcut(QKeySequence::New);
-  actNew->setToolTip(QStringLiteral("현장 조사 프로젝트를 새로 만듭니다 (Ctrl+N)"));
+  actNew->setToolTip(QStringLiteral("새 조사 — 현장 조사 프로젝트를 새로 만듭니다 (Ctrl+N)"));
   actOpen->setShortcut(QKeySequence::Open);
   actOpen->setToolTip(QStringLiteral("저장한 조사를 엽니다 (Ctrl+O)"));
   actSave->setShortcut(QKeySequence::Save);
   auto [actSaveAs, btnSaveAs] = addIcon(QStringLiteral("survey"), QStringLiteral("save_as"),
-                                        QStringLiteral("다른 이름"),
+                                        QStringLiteral("다른이름"),
                                         QStringLiteral("작업 중인 모든 레이어를 다른 이름으로 저장합니다 (Ctrl+Shift+S)"),
                                         &MainWindow::saveProjectAs);
   actSaveAs->setShortcut(QKeySequence::SaveAs);
@@ -459,7 +459,7 @@ void MainWindow::buildMenus() {
   addAction(actRedo);
   m_actRedo = actRedo;
   auto [actMeasure, btnMeasure] = addIcon(
-      QStringLiteral("record"), QStringLiteral("measure"), QStringLiteral("거리 측정"),
+      QStringLiteral("record"), QStringLiteral("measure"), QStringLiteral("측거"),
       QStringLiteral("지도에서 거리와 면적을 측정합니다. 다시 누르면 종료합니다"),
       &MainWindow::startMeasureTool);
   m_actMeasure = actMeasure;
@@ -470,7 +470,7 @@ void MainWindow::buildMenus() {
   m_btnDraw = new QToolButton(ribbon);
   m_btnDraw->setObjectName(QStringLiteral("btnDraw"));
   m_btnDraw->setIcon(KaIcons::icon(QStringLiteral("draw_poly")));
-  m_btnDraw->setText(QStringLiteral("그리기"));
+  m_btnDraw->setText(QStringLiteral("도화"));
   m_btnDraw->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   m_btnDraw->setCheckable(true);
   m_btnDraw->setToolTip(QStringLiteral("조사구역·유구 면과 선을 그립니다. 다시 누르면 도구를 닫고 이동합니다"));
@@ -498,7 +498,7 @@ void MainWindow::buildMenus() {
   m_btnTerrain = new QToolButton(ribbon);
   m_btnTerrain->setObjectName(QStringLiteral("btnTerrain"));
   m_btnTerrain->setIcon(KaIcons::icon(QStringLiteral("contour")));
-  m_btnTerrain->setText(QStringLiteral("지형맵"));
+  m_btnTerrain->setText(QStringLiteral("지형"));
   m_btnTerrain->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   m_btnTerrain->setCheckable(true);
   m_btnTerrain->setToolTip(
@@ -511,7 +511,7 @@ void MainWindow::buildMenus() {
   auto* topographic = new QToolButton(ribbon);
   topographic->setObjectName(QStringLiteral("btnTopographic"));
   topographic->setIcon(KaIcons::icon(QStringLiteral("contour")));
-  topographic->setText(QStringLiteral("수치지형도"));
+  topographic->setText(QStringLiteral("수치"));
   topographic->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   topographic->setToolTip(QStringLiteral("HGIS 안에서 국토지리정보원에 로그인하고 수치지형도를 받습니다"));
   topographic->setPopupMode(QToolButton::MenuButtonPopup);
@@ -549,7 +549,7 @@ void MainWindow::buildMenus() {
   m_btnSoil = new QToolButton(ribbon);
   m_btnSoil->setObjectName(QStringLiteral("btnSoil"));
   m_btnSoil->setIcon(KaIcons::icon(QStringLiteral("soil")));
-  m_btnSoil->setText(QStringLiteral("토양도"));
+  m_btnSoil->setText(QStringLiteral("토양"));
   m_btnSoil->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   m_btnSoil->setCheckable(true);
   m_btnSoil->setPopupMode(QToolButton::MenuButtonPopup);
@@ -581,7 +581,7 @@ void MainWindow::buildMenus() {
   connect(m_btnPaleo, &QToolButton::clicked, this, &MainWindow::startPaleoLandform);
   ribbon->addWidget(QStringLiteral("basemap"), m_btnPaleo);
   auto [actCadastral, btnCadastral] = addIcon(
-      QStringLiteral("basemap"), QStringLiteral("cadastral"), QStringLiteral("지적도"),
+      QStringLiteral("basemap"), QStringLiteral("cadastral"), QStringLiteral("지적"),
       QStringLiteral("조사구역 주변 5km 지적도를 받아 경계선과 지번을 표시합니다"),
       &MainWindow::downloadCadastral);
   actCadastral->setObjectName(QStringLiteral("actionCadastralDownload"));
@@ -593,7 +593,7 @@ void MainWindow::buildMenus() {
   m_btnDaedong = new QToolButton(ribbon);
   m_btnDaedong->setObjectName(QStringLiteral("btnDaedongyeojido"));
   m_btnDaedong->setIcon(KaIcons::icon(QStringLiteral("map")));
-  m_btnDaedong->setText(QStringLiteral("대동여지도"));
+  m_btnDaedong->setText(QStringLiteral("대동여지"));
   m_btnDaedong->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   m_btnDaedong->setToolTip(
       QStringLiteral("대동여지도를 참조 지도로 올립니다. API 키가 필요 없습니다"));
@@ -602,19 +602,19 @@ void MainWindow::buildMenus() {
   m_btnMap1919 = new QToolButton(ribbon);
   m_btnMap1919->setObjectName(QStringLiteral("btnMap1919"));
   m_btnMap1919->setIcon(KaIcons::icon(QStringLiteral("contour")));
-  m_btnMap1919->setText(QStringLiteral("1919 조선지형도\n1:5만"));
+  m_btnMap1919->setText(QStringLiteral("1919지형"));
   m_btnMap1919->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   connect(m_btnMap1919, &QToolButton::clicked, this, &MainWindow::addHistoryGisMap1919);
   ribbon->addWidget(QStringLiteral("basemap"), m_btnMap1919);
   auto [actGeology, btnGeology] = addIcon(
-      QStringLiteral("basemap"), QStringLiteral("geology"), QStringLiteral("지질도"),
+      QStringLiteral("basemap"), QStringLiteral("geology"), QStringLiteral("지질"),
       QStringLiteral("KIGAM 1:5만 지질 색 위에 지형 음영을 겹칩니다. 다시 누르면 숨깁니다"),
       &MainWindow::downloadGeologyMap);
   m_actGeology = actGeology;
   Q_UNUSED(btnGeology);
   if (m_actGeology) m_actGeology->setCheckable(true);
   auto [actRiver, btnRiver] = addIcon(
-      QStringLiteral("basemap"), QStringLiteral("river"), QStringLiteral("수계도"),
+      QStringLiteral("basemap"), QStringLiteral("river"), QStringLiteral("수계"),
       QStringLiteral("하천망을 겹칩니다. 다시 누르면 숨깁니다"),
       &MainWindow::downloadRiverMap);
   m_actRiver = actRiver;
@@ -626,13 +626,13 @@ void MainWindow::buildMenus() {
       QTimer::singleShot(0, this, [this]() { syncThematicButtons(); });
     });
   }
-  addIcon(QStringLiteral("align"), QStringLiteral("georef"), QStringLiteral("좌표없는 사진·CAD를\n도면에 합치기"),
+  addIcon(QStringLiteral("align"), QStringLiteral("georef"), QStringLiteral("정합"),
           QStringLiteral("좌표없는 사진·CAD를 도면에 합치기"), &MainWindow::georefAssistant);
 
   auto* btnBuffer = new QToolButton(ribbon);
   btnBuffer->setObjectName(QStringLiteral("btnBuffer"));
   btnBuffer->setIcon(KaIcons::icon(QStringLiteral("buffer")));
-  btnBuffer->setText(QStringLiteral("주변유적 500M·1000M\n표시하기"));
+  btnBuffer->setText(QStringLiteral("버퍼"));
   btnBuffer->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   btnBuffer->setCheckable(true);
   btnBuffer->setToolTip(QStringLiteral("주변유적 500M·1000M 표시하기 — 선택한 면 둘레에 거리 경계를 그립니다"));
@@ -648,7 +648,7 @@ void MainWindow::buildMenus() {
   auto* btnHeritage = new QToolButton(ribbon);
   btnHeritage->setObjectName(QStringLiteral("btnHeritageFetch"));
   btnHeritage->setIcon(KaIcons::icon(QStringLiteral("buffer")));
-  btnHeritage->setText(QStringLiteral("주변유적\n받기"));
+  btnHeritage->setText(QStringLiteral("유산"));
   btnHeritage->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   btnHeritage->setToolTip(QStringLiteral(
       "조사구역이 속한 시·군의 국가유산 자료를 인트라넷에서 받아 참조 지도로 올립니다.\n"
@@ -657,15 +657,15 @@ void MainWindow::buildMenus() {
   ribbon->addWidget(QStringLiteral("align"), btnHeritage);
 
   auto [actLayout, btnLayout] = addIcon(
-      QStringLiteral("out"), QStringLiteral("pdf"), QStringLiteral("도면 만들기"),
-      QStringLiteral("종이에 지도를 올려 도면을 만듭니다 (Ctrl+L)"), &MainWindow::openLayoutDesigner);
+      QStringLiteral("out"), QStringLiteral("pdf"), QStringLiteral("도면"),
+      QStringLiteral("도면 만들기 — 종이에 지도를 올려 도면을 만듭니다 (Ctrl+L)"), &MainWindow::openLayoutDesigner);
   actLayout->setShortcut(QKeySequence(QStringLiteral("Ctrl+L")));
   Q_UNUSED(btnLayout);
-  addIcon(QStringLiteral("out"), QStringLiteral("section"), QStringLiteral("단면도"),
+  addIcon(QStringLiteral("out"), QStringLiteral("section"), QStringLiteral("단면"),
           QStringLiteral("단면 GeoTIFF로 표고·거리 눈금 도면을 만듭니다"),
           &MainWindow::openSectionDesigner);
   auto [actMapGeoTiff, btnMapGeoTiff] = addIcon(
-      QStringLiteral("out"), QStringLiteral("map"), QStringLiteral("GeoTIFF\n저장"),
+      QStringLiteral("out"), QStringLiteral("map"), QStringLiteral("GeoTIFF"),
       QStringLiteral("현재 지도에 보이는 범위와 레이어를 지도 좌표계 그대로 GeoTIFF로 저장합니다"),
       &MainWindow::exportMapGeoTiff);
   m_actMapGeoTiff = actMapGeoTiff;
@@ -673,7 +673,7 @@ void MainWindow::buildMenus() {
   m_actMapGeoTiff->setEnabled(false);
   btnMapGeoTiff->setObjectName(QStringLiteral("btnMapGeoTiff"));
   auto [actExport, btnExport] = addIcon(
-      QStringLiteral("out"), QStringLiteral("transform"), QStringLiteral("5179좌표계\n내보내기"),
+      QStringLiteral("out"), QStringLiteral("transform"), QStringLiteral("5179"),
       QStringLiteral("인트라넷 제출. 선택한 레이어를 EPSG:5179 SHP 파일로만 저장합니다 (Ctrl+E)."),
       &MainWindow::convertSelectedTo5179);
   actExport->setShortcut(QKeySequence(QStringLiteral("Ctrl+E")));
@@ -712,7 +712,7 @@ void MainWindow::buildMenus() {
   auto* webBtn = new QToolButton(ribbon);
   webBtn->setObjectName(QStringLiteral("btnWeb"));
   webBtn->setIcon(KaIcons::icon(QStringLiteral("map")));
-  webBtn->setText(QStringLiteral("웹자료"));
+  webBtn->setText(QStringLiteral("웹"));
   webBtn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   webBtn->setToolTip(QStringLiteral("인트라넷·토양도·지적도·지형도 웹 자료를 엽니다"));
   webBtn->setPopupMode(QToolButton::InstantPopup);

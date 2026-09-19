@@ -33,6 +33,7 @@ private slots:
   void initTestCase();
   void ribbonButtons_renderAtIntendedSize();
   void ribbonOverflow_preservesControlsAndKeyboard();
+  void ribbonOverflow_keepsAlignAtFieldWidth();
   void ribbon_tabEnterNewSurveyToSave();
   void domainIcons_useDistinctColors();
   void iconStates_preserveMeaningAndDisableColor();
@@ -154,14 +155,14 @@ void TestTheme::ribbon_tabEnterNewSurveyToSave() {
     QKeySequence key;
   };
   const Cmd cmds[] = {
-      {"survey", "새 조사", QKeySequence::New},
-      {"survey", "조사 열기", QKeySequence::Open},
+      {"survey", "신규", QKeySequence::New},
+      {"survey", "열기", QKeySequence::Open},
       {"survey", "저장", QKeySequence::Save},
-      {"survey", "다른 이름", QKeySequence::SaveAs},
-      {"record", "그리기", QKeySequence(QStringLiteral("Ctrl+D"))},
+      {"survey", "다른이름", QKeySequence::SaveAs},
+      {"record", "도화", QKeySequence(QStringLiteral("Ctrl+D"))},
       {"record", "선택", QKeySequence(QStringLiteral("Ctrl+1"))},
-      {"out", "도면 만들기", QKeySequence(QStringLiteral("Ctrl+L"))},
-      {"out", "5179 내보내기", QKeySequence(QStringLiteral("Ctrl+E"))},
+      {"out", "도면", QKeySequence(QStringLiteral("Ctrl+L"))},
+      {"out", "5179", QKeySequence(QStringLiteral("Ctrl+E"))},
   };
   QList<QAction*> actions;
   QList<QToolButton*> buttons;
@@ -198,7 +199,7 @@ void TestTheme::ribbonOverflow_preservesControlsAndKeyboard() {
   KaBeginnerRibbon ribbon;
   ribbon.addGroup(QStringLiteral("survey"), QStringLiteral("조사파일"));
   ribbon.addGroup(QStringLiteral("record"), QStringLiteral("기록"));
-  auto* survey = new QAction(QStringLiteral("조사 열기"), &ribbon);
+  auto* survey = new QAction(QStringLiteral("열기"), &ribbon);
   auto* open = ribbon.addAction(QStringLiteral("survey"), survey);
   auto* draw = new QToolButton(&ribbon);
   draw->setText(QStringLiteral("그리기"));
@@ -212,7 +213,7 @@ void TestTheme::ribbonOverflow_preservesControlsAndKeyboard() {
   auto* overflow = ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
   QVERIFY(overflow);
   QVERIFY(!overflow->isVisible());
-  ribbon.resize(140, ribbon.height());
+  ribbon.resize(80, ribbon.height());
   QTRY_VERIFY(overflow->isVisible());
   QVERIFY(overflow->width() >= overflow->fontMetrics().horizontalAdvance(overflow->text()));
   auto* menu = ribbon.findChild<QMenu*>(QStringLiteral("ribbonOverflowMenu"));
@@ -234,10 +235,69 @@ void TestTheme::ribbonOverflow_preservesControlsAndKeyboard() {
     QVERIFY(retainedDraw && retainedDraw == draw);
     QCOMPARE(open->defaultAction(), survey);
     QVERIFY(draw->isVisible());
-    QCOMPARE(draw->font().pixelSize(), 13);
-    ribbon.resize(140, ribbon.height());
+    QCOMPARE(draw->font().pixelSize(), 12);
+    ribbon.resize(80, ribbon.height());
     QTRY_VERIFY(overflow->isVisible());
   }
+}
+
+void TestTheme::ribbonOverflow_keepsAlignAtFieldWidth() {
+  KaBeginnerRibbon ribbon;
+  ribbon.setAttribute(Qt::WA_DontShowOnScreen);
+  ribbon.addGroup(QStringLiteral("survey"), QStringLiteral("조사파일"));
+  ribbon.addGroup(QStringLiteral("record"), QStringLiteral("기록"));
+  ribbon.addGroup(QStringLiteral("basemap"), QStringLiteral("배경 지도"));
+  ribbon.addGroup(QStringLiteral("align"), QStringLiteral("좌표 정합"));
+  ribbon.addGroup(QStringLiteral("out"), QStringLiteral("내보내기"));
+  ribbon.addGroup(QStringLiteral("find"), QStringLiteral("찾기"));
+  const struct { const char* group; const char* text; } chips[] = {
+      {"survey", "신규"}, {"survey", "열기"}, {"survey", "저장"}, {"survey", "다른이름"},
+      {"record", "선택"}, {"record", "측거"}, {"record", "도화"}, {"record", "시굴격자"},
+      {"basemap", "지형"}, {"basemap", "수치"}, {"basemap", "DEM"}, {"basemap", "토양"},
+      {"basemap", "고지형"}, {"basemap", "지적"}, {"basemap", "대동여지"}, {"basemap", "1919지형"},
+      {"basemap", "지질"}, {"basemap", "수계"},
+      {"align", "정합"}, {"align", "버퍼"}, {"align", "유산"},
+      {"out", "도면"}, {"out", "단면"}, {"out", "GeoTIFF"}, {"out", "5179"},
+      {"find", "웹"}, {"find", "더보기"},
+  };
+  for (const auto& chip : chips) {
+    auto* button = new QToolButton(&ribbon);
+    button->setText(QString::fromUtf8(chip.text));
+    if (QString::fromLatin1(chip.group) == QLatin1String("align"))
+      button->setObjectName(QStringLiteral("fieldAlign_") + QString::fromUtf8(chip.text));
+    ribbon.addWidget(QString::fromLatin1(chip.group), button);
+  }
+  auto* locator = new QWidget(&ribbon);
+  locator->setObjectName(QStringLiteral("fieldRegionLocator"));
+  locator->setMinimumWidth(230);
+  locator->setFixedHeight(48);
+  ribbon.addWidget(QStringLiteral("find"), locator);
+  ribbon.resize(1366, ribbon.sizeHint().height());
+  ribbon.show();
+  QCoreApplication::processEvents();
+  auto* overflow = ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
+  QVERIFY(overflow);
+  auto* align = ribbon.group(QStringLiteral("align"));
+  QVERIFY(align);
+  QVERIFY2(align->parentWidget() == &ribbon,
+           "좌표 정합 must stay on the ribbon at 1366, not inside 더 많은 작업");
+  auto* georef = ribbon.findChild<QToolButton*>(QStringLiteral("fieldAlign_정합"));
+  QVERIFY(georef);
+  QVERIFY(georef->isVisible());
+  QCOMPARE(KaTheme::buttonMetrics().ribbonChipGap, 0);
+  QCOMPARE(KaTheme::buttonMetrics().ribbonChipWidth, 56);
+  QCOMPARE(KaTheme::buttonMetrics().ribbonMinWidth, 56);
+  QCOMPARE(KaTheme::buttonMetrics().ribbonFontSize, 12);
+  QVERIFY(georef->width() >= KaTheme::buttonMetrics().ribbonChipWidth);
+  QVERIFY(georef->height() >= KaTheme::buttonMetrics().ribbonHeight);
+  ribbon.resize(2200, ribbon.height());
+  QTRY_VERIFY(ribbon.group(QStringLiteral("find"))->parentWidget() == &ribbon);
+  QVERIFY(georef->width() >= KaTheme::buttonMetrics().ribbonChipWidth);
+  auto* find = ribbon.group(QStringLiteral("find"));
+  QVERIFY(find);
+  const int packedRight = find->mapTo(&ribbon, QPoint(find->width(), 0)).x();
+  QVERIFY2(ribbon.width() - packedRight >= 80,
+           "leftover window width must stay empty on the right, not on chips");
 }
 
 void TestTheme::ribbonButtons_renderAtIntendedSize() {
@@ -256,16 +316,16 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
   ribbon->addGroup(QStringLiteral("find"), QStringLiteral("찾기"));
   struct ButtonSpec { const char* group; const char* icon; const char* text; bool custom; };
   const ButtonSpec specs[] = {
-      {"survey", "new", "새 조사", false}, {"survey", "open", "조사 열기", false},
-      {"survey", "save", "저장", false}, {"survey", "save_as", "다른 이름", false},
+      {"survey", "new", "신규", false}, {"survey", "open", "열기", false},
+      {"survey", "save", "저장", false}, {"survey", "save_as", "다른이름", false},
       {"record", "select", "선택", false},
-      {"record", "measure", "거리 측정", false}, {"record", "draw_poly", "그리기", true},
+      {"record", "measure", "측거", false}, {"record", "draw_poly", "도화", true},
       {"record", "trench_grid", "시굴격자", false},
-      {"basemap", "contour", "지형맵", true}, {"basemap", "dem", "DEM", true},
-      {"basemap", "soil", "토양도", true}, {"basemap", "paleo", "고지형", true},
-      {"basemap", "geology", "지질도", false}, {"basemap", "river", "수계도", false},
-      {"align", "georef", "사진·CAD\n정합", false}, {"align", "buffer", "주변 범위", true},
-      {"out", "check", "검수", false}, {"out", "pdf", "도면 만들기", false},
+      {"basemap", "contour", "지형", true}, {"basemap", "dem", "DEM", true},
+      {"basemap", "soil", "토양", true}, {"basemap", "paleo", "고지형", true},
+      {"basemap", "geology", "지질", false}, {"basemap", "river", "수계", false},
+      {"align", "georef", "정합", false}, {"align", "buffer", "버퍼", true},
+      {"out", "check", "검수", false}, {"out", "pdf", "도면", false},
       {"out", "export", "내보내기", false},
       {"find", "more", "더보기", true},
   };
@@ -297,22 +357,31 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
   toolbar.show();
   QCoreApplication::processEvents();
 
+  const int commonWidth = buttons.front()->width();
   const int commonHeight = buttons.front()->height();
-  bool testedTwoLines = false;
-  for (QToolButton* button : buttons) {
+  QVERIFY(commonWidth >= KaTheme::buttonMetrics().ribbonChipWidth);
+  QVERIFY(commonHeight >= KaTheme::buttonMetrics().ribbonHeight);
+  for (int i = 0; i < buttons.size(); ++i) {
+    QToolButton* button = buttons.at(i);
     QVERIFY(qobject_cast<QFrame*>(button->parentWidget()));
     QCOMPARE(button->iconSize(), QSize(32, 32));
-    QCOMPARE(button->font().pixelSize(), 13);
+    QCOMPARE(button->font().pixelSize(), 12);
+    QCOMPARE(button->width(), commonWidth);
     QCOMPARE(button->height(), commonHeight);
     QCOMPARE(button->toolButtonStyle(), Qt::ToolButtonTextUnderIcon);
+    if (i > 0 && buttons.at(i - 1)->parentWidget() == button->parentWidget()) {
+      const int gap = button->x() - (buttons.at(i - 1)->x() + buttons.at(i - 1)->width());
+      QCOMPARE(gap, KaTheme::buttonMetrics().ribbonChipGap);
+    }
     QVERIFY2(toolbar.rect().contains(QRect(button->mapTo(&toolbar, QPoint()), button->size())),
              "all fixture buttons must fit without toolbar overflow");
     const QFontMetrics fm(button->font());
     const QSize label = fm.size(Qt::TextShowMnemonic, button->text());
     QVERIFY2(button->height() >= 32 + 4 + label.height() + 6,
              qPrintable(button->text() + QStringLiteral(": icon and label must fit")));
-    QVERIFY(button->width() >= label.width() + 6);
-    testedTwoLines |= button->text().contains(QLatin1Char('\n'));
+    QVERIFY(button->width() >= label.width());
+    QVERIFY2(!button->text().contains(QLatin1Char('\n')),
+             qPrintable(button->text() + QStringLiteral(": ribbon caption must stay one line")));
 
     // Compare actual widget pixels against the same widget with a transparent
     // icon. A non-null transparent icon keeps the layout and label unchanged.
@@ -334,7 +403,11 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
                      << "button" << button->size() << "icon ink (physical px)" << ink.size()
                      << "DPR" << dpr;
   }
-  QVERIFY2(testedTwoLines, "fixture must exercise the two-line label path");
+  QVERIFY2(!KaBeginnerRibbon::twoLine(QStringLiteral("조사 열기")).contains(QLatin1Char('\n')),
+           "twoLine keeps spaced Korean on one line");
+  QVERIFY2(KaBeginnerRibbon::twoLine(QStringLiteral("1919 조선지형도\n1:5만")) ==
+               QStringLiteral("1919 조선지형도 1:5만"),
+           "twoLine flattens explicit newlines");
   // A toolbar size change must not shrink nested ribbon icons again.
   toolbar.setIconSize(QSize(24, 24));
   QCoreApplication::processEvents();
@@ -842,8 +915,11 @@ void TestTheme::toolbarCheckedHasDistinctTreatment() {
   const QImage off = normal->grab().toImage();
   const QImage on = checked->grab().toImage();
   // Compare empty face pixels, not the separately tested icon/check marker.
-  const QColor normalFace = logicalPixel(off, 8, normal->height() / 2);
-  const QColor checkedFace = logicalPixel(on, 8, checked->height() / 2);
+  const int faceX = qMax(4, normal->width() / 2);
+  const int faceY = qBound(normal->iconSize().height() + 4, normal->height() - 8,
+                           normal->height() - 4);
+  const QColor normalFace = logicalPixel(off, faceX, faceY);
+  const QColor checkedFace = logicalPixel(on, faceX, faceY);
   QVERIFY2(normalFace != checkedFace, "checked ribbon needs a visible face treatment");
   const QColor foreground = checked->palette().color(QPalette::ButtonText);
   QVERIFY(contrastRatio(foreground, checkedFace) >= 4.5);
@@ -928,8 +1004,9 @@ void TestTheme::beginnerChrome_questionLabels() {
   QVERIFY2(rb.open(QIODevice::ReadOnly | QIODevice::Text), "KaBeginnerRibbon.cpp");
   const QString ribbon = QString::fromUtf8(rb.readAll());
   QVERIFY2(ribbon.contains(QLatin1String("ribbonGroupCaption")), "그룹 제목 라벨");
-  QVERIFY2(ribbon.contains(QLatin1String("twoLine")) || ribbon.contains(QStringLiteral("\\n")),
-           "리본 글자는 두 줄");
+  QVERIFY2(ribbon.contains(QLatin1String("twoLine")), "리본 글자 한 줄 정규화");
+  QVERIFY2(ribbon.contains(QLatin1String("replace(QLatin1Char('\\n')")),
+           "리본은 줄바꿈을 한 칸으로 붙인다");
 
   QFile ds(QStringLiteral("src/app/KaDrawingStudio.cpp"));
   QVERIFY2(ds.open(QIODevice::ReadOnly | QIODevice::Text), "KaDrawingStudio.cpp");

@@ -254,10 +254,13 @@ QString resolvedStyleSheet(const QString& sheet) {
   const struct { const char* name; int value; } replacements[] = {
       {"ribbonIconSize", metrics.ribbonIconSize},
       {"ribbonFontSize", metrics.ribbonFontSize},
+      {"ribbonChipWidth", metrics.ribbonChipWidth},
       {"ribbonMinWidth", metrics.ribbonMinWidth},
       {"ribbonHeight", metrics.ribbonHeight},
       {"buttonPadding", metrics.buttonPadding},
       {"buttonSpacing", metrics.buttonSpacing},
+      {"ribbonChipGap", metrics.ribbonChipGap},
+      {"ribbonGroupPad", metrics.ribbonGroupPad},
       {"scaleButtonHeight", metrics.scaleButtonHeight},
       {"scaleButtonMinWidth", metrics.scaleButtonMinWidth},
       {"scaleFontSize", metrics.scaleFontSize},

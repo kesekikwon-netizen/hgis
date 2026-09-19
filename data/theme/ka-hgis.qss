@@ -252,9 +252,10 @@ QLabel#ribbonGroupCaption {
   background: transparent;
 }
 QWidget#beginnerRibbon QToolButton {
-  /* Outer button dimensions come from KaTheme::ButtonMetrics in C++. */
-  min-width: 0;
-  min-height: 0;
+  min-width: @ribbonChipWidth@px;
+  max-width: @ribbonChipWidth@px;
+  min-height: @ribbonHeight@px;
+  max-height: @ribbonHeight@px;
   margin: 0;
   padding: @buttonPadding@px;
   background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
@@ -274,7 +275,13 @@ QWidget#beginnerRibbon QToolButton:enabled:pressed {
   background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @pressedTop@, stop:1 @pressedBottom@);
   border-bottom: 1px solid @edgeDark@;
   margin-top: 0;
-  min-height: 0;
+  min-height: @ribbonHeight@px;
+}
+QWidget#beginnerRibbon QToolButton#ribbonOverflow {
+  min-width: 72px;
+  max-width: 220px;
+  min-height: 28px;
+  max-height: @ribbonHeight@px;
 }
 QWidget#beginnerRibbon QToolButton:enabled:checked {
   background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);

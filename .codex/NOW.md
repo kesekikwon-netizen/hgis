@@ -1,3 +1,30 @@
+## 2026-09-20 리본 칸 고정·창 너비 안 나눔
+
+- 원인: 그룹이 Preferred라 `QHBoxLayout`이 창 남는 폭을 칸 사이에 나눔.
+- 칸은 같은 크기(`ribbonChipWidth` 56, `ribbonHeight` 82, QSS min/max). 그룹 Maximum. `addStretch(1)`이 남는 폭을 오른쪽이 먹음. https://doc.qt.io/qt-6.8/qboxlayout.html#addStretch
+- 넘침 버튼은 마지막 칸 옆. 1366에서 좌표 정합은 리본. CTest `theme_qss` Passed 0.75초.
+- clangd `setFixedSize` L169 → Qt `qwidget.h` L526/L912. `diagnostic_error_count` 12는 기존 compile DB INCLUDE. Graft `applyTwoLine` L148.
+- Archify workflow showcase 9/9 deliver visual-check pass → `build/qa/ribbon-pack-20260920/ribbon-pack.workflow.html`.
+- EXE SHA256 49D726D6151A95DDD31C26424745BFEA98CEABA83FB717210F44F19CFCE92AC5. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-20 리본 짧은 전문 용어
+
+- 칸 글자: 신규·열기·도화·측거·수치·지적·대동여지·1919지형·정합·버퍼·유산·도면·5179. 전체 뜻은 툴팁.
+- 폭은 `boundingRect` + `PM_ButtonMargin`/`PM_DefaultFrameWidth`. 한글이 `horizontalAdvance`보다 넓어 잘리던 것 보정.
+
+## 2026-09-20 리본 간격 축소
+
+- `ribbonChipGap=0`, `ribbonGroupPad=1`, `ribbonMinWidth=36`, `buttonPadding=1`. 조판용 `buttonSpacing=4`는 유지.
+- overflow는 왼쪽 그룹을 남기고 오른쪽부터 접음. 좌표 정합이 내보내기보다 먼저 사라지지 않음.
+- 목표: 현장 1366에서 「더 많은 작업」 없이 좌표 정합이 보임.
+- CTest `theme_qss` Passed 0.75초. `ribbonOverflow_keepsAlignAtFieldWidth` 포함. Release `ka-hgis` 링크.
+
+## 2026-09-20 리본 글자 한 줄
+
+- `KaBeginnerRibbon::twoLine`이 4글자 초과·공백에서 두 줄로 쪼개던 동작을 없앰. 줄바꿈은 공백으로 붙이고 폭은 한 줄 전체.
+- 긴 칸은 짧은 한 줄: `1919지형도`, `사진·CAD정합`, `주변범위`, `유적받기`, `GeoTIFF저장`, `5179내보내기`. 전체 이름은 툴팁.
+- 근거: Qt 6.8 `QToolButton::toolButtonStyle` https://doc.qt.io/qt-6.8/qtoolbutton.html
+
 ## 2026-09-20 배경 지도 대동여지도·1919 조선지형도
 
 - 리본 `배경 지도`에 **대동여지도**(키 없음), **1919 조선지형도 1:5만**(키 있을 때만 활성). 새 리본 없음. 더보기 **API 키 입력** 유지.

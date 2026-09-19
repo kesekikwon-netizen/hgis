@@ -23,6 +23,7 @@ public:
   QFrame* group(const QString& id) const;
   QList<QToolButton*> tabButtons() const;
   void applyTabOrder();
+  // 이름은 예전 두 줄 맞춤. 지금은 줄바꿈을 없애 한 줄로 맞춘다.
   static QString twoLine(const QString& text);
   static void applyTwoLine(QToolButton* button);
   QSize sizeHint() const override;
@@ -35,6 +36,7 @@ protected:
 
 private:
   QHBoxLayout* buttonRow(const QString& groupId) const;
+  int groupInsertIndex() const;
   void updateOverflow();
 
   QHBoxLayout* m_row = nullptr;
