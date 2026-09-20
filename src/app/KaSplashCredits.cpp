@@ -62,7 +62,9 @@ QString plainText() {
   return lines.join(QLatin1Char('\n'));
 }
 
-void paintHeader(QPainter& painter, const QRectF& area, const QPixmap& icon, double shine) {
+void paintHeader(QPainter& painter, const QRectF& area, const QPixmap& icon, double appear) {
+  painter.save();
+  painter.setOpacity(clamp01(appear));
   const double side = area.height();
   const qreal dpr = painter.device() ? painter.device()->devicePixelRatioF() : 1.0;
   if (!icon.isNull()) {
@@ -71,17 +73,6 @@ void paintHeader(QPainter& painter, const QRectF& area, const QPixmap& icon, dou
                                Qt::SmoothTransformation)
                        .convertToFormat(QImage::Format_ARGB32_Premultiplied);
     image.setDevicePixelRatio(dpr);
-    if (shine > 0.0 && shine < 1.0) {
-      // A light glint crosses the gold trowel, clipped to the icon's own shape.
-      QPainter glint(&image);
-      glint.setCompositionMode(QPainter::CompositionMode_SourceAtop);
-      const double x = -side * 0.4 + shine * side * 1.8;
-      QLinearGradient band(x, 0, x + side * 0.3, 0);
-      band.setColorAt(0, QColor(255, 248, 220, 0));
-      band.setColorAt(0.5, QColor(255, 248, 220, 190));
-      band.setColorAt(1, QColor(255, 248, 220, 0));
-      glint.fillRect(QRectF(0, 0, side, side), band);
-    }
     painter.drawImage(QPointF(area.left(), area.top()), image);
   }
   const double textLeft = area.left() + side * 1.22;
@@ -92,33 +83,25 @@ void paintHeader(QPainter& painter, const QRectF& area, const QPixmap& icon, dou
   painter.setFont(uiFont(side * 0.25));
   painter.drawText(QPointF(textLeft, area.bottom() - side * 0.06),
                    QStringLiteral("v2 · 현장을 도면으로"));
+  painter.restore();
 }
 
-void paintTitleBlock(QPainter& painter, const QRectF& area, double sweep) {
+void paintTitleBlock(QPainter& painter, const QRectF& area, double appear) {
   const QVector<Row> list = rows();
   const double rowHeight = area.height() / list.size();
   const double keyWidth = area.width() * 0.22;
-  QPainterPath frame;
-  frame.addRoundedRect(area, 10, 10);
   painter.save();
-  painter.fillPath(frame, QColor(9, 47, 86, 120));
-  painter.setClipPath(frame);
-  if (sweep > 0.0 && sweep < 1.0) {
-    const double y = area.top() + sweep * area.height();
-    QLinearGradient band(0, y - rowHeight, 0, y + rowHeight);
-    band.setColorAt(0, QColor(255, 255, 255, 0));
-    band.setColorAt(0.5, QColor(255, 255, 255, 34));
-    band.setColorAt(1, QColor(255, 255, 255, 0));
-    painter.fillRect(area, band);
-  }
-  painter.setPen(QPen(withAlpha(kLine, 0.55), 1));
+  painter.setOpacity(clamp01(appear));
+  painter.fillRect(area, QColor(9, 47, 86, 120));
+  painter.setClipRect(area);
+  painter.setPen(QPen(withAlpha(kLine, 0.4), 1));
   painter.drawLine(QPointF(area.left() + keyWidth, area.top()),
                    QPointF(area.left() + keyWidth, area.bottom()));
   for (int i = 0; i < list.size(); ++i) {
     const Row& row = list.at(i);
     const double top = area.top() + i * rowHeight;
     if (i > 0) {
-      painter.setPen(QPen(withAlpha(kLine, row.key.isEmpty() ? 0.14 : 0.42), 1));
+      painter.setPen(QPen(withAlpha(kLine, row.key.isEmpty() ? 0.1 : 0.28), 1));
       painter.drawLine(QPointF(area.left(), top), QPointF(area.right(), top));
     }
     const double baseline = top + rowHeight * 0.68;
@@ -131,51 +114,27 @@ void paintTitleBlock(QPainter& painter, const QRectF& area, double sweep) {
     painter.setPen(row.emphasis ? QColor(Qt::white) : kInk);
     painter.drawText(QPointF(area.left() + keyWidth + 9, baseline), row.value);
   }
-  painter.restore();
-  painter.setPen(QPen(withAlpha(kLine, 0.6), 1));
+  painter.setPen(QPen(withAlpha(kLine, 0.4), 1));
   painter.setBrush(Qt::NoBrush);
-  painter.drawPath(frame);
+  painter.drawRect(area.adjusted(0, 0, -1, -1));
+  painter.restore();
 }
 
 void paintFooter(QPainter& painter, const QRectF& bar, const QRectF& card, double unit,
                  double progress, const QString& status, const QString& seconds) {
-  painter.setFont(uiFont(12.5 * unit));
-  painter.setPen(kInk);
-  painter.drawText(QPointF(bar.left(), bar.top() - 8 * unit), status);
-  painter.drawText(QRectF(bar.left(), bar.top() - 26 * unit, bar.width(), 20 * unit),
-                   Qt::AlignRight | Qt::AlignBottom, seconds);
-
-  QPainterPath track;
-  track.addRoundedRect(bar, bar.height() / 2, bar.height() / 2);
-  painter.save();
-  painter.fillPath(track, withAlpha(kInk, 0.18));
-  painter.setClipPath(track);
-  constexpr int kSegments = 5;
-  const double segment = bar.width() / kSegments;
-  for (int i = 0; i < kSegments; ++i) {
-    const double filled = clamp01(progress * kSegments - i);
-    painter.fillRect(QRectF(bar.left() + segment * i, bar.top(), segment * filled, bar.height()),
-                     i % 2 ? kInk : kGold);
-  }
-  painter.restore();
-  painter.setPen(QPen(withAlpha(kInk, 0.6), 1));
-  painter.setBrush(Qt::NoBrush);
-  painter.drawPath(track);
-
-  painter.setPen(kSky);
+  Q_UNUSED(seconds);
   painter.setFont(uiFont(11 * unit));
-  for (int i = 0; i <= kSegments; ++i) {
-    const QString label = i == kSegments ? QStringLiteral("10초") : QString::number(i * 2);
-    const double x = bar.left() + segment * i;
-    const double width = QFontMetricsF(painter.font()).horizontalAdvance(label);
-    const double left = i == 0 ? x : (i == kSegments ? x - width : x - width / 2);
-    painter.drawText(QPointF(left, bar.bottom() + 15 * unit), label);
-  }
-
   painter.setPen(withAlpha(kInk, 0.88));
-  painter.setFont(uiFont(11.5 * unit));
-  painter.drawText(QRectF(card.left() + 24 * unit, card.bottom() - 30 * unit,
-                          card.width() - 48 * unit, 22 * unit),
+  painter.drawText(QPointF(card.left() + 28 * unit, bar.top() - 12 * unit), status);
+
+  painter.fillRect(bar, withAlpha(kInk, 0.14));
+  painter.fillRect(QRectF(bar.left(), bar.top(), bar.width() * clamp01(progress), bar.height()),
+                   withAlpha(kInk, 0.9));
+
+  painter.setPen(withAlpha(kInk, 0.72));
+  painter.setFont(uiFont(10.5 * unit));
+  painter.drawText(QRectF(card.left() + 28 * unit, bar.top() - 28 * unit,
+                          card.width() - 56 * unit, 16 * unit),
                    Qt::AlignRight | Qt::AlignVCenter, copyrightLine());
 }
 

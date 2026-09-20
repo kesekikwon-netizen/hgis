@@ -24,10 +24,9 @@ QString copyrightLine();
 // All credit text in reading order, for accessibility and tests.
 QString plainText();
 
-void paintHeader(QPainter& painter, const QRectF& area, const QPixmap& icon, double shine);
-// sweep in (0, 1) runs a light "being recorded" band down the rows.
-void paintTitleBlock(QPainter& painter, const QRectF& area, double sweep);
-// The reading progress is drawn as a drawing scale bar (축척바).
+void paintHeader(QPainter& painter, const QRectF& area, const QPixmap& icon, double appear);
+void paintTitleBlock(QPainter& painter, const QRectF& area, double appear);
+// Hairline reading progress. seconds is kept for callers; it is not painted.
 void paintFooter(QPainter& painter, const QRectF& bar, const QRectF& card, double unit,
                  double progress, const QString& status, const QString& seconds);
 

@@ -1,3 +1,24 @@
+## 2026-09-20 조판 번호 겹침 금지·화면=범례
+
+- 원인: 범위 유적을 전부 범례에 남기고 `compactRenderedNumbers`를 끄면, PAL이 숨긴 번호와 범례가 어긋난다.
+- 수정: 종이 위 지도 범위는 후보. `PreventOverlap` + `AllowDegradedPlacement`(최대 18mm). 놓인 번호만 분류별 1..K로 다시 매김. 범례는 `visibleKeys`. PDF는 `printedKeys == shownKeys`. https://qgis.org/pyqgis/master/core/Qgis.html 설치 헤더 `qgis.h` L1247–1252, `qgslabelplacementsettings.h` L47.
+- CTest `heritage_style` Passed 21.38초. 밀집 원은 겹침 없이 범례=화면. `widerScaleAddsMapExtentSitesToLegend`는 1:25000 후보 증가 + 범례=배치 번호.
+- clangd `compactRenderedNumbers` L190→`HeritageLayoutNumbers.h` L56, `applyLegend` L695→L35, `visibleExtentPolygon` L99→`qgslayoutitemmap.h` L479. `diagnostic_error_count` 15는 기존 compile DB.
+- Graft `compactRenderedNumbers` L190–L279, freshness refreshed. Archify showcase 9/9 deliver visual-check pass → `build/qa/heritage-numbers-match-20260920/`.
+- 1:50000 화면에서 24·30이 남고 범례는 1부터인 원인: 앞번호가 연속이면 숨긴 뒤를 지도 식에서 안 뺐다. 이제 빠진 번호가 있으면 식을 다시 쓰고 1..K로 맞춘다.
+- CTest `heritage_style` Passed 20.00초. clangd `compactRenderedNumbers` L190→헤더 L56. Graft L190–L279. Archify 기존 `heritage-numbers-match-20260920` 근거 유지.
+- 사용자: 도면 안 번호는 겹치면 안 됨. 위치는 살짝 밀려도 됨. `OrderedPositionsAroundPoint` 13방향 + 최대 28mm. `PreventOverlap` 유지. https://qgis.org/pyqgis/master/core/QgsLabelPointSettings.html 설치 `qgslabelpointsettings.h` L75–83, `qgis.h` L1321–1335.
+- CTest `heritage_style` Passed 49.57초. smoke 0. EXE SHA256 0D35BD13EA3E7BAEFA15ED783BEE98B62D78A67BDA94A3557572FA36CB04EF08. clangd `compactRenderedNumbers` L190→헤더. Graft `update` 배치 구간. Archify 기존 match 도표 유지. 커밋·푸시·포터블 없음. 사용자 앱은 다시 켜지 않음.
+
+## 2026-09-20 시작 안내 창·모션 정리, 5초
+
+- 색(파랑 그라데이션)은 유지. 창은 `SplashScreen|Frameless|NoDropShadow` 각진 불투명 판. https://doc.qt.io/qt-6.8/qtwidgets-widgets-windowflags-example.html
+- `WA_TranslucentBackground`·라운드 글로우·0–5초 눈금·알약 막대·금색 마커·흙 긁기 없음.
+- 도면은 `easeOut`으로 1.035→1.00. https://doc.qt.io/qt-6.8/qpainter.html#scale
+- 표제란 만든이는 `권영인`만. About 세 이름은 유지. 안내 5,000ms.
+- CTest `startup_splash` Passed 12.20초. smoke `--smoke-quit` exit 0. clangd `scale` L212→`qpainter.h` L217, `setFixedSize` L103→`qwidget.h` L291/292. `diagnostic_error_count` 9는 기존 compile DB. Graft `paintEvent` L188. Archify workflow showcase 9/9 deliver visual-check pass → `build/qa/splash-motion-20260920/`.
+- EXE SHA256 51DD87E0A386C1DAE94367C90A1A6DD8B8647EDF23E1B8BAEF5F48B87E20AA1D. 커밋·푸시·포터블·사용자 앱 없음.
+
 ## 2026-09-20 리본 칸 고정·창 너비 안 나눔
 
 - 원인: 그룹이 Preferred라 `QHBoxLayout`이 창 남는 폭을 칸 사이에 나눔.

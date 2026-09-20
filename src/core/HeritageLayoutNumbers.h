@@ -41,6 +41,8 @@ public:
   static HeritageLayoutNumbers* forMap(QgsLayoutItemMap* map);
   bool acceptRenderedLabels(QgsLayoutItemMap* map, const QgsLabelingResults* results);
   const QSet<QString>& visibleKeys() const { return m_visibleKeys; }
+  // Numbers actually drawn on the map. Same set as the sheet legend.
+  QSet<QString> legendKeys() const;
   static QString entryKey(const QString& layerId, int number);
   bool exportPdf(QgsLayoutItemMap* map, QgsLayoutItemLegend* legend,
                  const QString& path, double dpi, QString* error = nullptr, bool forceVectorOutput = false);

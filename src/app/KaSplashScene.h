@@ -10,22 +10,14 @@
 class QPainter;
 class QPixmap;
 
-// The field-to-drawing scene of the startup splash: a surveyed plan covered with
-// soil. Scraping the soil, automatically over time or with the mouse as a trowel,
-// reveals the measured drawing underneath: "현장을 도면으로".
+// Finished survey plan on the startup splash. The plate is already uncovered;
+// motion is a zoom on the splash, not a trowel scrape.
 class KaSplashScene {
 public:
-  // The automatic trowel pass starts once the credits have been on screen for a
-  // while and finishes before the end, so the drawing is complete without the mouse.
-  static constexpr double kScrapeStart = 0.16;
-  static constexpr double kScrapeLength = 0.52;
-  static constexpr double kSlope = 0.6;  // the scrape line leans like a trowel stroke
 
   void setRect(const QRectF& plan, qreal devicePixelRatio);
   QRectF rect() const { return m_rect; }
-  // phase is the 0..1 animation position; dt is the frame time in seconds.
   void advance(double phase, double dt);
-  // The mouse works as a trowel. Returns true while the pointer is over the plan.
   bool pointerMoved(const QPointF& pos, bool pressed);
   void pointerLeft();
   void paint(QPainter& painter, double phase, const QPixmap& trowel) const;

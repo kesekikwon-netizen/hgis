@@ -3206,7 +3206,8 @@ bool KaDrawingStudio::syncHeritageNumbers(bool force) {
   syncAboveLabelsMap(map);
   if (auto* legend = dynamic_cast<QgsLayoutItemLegend*>(findItemById(ly, kIdLegend))) {
     LayoutService::tuneSheetLegend(legend);
-    m_heritageNumbers.applyLegend(legend);
+    if (!m_heritageNumbers.legendKeys().isEmpty())
+      m_heritageNumbers.applyLegend(legend);
   }
   map->refresh();
   return true;

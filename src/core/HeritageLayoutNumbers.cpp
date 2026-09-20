@@ -4,6 +4,7 @@
 #include "HeritageStyle.h"
 
 #include <qgscategorizedsymbolrenderer.h>
+#include <qgsexception.h>
 #include <qgscallout.h>
 #include <qgslabelpointsettings.h>
 #include <qgslabelplacementsettings.h>
@@ -40,6 +41,7 @@
 
 #include <QCryptographicHash>
 #include <QDataStream>
+#include <QTransform>
 #include <memory>
 #include <QScopedValueRollback>
 #include <QSignalBlocker>
@@ -90,10 +92,30 @@ QPainterPath visibleMapOnPaper(QgsLayoutItemMap* map, bool exporting) {
   frame.addPolygon(map->mapToScene(map->rect()));
   return paper.intersected(frame);
 }
+
+// Geographic footprint of the map that actually sits on the exported page.
+// Scale changes this polygon; label collision does not.
+QgsGeometry mapFootprintOnPaper(QgsLayoutItemMap* map, bool exporting) {
+  const QgsGeometry extent = QgsGeometry::fromQPolygonF(map->visibleExtentPolygon());
+  const QPainterPath onPaper = visibleMapOnPaper(map, exporting);
+  if (onPaper.isEmpty()) return extent;
+  const QgsGeometry clipped = QgsGeometry::fromQPolygonF(
+      map->layoutToMapCoordsTransform().map(onPaper.toFillPolygon()));
+  return clipped.isEmpty() ? extent : clipped;
+}
 }  // namespace
 
 QString HeritageLayoutNumbers::entryKey(const QString& layerId, int number) {
   return layerId + QLatin1Char(':') + QString::number(number);
+}
+
+QSet<QString> HeritageLayoutNumbers::legendKeys() const {
+  if (m_tracking) return m_visibleKeys;
+  QSet<QString> keys;
+  for (const auto& entry : m_entries) {
+    if (entry.number > 0) keys.insert(entryKey(entry.layerId, entry.number));
+  }
+  return keys;
 }
 
 HeritageLayoutNumbers* HeritageLayoutNumbers::forMap(QgsLayoutItemMap* map) {
@@ -146,9 +168,9 @@ bool HeritageLayoutNumbers::acceptRenderedLabels(QgsLayoutItemMap* map, const Qg
   if (!renumbered) m_visibleKeys = keys;
   ++m_placementRevision;
   m_legendPending = renumbered;
-  // Wait for the pinned numbers to finish drawing before replacing the preview
-  // legend. PDF export explicitly settles the legend before its final pass.
-  if (!m_exporting && !renumbered) emit visibleEntriesChanged();
+  // Preview must not keep the first-pass numbers (24, 30, …) after hidden
+  // siblings are dropped. Update the legend as soon as the series is known.
+  if (!m_exporting) emit visibleEntriesChanged();
   return true;
 }
 
@@ -170,17 +192,17 @@ bool HeritageLayoutNumbers::compactRenderedNumbers(QgsLayoutItemMap* map, const 
   if (!map || !results) return false;
   QVector<Entry> numbered = m_entries;
   QMap<QString, int> counters;
-  bool hasGaps = false;
+  bool needsRewrite = false;
   for (auto& entry : numbered) {
     const bool visible = entry.number > 0 && keys.contains(entryKey(entry.layerId, entry.number));
     const int next = visible ? ++counters[entry.dataset] : 0;
-    if (visible && entry.number != next) hasGaps = true;
+    if (entry.number != next) needsRewrite = true;
     entry.number = next;
   }
-  if (!hasGaps) return false;
+  if (!needsRewrite || keys.isEmpty()) return false;
 
-  // Keep the already collision-tested placement, including one anchor per
-  // actually placed feature of a shared category. Hidden siblings stay hidden.
+  // Keep the already collision-tested placement. Hidden siblings stay hidden
+  // so map numbers and legend numbers stay the same consecutive series.
   QHash<QString, QHash<qint64, int>> indices;
   for (int i = 0; i < m_entries.size(); ++i)
     for (auto id : m_entries[i].featureIds) indices[m_entries[i].layerId].insert(id, i);
@@ -193,8 +215,6 @@ bool HeritageLayoutNumbers::compactRenderedNumbers(QgsLayoutItemMap* map, const 
     if (layer == indices.cend()) continue;
     const int index = layer->value(label.featureId, -1);
     if (index < 0 || !numbered[index].number || label.labelText != QString::number(m_entries[index].number)) continue;
-    // Recheck the individual feature against paper; another feature with the
-    // same number can be visible while this feature lies outside the page.
     QPolygonF polygon;
     for (const auto& corner : label.cornerPoints) polygon.append(toPaper.map(QPointF(corner.x(), corner.y())));
     QPainterPath text;
@@ -372,10 +392,10 @@ bool HeritageLayoutNumbers::exportPdf(QgsLayoutItemMap* map, QgsLayoutItemLegend
     if (!results && !m_entries.isEmpty())
       return fail(QStringLiteral("PDF 번호 배치 결과를 확인하지 못했습니다."));
     const auto printedKeys = placedKeys(map, results);
-    const auto legendKeys = m_visibleKeys;
+    const auto shownKeys = m_visibleKeys;
     acceptRenderedLabels(map, results);
     if (!m_error.isEmpty()) return fail(m_error);
-    if (printedKeys == legendKeys && signature == renderSignature(map)) {
+    if (printedKeys == shownKeys && signature == renderSignature(map)) {
       QFile source(draft);
       QSaveFile destination(path);
       if (!source.open(QIODevice::ReadOnly) || !destination.open(QIODevice::WriteOnly))
@@ -488,7 +508,7 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
       m_error = QStringLiteral("'%1'의 조판 번호는 단일 심볼 또는 분류 스타일에서 사용할 수 있습니다.").arg(layer->name());
       return false;
     }
-    QgsGeometry footprint = QgsGeometry::fromQPolygonF(map->visibleExtentPolygon());
+    QgsGeometry footprint = mapFootprintOnPaper(map, m_exporting);
     try {
       footprint.transform(QgsCoordinateTransform(map->crs(), layer->crs(), project->transformContext()));
     } catch (const QgsCsException& e) {
@@ -604,14 +624,32 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
     labels.placement = Qgis::LabelPlacement::OrderedPositionsAroundPoint;
     labels.centroidInside = true;
     labels.placementSettings().setOverlapHandling(Qgis::LabelOverlapHandling::PreventOverlap);
-    labels.placementSettings().setAllowDegradedPlacement(false);
-    labels.dist = 2.5;
+    labels.placementSettings().setAllowDegradedPlacement(true);
+    // Prefer a small offset from the site. Farther rings are allowed so two
+    // badges can sit side by side instead of stacking on the same point.
+    labels.dist = 1.8;
     labels.distUnits = Qgis::RenderUnit::Millimeters;
-    labels.pointSettings().setMaximumDistance(12.);
+    labels.pointSettings().setMaximumDistance(28.);
     labels.pointSettings().setMaximumDistanceUnit(Qgis::RenderUnit::Millimeters);
-    // PAL normally collides the text rectangle, not the larger colored disc.
-    // Reserve enough whitespace for the entire badge, including multi-digit IDs.
-    labels.thinningSettings().setLabelMarginDistance(circleSize(counters.value(datasetName)) + .4);
+    labels.pointSettings().setPredefinedPositionOrder({
+        Qgis::LabelPredefinedPointPosition::TopRight,
+        Qgis::LabelPredefinedPointPosition::TopLeft,
+        Qgis::LabelPredefinedPointPosition::BottomRight,
+        Qgis::LabelPredefinedPointPosition::BottomLeft,
+        Qgis::LabelPredefinedPointPosition::MiddleRight,
+        Qgis::LabelPredefinedPointPosition::MiddleLeft,
+        Qgis::LabelPredefinedPointPosition::TopMiddle,
+        Qgis::LabelPredefinedPointPosition::BottomMiddle,
+        Qgis::LabelPredefinedPointPosition::TopSlightlyRight,
+        Qgis::LabelPredefinedPointPosition::TopSlightlyLeft,
+        Qgis::LabelPredefinedPointPosition::BottomSlightlyRight,
+        Qgis::LabelPredefinedPointPosition::BottomSlightlyLeft,
+        Qgis::LabelPredefinedPointPosition::OverPoint,
+    });
+    // PAL collides the text box, not the colored disc. Keep the full badge clear.
+    labels.thinningSettings().setLimitNumberLabelsEnabled(false);
+    labels.thinningSettings().setMinimumFeatureSize(0);
+    labels.thinningSettings().setLabelMarginDistance(circleSize(counters.value(datasetName)) + .35);
     labels.thinningSettings().setLabelMarginDistanceUnit(Qgis::RenderUnit::Millimeters);
     auto* callout = new QgsSimpleLineCallout;
     callout->setEnabled(true);
@@ -686,12 +724,12 @@ void HeritageLayoutNumbers::applyLegend(QgsLayoutItemLegend* legend) const {
       else needsMapFilter = true;
     }
   }
-  // Only numbered heritage rows have already been filtered to the footprint.
-  // Other vectors (e.g. geology/soil) still need QGIS symbol hit testing.
+  // Heritage rows are already limited to the on-paper map. Other vectors
+  // (e.g. geology/soil) still need QGIS symbol hit testing.
   legend->setLegendFilterByMapEnabled(needsMapFilter);
   if (current) return;
   const QScopedValueRollback<bool> applying(m_applying, true);
-  // Numbered rows already passed the exact rotated-map footprint test.
+  // Numbered rows already passed the paper-footprint intersection test.
   if (!m_entries.isEmpty()) {
     // This service applies the complete override snapshot below. Letting the
     // linked map also reload it rebuilds all rows once before our own update.
@@ -706,7 +744,7 @@ void HeritageLayoutNumbers::applyLegend(QgsLayoutItemLegend* legend) const {
     QSignalBlocker nodeSignals(node);
     QList<int> order;
     for (const Entry& entry : m_entries) {
-      if (entry.layerId != layer->id()) continue;
+      if (entry.layerId != layer->id() || entry.number <= 0) continue;
       if (m_tracking && !m_visibleKeys.contains(entryKey(entry.layerId, entry.number))) continue;
       order.append(entry.legendIndex);
       auto marker = QgsMarkerSymbol::createSimple({

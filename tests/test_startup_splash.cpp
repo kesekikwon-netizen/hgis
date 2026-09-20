@@ -60,8 +60,8 @@ private slots:
     QCOMPARE(ready.count(), 1);
   }
 
-  void defaultTenSecondsStayResponsiveAndKeepNoticesVisible() {
-    QCOMPARE(KaStartupSplash::ReadingDurationMs, 10000);
+  void defaultFiveSecondsStayResponsiveAndKeepNoticesVisible() {
+    QCOMPARE(KaStartupSplash::ReadingDurationMs, 5000);
     KaStartupSplash splash;
     QSignalSpy ready(&splash, &KaStartupSplash::readyToShow);
     splash.show();
@@ -79,7 +79,8 @@ private slots:
       QVERIFY(splash.grab().save(QDir(output).filePath(QStringLiteral("startup-v2.png"))));
     }
     const QString credits = KaStartupSplash::creditsText();
-    for (const QString& text : {QStringLiteral("권영인"), QStringLiteral("동국문화재연구원"),
+    for (const QString& text : {QStringLiteral("만든이"), QStringLiteral("권영인"),
+                                QStringLiteral("동국문화재연구원"),
                                 QStringLiteral("v2"), QStringLiteral("GPL"),
                                 QStringLiteral("VWorld"), QStringLiteral("국가유산")})
       QVERIFY2(credits.contains(text), qPrintable(text));
@@ -92,56 +93,49 @@ private slots:
                                   QStringLiteral("GEOS"), QStringLiteral("SQLite"),
                                   QStringLiteral("Chromium")})
       QVERIFY(attribution.contains(library));
-    QTest::qWait(qMax(1, 9000 - int(elapsed.elapsed())));
+    QTest::qWait(qMax(1, 4000 - int(elapsed.elapsed())));
     QCOMPARE(ready.count(), 0);
     QVERIFY(splash.isVisible());
-    QVERIFY(beats > 20);  // The normal event loop keeps processing other work.
+    QVERIFY(beats > 20);
     QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 2000);
-    QVERIFY(elapsed.elapsed() >= 10000);
-    QVERIFY(elapsed.elapsed() < 12000);
+    QVERIFY(elapsed.elapsed() >= 5000);
+    QVERIFY(elapsed.elapsed() < 7000);
   }
 
-  void cornersAreRoundedAndMotionChangesTheFrame() {
+  void plateIsOpaqueAndMotionChangesTheFrame() {
     KaStartupSplash splash(nullptr, 3000);
     splash.show();
     QTest::qWait(50);
     saveFrame(splash, QStringLiteral("startup-cover.png"));
     const QImage cover = splash.grab().toImage();
-    // Rounded card: the corners stay transparent, the inside is painted.
-    QCOMPARE(qAlpha(cover.pixel(1, 1)), 0);
-    QCOMPARE(qAlpha(cover.pixel(cover.width() - 2, cover.height() - 2)), 0);
+    // Opaque plate: corners and center are painted, not a floating rounded card.
+    QVERIFY(qAlpha(cover.pixel(1, 1)) > 200);
+    QVERIFY(qAlpha(cover.pixel(cover.width() - 2, cover.height() - 2)) > 200);
     QVERIFY(qAlpha(cover.pixel(cover.width() / 2, cover.height() / 2)) > 200);
     splash.markReady();
     QTest::qWait(1500);
     saveFrame(splash, QStringLiteral("startup-motion.png"));
     const QImage moving = splash.grab().toImage();
     QVERIFY(moving != cover);
-    QCOMPARE(qAlpha(moving.pixel(1, 1)), 0);
+    QVERIFY(qAlpha(moving.pixel(1, 1)) > 200);
   }
 
-  void mouseScrapesSoilAndNeverClosesTheNotice() {
+  void clickNeverClosesTheNotice() {
     KaStartupSplash splash(nullptr, 4000);
     QSignalSpy ready(&splash, &KaStartupSplash::readyToShow);
     splash.show();
     splash.markReady();
-    QTest::qWait(60);  // before the automatic trowel pass starts
+    QTest::qWait(60);
     const QRectF plan = splash.planRect();
-    const double before = splash.revealedFraction();
-    for (int i = 0; i <= 24; ++i) {
-      const double t = i / 24.0;
-      moveMouse(splash, QPointF(plan.left() + plan.width() * (0.1 + 0.8 * t),
-                                plan.top() + plan.height() * (0.3 + 0.4 * t)));
-    }
-    const double scraped = splash.revealedFraction();
+    QCOMPARE(splash.revealedFraction(), 1.0);
     moveMouse(splash, QPointF(plan.left() + plan.width() * 0.3, plan.top() + plan.height() * 0.4));
     saveFrame(splash, QStringLiteral("startup-scrape.png"));
-    QVERIFY2(scraped > before + 0.03, qPrintable(QStringLiteral("%1 -> %2").arg(before).arg(scraped)));
+    QCOMPARE(splash.revealedFraction(), 1.0);
     QTest::mouseClick(&splash, Qt::LeftButton, Qt::NoModifier, plan.center().toPoint());
     QVERIFY(splash.isVisible());
     QCOMPARE(ready.count(), 0);
     QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 6000);
-    // The automatic pass uncovers the whole drawing before the notice ends.
-    QVERIFY(splash.revealedFraction() > 0.97);
+    QCOMPARE(splash.revealedFraction(), 1.0);
     QEvent leave(QEvent::Leave);
     QApplication::sendEvent(&splash, &leave);
     splash.update();
@@ -156,8 +150,8 @@ private slots:
     splash.show();
     splash.markReady();
     QTest::qWait(60);
-    QVERIFY(splash.revealedFraction() > 0.97);
-    moveMouse(splash, splash.planRect().center());  // ignored, never crashes
+    QCOMPARE(splash.revealedFraction(), 1.0);
+    moveMouse(splash, splash.planRect().center());
     QVERIFY(splash.readingProgress() < 1000);
   }
 };

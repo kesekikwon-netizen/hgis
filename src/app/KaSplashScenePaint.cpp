@@ -1,5 +1,4 @@
-// Painting for KaSplashScene: grid, measured drawing, remaining soil, survey
-// markers and the trowel pointer. Kept apart from the scene state and scraping.
+// Painting for KaSplashScene: grid, measured drawing and survey markers.
 #include "KaSplashScene.h"
 
 #include "KaSplashPalette.h"
@@ -11,17 +10,17 @@
 
 using namespace KaSplashPalette;
 
-void KaSplashScene::paint(QPainter& painter, double phase, const QPixmap& trowel) const {
-  if (m_soil.isNull()) return;
+void KaSplashScene::paint(QPainter& painter, double phase, const QPixmap&) const {
+  if (m_rect.isEmpty()) return;
   const double w = m_rect.width(), h = m_rect.height();
   QPainterPath frame;
-  frame.addRoundedRect(m_rect, 14, 14);
+  frame.addRect(m_rect);
   painter.save();
   painter.setClipPath(frame, Qt::IntersectClip);
   painter.fillPath(frame, kPlanShade);
   painter.translate(m_rect.topLeft());
 
-  const double cell = h / 10.0;  // 방안지: 1 m lines, heavier every 5 m
+  const double cell = h / 10.0;
   for (int i = 0; i * cell <= w + 0.5; ++i) {
     painter.setPen(QPen(withAlpha(kLine, i % 5 ? 0.1 : 0.26), 1));
     painter.drawLine(QPointF(i * cell, 0), QPointF(i * cell, h));
@@ -31,73 +30,47 @@ void KaSplashScene::paint(QPainter& painter, double phase, const QPixmap& trowel
     painter.drawLine(QPointF(0, j * cell), QPointF(w, j * cell));
   }
 
-  const int hover = hoveredFeature();
-  for (int i = 0; i < m_features.size(); ++i) {
-    const Feature& f = m_features.at(i);
-    const bool lit = i == hover;
+  for (const Feature& f : m_features) {
     if (f.style == Style::Filled) {
-      painter.fillPath(f.shape, lit ? QColor(Qt::white) : kGold);
+      painter.fillPath(f.shape, withAlpha(kInk, 0.82));
       continue;
     }
-    QPen pen(lit ? kGold : kInk, lit ? 2.6 : 1.6);
+    QPen pen(kInk, 1.6);
     if (f.style == Style::Dashed) pen.setDashPattern({6, 4});
     painter.setPen(pen);
-    painter.setBrush(lit ? QBrush(withAlpha(kGold, 0.12)) : QBrush(Qt::NoBrush));
+    painter.setBrush(Qt::NoBrush);
     painter.drawPath(f.shape);
   }
   painter.setPen(withAlpha(kInk, 0.75));
   painter.setFont(monoFont(h * 0.034));
   painter.drawText(QPointF(w * 0.2, h * 0.64), QStringLiteral("+32.45m"));
 
-  painter.drawImage(QPointF(0, 0), m_soil);
-
-  const double slope = h * kSlope, edge = m_autoScrape * (w + slope);
-  if (m_autoScrape > 0.0 && m_autoScrape < 1.0) {  // the automatic trowel pass
-    painter.setPen(QPen(kSand, 3, Qt::SolidLine, Qt::RoundCap));
-    painter.drawLine(QPointF(edge, 0), QPointF(edge - slope, h));
-    if (!m_pointerInside && !trowel.isNull()) {
-      const double s = h * 0.12;
-      painter.drawPixmap(QRectF(edge - slope * 0.5 - s * 0.2, h * 0.5 - s * 0.9, s, s), trowel,
-                         QRectF(trowel.rect()));
-    }
-  }
-
   painter.setFont(uiFont(h * 0.036, true));
-  for (int i = 0; i < m_features.size(); ++i) {
-    const Feature& f = m_features.at(i);
-    if (f.label.isNull() || !uncovered(f.shape.boundingRect().center())) continue;
-    painter.setPen(i == hover ? kGold : kSky);
+  for (const Feature& f : m_features) {
+    if (f.label.isNull()) continue;
+    painter.setPen(kSky);
     painter.drawText(f.label, f.name);
   }
 
-  for (const Grain& g : m_grains) {
-    const QColor shade = g.shade == 0 ? kSand : (g.shade == 1 ? kOchre : kLoam);
-    painter.fillRect(QRectF(g.pos, QSizeF(2.2, 2.2)), withAlpha(shade, g.life));
-  }
-
   paintMarkers(painter, phase);
-
-  if (m_pointerInside) paintPointer(painter, hover, trowel);
-
   painter.restore();
   painter.setPen(QPen(withAlpha(kLine, 0.45), 1));
   painter.setBrush(Qt::NoBrush);
   painter.drawPath(frame);
 }
 
-// Survey benchmarks and the north arrow sit on the surface, above the soil.
 void KaSplashScene::paintMarkers(QPainter& painter, double phase) const {
-  const double alpha = easeOut((phase - 0.05) * 9);
+  const double alpha = easeOut((phase - 0.12) * 3.2);
   if (alpha <= 0.0) return;
-  const double w = m_rect.width(), h = m_rect.height(), r = h * 0.02;
+  const double w = m_rect.width(), h = m_rect.height(), r = h * 0.016;
   painter.save();
   painter.setOpacity(alpha);
   for (const QPointF& bm : {QPointF(w * 0.09, h * 0.08), QPointF(w * 0.86, h * 0.62)}) {
-    painter.setPen(QPen(kGold, 1.6));
+    painter.setPen(QPen(kInk, 1.1));
     painter.setBrush(Qt::NoBrush);
     painter.drawEllipse(bm, r, r);
-    painter.drawLine(bm - QPointF(r * 1.8, 0), bm + QPointF(r * 1.8, 0));
-    painter.drawLine(bm - QPointF(0, r * 1.8), bm + QPointF(0, r * 1.8));
+    painter.drawLine(bm - QPointF(r * 1.6, 0), bm + QPointF(r * 1.6, 0));
+    painter.drawLine(bm - QPointF(0, r * 1.6), bm + QPointF(0, r * 1.6));
   }
   painter.setPen(kSky);
   painter.setFont(monoFont(h * 0.027));  // leaves room for the north arrow
@@ -107,7 +80,6 @@ void KaSplashScene::paintMarkers(QPainter& painter, double phase) const {
 
   painter.save();
   painter.translate(w - h * 0.07, h * 0.1);
-  painter.rotate((1.0 - easeOut((phase - 0.04) * 6)) * 126.0);  // settles on true north
   painter.setPen(Qt::NoPen);
   painter.setBrush(kInk);
   painter.drawPolygon(QPolygonF({QPointF(0, -h * 0.05), QPointF(h * 0.018, h * 0.022),

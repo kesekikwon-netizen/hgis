@@ -5,9 +5,8 @@
 
 #include <algorithm>
 
-// Colors, fonts and easing shared by the startup splash. The blue chrome matches
-// the splash card and app accent; the earth tones reuse KaTheme's icon palette
-// (soil, ochre, sand, stone) so the soil reads as the same material as the icons.
+// Colors, fonts and easing shared by the startup splash. Blues match the app
+// accent. Earth tones remain for leftover scrape helpers that no longer paint.
 namespace KaSplashPalette {
 
 inline const QColor kInk{0xE5, 0xF2, 0xFF};

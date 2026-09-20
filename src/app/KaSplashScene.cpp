@@ -18,7 +18,7 @@ constexpr double kPi = 3.14159265358979323846;
 
 void KaSplashScene::setRect(const QRectF& plan, qreal devicePixelRatio) {
   const qreal dpr = devicePixelRatio > 0 ? devicePixelRatio : 1.0;
-  if (plan == m_rect && qFuzzyCompare(dpr, m_dpr) && !m_soil.isNull()) return;
+  if (plan == m_rect && qFuzzyCompare(dpr, m_dpr) && !m_features.isEmpty()) return;
   m_rect = plan;
   m_dpr = dpr;
   rebuild();
@@ -41,42 +41,12 @@ void KaSplashScene::addFeature(const QPainterPath& shape, const QString& name,
 void KaSplashScene::rebuild() {
   const double w = m_rect.width(), h = m_rect.height();
   if (w < 1 || h < 1) return;
-  m_soil = QImage(QSize(int(std::ceil(w * m_dpr)), int(std::ceil(h * m_dpr))),
-                  QImage::Format_ARGB32_Premultiplied);
-  m_soil.setDevicePixelRatio(m_dpr);
-  m_soil.fill(kSoil);
-  m_seed = 0x2545F491u;  // the same soil every launch
-  {
-    QPainter p(&m_soil);
-    p.setRenderHint(QPainter::Antialiasing);
-    p.setPen(Qt::NoPen);
-    for (int i = 0; i < 7; ++i) {  // soil colour changes (토색 차이)
-      p.setBrush(withAlpha(i % 2 ? kOchre : kLoam, 0.35));
-      p.drawEllipse(QPointF(unitRandom() * w, unitRandom() * h), w * (0.12 + unitRandom() * 0.2),
-                    h * (0.08 + unitRandom() * 0.14));
-    }
-    const QColor shades[] = {kSand, kOchre, kStone, kLoam};
-    const int grains = int(w * h / 70);
-    for (int i = 0; i < grains; ++i) {
-      const double size = 0.8 + unitRandom() * 2.2;
-      p.fillRect(QRectF(unitRandom() * w, unitRandom() * h, size, size),
-                 withAlpha(shades[i % 4], 0.35 + unitRandom() * 0.5));
-    }
-    p.setBrush(withAlpha(kStone, 0.8));
-    for (int i = 0; i < 26; ++i) {
-      const double r = 1.5 + unitRandom() * 3.5;
-      p.drawEllipse(QPointF(unitRandom() * w, unitRandom() * h), r * 1.3, r);
-    }
-  }
-  if (m_autoScrape > 0.0) {  // keep what was already scraped after a resize
-    const double done = m_autoScrape;
-    m_autoScrape = 0.0;
-    advance(kScrapeStart + done * kScrapeLength, 0.0);
-  }
-
+  m_soil = QImage();
+  m_grains.clear();
+  m_autoScrape = 1.0;
   m_features.clear();
   QPainterPath house;
-  house.addRoundedRect(QRectF(w * 0.12, h * 0.2, w * 0.36, h * 0.34), 8, 8);
+  house.addRect(QRectF(w * 0.12, h * 0.2, w * 0.36, h * 0.34));
   for (const QPointF& q : {QPointF(0.16, 0.25), QPointF(0.44, 0.25), QPointF(0.16, 0.49),
                            QPointF(0.44, 0.49)})
     house.addEllipse(QPointF(w * q.x(), h * q.y()), h * 0.018, h * 0.018);
@@ -119,62 +89,14 @@ void KaSplashScene::spray(const QPointF& localPos, int count, double speed) {
   }
 }
 
-void KaSplashScene::advance(double phase, double dt) {
-  if (m_soil.isNull()) return;
-  const double scrape = clamp01((phase - kScrapeStart) / kScrapeLength);
-  if (scrape > m_autoScrape) {
-    m_autoScrape = scrape;
-    const double w = m_rect.width(), h = m_rect.height(), slope = h * kSlope;
-    const double edge = scrape * (w + slope);
-    QPainterPath swept;
-    swept.moveTo(-slope - 4, -4);
-    swept.lineTo(edge + 4 * kSlope, -4);
-    swept.lineTo(edge - slope - 4 * kSlope, h + 4);
-    swept.lineTo(-slope - 4, h + 4);
-    swept.closeSubpath();
-    erase(swept);
-    if (scrape < 1.0 && dt > 0.0) {
-      for (int i = 0; i < 3; ++i) {
-        const double t = unitRandom();
-        spray(QPointF(edge - slope * t, h * t), 1, h * 0.5);
-      }
-    }
-  }
-  for (Grain& grain : m_grains) {
-    grain.pos += grain.velocity * dt;
-    grain.velocity.ry() += m_rect.height() * 1.4 * dt;
-    grain.life -= dt * 1.5;
-  }
-  m_grains.erase(std::remove_if(m_grains.begin(), m_grains.end(),
-                                [](const Grain& g) { return g.life <= 0.0; }),
-                 m_grains.end());
+void KaSplashScene::advance(double, double) {
 }
 
-bool KaSplashScene::pointerMoved(const QPointF& pos, bool pressed) {
+bool KaSplashScene::pointerMoved(const QPointF& pos, bool) {
   m_pointerInside = m_rect.contains(pos);
   m_pointer = pos - m_rect.topLeft();
-  if (!m_pointerInside || m_soil.isNull()) {
-    m_hasLastScrape = false;
-    return false;
-  }
-  m_interacted = true;
-  const double radius = m_rect.height() * (pressed ? 0.075 : 0.05);
-  QPainterPath brush;
-  brush.setFillRule(Qt::WindingFill);
-  if (m_hasLastScrape) {
-    QPainterPath segment(m_lastScrape);
-    segment.lineTo(m_pointer);
-    QPainterPathStroker stroker;
-    stroker.setWidth(radius * 2);
-    stroker.setCapStyle(Qt::RoundCap);
-    brush.addPath(stroker.createStroke(segment));
-  }
-  brush.addEllipse(m_pointer, radius, radius);
-  erase(brush);
-  spray(m_pointer, pressed ? 6 : 3, m_rect.height() * 0.6);
-  m_lastScrape = m_pointer;
-  m_hasLastScrape = true;
-  return true;
+  m_hasLastScrape = false;
+  return false;
 }
 
 void KaSplashScene::pointerLeft() {
@@ -182,9 +104,8 @@ void KaSplashScene::pointerLeft() {
   m_hasLastScrape = false;
 }
 
-bool KaSplashScene::uncovered(const QPointF& localPos) const {
-  const QPoint pixel(int(localPos.x() * m_dpr), int(localPos.y() * m_dpr));
-  return !m_soil.valid(pixel) || qAlpha(m_soil.pixel(pixel)) < 60;
+bool KaSplashScene::uncovered(const QPointF&) const {
+  return true;
 }
 
 int KaSplashScene::hoveredFeature() const {
@@ -195,10 +116,5 @@ int KaSplashScene::hoveredFeature() const {
 }
 
 double KaSplashScene::revealedFraction() const {
-  if (m_soil.isNull()) return 0.0;
-  int open = 0, total = 0;
-  for (int y = 0; y < m_soil.height(); y += 4)
-    for (int x = 0; x < m_soil.width(); x += 4, ++total)
-      if (qAlpha(m_soil.pixel(x, y)) < 60) ++open;
-  return total ? double(open) / total : 0.0;
+  return m_features.isEmpty() ? 0.0 : 1.0;
 }

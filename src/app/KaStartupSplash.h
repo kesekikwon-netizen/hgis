@@ -10,17 +10,15 @@
 class KaSplashScene;
 class QTimer;
 
-// Startup notice shown before the main window. Names, copyright and data sources
-// are painted from the first frame as a drawing title block and stay for the whole
-// reading interval. The reading interval starts after synchronous initialization
-// is complete, so the ten-second gauge and the motion run on the normal event
-// loop, never a busy wait. The plan on the left is interactive: the mouse works
-// as a trowel that scrapes the soil off the measured drawing. Clicking never
-// closes the notice early.
+// Startup notice shown before the main window. The plate is an opaque rectangle
+// with no drop shadow. Names, copyright and data sources stay on a drawing
+// title block for the whole reading interval. The interval starts after
+// synchronous initialization, so the five-second hairline and the quiet zoom
+// run on the event loop. Clicking never closes the notice early.
 class KaStartupSplash final : public QWidget {
   Q_OBJECT
 public:
-  static constexpr int ReadingDurationMs = 10000;
+  static constexpr int ReadingDurationMs = 5000;
   explicit KaStartupSplash(QWidget* parent = nullptr,
                            int readingDurationMs = ReadingDurationMs);
   ~KaStartupSplash() override;
