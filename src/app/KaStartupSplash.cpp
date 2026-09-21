@@ -8,7 +8,9 @@
 #include <QLinearGradient>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QScreen>
+#include <QShowEvent>
 #include <QTimer>
 
 #ifdef Q_OS_WIN
@@ -33,37 +35,38 @@ bool reducedMotionRequested() {
   return false;
 }
 
-// Plate geometry shared by painting and the plan.
 struct Layout {
+  QRectF frame;
   QRectF card;
   QRectF plan;
   QRectF header;
   QRectF block;
   QRectF bar;
   double unit = 1.0;
+  double frameRadius = 22.0;
+  double cardRadius = 16.0;
 };
 
 Layout layoutFor(const QRectF& bounds) {
   Layout l;
-  l.card = bounds;
+  l.frame = bounds.adjusted(16, 14, -16, -18);
+  l.card = l.frame.adjusted(9, 9, -9, -9);
   l.unit = l.card.height() / 500.0;
-  const double u = l.unit, margin = 28 * u;
-  const double top = l.card.top() + margin, bottom = l.card.bottom() - 48 * u;
+  const double u = qMax(0.7, l.unit), margin = 26 * u;
+  const double top = l.card.top() + margin, bottom = l.card.bottom() - 46 * u;
   const QRectF content(l.card.left() + margin, top, l.card.width() - 2 * margin, bottom - top);
-  l.plan = QRectF(content.left(), content.top(), content.width() * 0.46, content.height());
-  const double right = l.plan.right() + 24 * u;
+  l.plan = QRectF(content.left(), content.top(), content.width() * 0.48, content.height());
+  const double right = l.plan.right() + 22 * u;
   l.header = QRectF(right, content.top(), content.right() - right, 52 * u);
   l.block = QRectF(right, l.header.bottom() + 14 * u, content.right() - right,
                    content.bottom() - l.header.bottom() - 14 * u);
-  l.bar = QRectF(l.card.left(), l.card.bottom() - 2, l.card.width(), 2);
+  l.bar = QRectF(l.card.left() + 18 * u, l.card.bottom() - 18 * u, l.card.width() - 36 * u, 3);
   return l;
 }
 
 }  // namespace
 
 QString KaStartupSplash::attributionText() {
-  // Existing application notices (LICENSE and MainWindow::showAbout), with
-  // WebEngine identified separately because its third-party terms also apply.
   return QStringLiteral(
       "QGIS  © QGIS Development Team · GNU GPL v2 이상\n"
       "Qt  © The Qt Company 및 기여자 · LGPLv3 / GPLv2 / GPLv3\n"
@@ -82,13 +85,15 @@ QString KaStartupSplash::creditsText() {
 }
 
 KaStartupSplash::KaStartupSplash(QWidget* parent, int readingDurationMs)
-    : QWidget(parent, Qt::SplashScreen | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint),
+    : QWidget(parent, Qt::SplashScreen | Qt::FramelessWindowHint),
       m_readingDurationMs(qMax(1, readingDurationMs)),
       m_scene(std::make_unique<KaSplashScene>()),
       m_icon(QStringLiteral(":/ka-hgis/app-icon.png")),
       m_reducedMotion(reducedMotionRequested()) {
   setObjectName(QStringLiteral("startupSplash"));
   setWindowTitle(QStringLiteral("필드고고학GIS v2 · 시작 안내"));
+  setAttribute(Qt::WA_TranslucentBackground);
+  setAutoFillBackground(false);
   setMouseTracking(true);
   setAccessibleName(QStringLiteral("필드고고학GIS v2 시작 안내"));
   setAccessibleDescription(creditsText());
@@ -97,14 +102,19 @@ KaStartupSplash::KaStartupSplash(QWidget* parent, int readingDurationMs)
   m_timer->setInterval(25);
   m_timer->setTimerType(Qt::PreciseTimer);
   connect(m_timer, &QTimer::timeout, this, &KaStartupSplash::tick);
-  const QRect available = QGuiApplication::primaryScreen()
-                              ? QGuiApplication::primaryScreen()->availableGeometry()
-                              : QRect(0, 0, 1024, 768);
-  setFixedSize(qMin(880, available.width() - 32), qMin(500, available.height() - 32));
-  move(available.center() - rect().center());
+  placeWindow();
 }
 
 KaStartupSplash::~KaStartupSplash() = default;
+
+void KaStartupSplash::placeWindow() {
+  const QRect available = QGuiApplication::primaryScreen()
+                              ? QGuiApplication::primaryScreen()->availableGeometry()
+                              : QRect(0, 0, 1024, 768);
+  setFixedSize(qMin(920, available.width() - 24), qMin(536, available.height() - 24));
+  move(available.center() - rect().center());
+  layoutScene();
+}
 
 void KaStartupSplash::markReady() {
   if (m_readingClock.isValid())
@@ -150,7 +160,8 @@ void KaStartupSplash::tick() {
 }
 
 void KaStartupSplash::layoutScene() {
-  m_scene->setRect(layoutFor(QRectF(rect())).plan, devicePixelRatioF());
+  const Layout l = layoutFor(QRectF(rect()));
+  m_scene->setRect(l.plan, devicePixelRatioF());
 }
 
 QRectF KaStartupSplash::planRect() const {
@@ -161,7 +172,16 @@ double KaStartupSplash::revealedFraction() const {
   return m_scene->revealedFraction();
 }
 
+double KaStartupSplash::motionClock() const {
+  return m_scene->clock();
+}
+
 void KaStartupSplash::resizeEvent(QResizeEvent*) {
+  layoutScene();
+}
+
+void KaStartupSplash::showEvent(QShowEvent* event) {
+  QWidget::showEvent(event);
   layoutScene();
 }
 
@@ -191,31 +211,50 @@ void KaStartupSplash::paintEvent(QPaintEvent*) {
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing);
   painter.setRenderHint(QPainter::SmoothPixmapTransform);
-  QLinearGradient blue(0, 0, width(), height());
-  blue.setColorAt(0, QColor(QStringLiteral("#267abb")));
-  blue.setColorAt(0.4, QColor(QStringLiteral("#12558d")));
-  blue.setColorAt(1, QColor(QStringLiteral("#092f56")));
-  painter.fillRect(rect(), blue);
-  painter.setPen(QPen(QColor(182, 225, 255, 56), 1));
+  painter.setCompositionMode(QPainter::CompositionMode_Source);
+  painter.fillRect(rect(), Qt::transparent);
+  painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+
+  QPainterPath shadow;
+  shadow.addRoundedRect(l.frame.translated(0, 5), l.frameRadius + 2, l.frameRadius + 2);
+  painter.fillPath(shadow, QColor(12, 28, 48, 70));
+
+  QLinearGradient mat(l.frame.topLeft(), l.frame.bottomLeft());
+  mat.setColorAt(0, QColor(255, 255, 255));
+  mat.setColorAt(0.42, QColor(246, 249, 252));
+  mat.setColorAt(1, QColor(214, 221, 232));
+  QPainterPath frame;
+  frame.addRoundedRect(l.frame, l.frameRadius, l.frameRadius);
+  painter.fillPath(frame, mat);
+  painter.setPen(QPen(QColor(255, 255, 255, 220), 1.4));
   painter.setBrush(Qt::NoBrush);
-  painter.drawRect(rect().adjusted(0, 0, -1, -1));
+  painter.drawPath(frame);
+
+  QLinearGradient blue(l.card.topLeft(), l.card.bottomRight());
+  blue.setColorAt(0, QColor(QStringLiteral("#2b86c9")));
+  blue.setColorAt(0.38, QColor(QStringLiteral("#12558d")));
+  blue.setColorAt(1, QColor(QStringLiteral("#092f56")));
+  QPainterPath card;
+  card.addRoundedRect(l.card, l.cardRadius, l.cardRadius);
+  painter.fillPath(card, blue);
+
+  QLinearGradient gloss(l.card.topLeft(), QPointF(l.card.left(), l.card.top() + l.card.height() * 0.46));
+  gloss.setColorAt(0, QColor(255, 255, 255, 96));
+  gloss.setColorAt(0.55, QColor(255, 255, 255, 22));
+  gloss.setColorAt(1, QColor(255, 255, 255, 0));
+  painter.fillPath(card, gloss);
+  painter.setPen(QPen(QColor(255, 255, 255, 110), 1.3));
+  painter.drawRoundedRect(l.card.adjusted(1.2, 1.2, -1.2, -1.2), l.cardRadius - 1, l.cardRadius - 1);
 
   const double ph = phase();
-  const double travel = m_reducedMotion ? 1.0 : KaSplashPalette::easeOut(ph);
   painter.save();
-  painter.setOpacity(m_reducedMotion ? 1.0 : 0.78 + 0.22 * travel);
-  const QPointF pivot = l.plan.center();
-  const double zoom = 1.0 + 0.035 * (1.0 - travel);
-  painter.save();
-  painter.setClipRect(l.plan);
-  painter.translate(pivot);
-  painter.scale(zoom, zoom);
-  painter.translate(-pivot);
+  QPainterPath planClip;
+  planClip.addRoundedRect(l.plan, 10, 10);
+  painter.setClipPath(planClip);
   m_scene->paint(painter, ph, m_icon);
   painter.restore();
   KaSplashCredits::paintHeader(painter, l.header, m_icon, 1.0);
   KaSplashCredits::paintTitleBlock(painter, l.block, 1.0);
   KaSplashCredits::paintFooter(painter, l.bar, l.card, l.unit, m_progress / 1000.0,
                                statusText(), QString());
-  painter.restore();
 }

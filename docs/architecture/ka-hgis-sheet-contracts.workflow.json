@@ -1,0 +1,41 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Sheet contracts",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "snap", "label": "Snap" },
+    { "id": "page", "label": "Page" },
+    { "id": "site", "label": "Sites" }
+  ],
+  "phases": [
+    { "id": "in", "label": "In", "fromCol": 0, "toCol": 1 },
+    { "id": "keep", "label": "Keep", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "out", "label": "Out", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["cad", "magnet", "edge", "clip", "badge"],
+  "nodes": [
+    { "id": "cad", "lane": "snap", "col": 0, "type": "database", "label": "지적도", "sublabel": "not reference" },
+    { "id": "magnet", "lane": "snap", "col": 1, "type": "backend", "label": "자석", "sublabel": "SurveyLayers" },
+    { "id": "edge", "lane": "page", "col": 2, "type": "backend", "label": "Equal edge", "sublabel": "10 mm · 317×220" },
+    { "id": "fold", "lane": "site", "col": 2, "type": "database", "label": "Collapse", "sublabel": "kind group" },
+    { "id": "clip", "lane": "site", "col": 3, "type": "backend", "label": "Page clip", "sublabel": "intersects" },
+    { "id": "badge", "lane": "site", "col": 4, "type": "frontend", "label": "Number", "sublabel": "PAL once; reuse" },
+    { "id": "topo", "lane": "page", "col": 5, "type": "external", "label": "Topo line", "sublabel": "0.2 mm" }
+  ],
+  "edges": [
+    { "from": "cad", "to": "magnet", "variant": "emphasis" },
+    { "from": "magnet", "to": "edge", "label": "sheet" },
+    { "from": "edge", "to": "clip", "variant": "emphasis" },
+    { "from": "fold", "to": "clip", "label": "import" },
+    { "from": "clip", "to": "badge", "variant": "emphasis" },
+    { "from": "edge", "to": "topo", "label": "pan", "variant": "dashed", "role": "branch" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Snap", "items": ["Cadastral snaps; WMS does not"] },
+    { "dot": "emerald", "title": "Page", "items": ["Equal top/sides; A4 landscape 317×220; legend = clip"] },
+    { "dot": "rose", "title": "Keep", "items": ["Do not revert these contracts"] }
+  ]
+}

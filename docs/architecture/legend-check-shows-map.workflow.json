@@ -1,0 +1,36 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Legend check shows map",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "tree", "label": "Legend" },
+    { "id": "map", "label": "Map" }
+  ],
+  "phases": [
+    { "id": "off", "label": "All off", "fromCol": 0, "toCol": 1 },
+    { "id": "check", "label": "One on", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "paint", "label": "Paint", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["allOff", "tick", "hidden", "reveal", "paint"],
+  "nodes": [
+    { "id": "allOff", "lane": "tree", "col": 0, "type": "backend", "label": "전체 끄기", "sublabel": "Recursive false" },
+    { "id": "tick", "lane": "tree", "col": 2, "type": "frontend", "label": "개별 체크", "sublabel": "child only" },
+    { "id": "hidden", "lane": "map", "col": 2, "type": "database", "label": "체크만", "sublabel": "group still off" },
+    { "id": "reveal", "lane": "tree", "col": 3, "type": "backend", "label": "reveal", "sublabel": "ParentRecursive" },
+    { "id": "paint", "lane": "map", "col": 5, "type": "frontend", "label": "isVisible", "sublabel": "paint order" }
+  ],
+  "edges": [
+    { "from": "allOff", "to": "tick", "label": "then one" },
+    { "from": "tick", "to": "hidden", "variant": "emphasis" },
+    { "from": "hidden", "to": "reveal", "variant": "emphasis" },
+    { "from": "reveal", "to": "paint", "label": "ancestors on" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Bug", "items": ["Check without ancestors does not paint"] },
+    { "dot": "emerald", "title": "Fix", "items": ["Open checked node parents"] },
+    { "dot": "cyan", "title": "Keep", "items": ["Unchecked siblings stay off"] }
+  ]
+}

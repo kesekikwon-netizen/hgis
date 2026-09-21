@@ -103,6 +103,32 @@ void retargetGpkgLayers(QgsProject* project, const QString& fromPath, const QStr
   }
 }
 
+// writeEmbedded는 조사 GPKG를 절대경로로 남긴다. 파일을 다른 폴더·PC로 복사하면
+// 레이어가 원본 경로를 그대로 연다. 지금 연 파일 안에 같은 테이블이 있으면 그쪽으로 돌린다.
+int remountCopiedSurveyLayers(QgsProject* project, const QString& gpkgPath) {
+  if (!project || gpkgPath.isEmpty()) return 0;
+  const QString abs = QFileInfo(gpkgPath).absoluteFilePath();
+  QSet<QString> stale;
+  for (QgsMapLayer* ml : project->mapLayers()) {
+    auto* vl = qobject_cast<QgsVectorLayer*>(ml);
+    if (!vl) continue;
+    if (vl->providerType().compare(QLatin1String("ogr"), Qt::CaseInsensitive) != 0) continue;
+    const QString file = vl->source().section(QLatin1Char('|'), 0, 0);
+    if (file.isEmpty()) continue;
+    const QFileInfo fi(file);
+    if (fi.suffix().compare(QLatin1String("gpkg"), Qt::CaseInsensitive) != 0) continue;
+    if (fi.absoluteFilePath().compare(abs, Qt::CaseInsensitive) == 0) continue;
+    const QString table = gpkgTableName(vl);
+    if (table.isEmpty()) continue;
+    QgsVectorLayer probe(QStringLiteral("%1|layername=%2").arg(abs, table),
+                         QStringLiteral("probe"), QStringLiteral("ogr"));
+    if (!probe.isValid()) continue;
+    stale.insert(fi.absoluteFilePath());
+  }
+  for (const QString& from : stale) retargetGpkgLayers(project, from, abs);
+  return stale.size();
+}
+
 void restoreLayerSources(QgsProject* project, const QHash<QString, QString>& sources) {
   if (!project) return;
   for (QgsMapLayer* ml : project->mapLayers()) {
@@ -607,7 +633,7 @@ AbsorbResult absorbExternalVectors(QgsProject* project, const QString& gpkgPath,
       const QString provider = early->providerType().toLower();
       if (provider == QLatin1String("ogr") && !livesInGpkg(early, gpkgPath) &&
           (alsoSurveyGpkg.isEmpty() || !livesInGpkg(early, alsoSurveyGpkg)) &&
-          !LayerOps::isReferenceLayer(early)) {
+          !LayerOps::isReferenceLayer(early) && !LayerOps::isCadastralLayer(early)) {
         const QString file = early->source().section(QLatin1Char('|'), 0, 0);
         if (file.isEmpty() || !QFileInfo::exists(file)) {
           r.failed << early->name();
@@ -633,8 +659,9 @@ AbsorbResult absorbExternalVectors(QgsProject* project, const QString& gpkgPath,
     if (provider == QLatin1String("ogr") && !alsoSurveyGpkg.isEmpty() &&
         livesInGpkg(vl, alsoSurveyGpkg))
       continue;
-    if (LayerOps::isReferenceLayer(vl) && provider != QLatin1String("memory")) {
-      // 바깥 파일의 참조 지도는 조사 파일에 복사하지 않는다.
+    if ((LayerOps::isReferenceLayer(vl) || LayerOps::isCadastralLayer(vl)) &&
+        provider != QLatin1String("memory")) {
+      // 바깥 파일의 참조 지도·지적도는 조사 파일에 복사하지 않는다.
       // 메모리 레이어는 닫으면 사라진다. persistSurveyWork는 커밋을 먼저 하므로
       // isModified()만 보면 닫기 저장에서 빠진다.
       r.skippedReference << vl->name();
@@ -754,15 +781,16 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
     return attempt;
   }
 
+  // Tree order is not save order. Commit every layer that can save, then
+  // fail if a later (or earlier) layer still blocks the package publish.
+  QStringList blockedNames;
   for (QgsVectorLayer* vector : ordered) {
     if (!vector->isValid() || !vector->isEditable() || !vector->isModified())
       continue;
     if (!vector->allowCommit()) {
+      blockedNames << vector->name();
       attempt.failedLayers << vector->name();
-      recover(QStringLiteral("%1의 편집을 저장하지 못해 전체 저장을 마치지 못했습니다. "
-                             "미저장 편집은 유지됩니다.")
-                  .arg(vector->name()));
-      return attempt;
+      continue;
     }
     if (livesInGpkg(vector, gpkgPath)) {
       QString writeLayerError;
@@ -772,6 +800,15 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
         recover(writeLayerError.isEmpty()
                     ? QStringLiteral("%1의 편집을 다음 세대 파일에 쓰지 못했습니다.").arg(vector->name())
                     : writeLayerError);
+        return attempt;
+      }
+      // 세대 파일에 쓴 뒤에도 메모리 버퍼를 비운다. 다음 레이어가 실패하면
+      // 이미 쓴 레이어는 원본에도 반영되고 isModified()가 꺼져 있어야 한다.
+      if (!vector->commitChanges(false)) {
+        attempt.failedLayers << vector->name();
+        recover(QStringLiteral("%1의 편집을 저장하지 못해 전체 저장을 마치지 못했습니다. "
+                               "미저장 편집은 유지됩니다.")
+                    .arg(vector->name()));
         return attempt;
       }
       attempt.committedLayers << vector->name();
@@ -785,6 +822,12 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
       return attempt;
     }
     attempt.committedLayers << vector->name();
+  }
+  if (!blockedNames.isEmpty()) {
+    recover(QStringLiteral("%1의 편집을 저장하지 못해 전체 저장을 마치지 못했습니다. "
+                           "미저장 편집은 유지됩니다.")
+                .arg(blockedNames.join(QStringLiteral(", "))));
+    return attempt;
   }
 
   const AbsorbResult absorbed = absorbExternalVectors(project, generation, gpkgPath);
@@ -1013,6 +1056,8 @@ bool readEmbedded(QgsProject* project, const QString& gpkgPath, bool* crashedOut
   if (!ok && errorOut)
     *errorOut = crashed ? QStringLiteral("조사 파일 안의 작업공간을 읽다 오류가 났습니다.")
                         : project->error();
+  if (ok && remountCopiedSurveyLayers(project, abs) > 0)
+    LayerOps::reloadSurveyGpkgReaders(project, abs);
   return ok;
 }
 

@@ -15,6 +15,7 @@
 #include <QTextEdit>
 #include <QTabWidget>
 #include <qgslayertree.h>
+#include <qgslayertreemodellegendnode.h>
 #include <qgslayertreeview.h>
 #include <qgsmapcanvas.h>
 #include <qgsproject.h>
@@ -99,16 +100,72 @@ void MainWindow::watchUndoFeatureIds(QgsVectorLayer* layer) {
   });
 }
 
+void MainWindow::remapUndoFeatureIdsAfterSave() {
+  auto* project = QgsProject::instance();
+  if (!project) return;
+  for (auto& action : m_undoActions) {
+    auto* layer = qobject_cast<QgsVectorLayer*>(project->mapLayer(action.layerId));
+    if (!layer || !layer->isValid()) continue;
+    if (action.featureId >= 0 && layer->getFeature(action.featureId).isValid()) continue;
+    if (!action.featureData.isValid()) continue;
+    QgsAttributeList primary;
+    if (QgsVectorDataProvider* provider = layer->dataProvider())
+      primary = provider->pkAttributeIndexes();
+    QgsFeature current;
+    auto iterator = layer->getFeatures();
+    while (iterator.nextFeature(current)) {
+      bool same = current.attributeCount() == action.featureData.attributeCount();
+      for (int i = 0; same && i < current.attributeCount(); ++i) {
+        if (primary.contains(i)) continue;
+        if (current.attribute(i) != action.featureData.attribute(i)) same = false;
+      }
+      if (!same) continue;
+      action.featureId = current.id();
+      break;
+    }
+  }
+}
+
 void MainWindow::removeLayersFromTree(QgsLayerTreeView* tree) {
   if (!tree || m_isOpeningSurvey || m_closingWindow || editingText()) return;
-  QList<QgsMapLayer*> selected = tree->selectedLayers();
-  if (selected.isEmpty() && tree->currentLayer()) selected.append(tree->currentLayer());
-  if (selected.isEmpty()) {
+  QList<QgsMapLayer*> selected;
+  auto addLayer = [&](QgsMapLayer* layer) {
+    if (layer && !selected.contains(layer)) selected.append(layer);
+  };
+  for (QgsMapLayer* layer : tree->selectedLayers()) addLayer(layer);
+  addLayer(tree->currentLayer());
+  QSet<QgsLayerTreeNode*> nodes;
+  if (auto* model = tree->selectionModel()) {
+    for (const QModelIndex& idx : model->selectedIndexes()) {
+      if (auto* node = tree->index2node(idx)) nodes.insert(node);
+      if (auto* legend = tree->index2legendNode(idx)) {
+        if (legend->layerNode()) nodes.insert(legend->layerNode());
+      }
+    }
+  }
+  if (auto* node = tree->currentNode()) nodes.insert(node);
+  if (auto* legend = tree->index2legendNode(tree->currentIndex())) {
+    if (legend->layerNode()) nodes.insert(legend->layerNode());
+  }
+  for (QgsLayerTreeNode* node : nodes) {
+    for (QgsMapLayer* layer : LayerOps::removableCadastralLayersFromNode(node))
+      addLayer(layer);
+  }
+  auto* project = QgsProject::instance();
+  auto* root = project ? project->layerTreeRoot() : nullptr;
+  if (root) {
+    for (QgsMapLayer* layer : QList<QgsMapLayer*>(selected)) {
+      QgsLayerTreeLayer* item = root->findLayer(layer->id());
+      auto* parent = item ? qobject_cast<QgsLayerTreeGroup*>(item->parent()) : nullptr;
+      if (!parent) continue;
+      for (QgsMapLayer* extra : LayerOps::removableCadastralLayersFromNode(parent))
+        addLayer(extra);
+    }
+  }
+  if (selected.isEmpty() || !project || !root) {
     statusBar()->showMessage(QStringLiteral("제거할 레이어를 먼저 클릭하세요."), 4000);
     return;
   }
-  auto* project = QgsProject::instance();
-  auto* root = project->layerTreeRoot();
   auto removed = std::make_shared<KaRemovedLayers>();
   // Snapshot all positions before any node is removed. Keep the actual layer,
   // including unsaved edit buffers and memory data, until restored or discarded.
@@ -130,6 +187,14 @@ void MainWindow::removeLayersFromTree(QgsLayerTreeView* tree) {
     entry.layer.reset(project->takeMapLayer(layer));
   }
   if (removed->entries.empty()) return;
+  bool removedCadastral = false;
+  for (const auto& entry : removed->entries) {
+    QgsMapLayer* layer = entry.layer.get();
+    if (LayerOps::isCadastralLayer(layer) || LayerOps::isVworldCadastralPicture(layer))
+      removedCadastral = true;
+  }
+  if (removedCadastral)
+    LayerOps::rememberUserRemovedCadastral(project);
   KaUndoAction action;
   action.type = KaUndoAction::LayersRemoved;
   action.removedLayers = std::move(removed);
@@ -333,6 +398,11 @@ void MainWindow::deleteFeaturesOrSelectedReferenceLayers() {
     removeSelectedLayers();
     return;
   }
+  if (m_layerTree &&
+      !LayerOps::removableCadastralLayersFromNode(m_layerTree->currentNode()).isEmpty()) {
+    removeSelectedLayers();
+    return;
+  }
   deleteSelectedFeatures();
 }
 
@@ -344,7 +414,9 @@ void MainWindow::deleteSelectedFeatures() {
   int deleted = 0;
   for (const auto& item : selected) {
     auto* layer = item.layer.data();
-    if (!layer || done.contains(layer->id()) || LayerOps::isReferenceLayer(layer)) continue;
+    if (!layer || done.contains(layer->id()) || LayerOps::isReferenceLayer(layer) ||
+        LayerOps::isCadastralLayer(layer))
+      continue;
     done.insert(layer->id());
     QgsFeatureList features;
     for (const auto& candidate : selected) {

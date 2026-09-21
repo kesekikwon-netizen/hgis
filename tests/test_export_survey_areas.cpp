@@ -1,9 +1,10 @@
-﻿// 제출 패키지가 같은 layer_key 를 가진 레이어를 모두 내보내는지 검증한다.
+// 제출 패키지가 같은 layer_key 를 가진 레이어를 모두 내보내는지 검증한다.
 // 조사구역 대화상자의 「새 조사구역 레이어 만들기」는 survey_area_2, _3 을
 // 같은 키로 만든다. 예전에는 첫 레이어 하나만 내보내 제출물에서 구역이 빠졌다.
 #include "core/ChecklistEngine.h"
 #include "core/ExportService.h"
 #include "core/LayerOps.h"
+#include "core/LayoutService.h"
 #include "core/ProjectStateBuilder.h"
 
 #include <QCoreApplication>
@@ -11,6 +12,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonObject>
+#include <QRectF>
 #include <QTemporaryDir>
 #include <QVector>
 #include <QtTest>
@@ -19,7 +21,11 @@
 #include <qgscoordinatereferencesystem.h>
 #include <qgsfeature.h>
 #include <qgsgeometry.h>
+#include <qgslayoutitemmap.h>
+#include <qgslayoutmanager.h>
+#include <qgsmaplayer.h>
 #include <qgspointxy.h>
+#include <qgsprintlayout.h>
 #include <qgsproject.h>
 #include <qgsrectangle.h>
 #include <qgsvectordataprovider.h>
@@ -39,6 +45,33 @@ QgsVectorLayer* addSurveyAreaLayer(QgsProject* project, const QString& name,
   LayerOps::markSurveyLayer(layer, layerKey);
   project->addMapLayer(layer);
   return layer;
+}
+
+bool addComposedUserSheet(QgsProject* project, QgsMapLayer* mapLayer) {
+  if (!project || !mapLayer)
+    return false;
+  QString err;
+  if (LayoutService::createBlankSheet(project, 297.0, 210.0, QStringLiteral("user_sheet"), &err)
+          .isEmpty())
+    return false;
+  auto* ly = dynamic_cast<QgsPrintLayout*>(
+      project->layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  if (!ly)
+    return false;
+  auto* map = new QgsLayoutItemMap(ly);
+  map->setId(QStringLiteral("ka_map"));
+  map->attemptSetSceneRect(QRectF(20.0, 20.0, 120.0, 80.0));
+  map->setCrs(project->crs().isValid() ? project->crs()
+                                       : QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  map->setKeepLayerSet(true);
+  map->setLayers(QList<QgsMapLayer*>{mapLayer});
+  QgsRectangle ext = mapLayer->extent();
+  if (ext.isEmpty() || !ext.isFinite())
+    ext = QgsRectangle(200000.0, 450000.0, 200200.0, 450160.0);
+  map->zoomToExtent(ext);
+  if (map->scene() != ly)
+    ly->addLayoutItem(map);
+  return LayoutService::isComposedStudioSheet(project);
 }
 
 bool addSquare(QgsVectorLayer* layer, const QString& label, double x, double y) {
@@ -90,6 +123,7 @@ private slots:
   void longFieldNamesFitTheShapefile();
   void exportShp_matchesProjDirectWithinOneMillimetre_data();
   void exportShp_matchesProjDirectWithinOneMillimetre();
+  void exportSubmissionPackage_withoutUserSheetFails();
 };
 
 // 구역 레이어가 둘이면 두 도형이 모두 제출 SHP 에 들어가야 한다.
@@ -106,6 +140,7 @@ void TestExportSurveyAreas::everySurveyAreaLayerReachesTheSubmissionShp() {
   QVERIFY(second);
   QVERIFY(addSquare(second, QStringLiteral("2구역"), 200500, 450500));
   QCOMPARE(LayerOps::findAllByLayerKey(&project, QStringLiteral("survey_area")).size(), 2);
+  QVERIFY(addComposedUserSheet(&project, first));
 
   const QString output = temporary.filePath(QStringLiteral("submission"));
   QString error;
@@ -130,6 +165,7 @@ void TestExportSurveyAreas::emptyFirstLayerDoesNotDropTheSubmissionShp() {
   auto* drawn = addSurveyAreaLayer(&project, QStringLiteral("조사구역 2"));
   QVERIFY(drawn);
   QVERIFY(addSquare(drawn, QStringLiteral("실제 구역"), 200000, 450000));
+  QVERIFY(addComposedUserSheet(&project, drawn));
 
   const QString output = temporary.filePath(QStringLiteral("submission"));
   QString error;
@@ -164,6 +200,7 @@ void TestExportSurveyAreas::referenceLayerNamedLikeDomainStaysOut() {
   project.addMapLayer(reference);
   QVERIFY(addSquare(reference, QStringLiteral("주변 유적"), 300000, 460000));
   QVERIFY(LayerOps::layerKeyOf(reference).isEmpty());
+  QVERIFY(addComposedUserSheet(&project, survey));
 
   const QString output = temporary.filePath(QStringLiteral("submission"));
   QString error;
@@ -192,6 +229,7 @@ void TestExportSurveyAreas::legacyLayerWithoutKeyStillExports() {
   project.addMapLayer(legacy);
   QVERIFY(LayerOps::layerKeyOf(legacy).isEmpty());
   QVERIFY(addSquare(legacy, QStringLiteral("예전 구역"), 200000, 450000));
+  QVERIFY(addComposedUserSheet(&project, legacy));
 
   const QString output = temporary.filePath(QStringLiteral("submission"));
   QString error;
@@ -338,6 +376,7 @@ void TestExportSurveyAreas::longFieldNamesFitTheShapefile() {
   point.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(200010, 450010)));
   QgsFeatureList pointFeatures{point};
   QVERIFY(points->dataProvider()->addFeatures(pointFeatures));
+  QVERIFY(addComposedUserSheet(&project, area));
 
   const QString output = temporary.filePath(QStringLiteral("submission"));
   QString error;
@@ -432,6 +471,7 @@ void TestExportSurveyAreas::exportShp_matchesProjDirectWithinOneMillimetre() {
   feature.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(x, y)));
   QgsFeatureList features{feature};
   QVERIFY(points->dataProvider()->addFeatures(features));
+  QVERIFY(addComposedUserSheet(&project, points));
 
   const QString output = temporary.filePath(QStringLiteral("submission"));
   QString error;
@@ -462,6 +502,24 @@ void TestExportSurveyAreas::exportShp_matchesProjDirectWithinOneMillimetre() {
                           .arg(projX, 0, 'f', 6)
                           .arg(projY, 0, 'f', 6)
                           .arg(metres, 0, 'f', 6)));
+}
+
+void TestExportSurveyAreas::exportSubmissionPackage_withoutUserSheetFails() {
+  QTemporaryDir temporary;
+  QVERIFY(temporary.isValid());
+  QgsProject project;
+  project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+  auto* first = addSurveyAreaLayer(&project, QStringLiteral("조사구역"));
+  QVERIFY(first);
+  QVERIFY(addSquare(first, QStringLiteral("1구역"), 200000, 450000));
+
+  const QString output = temporary.filePath(QStringLiteral("submission"));
+  QString error;
+  QVERIFY(ExportService::exportSubmissionPackage(&project, output, QStringLiteral("UTF-8"),
+                                                 QStringLiteral("OK"), true, false, &error)
+              .isEmpty());
+  QVERIFY2(error.contains(QStringLiteral("도면만들기")), qPrintable(error));
+  QVERIFY(!QFileInfo::exists(QDir(output).filePath(QStringLiteral("README_submit.txt"))));
 }
 
 #include "test_export_survey_areas.moc"

@@ -57,9 +57,9 @@ QueryResult query(const QList<Record>& records, const QgsRectangle& bounds,
 // 1:25,000 sheet scale. Coverage still uses this to recognize a survey view.
 // Category visibility is the archaeology location-map set, not this number.
 constexpr double kDetailMaxScale = 25000.;
-constexpr double kCoverageRadiusMeters = 10000.;
+constexpr double kCoverageRadiusMeters = 5000.;
 bool visibleAtScale(Category category, double scale);
-// Work-CRS meters. Grows a tight survey view to the same 10 km download radius
+// Work-CRS meters. Grows a tight survey view to the same 5 km load radius
 // so received neighbor sheets stay on the map; a larger canvas wins as-is.
 QgsRectangle coverageBounds(const QgsRectangle& view, double radiusMeters = kCoverageRadiusMeters);
 QString categoryName(Category category);

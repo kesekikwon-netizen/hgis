@@ -16,6 +16,7 @@
 #include <QPushButton>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QWidget>
 
 #include <qgscoordinatereferencesystem.h>
 #include <qgscoordinatetransformcontext.h>
@@ -158,7 +159,18 @@ void KaMeasureMapTool::ensureHud() {
 void KaMeasureMapTool::placeHud() {
   if (!m_hud || !canvas())
     return;
-  m_hud->move(10, 10);
+  auto* host = canvas()->viewport() ? canvas()->viewport() : static_cast<QWidget*>(canvas());
+  int x = 10;
+  int y = 10;
+  if (host) {
+    if (auto* rail = host->findChild<QWidget*>(QStringLiteral("layerOpacityRail"))) {
+      if (rail->isVisible()) {
+        x = rail->geometry().right() + 8;
+        y = rail->geometry().top();
+      }
+    }
+  }
+  m_hud->move(x, y);
   m_hud->raise();
 }
 

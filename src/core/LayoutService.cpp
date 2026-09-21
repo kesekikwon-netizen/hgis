@@ -4,8 +4,11 @@
 #include "DemColorRampLegend.h"
 #include "GeologyMapService.h"
 #include "LayerOps.h"
+#include "LayerLabelControls.h"
 
 #include <QColor>
+#include <QGraphicsItem>
+#include <QSet>
 #include <QDate>
 #include <QDir>
 #include <QFile>
@@ -292,7 +295,9 @@ static bool hasDrawableContent(const QList<QgsMapLayer*>& layers, const LayoutSe
   if (rec.kind == LayoutService::DrawingKind::FeaturePlan) {
     for (QgsMapLayer* ml : layers) {
       auto* vl = qobject_cast<QgsVectorLayer*>(ml);
-      if (!vl || LayerOps::isReferenceLayer(vl) || LayerOps::isBasemapLayer(vl)) continue;
+      if (!vl || LayerOps::isReferenceLayer(vl) || LayerOps::isCadastralLayer(vl) ||
+          LayerOps::isBasemapLayer(vl))
+        continue;
       const QString k = LayerOps::layerKeyOf(vl);
       if ((k == QLatin1String("feature_poly") || k == QLatin1String("feature_line")) && vl->featureCount() > 0)
         return true;
@@ -302,7 +307,9 @@ static bool hasDrawableContent(const QList<QgsMapLayer*>& layers, const LayoutSe
   if (rec.kind == LayoutService::DrawingKind::Section) {
     for (QgsMapLayer* ml : layers) {
       auto* vl = qobject_cast<QgsVectorLayer*>(ml);
-      if (!vl || LayerOps::isReferenceLayer(vl) || LayerOps::isBasemapLayer(vl)) continue;
+      if (!vl || LayerOps::isReferenceLayer(vl) || LayerOps::isCadastralLayer(vl) ||
+          LayerOps::isBasemapLayer(vl))
+        continue;
       const QString k = LayerOps::layerKeyOf(vl);
       if (k == QLatin1String("section_line") && vl->featureCount() > 0)
         return true;
@@ -311,7 +318,9 @@ static bool hasDrawableContent(const QList<QgsMapLayer*>& layers, const LayoutSe
   }
   for (QgsMapLayer* ml : layers) {
     auto* vl = qobject_cast<QgsVectorLayer*>(ml);
-    if (!vl || LayerOps::isReferenceLayer(vl) || LayerOps::isBasemapLayer(vl)) continue;
+    if (!vl || LayerOps::isReferenceLayer(vl) || LayerOps::isCadastralLayer(vl) ||
+        LayerOps::isBasemapLayer(vl))
+      continue;
     if (rec.kind == LayoutService::DrawingKind::FeatureDetail) {
       if (featureId != FID_NULL && vl->getFeature(featureId).isValid())
         return true;
@@ -888,6 +897,25 @@ void LayoutService::applySurveyFrameGrid(QgsLayoutItemMap* map, double intervalM
   map->updateBoundingRect();
 }
 
+QRectF LayoutService::equalFullSheetMapRect(const QRectF& page, const QRectF& map) {
+  if (!page.isValid() || !map.isValid() || map.width() < page.width() * 0.65)
+    return map;
+  const double left = map.left() - page.left();
+  const double right = page.right() - map.right();
+  const double top = map.top() - page.top();
+  if (qAbs(left - right) > 3.0)
+    return map;
+  const double side = (left + right) * 0.5;
+  if (side < 8.0 || qAbs(top - side) < 0.75)
+    return map;
+  const double bottomKeep = page.bottom() - map.bottom();
+  if (bottomKeep < 8.0)
+    return map;
+  return QRectF(page.left() + side, page.top() + side,
+                std::max(40.0, page.width() - 2.0 * side),
+                std::max(40.0, page.height() - side - bottomKeep));
+}
+
 LayoutService::SheetChromeRects LayoutService::standardSheetChrome(const QRectF& page,
                                                                    const QRectF& requestedMap) {
   // Field sheet strip locked under the map (not on imagery):
@@ -1060,8 +1088,17 @@ QString LayoutService::createBlankSheet(QgsProject* project, double widthMm, dou
     if (QgsLayoutItemPage* page = layout->pageCollection()->page(0))
       page->setPageSize(QgsLayoutSize(widthMm, heightMm, Qgis::LayoutUnit::Millimeters));
   }
+  layout->setCustomProperty(QStringLiteral("ka_hgis/auto_template"), false);
+  layout->setCustomProperty(QStringLiteral("ka_hgis/user_composed"), false);
   project->layoutManager()->addLayout(layout);
   return name;
+}
+
+void LayoutService::markStudioSheetComposed(QgsLayout* layout) {
+  if (!layout)
+    return;
+  layout->setCustomProperty(QStringLiteral("ka_hgis/auto_template"), false);
+  layout->setCustomProperty(QStringLiteral("ka_hgis/user_composed"), true);
 }
 
 static QgsPrintLayout* replaceLayout(QgsProject* project, const QString& name) {
@@ -1145,6 +1182,9 @@ bool LayoutService::isComposedStudioSheet(QgsProject* project, const QString& la
       project->layoutManager()->layoutByName(target));
   if (!ly)
     return false;
+  if (ly->customProperty(QStringLiteral("ka_hgis/auto_template")).toBool() &&
+      !ly->customProperty(QStringLiteral("ka_hgis/user_composed")).toBool())
+    return false;
 
   auto* map = dynamic_cast<QgsLayoutItemMap*>(ly->itemById(QStringLiteral("ka_map")));
   if (!map)
@@ -1181,7 +1221,8 @@ bool LayoutService::isComposedStudioSheet(QgsProject* project, const QString& la
       continue;
     if (target != QLatin1String("section_sheet") && n == QLatin1String("ka_section_blank"))
       continue;
-    if (LayerOps::isReferenceLayer(l) || LayerOps::isBasemapLayer(l))
+    if (LayerOps::isReferenceLayer(l) || LayerOps::isCadastralLayer(l) ||
+        LayerOps::isBasemapLayer(l))
       continue;
 
     if (auto* vl = qobject_cast<QgsVectorLayer*>(l)) {
@@ -1322,29 +1363,18 @@ int LayoutService::exportDrawingPdfs(QgsProject* project, const QString& outDir,
     if (errorOut) *errorOut = QStringLiteral("폴더를 만들 수 없습니다.");
     return 0;
   }
-  if (project->layoutManager()->layoutByName(QStringLiteral("user_sheet"))) {
-    const QString path = dir.filePath(QStringLiteral("조사도면.pdf"));
-    QString err;
-    if (!exportLayoutPdf(project, QStringLiteral("user_sheet"), path, &err).isEmpty())
-      return 1;
-    if (errorOut) *errorOut = err.isEmpty() ? QStringLiteral("도면만들기 PDF를 만들지 못했습니다.") : err;
+  if (!isComposedStudioSheet(project, QStringLiteral("user_sheet"))) {
+    if (errorOut)
+      *errorOut = QStringLiteral("도면만들기에서 용지를 만든 뒤 다시 보내기 하세요.");
     return 0;
   }
-
-  ensureDefaultLayouts(project);
-  int n = 0;
-  QString lastErr;
-  for (const DrawingRecipe& rec : allRecipes()) {
-    const QString path = dir.filePath(rec.titleKo + QStringLiteral(".pdf"));
-    QString err;
-    if (!exportLayoutPdf(project, rec.layoutId, path, &err).isEmpty())
-      ++n;
-    else
-      lastErr = err;
-  }
-  if (n == 0 && errorOut)
-    *errorOut = lastErr.isEmpty() ? QStringLiteral("도면 PDF를 만들지 못했습니다.") : lastErr;
-  return n;
+  const QString path = dir.filePath(QStringLiteral("조사도면.pdf"));
+  QString err;
+  if (!exportLayoutPdf(project, QStringLiteral("user_sheet"), path, &err).isEmpty())
+    return 1;
+  if (errorOut)
+    *errorOut = err.isEmpty() ? QStringLiteral("도면만들기 PDF를 만들지 못했습니다.") : err;
+  return 0;
 }
 
 bool LayoutService::sheetLegendOmitsLayerName(const QString& name) {
@@ -1388,8 +1418,50 @@ bool onLinkedMap(QgsLayoutItemLegend* legend, QgsMapLayer* ml) {
   if (!legend || !ml) return false;
   QgsLayoutItemMap* map = legend->linkedMap();
   if (!map) return true;
-  const QList<QgsMapLayer*> onMap = map->layers();
-  return onMap.contains(ml);
+  if (map->layers().contains(ml)) return true;
+  if (auto* layout = legend->layout()) {
+    for (QGraphicsItem* item : layout->items()) {
+      auto* other = dynamic_cast<QgsLayoutItemMap*>(item);
+      if (!other) continue;
+      if ((other->id() == QLatin1String("ka_map_above") ||
+           other->id() == QLatin1String("ka_map_numbers")) &&
+          other->layers().contains(ml))
+        return true;
+    }
+  }
+  return LayerLabelControls::isHeritage(ml);
+}
+
+void addMissingSheetLegendLayers(QgsLayoutItemLegend* legend, QgsLayerTree* root) {
+  if (!legend || !root) return;
+  QSet<QString> seen;
+  for (auto* existing : root->findLayers()) {
+    if (existing && existing->layer()) seen.insert(existing->layer()->id());
+  }
+  QList<QgsMapLayer*> extra;
+  if (auto* map = legend->linkedMap()) extra.append(map->layers());
+  if (auto* layout = legend->layout()) {
+    for (QGraphicsItem* item : layout->items()) {
+      auto* other = dynamic_cast<QgsLayoutItemMap*>(item);
+      if (!other) continue;
+      if (other->id() == QLatin1String("ka_map_above") ||
+          other->id() == QLatin1String("ka_map_numbers"))
+        extra.append(other->layers());
+    }
+    if (auto* project = layout->project()) {
+      for (auto* node : project->layerTreeRoot()->findLayers()) {
+        if (!node || !node->isVisible()) continue;
+        auto* vl = qobject_cast<QgsVectorLayer*>(node->layer());
+        if (vl && LayerLabelControls::isHeritage(vl)) extra.append(vl);
+      }
+    }
+  }
+  for (auto* layer : extra) {
+    if (!layer || seen.contains(layer->id())) continue;
+    if (omitSheetLegendLayer(layer, layer->name()) || !projectLayerChecked(layer)) continue;
+    root->addLayer(layer);
+    seen.insert(layer->id());
+  }
 }
 
 }  // namespace
@@ -1527,6 +1599,7 @@ void LayoutService::tuneSheetLegend(QgsLayoutItemLegend* legend) {
   QgsLegendModel* model = legend->model();
   if (!model || !model->rootGroup()) return;
   QgsLayerTree* root = model->rootGroup();
+  addMissingSheetLegendLayers(legend, root);
 
   QList<QgsLayerTreeLayer*> toRemove;
   for (QgsLayerTreeLayer* ll : root->findLayers()) {

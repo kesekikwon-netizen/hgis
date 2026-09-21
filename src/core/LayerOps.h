@@ -16,21 +16,29 @@ class QgsPointXY;
 class QgsFeature;
 class QgsLayerTreeGroup;
 class QgsLayerTreeLayer;
+class QgsLayerTreeNode;
 class QgsGeometry;
 class QgsCoordinateReferenceSystem;
 
 class LayerOps {
 public:
   static constexpr const char* kGroupSurveyData = "조사 데이터";
+  static constexpr const char* kGroupCadastral = "지적도";
   static constexpr const char* kGroupReference = "참조 지도";
   static constexpr const char* kPropLayerKey = "ka_hgis/layer_key";
   static constexpr const char* kPropLayerRole = "ka_hgis/layer_role";
   static constexpr const char* kAdminEmdKey = "admin_emd";
   static constexpr const char* kRoleSurvey = "survey";
+  static constexpr const char* kRoleCadastral = "cadastral";
   static constexpr const char* kRoleReference = "reference";
   static constexpr const char* kPropAlignPending = "ka_hgis/align_pending";
+  static constexpr const char* kPropSkipAutoCadastral = "skip_auto_cadastral";
   /// 신규 주제도 내려받기 범위를 정하는 축척. 내려받은 레이어의 표시 제한이 아니다.
   static constexpr double kThematicMinScaleDenom = 100000.0;
+  /// 휠·도구 한 칸 확대 배율. QGIS 기본 2.0은 한 칸에 축척이 두 배가 된다.
+  /// https://qgis.org/pyqgis/master/gui/QgsMapCanvas.html
+  static constexpr double kWheelZoomFactor = 1.2;
+  static void applyWheelZoomFactor(QgsMapCanvas* canvas);
   static void applyThematicOverlayScaleRange(QgsMapLayer* layer);
   static void restoreThematicOverlayVisibility(QgsProject* project);
   /// Move a legend row without removing the datasource from the project.
@@ -92,6 +100,8 @@ public:
   // QGIS 는 도형을 모두 그린 뒤 라벨을 한 번에 얹으므로, 위 레이어가 아래
   // 레이어의 글자에 가린다. 그 레이어들을 2차 패스로 다시 그리기 위한 목록이다.
   static QList<QgsMapLayer*> layersDrawnAboveLabels(QgsProject* project);
+  // 조판 본지도: 덧그림 조사·지적을 뺀다. 주변유적은 본지도에 남긴다.
+  static QList<QgsMapLayer*> sheetBasePaintLayers(QgsProject* project);
   static bool labelsVisible(const QgsMapLayer* layer);
   static bool setLabelsVisible(QgsMapLayer* layer, bool on);
   static bool applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fill, const QColor& stroke,
@@ -229,6 +239,9 @@ public:
 
   static bool toggleLayerVisibility(QgsProject* project, QgsMapCanvas* canvas, const QString& name, bool visible);
   static bool isLayerVisible(QgsProject* project, const QString& name);
+  // 전체 끄기 후 자식만 체크하면 부모 그룹이 꺼진 채라 지도에 안 나온다.
+  // 체크된 노드의 조상을 같이 열어 isVisible()을 맞춘다.
+  static void revealCheckedLegendNode(QgsLayerTreeNode* node);
   // refresh() only when no WMS/XYZ job is in flight (provider_wms deleteLater AV).
   static void refreshCanvasIfIdle(QgsMapCanvas* canvas);
 
@@ -322,7 +335,9 @@ public:
   static void placeInLegendGroup(QgsProject* project, QgsMapLayer* layer, const QString& groupName,
                                  bool insertAtBottom = false);
   static void markSurveyLayer(QgsMapLayer* layer, const QString& layerKey);
+  static void markCadastralLayer(QgsMapLayer* layer);
   static void markReferenceLayer(QgsMapLayer* layer);
+  static void placeCadastralLayer(QgsProject* project, QgsMapLayer* layer);
   // 미리 받아 둔 MBTiles 타일팩을 참조 지도로 올린다. 원격 XYZ와 같은 자리에
   // 쓰이지만 네트워크를 타지 않는다(TilePackService가 만든 파일).
   static bool addTilePackBasemap(QgsProject* project, QgsMapCanvas* canvas, const QString& path,
@@ -332,7 +347,16 @@ public:
   static void knockOutProjectRasterPaper(QgsProject* project);
   static QString layerKeyOf(const QgsMapLayer* layer);
   static bool isReferenceLayer(const QgsMapLayer* layer);
+  static bool isCadastralLayer(const QgsMapLayer* layer);
+  static bool isVworldCadastralPicture(const QgsMapLayer* layer);
+  static bool projectHasCadastralLayer(const QgsProject* project);
+  static bool userRemovedCadastral(const QgsProject* project);
+  static void rememberUserRemovedCadastral(QgsProject* project);
+  static void clearUserRemovedCadastral(QgsProject* project);
+  static QList<QgsMapLayer*> removableCadastralLayersFromNode(QgsLayerTreeNode* node);
   static bool isBasemapLayer(const QgsMapLayer* layer);
+  // Survey vectors and cadastral parcel lines. WMS/XYZ pictures cannot snap.
+  static bool isSnapSourceLayer(const QgsVectorLayer* layer);
   static QgsVectorLayer* findByLayerKey(QgsProject* project, const QString& layerKey);
   // 같은 layer_key 를 가진 레이어를 모두 돌려준다. 조사구역처럼 사용자가 레이어를
   // 여러 개 만들 수 있으므로, 제출 패키지가 하나만 내보내지 않게 하려고 쓴다.
@@ -400,7 +424,7 @@ public:
     bool topological = true;
   };
   // Writes QgsSnappingConfig plus ka_hgis/snap_target. SurveyLayers uses AdvancedConfiguration
-  // on non-reference vectors only. CurrentLayer uses ActiveLayer.
+  // on survey vectors and cadastral lines. CurrentLayer uses ActiveLayer.
   // topological writes QgsProject::setTopologicalEditing and ka_hgis/topological.
   static void applySnapSettings(QgsProject* project, const SnapSettings& settings);
   static SnapSettings readSnapSettings(const QgsProject* project);

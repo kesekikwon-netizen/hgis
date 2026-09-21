@@ -58,6 +58,21 @@ public:
                            double paperWidthMm, double paperHeightMm,
                            QWidget* parent = nullptr);
   static bool promptPaper(QWidget* parent, double* widthMm, double* heightMm);
+  static constexpr double kA4PortraitWidthMm = 210.0;
+  static constexpr double kA4PortraitHeightMm = 297.0;
+  // A4 가로(297×210)에서 좌·우·위 각 10mm를 더 준 현장 조판.
+  static constexpr double kA4LandscapeWidthMm = 297.0;
+  static constexpr double kA4LandscapeHeightMm = 210.0;
+  static constexpr double kFieldPaperExtraMm = 10.0;
+  static constexpr double kFieldPaperWidthMm =
+      kA4LandscapeWidthMm + kFieldPaperExtraMm * 2.0;
+  static constexpr double kFieldPaperHeightMm =
+      kA4LandscapeHeightMm + kFieldPaperExtraMm;
+  static constexpr double kFieldEdgeMm = 10.0;
+  static constexpr double kFieldBottomChromeMm = 38.0;
+  static bool isLegacyA4LandscapeMm(double widthMm, double heightMm);
+  void applyFieldPageGrow();
+  void applyFieldEdge();
   void resetPaper(double widthMm, double heightMm, bool preserveExisting = true);
   void refreshMapFromProject();
   void updateLayerOpacityControl();
@@ -90,6 +105,7 @@ public slots:
   void deleteSelectedItems();
   void removeSelectedLayers();
   void undoLastChange();
+  void savePdf();
 
 signals:
   void drawingScaleChanged(double denominator);
@@ -105,7 +121,6 @@ private slots:
   void flushLayerSync();
   void toggleAllLayersChecked();
   void refreshLayerCheckAllButton();
-  void savePdf();
   void beginPlaceLegend();
   void beginPlaceNorth(const QString& svgRel);
   void beginPlaceScaleBar(const QString& style);
@@ -132,6 +147,7 @@ private:
   // 라벨 위에 위 레이어를 한 번 더 그리는 덧지도를 본 지도에 맞춘다.
   void syncAboveLabelsMap(QgsLayoutItemMap* base);
   bool syncHeritageNumbers(bool force = false);
+  void applyHeritageNumberChrome();
   QgsVectorLayer* blankMapLayer();
   static void ensureLayoutGuiRegistered(QgsMapCanvas* mapCanvas);
   void startPlace(PlaceKind kind);
@@ -172,8 +188,8 @@ private:
 
   QPointer<QgsProject> m_project;
   QPointer<QgsMapCanvas> m_mapCanvas;
-  double m_paperW = 297.0;
-  double m_paperH = 210.0;
+  double m_paperW = kA4PortraitWidthMm;
+  double m_paperH = kA4PortraitHeightMm;
   QgsLayoutView* m_view = nullptr;
   QgsLayoutViewToolSelect* m_toolSelect = nullptr;
   QgsLayoutViewToolPan* m_toolPan = nullptr;
@@ -229,6 +245,8 @@ private:
   QSize m_lastFitViewport;
   bool m_syncingMapFromLayers = false;
   bool m_syncingHeritageNumbers = false;
+  bool m_numberChromePending = false;
+  QByteArray m_aboveMapDigest;
   HeritageLayoutNumbers m_heritageNumbers;
   QTimer* m_layerSyncTimer = nullptr;
   bool m_layerSyncPending = false;

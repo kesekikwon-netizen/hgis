@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Wheel zoom step",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "in", "label": "Wheel" },
+    { "id": "app", "label": "App" }
+  ],
+  "phases": [
+    { "id": "read", "label": "Read", "fromCol": 0, "toCol": 1 },
+    { "id": "step", "label": "Step", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "view", "label": "View", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["notch", "factor", "map"],
+  "nodes": [
+    { "id": "notch", "lane": "in", "col": 0, "type": "external", "label": "One notch", "sublabel": "120 deg" },
+    { "id": "factor", "lane": "app", "col": 2, "type": "backend", "label": "1.2×", "sublabel": "kWheelZoomFactor" },
+    { "id": "map", "lane": "app", "col": 4, "type": "frontend", "label": "Map", "sublabel": "setWheelFactor" },
+    { "id": "sheet", "lane": "app", "col": 5, "type": "frontend", "label": "Sheet", "sublabel": "same step" }
+  ],
+  "edges": [
+    { "from": "notch", "to": "factor", "label": "wheel" },
+    { "from": "factor", "to": "map", "variant": "emphasis" },
+    { "from": "factor", "to": "sheet", "label": "layout" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Was", "items": ["Map 2.0; sheet 1.35"] },
+    { "dot": "emerald", "title": "Now", "items": ["Both 1.2 per notch"] },
+    { "dot": "cyan", "title": "Keep", "items": ["Ctrl finer on sheet"] }
+  ]
+}

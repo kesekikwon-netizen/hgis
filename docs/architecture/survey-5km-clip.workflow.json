@@ -1,0 +1,36 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Survey 5km clip",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "src", "label": "Official" },
+    { "id": "app", "label": "App" }
+  ],
+  "phases": [
+    { "id": "get", "label": "Receive", "fromCol": 0, "toCol": 1 },
+    { "id": "cut", "label": "Clip", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "show", "label": "Legend", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["zip", "keep", "scope", "clip", "layer"],
+  "nodes": [
+    { "id": "zip", "lane": "src", "col": 0, "type": "cloud", "label": "시·군 ZIP", "sublabel": "도엽 전체" },
+    { "id": "keep", "lane": "app", "col": 1, "type": "database", "label": "원본 보관", "sublabel": "no edit" },
+    { "id": "scope", "lane": "app", "col": 2, "type": "backend", "label": "조사구역", "sublabel": "buffer 5km" },
+    { "id": "clip", "lane": "app", "col": 3, "type": "backend", "label": "교집합", "sublabel": "SurveyScopeClip" },
+    { "id": "layer", "lane": "app", "col": 5, "type": "frontend", "label": "범례", "sublabel": "near only" }
+  ],
+  "edges": [
+    { "from": "zip", "to": "keep", "label": "download" },
+    { "from": "keep", "to": "scope" },
+    { "from": "scope", "to": "clip", "variant": "emphasis" },
+    { "from": "clip", "to": "layer", "label": "add" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Server", "items": ["No 5km extract"] },
+    { "dot": "emerald", "title": "After", "items": ["Clip then add"] },
+    { "dot": "cyan", "title": "Keep", "items": ["Original ZIP/sheet"] }
+  ]
+}

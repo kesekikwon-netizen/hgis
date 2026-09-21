@@ -435,15 +435,9 @@ void TestE2EOpaque::testT2_ZeroFeatureLayers_ExportGraceful() {
   const QString res = ExportService::exportSubmissionPackage(
       &proj, outDir, QStringLiteral("UTF-8"),
       QStringLiteral("Empty project warning"), false, false, &err);
-  QVERIFY2(!res.isEmpty(), qPrintable(err));
-
-  QDir out(outDir);
-  // With 0 features, empty shapefiles should be skipped gracefully
-  QVERIFY(!QFile::exists(out.filePath(QStringLiteral("survey_area.shp"))));
-  QVERIFY(!QFile::exists(out.filePath(QStringLiteral("feature_poly.shp"))));
-  // Metadata and manifest must still be produced
-  QVERIFY(QFile::exists(out.filePath(QStringLiteral("README_submit.txt"))));
-  QVERIFY(QFile::exists(out.filePath(QStringLiteral("MANIFEST.sha256"))));
+  QVERIFY(res.isEmpty());
+  QVERIFY2(err.contains(QStringLiteral("도면만들기")), qPrintable(err));
+  QVERIFY(!QFile::exists(QDir(outDir).filePath(QStringLiteral("README_submit.txt"))));
 }
 
 void TestE2EOpaque::testT2_DegenerateGeometry_EdgeCases() {

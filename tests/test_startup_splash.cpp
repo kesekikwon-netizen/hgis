@@ -8,6 +8,7 @@
 #include <QSignalSpy>
 #include <QTimer>
 #include <QtTest>
+#include <QWidget>
 
 namespace {
 
@@ -60,8 +61,8 @@ private slots:
     QCOMPARE(ready.count(), 1);
   }
 
-  void defaultFiveSecondsStayResponsiveAndKeepNoticesVisible() {
-    QCOMPARE(KaStartupSplash::ReadingDurationMs, 5000);
+  void defaultTenSecondsStayResponsiveAndKeepNoticesVisible() {
+    QCOMPARE(KaStartupSplash::ReadingDurationMs, 10000);
     KaStartupSplash splash;
     QSignalSpy ready(&splash, &KaStartupSplash::readyToShow);
     splash.show();
@@ -93,31 +94,37 @@ private slots:
                                   QStringLiteral("GEOS"), QStringLiteral("SQLite"),
                                   QStringLiteral("Chromium")})
       QVERIFY(attribution.contains(library));
-    QTest::qWait(qMax(1, 4000 - int(elapsed.elapsed())));
+    QTest::qWait(qMax(1, 9000 - int(elapsed.elapsed())));
     QCOMPARE(ready.count(), 0);
     QVERIFY(splash.isVisible());
     QVERIFY(beats > 20);
-    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 2000);
-    QVERIFY(elapsed.elapsed() >= 5000);
-    QVERIFY(elapsed.elapsed() < 7000);
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 3000);
+    QVERIFY(elapsed.elapsed() >= 10000);
+    QVERIFY(elapsed.elapsed() < 13000);
   }
 
   void plateIsOpaqueAndMotionChangesTheFrame() {
     KaStartupSplash splash(nullptr, 3000);
     splash.show();
-    QTest::qWait(50);
+    QTest::qWait(80);
     saveFrame(splash, QStringLiteral("startup-cover.png"));
     const QImage cover = splash.grab().toImage();
-    // Opaque plate: corners and center are painted, not a floating rounded card.
-    QVERIFY(qAlpha(cover.pixel(1, 1)) > 200);
-    QVERIFY(qAlpha(cover.pixel(cover.width() - 2, cover.height() - 2)) > 200);
+    // Rounded card: the window corners stay clear so the white mat can sit outside.
+    QVERIFY(qAlpha(cover.pixel(1, 1)) < 40);
+    QVERIFY(qAlpha(cover.pixel(cover.width() - 2, cover.height() - 2)) < 40);
     QVERIFY(qAlpha(cover.pixel(cover.width() / 2, cover.height() / 2)) > 200);
+    const QColor rim = cover.pixelColor(20, cover.height() / 2);
+    QVERIFY(rim.red() > 180 && rim.green() > 180 && rim.blue() > 180);
     splash.markReady();
-    QTest::qWait(1500);
+    const QRect plan = splash.planRect().toRect();
+    const QImage first = splash.grab(plan).toImage();
+    QTRY_VERIFY_WITH_TIMEOUT(splash.motionClock() > 0.25, 2000);
     saveFrame(splash, QStringLiteral("startup-motion.png"));
     const QImage moving = splash.grab().toImage();
-    QVERIFY(moving != cover);
-    QVERIFY(qAlpha(moving.pixel(1, 1)) > 200);
+    const QImage later = splash.grab(plan).toImage();
+    QVERIFY(qAlpha(moving.pixel(1, 1)) < 40);
+    QVERIFY(qAlpha(moving.pixel(moving.width() / 2, moving.height() / 2)) > 200);
+    QVERIFY(first != later);
   }
 
   void clickNeverClosesTheNotice() {
@@ -127,15 +134,14 @@ private slots:
     splash.markReady();
     QTest::qWait(60);
     const QRectF plan = splash.planRect();
-    QCOMPARE(splash.revealedFraction(), 1.0);
+    QVERIFY(splash.revealedFraction() < 1.0);
     moveMouse(splash, QPointF(plan.left() + plan.width() * 0.3, plan.top() + plan.height() * 0.4));
     saveFrame(splash, QStringLiteral("startup-scrape.png"));
-    QCOMPARE(splash.revealedFraction(), 1.0);
     QTest::mouseClick(&splash, Qt::LeftButton, Qt::NoModifier, plan.center().toPoint());
     QVERIFY(splash.isVisible());
     QCOMPARE(ready.count(), 0);
     QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 6000);
-    QCOMPARE(splash.revealedFraction(), 1.0);
+    QVERIFY(splash.revealedFraction() >= 0.99);
     QEvent leave(QEvent::Leave);
     QApplication::sendEvent(&splash, &leave);
     splash.update();

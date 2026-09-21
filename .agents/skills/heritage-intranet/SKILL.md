@@ -56,7 +56,7 @@ description: 문화재인트라넷 — D:/hgis의 주변유적 받기, 국가유
 
 ## 범례를 이어서 수정할 때
 
-`LayoutService::tuneSheetLegend`, `KaDrawingStudio`, `HeritageSiteLegend`의 현재 상태와 설치된 QGIS 헤더를 확인한다. 도면 범위 필터, 번호 생성, 자동 열 배치는 서로 다른 기능이다.
+`LayoutService::tuneSheetLegend`, `KaDrawingStudio`, `HeritageSiteLegend`의 현재 상태와 설치된 QGIS 헤더를 확인한다. 도면 범위 필터, 번호 생성, 자동 열 배치는 서로 다른 기능이다. 조판 번호·페이지 범례의 현재 계약은 [ka-hgis-sheet](../ka-hgis-sheet/SKILL.md)다. 2026-09-13 「번호 제거」 기록으로 번호를 지우지 않는다.
 
 범례가 길다는 신고만으로 시군 전체가 표시된다고 판단하지 않는다. 현재 QGIS 필터의 확인 근거는 [도면 범례 상태](references/legend-state.md)를 읽는다.
 

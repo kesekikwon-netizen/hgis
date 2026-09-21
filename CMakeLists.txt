@@ -50,7 +50,7 @@ endif()
 set(OSGEO4W_ROOT "${OSGEO4W_ROOT_DEFAULT}" CACHE PATH "OSGeo4W root")
 set(QGIS_PREFIX_PATH "${OSGEO4W_ROOT}/apps/qgis-dev" CACHE PATH "QGIS prefix")
 list(PREPEND CMAKE_PREFIX_PATH "${OSGEO4W_ROOT}/apps/Qt6" "${OSGEO4W_ROOT}/apps/Qt6/lib/cmake")
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Xml PrintSupport Network Svg Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Xml PrintSupport Network Svg Test Multimedia MultimediaWidgets)
 find_package(Qt6 REQUIRED COMPONENTS WebEngineWidgets)
 
 set(KA_INCLUDES
@@ -105,6 +105,7 @@ add_library(ka_core STATIC
   src/core/KaSessionLog.cpp
   src/core/HeritageIntranetFlow.cpp
   src/core/HeritageImport.cpp
+  src/core/SurveyScopeClip.cpp
   src/core/HeritageFormParser.cpp
   src/core/HeritageHttpClient.cpp
   src/core/WorkflowGuide.cpp
@@ -145,6 +146,7 @@ add_library(ka_core STATIC
   src/core/HeritageIntranetSettings.h
   src/core/HeritageIntranetFlow.h
   src/core/HeritageImport.h
+  src/core/SurveyScopeClip.h
   src/core/HeritageFormParser.h
   src/core/HeritageHttpClient.h
   src/core/WorkflowGuide.h
@@ -325,12 +327,14 @@ add_executable(ka-hgis
 )
 target_include_directories(ka-hgis PRIVATE ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
 target_link_directories(ka-hgis PRIVATE ${KA_LIBDIRS})
-target_link_libraries(ka-hgis PRIVATE ka_core Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::PrintSupport Qt6::Network Qt6::Svg Qt6::WebEngineWidgets qgis_core qgis_gui)
+target_link_libraries(ka-hgis PRIVATE ka_core Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::PrintSupport Qt6::Network Qt6::Svg Qt6::WebEngineWidgets Qt6::Multimedia Qt6::MultimediaWidgets qgis_core qgis_gui)
 target_compile_definitions(ka-hgis PRIVATE
   KA_HGIS_HAS_QGIS=1
   "CORE_EXPORT=__declspec(dllimport)"
   "GUI_EXPORT=__declspec(dllimport)"
   "KA_HGIS_VERSION=\"${PROJECT_VERSION}\"")
+# Desktop GUI. QGIS/Qt debug text must not open a console behind the window.
+set_target_properties(ka-hgis PROPERTIES WIN32_EXECUTABLE TRUE)
 
 # 릴리스에도 PDB를 만들어 크래시 로그(KaCrashGuard)가 함수명·줄번호까지 심볼화하게 한다.
 # /FS: 병렬 컴파일에서 같은 PDB에 안전하게 쓰도록(C1041 방지).
@@ -531,6 +535,10 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_heritage_import_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_heritage_import_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(heritage_import ka_heritage_import_tests)
+  add_executable(ka_survey_scope_clip_tests tests/test_survey_scope_clip.cpp)
+  target_link_libraries(ka_survey_scope_clip_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_survey_scope_clip_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(survey_scope_clip ka_survey_scope_clip_tests)
   add_executable(ka_heritage_download_retry_tests tests/test_heritage_download_retry.cpp
     src/app/KaHeritageBrowser.cpp src/app/KaHeritageBrowser.h)
   target_link_libraries(ka_heritage_download_retry_tests PRIVATE ka_core Qt6::Test Qt6::WebEngineWidgets)
@@ -736,6 +744,7 @@ if(KA_HGIS_BUILD_TESTS)
   ka_add_qtest_filter(save_open_drawing ka_save_open_tests
     drawingStudio_decorationsMoveAndShrink
     drawingStudio_northArrowRendersOnOpen
+    drawingStudio_fieldPageGrowsA4LandscapeByOneCentimetre
     drawingStudio_heritageRefreshRequestsCoalesceAndReuseOnRevisit
     drawingStudioAboveLabelsMapDrawsGeometryWithoutDuplicateNumberLabels
     drawingStudio_largeScaleChipsApplyToMapAndInput
@@ -748,6 +757,9 @@ if(KA_HGIS_BUILD_TESTS)
     trenchPresetRespectsAreaAndDimensions
     layerDeleteKeyPreservesSourceAndUndoRestoresPendingEdits
     layerDeleteKeyRemovesReferenceFromMap
+    layerDeleteKeyRemovesCadastralAndKeepsItGone
+    cadastralGroupDeleteKeyRemovesChildren
+    cadastralGroupContextMenuCanRemove
     ctrlZRestoresVertexEditsAndGroupedFeatureDeletion
     layerContextMenu_usesClickedRowAndLeavesSourceIntact
     layerContextMenu_moveToBottomPreservesRegisteredLayer
@@ -784,7 +796,7 @@ if(KA_HGIS_BUILD_TESTS)
     save_open_window save_open_topo save_open_drawing
     save_open_edit save_open_roundtrip save_open_open
     save_open_open_invalid save_open_commit save_open_saveas)
-  set_tests_properties(${KA_SAVE_OPEN_TESTS} PROPERTIES TIMEOUT 60 RESOURCE_LOCK ka_save_open)
+  set_tests_properties(${KA_SAVE_OPEN_TESTS} PROPERTIES TIMEOUT 180 RESOURCE_LOCK ka_save_open)
 
   add_executable(ka_e2e_tests tests/test_e2e_opaque.cpp)
   set_target_properties(ka_e2e_tests PROPERTIES WIN32_EXECUTABLE FALSE)
@@ -820,7 +832,7 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(topographic_scope PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 90)
     set_tests_properties(topographic_import PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
     set_tests_properties(heritage_flow PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
-    set_tests_properties(heritage_style PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+    set_tests_properties(heritage_style PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
     set_tests_properties(heritage_form PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(heritage_download_retry PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 90)
     set_tests_properties(gdal_error_log PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)

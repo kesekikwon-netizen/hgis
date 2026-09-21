@@ -194,6 +194,8 @@ void TestKaHgis::fromProject_emptySeededSiteLocation_layoutExistsFalse() {
   QVERIFY(!st.value(QStringLiteral("layout_exists:survey_area_map")).toBool());
   QVERIFY(!st.value(QStringLiteral("layout_exists:feature_detail")).toBool());
   QVERIFY(!st.value(QStringLiteral("layout_exists:section")).toBool());
+  QVERIFY(!LayoutService::isComposedStudioSheet(&proj, QStringLiteral("site_location")));
+  QVERIFY(!LayoutService::isComposedStudioSheet(&proj, QStringLiteral("feature_detail")));
 }
 
 void TestKaHgis::fromProject_composedUserSheet_layoutExistsTrue() {
@@ -267,7 +269,7 @@ void TestKaHgis::fromProject_composedUserSheet_layoutExistsTrue() {
   QVERIFY(st.value(QStringLiteral("layout_exists:feature_plan")).toBool());
   QVERIFY(st.value(QStringLiteral("layout_exists:survey_area_map")).toBool());
   QVERIFY(!st.value(QStringLiteral("layout_exists:section")).toBool());
-  QVERIFY(!st.value(QStringLiteral("layout_exists:feature_detail")).toBool());
+  QVERIFY(st.value(QStringLiteral("layout_exists:feature_detail")).toBool());
 }
 
 void TestKaHgis::test_uncomposed_user_sheet_rejected() {

@@ -296,13 +296,13 @@ private slots:
     QCOMPARE(detail.matches.size(), 1);
     QCOMPARE(detail.matches.first().category, C::Building);
   }
-  void coverageBoundsGrowsSurveyViewToTenKilometers() {
-    QCOMPARE(TopographicCatalog::kCoverageRadiusMeters, 10000.);
+  void coverageBoundsGrowsSurveyViewToFiveKilometers() {
+    QCOMPARE(TopographicCatalog::kCoverageRadiusMeters, 5000.);
     const QgsRectangle survey(199900., 449900., 200200., 450200.);
     const auto cover = TopographicCatalog::coverageBounds(survey);
     QVERIFY(cover.contains(survey));
-    QVERIFY(cover.contains(QgsPointXY(208000., 450050.)));
-    QVERIFY(!cover.contains(QgsPointXY(220000., 450050.)));
+    QVERIFY(cover.contains(QgsPointXY(204000., 450050.)));
+    QVERIFY(!cover.contains(QgsPointXY(208000., 450050.)));
     const QgsRectangle wide(165000., 415000., 235000., 485000.);
     QCOMPARE(TopographicCatalog::coverageBounds(wide), wide);
     QCOMPARE(TopographicCatalog::coverageBounds(QgsRectangle()), QgsRectangle());

@@ -126,6 +126,7 @@ private slots:
   void atomicProjectWrite_keepsOneBackupGeneration();
   void fullWorkflowSurveyToPackage();
   void exportSubmissionPackage_pdfIsUserSheetOnly();
+  void exportSubmissionPackage_withoutUserSheetFails();
   void exportSubmissionPackage_preservesPreviousPackage();
   void exportManifestFailurePreservesPreviousFile();
   void exportSubmissionPackage_finalizationFailure_data();
@@ -182,6 +183,7 @@ private slots:
   void undoCommittedFeature_removesLastAdded();
   void mapEditUndoRedo_drawMoveDeleteRestoresFeature();
   void snapSettings_surviveProjectWriteAndReopen();
+  void applySnapSettingsKeepsCadastralUnchecked();
   void topologicalVertexMove_movesSharedVertexOnBothFeatures();
   void featureForm_cancelKeepsGeometryAndOkWritesNameNumber();
   void captureVertexDrag_preservesEditsAndReportsOutcome_data();
@@ -229,6 +231,7 @@ private slots:
   void layoutLayerPanel_hasCheckAllToggle();
   void layoutLegend_deletableAndStaysDeleted();
   void opacityRail_hasBrightnessForRasters();
+  void measureHudSitsBesideOpacityRail();
   void labelsFollowLayerStackOrder();
   void redLineDrawsOverLowerLayerLabels_map();
   void redLineDrawsOverLowerLayerLabels_layoutAndPdf();
@@ -251,6 +254,7 @@ private slots:
   void layoutStudio_checkedLayersScaleBarLegendSize();
   void layoutEnter_matchesCanvasViewWithoutNiceSnap();
   void layoutStandardSheetChrome_sitsBelowMap();
+  void layoutEqualFullSheetMapRect_matchesTopToSides();
   void layoutExtentForPaperScale_keepsTypedDenominator();
   void layoutNiceScaleDenominator_endsOnTen();
   void legendTitlesHideEpsgAndUseShortKorean();
@@ -520,6 +524,35 @@ void TestWorkflow::exportSubmissionPackage_pdfIsUserSheetOnly() {
   QVERIFY(!QFile::exists(QDir(pkg).filePath(QStringLiteral("유구배치도.pdf"))));
 }
 
+void TestWorkflow::exportSubmissionPackage_withoutUserSheetFails() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* sa = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                QStringLiteral("survey_area"), QStringLiteral("memory"));
+  QVERIFY(sa->isValid());
+  sa->setCustomProperty(QString::fromUtf8(LayerOps::kPropLayerKey), QStringLiteral("survey_area"));
+  proj.addMapLayer(sa);
+  QVERIFY(sa->startEditing());
+  QgsFeature sf(sa->fields());
+  QgsPolylineXY ring;
+  ring << QgsPointXY(200000, 450000) << QgsPointXY(200100, 450000)
+       << QgsPointXY(200100, 450100) << QgsPointXY(200000, 450100)
+       << QgsPointXY(200000, 450000);
+  sf.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+  QVERIFY(sa->addFeature(sf));
+  QVERIFY(sa->commitChanges());
+
+  const QString pkg = QDir::temp().filePath(
+      QStringLiteral("ka_pkg_nosheet_") + QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QDir(pkg).removeRecursively();
+  QString err;
+  QVERIFY(ExportService::exportSubmissionPackage(&proj, pkg, QStringLiteral("UTF-8"),
+                                                 QStringLiteral("OK"), true, false, &err)
+              .isEmpty());
+  QVERIFY2(err.contains(QStringLiteral("도면만들기")), qPrintable(err));
+  QVERIFY(!QFile::exists(QDir(pkg).filePath(QStringLiteral("README_submit.txt"))));
+}
+
 void TestWorkflow::exportSubmissionPackage_preservesPreviousPackage() {
   QTemporaryDir temporary;
   QVERIFY(temporary.isValid());
@@ -576,26 +609,12 @@ void TestWorkflow::exportSubmissionPackage_preservesPreviousPackage() {
     QCOMPARE(file.readAll(), it.value());
   }
   const QString second = temporary.filePath(QStringLiteral("두 번째 제출"));
-  QCOMPARE(ExportService::exportSubmissionPackage(&project, second, QStringLiteral("CP949"),
-                                                QStringLiteral("OK"), true, false, &error), second);
-  QVERIFY(!QFile::exists(QDir(second).filePath(QStringLiteral("control_points.shp"))));
-  QVERIFY(!QFile::exists(QDir(second).filePath(QStringLiteral("조사도면.pdf"))));
-  QFile manifest(QDir(second).filePath(QStringLiteral("MANIFEST.sha256")));
-  QVERIFY(manifest.open(QIODevice::ReadOnly));
-  const QByteArray contents = manifest.readAll();
-  QStringList listed;
-  for (const QByteArray& line : contents.split('\n')) {
-    if (line.trimmed().isEmpty()) continue;
-    const QString name = QString::fromUtf8(line.mid(66).trimmed());
-    QFile file(QDir(second).filePath(name));
-    QVERIFY(file.open(QIODevice::ReadOnly));
-    QCOMPARE(line.left(64), QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256).toHex());
-    listed << name;
-  }
-  QStringList actual = QDir(second).entryList(QDir::Files);
-  actual.removeOne(QStringLiteral("MANIFEST.sha256"));
-  listed.sort(); actual.sort();
-  QCOMPARE(listed, actual);
+  QVERIFY2(ExportService::exportSubmissionPackage(&project, second, QStringLiteral("CP949"),
+                                                 QStringLiteral("OK"), true, false, &error)
+               .isEmpty(),
+           "empty project without composed user_sheet must not finalize a package");
+  QVERIFY2(error.contains(QStringLiteral("도면만들기")), qPrintable(error));
+  QVERIFY(!QFile::exists(QDir(second).filePath(QStringLiteral("README_submit.txt"))));
 }
 
 void TestWorkflow::exportManifestFailurePreservesPreviousFile() {
@@ -745,6 +764,7 @@ void TestWorkflow::exportSubmissionPackage_excludesPrivateHeritage() {
   QCOMPARE(references.size(), 6);
   if (domainNameCollision)
     references.first()->setName(QStringLiteral("feature_poly"));
+  QVERIFY(addComposedUserSheet(&project, survey));
 
   const QString output = temporary.filePath(QStringLiteral("submission"));
   QString error;
@@ -790,6 +810,14 @@ void TestWorkflow::exportLayoutPdf_userSheetMissing_doesNotSeedFiveTemplates() {
            "missing user_sheet must not seed site_location");
   QVERIFY2(!proj.layoutManager()->layoutByName(QStringLiteral("feature_plan")),
            "missing user_sheet must not seed feature_plan");
+  const QString pdfDir = QDir::temp().filePath(
+      QStringLiteral("ka_missing_drawings_") + QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QDir(pdfDir).removeRecursively();
+  QString drawErr;
+  QCOMPARE(LayoutService::exportDrawingPdfs(&proj, pdfDir, &drawErr), 0);
+  QVERIFY2(drawErr.contains(QStringLiteral("도면만들기")), qPrintable(drawErr));
+  QVERIFY2(!proj.layoutManager()->layoutByName(QStringLiteral("survey_area_map")),
+           "exportDrawingPdfs must not seed five templates");
 }
 
 void TestWorkflow::shpKoreanRoundTripUtf8() {
@@ -2383,6 +2411,7 @@ void TestWorkflow::convert5186PolygonTo5179Shp() {
   QgsProject proj5186;
   proj5186.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
   proj5186.addMapLayer(fp);
+  QVERIFY2(addComposedUserSheet(&proj5186, fp), "composed user_sheet");
   const QString pkgDir = QDir(dir).filePath(QStringLiteral("pkg5186"));
   QString perr;
   QVERIFY2(!ExportService::exportSubmissionPackage(&proj5186, pkgDir, QStringLiteral("UTF-8"), QStringLiteral("OK"), false, false, &perr).isEmpty(), qPrintable(perr));
@@ -2885,6 +2914,24 @@ void TestWorkflow::snapSettings_surviveProjectWriteAndReopen() {
   QVERIFY(project.snappingConfig().individualLayerSettings(area).enabled());
   QVERIFY(!project.snappingConfig().individualLayerSettings(ref).enabled());
 
+  auto* cad = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                 QStringLiteral("지적도 · 조사 주변 5km"), QStringLiteral("memory"));
+  QVERIFY(cad->isValid());
+  LayerOps::markCadastralLayer(cad);
+  project.addMapLayer(cad);
+  LayerOps::applySnapSettings(&project, input);
+  QVERIFY2(!LayerOps::isReferenceLayer(cad), "지적도는 참조 지도가 아니다");
+  QVERIFY(LayerOps::isCadastralLayer(cad));
+  QVERIFY(LayerOps::isSnapSourceLayer(cad));
+  QVERIFY2(project.snappingConfig().individualLayerSettings(cad).enabled(),
+           "지적 선에도 자석이 붙어야 한다");
+  QVERIFY(!project.snappingConfig().individualLayerSettings(ref).enabled());
+  auto* cadGroup = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral));
+  QVERIFY2(cadGroup, "지적도는 별도 범례 그룹");
+  QVERIFY(cadGroup->findLayer(cad->id()));
+  if (auto* refGroup = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupReference)))
+    QVERIFY(!refGroup->findLayer(cad->id()));
+
   auto* extra = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
                                    QStringLiteral("유구"), QStringLiteral("memory"));
   QVERIFY(extra->isValid());
@@ -2894,6 +2941,38 @@ void TestWorkflow::snapSettings_surviveProjectWriteAndReopen() {
   QVERIFY2(project.snappingConfig().individualLayerSettings(extra).enabled(),
            "later survey layer must join AdvancedConfiguration");
   QVERIFY(!project.snappingConfig().individualLayerSettings(ref).enabled());
+}
+
+void TestWorkflow::applySnapSettingsKeepsCadastralUnchecked() {
+  QgsProject project;
+  project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* cad = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                 QStringLiteral("지적도 · 조사 주변 5km"), QStringLiteral("memory"));
+  QVERIFY(cad->isValid());
+  LayerOps::markCadastralLayer(cad);
+  project.addMapLayer(cad, false);
+  LayerOps::placeCadastralLayer(&project, cad);
+  auto* cadGroup = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral));
+  QVERIFY(cadGroup);
+  auto* cadNode = cadGroup->findLayer(cad->id());
+  QVERIFY(cadNode);
+  cadNode->setItemVisibilityChecked(false);
+  cadGroup->setItemVisibilityChecked(false);
+
+  auto* soil = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("토양도"), QStringLiteral("memory"));
+  QVERIFY(soil->isValid());
+  LayerOps::markReferenceLayer(soil);
+  project.addMapLayer(soil);
+  LayerOps::placeInLegendGroup(&project, soil, QStringLiteral("참조 지도"));
+  LayerOps::SnapSettings snap;
+  snap.enabled = true;
+  LayerOps::applySnapSettings(&project, snap);
+
+  cadNode = cadGroup->findLayer(cad->id());
+  QVERIFY(cadNode);
+  QVERIFY2(!cadNode->itemVisibilityChecked(), "토양도를 받아도 꺼 둔 지적이 다시 켜지면 안 된다");
+  QVERIFY2(!cadGroup->itemVisibilityChecked(), "지적도 그룹도 꺼 둔 채로 남아야 한다");
 }
 
 void TestWorkflow::topologicalVertexMove_movesSharedVertexOnBothFeatures() {
@@ -4297,6 +4376,16 @@ void TestWorkflow::opacityRail_hasBrightnessForRasters() {
   QVERIFY2(!LayerOps::canAdjustBrightness(&vl), "도형 레이어에는 밝기가 없다");
 }
 
+void TestWorkflow::measureHudSitsBesideOpacityRail() {
+  QFile c(QStringLiteral("src/app/KaMeasureMapTool.cpp"));
+  QVERIFY2(c.open(QIODevice::ReadOnly | QIODevice::Text), "KaMeasureMapTool.cpp");
+  const QString s = QString::fromUtf8(c.readAll());
+  QVERIFY2(s.contains(QLatin1String("layerOpacityRail")),
+           "줄자 창이 투명도 막대를 피해야 한다");
+  QVERIFY2(s.contains(QLatin1String("geometry().right()")),
+           "줄자는 막대 오른쪽에 두어야 한다");
+}
+
 // ── 겹침 재현용 도구 ────────────────────────────────────────────────────
 // 아래: 지번을 다는 지적 면. 위: 그 지번을 가로지르는 빨간 선.
 // 실제 화소로 「누가 나중에 그려졌는지」를 본다.
@@ -5288,6 +5377,20 @@ void TestWorkflow::layoutStandardSheetChrome_sitsBelowMap() {
   QVERIFY2(c.north.bottom() <= page.bottom() - 7.5, "north stays above the page margin");
   QVERIFY2(c.scaleBar.height() >= 11.0, "scale bar slot fits QGIS Line Ticks Up minimum");
   QVERIFY2(c.scaleLabel.top() >= c.scaleBar.bottom() + 2.0, "scale text stays below the bar box");
+}
+
+void TestWorkflow::layoutEqualFullSheetMapRect_matchesTopToSides() {
+  const QRectF page(0.0, 0.0, 210.0, 297.0);
+  const QRectF uneven(18.0, 12.0, 174.0, 247.0);
+  const QRectF equalized = LayoutService::equalFullSheetMapRect(page, uneven);
+  QVERIFY2(qAbs(equalized.left() - equalized.top()) < 0.01, "top matches left");
+  QVERIFY2(qAbs((page.right() - equalized.right()) - equalized.left()) < 0.01, "right matches left");
+  QVERIFY2(qAbs((page.bottom() - equalized.bottom()) - (page.bottom() - uneven.bottom())) < 0.01,
+           "bottom chrome room stays");
+  const QRectF custom(40.0, 30.0, 80.0, 90.0);
+  QCOMPARE(LayoutService::equalFullSheetMapRect(page, custom), custom);
+  const QRectF already(18.0, 18.0, 174.0, 241.0);
+  QCOMPARE(LayoutService::equalFullSheetMapRect(page, already), already);
 }
 
 void TestWorkflow::layoutExtentForPaperScale_keepsTypedDenominator() {
@@ -7727,27 +7830,11 @@ void TestWorkflow::test_challenge_section_sheet_bundling_variations() {
     QString err;
     const QString res = ExportService::exportSubmissionPackage(
         &proj, pkgDir, QStringLiteral("UTF-8"), QStringLiteral("OK"), true, false, &err);
-    QVERIFY2(!res.isEmpty(), qPrintable(err));
-
-    // 단면도.pdf must exist, 조사도면.pdf must NOT exist
-    QVERIFY(QFile::exists(QDir(pkgDir).filePath(QStringLiteral("단면도.pdf"))));
+    QVERIFY(res.isEmpty());
+    QVERIFY2(err.contains(QStringLiteral("도면만들기")), qPrintable(err));
+    QVERIFY(!QFile::exists(QDir(pkgDir).filePath(QStringLiteral("README_submit.txt"))));
+    QVERIFY(!QFile::exists(QDir(pkgDir).filePath(QStringLiteral("단면도.pdf"))));
     QVERIFY(!QFile::exists(QDir(pkgDir).filePath(QStringLiteral("조사도면.pdf"))));
-
-    // README_submit.txt mentions 단면도.pdf and notes absence of 조사도면.pdf
-    QFile rf(QDir(pkgDir).filePath(QStringLiteral("README_submit.txt")));
-    QVERIFY(rf.open(QIODevice::ReadOnly | QIODevice::Text));
-    const QString readmeContent = QString::fromUtf8(rf.readAll());
-    rf.close();
-    QVERIFY(readmeContent.contains(QStringLiteral("단면도.pdf")));
-    QVERIFY(readmeContent.contains(QStringLiteral("조사도면.pdf 없음")));
-
-    // MANIFEST.sha256 registers 단면도.pdf
-    QFile mf(QDir(pkgDir).filePath(QStringLiteral("MANIFEST.sha256")));
-    QVERIFY(mf.open(QIODevice::ReadOnly | QIODevice::Text));
-    const QString manifestContent = QString::fromUtf8(mf.readAll());
-    mf.close();
-    QVERIFY(manifestContent.contains(QStringLiteral("단면도.pdf")));
-    QVERIFY(!manifestContent.contains(QStringLiteral("조사도면.pdf")));
   }
 }
 

@@ -26,12 +26,12 @@
 #include <QSize>
 #include <QUrl>
 #include <QWindow>
+#include <QSet>
 #include <QColor>
 #include <QFont>
 #include <QDir>
 #include <QDomDocument>
 #include <QUrlQuery>
-#include <QSet>
 #include <QTemporaryFile>
 #include <QPointer>
 #include <QScopedValueRollback>
@@ -393,6 +393,7 @@ QString labelOrderSignature(QgsLayerTree* root) {
       sig += QString::number(reinterpret_cast<quintptr>(vl->labeling()), 16);
       sig += QString::number(reinterpret_cast<quintptr>(vl->renderer()), 16);
       sig += QString::number(vl->opacity(), 'f', 3);
+      sig += LayerOps::isReferenceLayer(vl) ? QLatin1Char('R') : QLatin1Char('r');
     }
     sig += QLatin1Char(';');
   }
@@ -442,12 +443,21 @@ bool refreshLabelOrderCache(QgsProject* project) {
     }
 
     // 2) 덧그림(2차 패스) 대상. 두 번 그려도 화면이 같은 벡터만.
-    //    수치지형도는 회색 0.2mm 밑그림이라 라벨 위로 올릴 이유가 없다. 오히려
-    //    선 16만 개를 한 번 더 그리느라 넓은 범위로 이동할 때 화면이 수십 초
-    //    멎었다. 밑그림은 2차 패스에서 뺀다.
+    //    조사 도형·지적처럼 아래 글자를 덮어야 하는 레이어만. 참조 지도
+    //    (주변유적·지질·토양·지형도·위성)는 그림이라 한 번만 그린다.
+    //    수치지형도는 선 16만을 한 번 더 그리면 넓은 범위에서 수십 초 멎었다.
     const bool isBackdrop =
         !ml->customProperty(QStringLiteral("ka_hgis/topographic_group")).toString().isEmpty();
-    if (visible && labeledBelow && vl && !hidesOwn && !isBackdrop && paintsFullyOpaque(vl))
+    // 주변유적은 참조지만 지적 덧그림 위에 다시 그려야 한다. 빼면
+    // 지번을 덮는 지적·조사 덧그림이 유적 도형·이름을 가리고, 범례를
+    // 전부 껐다 켜야 다시 보인다. 지질·토양·지형도·위성은 그대로 뺀다.
+    const bool keepHeritage = LayerLabelControls::isHeritage(vl);
+    // 주변유적은 아래 글자가 없어도 덧그림에 모은다. labeledBelow에만 넣으면
+    // 첫 자료만 본지도에 남고 나머지 다섯은 덧지도에만 가서, 덧지도가
+    // 비는 순간 조판에 유적 도형이 하나만 남거나 전부 사라진다.
+    if (visible && vl && !hidesOwn && !isBackdrop && paintsFullyOpaque(vl)
+        && (!LayerOps::isReferenceLayer(vl) || keepHeritage)
+        && (labeledBelow || keepHeritage))
       bottomUp.append(QPointer<QgsMapLayer>(ml));
 
     // 3) 라벨끼리는 위 레이어가 이긴다.
@@ -487,6 +497,22 @@ QList<QgsMapLayer*> LayerOps::layersDrawnAboveLabels(QgsProject* project) {
   if (!g_labelOrder.valid || g_labelOrder.project != project) return out;
   for (const QPointer<QgsMapLayer>& p : g_labelOrder.above) {
     if (p) out.append(p.data());
+  }
+  return out;
+}
+
+QList<QgsMapLayer*> LayerOps::sheetBasePaintLayers(QgsProject* project) {
+  QList<QgsMapLayer*> out;
+  if (!project) return out;
+  const QList<QgsMapLayer*> visible = visibleLayersPaintOrder(project);
+  const QList<QgsMapLayer*> above = layersDrawnAboveLabels(project);
+  QSet<QgsMapLayer*> skip(above.begin(), above.end());
+  for (QgsMapLayer* layer : visible) {
+    if (!layer) continue;
+    // 주변유적은 본지도에 남겨 범례 히트테스트와 도형이 빠지지 않게 한다.
+    // 조사·지적은 덧지도에만 그린다.
+    if (skip.contains(layer) && !LayerLabelControls::isHeritage(layer)) continue;
+    out.append(layer);
   }
   return out;
 }

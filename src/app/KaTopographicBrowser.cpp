@@ -12,7 +12,9 @@
 #include <QFileInfo>
 #include <QFile>
 #include <QHBoxLayout>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
@@ -598,7 +600,7 @@ void KaTopographicBrowser::automationMessage(const QString& message) {
 void KaTopographicBrowser::stopAutomatic() {
   ++m_automationGeneration;m_automationTimer->stop();m_scriptInFlight=false;
   if(m_transferPage)m_transferPage->setProperty("kaTopographicStoppedTransfer",true);
-  m_pendingScope={};m_automationStage=QStringLiteral("stopped");m_transferPage.clear();
+  m_pendingScope={};m_automationStage=QStringLiteral("stopped");m_requestedNumbers.clear();m_transferPage.clear();
   m_orderPage.clear();m_orderDownloadPage.clear();
   for(int i=0;i<m_tabs->count();++i)if(auto* view=qobject_cast<QWebEngineView*>(m_tabs->widget(i)))
     if(trustedPage(view->url()))view->page()->runJavaScript(QStringLiteral(
@@ -625,6 +627,10 @@ void KaTopographicBrowser::prepareSheets(double x, double y, double radius, cons
                          {QStringLiteral("cachedNumbers"),QJsonArray::fromStringList(cached)}};
   const QString key=QString::fromUtf8(QJsonDocument(scope).toJson(QJsonDocument::Compact));
   if(m_scopeKey==key && m_automationStage!=QLatin1String("stopped")) return;
+  // The portal query uses a 5 km circle. A few metres of canvas wobble must
+  // not start the same 도엽 order again.
+  if(m_automationStage!=QLatin1String("stopped") && !m_requestedNumbers.isEmpty() &&
+      m_requestedNumbers==unique) return;
   if(m_automationStage==QLatin1String("order") || m_automationStage==QLatin1String("files") || m_automationStage==QLatin1String("download") ||
       m_automationStage==QLatin1String("transfer")) {
     m_pendingScope=scope;
@@ -641,6 +647,11 @@ void KaTopographicBrowser::startAutomation(const QJsonObject& scope) {
   m_scope=scope; m_pendingScope={}; m_officialRecords={}; m_currentRecord={}; m_sheetIndex=0;
   m_transferManifest={};m_sheetDownloadDirectories.clear();
   m_scopeKey=QString::fromUtf8(QJsonDocument(scope).toJson(QJsonDocument::Compact));
+  QStringList requested;
+  for (const auto& item : scope.value(QStringLiteral("numbers")).toArray())
+    requested.append(item.toString());
+  requested.removeDuplicates(); requested.sort();
+  m_requestedNumbers=requested;
   m_transferPage.clear(); m_automationStage=QStringLiteral("select"); m_lastAutomationMessage.clear();
   m_orderPage.clear();m_orderDownloadPage.clear();
   for(int i=0;i<m_tabs->count();++i)if(auto* view=qobject_cast<QWebEngineView*>(m_tabs->widget(i)))

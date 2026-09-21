@@ -5,6 +5,7 @@
 #include <QSet>
 #include <memory>
 #include <vector>
+#include <qgspointxy.h>
 #include "core/TopographicCatalog.h"
 
 class QgsMapCanvas;
@@ -64,6 +65,9 @@ private:
   QHash<QString, QString> m_styles;
   QHash<QString, bool> m_visibility;
   QSet<QString> m_userDeleted;
+  QSet<QString> m_ignored;
+  QgsPointXY m_settledCenter;
+  bool m_hasSettledCoverage = false;
   QSet<QString> m_automaticRecords;
   QSet<QString> m_manualRecords;
   QHash<QString, QString> m_reviewReasons;

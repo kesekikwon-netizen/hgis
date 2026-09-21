@@ -32,6 +32,8 @@ public:
   };
 
   bool update(QgsLayoutItemMap* map, bool force = false);
+  void raiseAboveGeometries(QgsLayoutItemMap* map);
+  static QgsLayoutItemMap* numbersMapOf(QgsLayoutItemMap* base);
   void applyLegend(QgsLayoutItemLegend* legend) const;
   const QVector<Entry>& entries() const { return m_entries; }
   const QMap<QString, QString>& overrides() const { return m_overrides; }
@@ -54,11 +56,17 @@ private:
   QByteArray renderSignature(QgsLayoutItemMap* map, bool includeStyles = true) const;
   QSet<QString> placedKeys(QgsLayoutItemMap* map, const QgsLabelingResults* results) const;
   bool compactRenderedNumbers(QgsLayoutItemMap* map, const QgsLabelingResults* results, const QSet<QString>& keys);
+  bool shouldRestoreCandidates(QgsLayoutItemMap* map) const;
   void restoreCandidates(QgsLayoutItemMap* map);
+  void applyBaseStyleOverrides(QgsLayoutItemMap* map);
+  void connectNumberPreview(QgsLayoutItemMap* map);
   QVector<Entry> m_candidateEntries;
   QMap<QString, QString> m_candidateOverrides;
   QByteArray m_pinnedSignature;
+  double m_pinnedPaperArea = 0.;
   bool m_compacted = false;
+  bool m_restorePending = false;
+  int m_restoreSkips = 0;
   bool m_legendPending = false;
   QPointer<QgsLayoutItemMap> m_followedMap;
   QVector<QMetaObject::Connection> m_renderConnections;
@@ -70,6 +78,7 @@ private:
   bool m_previewDirty = false;
   bool m_exporting = false;
   QString m_signature;
+  QByteArray m_contentSignature;
   QString m_error;
   QVector<Entry> m_entries;
   QMap<QString, QString> m_overrides;

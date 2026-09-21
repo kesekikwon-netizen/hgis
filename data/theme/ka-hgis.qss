@@ -513,8 +513,7 @@ QWidget#sampleStrip {
   border-bottom: 1px solid @border@;
 }
 QToolButton.sampleTile {
-  /* C++ uses layoutButtonHeight and scaleButtonMinWidth for outer size. */
-  min-width: 0;
+  /* Width comes from QWidget::setMinimumWidth. min-width:0 overrode it. */
   min-height: 0;
   padding: @buttonPadding@px;
   font-size: @scaleFontSize@px;

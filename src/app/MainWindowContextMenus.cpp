@@ -28,6 +28,7 @@
 #include <qgsgeometry.h>
 #include <qgsexception.h>
 #include <qgslayertree.h>
+#include <qgslayertreemodellegendnode.h>
 #include <qgslayertreeview.h>
 #include <qgsmapcanvas.h>
 #include <qgsmapmouseevent.h>
@@ -181,13 +182,34 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
   if (!treeView || !treeView->viewport()) return;
   // QAbstractScrollArea's customContextMenuRequested position is already in viewport coordinates.
   const QModelIndex index = treeView->indexAt(pos);
-  auto* node = index.isValid() ? qobject_cast<QgsLayerTreeLayer*>(treeView->index2node(index)) : nullptr;
+  QgsLayerTreeNode* raw = index.isValid() ? treeView->index2node(index) : nullptr;
+  auto* node = qobject_cast<QgsLayerTreeLayer*>(raw);
   QPointer<QgsMapLayer> layer(node ? node->layer() : nullptr);
+  if (!layer) {
+    if (auto* legend = treeView->index2legendNode(index)) {
+      if (legend->layerNode()) {
+        node = legend->layerNode();
+        layer = node->layer();
+        raw = node;
+      }
+    }
+  }
   QMenu menu(this);
   menu.setObjectName(QStringLiteral("layerContextMenu"));
   menu.setToolTipsVisible(true);
   if (!layer) {
     addMenuAction(&menu, "layer.import", QStringLiteral("참고 자료 불러오기…"), {}, [this]() { addUserLayer(); });
+    const QList<QgsMapLayer*> cadastral =
+        LayerOps::removableCadastralLayersFromNode(raw ? raw : treeView->currentNode());
+    if (!cadastral.isEmpty()) {
+      addMenuAction(&menu, "layer.remove", QStringLiteral("레이어 삭제"), {},
+          [this, treeView, index]() {
+            if (index.isValid())
+              treeView->setCurrentIndex(index);
+            removeLayersFromTree(treeView);
+          },
+          QStringLiteral("목록에서 제거합니다. 원본 파일은 보존하며 Ctrl+Z로 복원할 수 있습니다."));
+    }
     menu.exec(treeView->viewport()->mapToGlobal(pos));
     return;
   }

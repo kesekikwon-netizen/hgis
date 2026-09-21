@@ -91,9 +91,8 @@ void MainWindow::showSubToolsSubmit() {
 
 void MainWindow::rebuildLayouts() {
 #if KA_HGIS_HAS_QGIS
-  const int n = LayoutService::rebuildDefaultLayouts(QgsProject::instance());
-  statusBar()->showMessage(QStringLiteral("도면 5종을 다시 만들었습니다 (%1)").arg(n), 6000);
   openLayoutDesigner();
+  statusBar()->showMessage(QStringLiteral("도면만들기에서 용지를 다시 배치하세요."), 6000);
 #endif
 }
 
@@ -238,10 +237,6 @@ QJsonObject MainWindow::buildProjectState() const {
 
 void MainWindow::runChecklist() {
   if (!m_checklist) return;
-#if KA_HGIS_HAS_QGIS
-  // 검수 규칙이 도면 존재를 본다. 조사를 열 때가 아니라 여기서 준비한다.
-  LayoutService::ensureDefaultLayouts(QgsProject::instance());
-#endif
   if (m_checklist->ruleCount() == 0) m_checklist->loadRules(rulesPath());
   const auto results = m_checklist->evaluate(buildProjectState());
   int err = 0, warn = 0;
@@ -257,15 +252,14 @@ void MainWindow::runChecklist() {
 void MainWindow::exportPdf() {
 #if KA_HGIS_HAS_QGIS
   openLayoutDesigner();
+  if (m_drawingStudio)
+    m_drawingStudio->savePdf();
 #else
   QMessageBox::warning(this, QStringLiteral("도면"), QStringLiteral("QGIS 빌드 필요"));
 #endif
 }
 
 void MainWindow::exportShpPackage() {
-#if KA_HGIS_HAS_QGIS
-  LayoutService::ensureDefaultLayouts(QgsProject::instance());
-#endif
   const auto results = m_checklist->evaluate(buildProjectState());
   bool hasErr = false;
   QString summary;
@@ -382,11 +376,14 @@ void MainWindow::openLayoutDesigner() {
   if (m_drawingStudio && m_viewTabs->indexOf(m_drawingStudio) >= 0) {
     m_viewTabs->setCurrentWidget(m_drawingStudio);
     hideSubTools();
+    m_drawingStudio->applyFieldPageGrow();
+    m_drawingStudio->applyFieldEdge();
     m_drawingStudio->refreshMapFromProject();
     onCanvasScaleChanged(m_canvas->scale());
     return;
   }
-  double w = 297.0, h = 210.0;
+  double w = KaDrawingStudio::kA4PortraitWidthMm;
+  double h = KaDrawingStudio::kA4PortraitHeightMm;
   if (!KaDrawingStudio::promptPaper(this, &w, &h))
     return;
   if (!m_drawingStudio) {

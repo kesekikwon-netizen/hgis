@@ -34,7 +34,7 @@
 #include <cmath>
 
 namespace {
-constexpr double kRadiusKm = 10.;
+constexpr double kRadiusKm = 5.;
 using Record = TopographicCatalog::Record;
 using PreparationProgress = std::function<void(const QString&,const QString&)>;
 struct Prepared {
@@ -402,8 +402,9 @@ KaTopographicScopePanel::KaTopographicScopePanel(QgsMapCanvas* canvas, KaTopogra
     } else refreshScope();
   });
   if (canvas) {
+    // Only a real pan/zoom can change the 5 km sheet set. A map refresh after
+    // importing SHP must not restart the official order.
     connect(canvas,&QgsMapCanvas::extentsChanged,m_scopeTimer,qOverload<>(&QTimer::start));
-    connect(canvas,&QgsMapCanvas::mapCanvasRefreshed,m_scopeTimer,qOverload<>(&QTimer::start));
     connect(canvas,&QObject::destroyed,this,[this]{
       for (auto& boundary:m_boundaries) boundary.release(); // The canvas scene owns deletion during its destruction.
       m_boundaries.clear(); m_canvas.clear(); m_enabled->setChecked(false);
@@ -486,19 +487,21 @@ void KaTopographicScopePanel::refreshScope() {
   const auto work=m_canvas->mapSettings().destinationCrs();
   const QgsPointXY center=m_canvas->extent().center();
   try {
-    const QString key=QStringLiteral("%1|%2|%3|%4").arg(work.authid()).arg(center.x(),0,'f',2).arg(center.y(),0,'f',2).arg(kRadiusKm);
-    if (key==m_scopeKey) return;
     const auto selected=TopographicSheets::select(center,work,kRadiusKm,project->transformContext());
     if (!selected.error.isEmpty()) {
       m_enabled->setChecked(false);
       setAttention(selected.error);
       return;
     }
+    QStringList wanted;
+    for (const auto& sheet:selected.sheets) wanted.append(sheet.number);
+    wanted.sort();
+    const QString key=QStringLiteral("%1|%2").arg(work.authid(), wanted.join(QLatin1Char(',')));
+    if (key==m_scopeKey) return;
     QgsCoordinateTransform toPortal(work,QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5179")),project);
     toPortal.setAllowFallbackTransforms(false); toPortal.setBallparkTransformsAreAppropriate(false);
     const auto portal=toPortal.transform(center); m_easting5179=portal.x(); m_northing5179=portal.y();
-    m_scopeKey=key; m_searchArea=selected.searchArea; m_wanted.clear(); clearBoundaries();
-    for (const auto& sheet:selected.sheets) m_wanted.append(sheet.number);
+    m_scopeKey=key; m_searchArea=selected.searchArea; m_wanted=wanted; clearBoundaries();
     auto circle=std::make_unique<QgsRubberBand>(m_canvas,Qgis::GeometryType::Polygon);
     circle->setColor(QColor(32,137,193,210)); circle->setFillColor(QColor(32,137,193,15)); circle->setWidth(2);
     circle->setLineStyle(Qt::DashLine); circle->setToGeometry(m_searchArea,work); m_boundaries.push_back(std::move(circle));

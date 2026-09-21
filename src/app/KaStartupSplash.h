@@ -8,17 +8,17 @@
 #include <memory>
 
 class KaSplashScene;
+class QShowEvent;
 class QTimer;
 
-// Startup notice shown before the main window. The plate is an opaque rectangle
-// with no drop shadow. Names, copyright and data sources stay on a drawing
-// title block for the whole reading interval. The interval starts after
-// synchronous initialization, so the five-second hairline and the quiet zoom
-// run on the event loop. Clicking never closes the notice early.
+// Startup notice shown before the main window. A white rounded mat sits outside
+// a glossy blue card. The left slot is a painted field-drawing motion graphic,
+// not a video file. Names, copyright and data sources stay on a drawing title
+// block for the whole reading interval. Clicking never closes the notice early.
 class KaStartupSplash final : public QWidget {
   Q_OBJECT
 public:
-  static constexpr int ReadingDurationMs = 5000;
+  static constexpr int ReadingDurationMs = 10000;
   explicit KaStartupSplash(QWidget* parent = nullptr,
                            int readingDurationMs = ReadingDurationMs);
   ~KaStartupSplash() override;
@@ -30,6 +30,7 @@ public:
   int readingProgress() const { return m_progress; }
   QRectF planRect() const;
   double revealedFraction() const;
+  double motionClock() const;
 
 signals:
   void readyToShow();
@@ -37,6 +38,7 @@ signals:
 protected:
   void paintEvent(QPaintEvent*) override;
   void resizeEvent(QResizeEvent*) override;
+  void showEvent(QShowEvent* event) override;
   void mouseMoveEvent(QMouseEvent* event) override;
   void mousePressEvent(QMouseEvent* event) override;
   void leaveEvent(QEvent*) override;
@@ -44,6 +46,7 @@ protected:
 private:
   void tick();
   void layoutScene();
+  void placeWindow();
   void trackPointer(const QPointF& pos, bool pressed);
   double phase() const;
   QString statusText() const;

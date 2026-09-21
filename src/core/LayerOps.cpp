@@ -48,6 +48,7 @@
 #include <qgsrasterlayer.h>
 #include <qgsbrightnesscontrastfilter.h>
 #include <qgsmapcanvas.h>
+#include <qgssettings.h>
 #include <qgsvectorfilewriter.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgscoordinatetransformcontext.h>
@@ -382,6 +383,7 @@ bool LayerOps::applyFeatureFormValues(QgsVectorLayer* layer, qint64 featureId, c
     return false;
   };
   if (!layer || !layer->isValid()) return fail(QStringLiteral("레이어가 없습니다."));
+  if (isCadastralLayer(layer)) return fail(QStringLiteral("지적도는 고칠 수 없습니다."));
   if (isReferenceLayer(layer)) return fail(QStringLiteral("참조 지도는 고칠 수 없습니다."));
   const FeatureFormFields fields = featureFormFields(layer);
   if (fields.nameIndex < 0 && fields.numberIndex < 0)
@@ -1250,9 +1252,50 @@ void LayerOps::markSurveyLayer(QgsMapLayer* layer, const QString& layerKey) {
   layer->setCustomProperty(QString::fromUtf8(kPropLayerRole), QString::fromUtf8(kRoleSurvey));
 }
 
+void LayerOps::markCadastralLayer(QgsMapLayer* layer) {
+  if (!layer) return;
+  layer->setCustomProperty(QString::fromUtf8(kPropLayerRole), QString::fromUtf8(kRoleCadastral));
+  layer->setCustomProperty(QStringLiteral("ka_hgis/cadastral"), true);
+}
+
 void LayerOps::markReferenceLayer(QgsMapLayer* layer) {
   if (!layer) return;
+  if (isCadastralLayer(layer)) return;
   layer->setCustomProperty(QString::fromUtf8(kPropLayerRole), QString::fromUtf8(kRoleReference));
+}
+
+void LayerOps::placeCadastralLayer(QgsProject* project, QgsMapLayer* layer) {
+  if (!project || !layer) return;
+  QgsLayerTree* root = project->layerTreeRoot();
+  if (!root) return;
+  QgsLayerTreeGroup* cad = root->findGroup(QString::fromUtf8(kGroupCadastral));
+  const bool created = cad == nullptr;
+  if (!cad) {
+    int idx = 0;
+    const QList<QgsLayerTreeNode*> children = root->children();
+    if (auto* survey = root->findGroup(QString::fromUtf8(kGroupSurveyData)))
+      idx = children.indexOf(survey) + 1;
+    else if (auto* ref = root->findGroup(QString::fromUtf8(kGroupReference)))
+      idx = qMax(0, children.indexOf(ref));
+    cad = root->insertGroup(idx, QString::fromUtf8(kGroupCadastral));
+  }
+  if (!cad) return;
+  if (QgsLayerTreeLayer* node = root->findLayer(layer->id())) {
+    auto* parent = qobject_cast<QgsLayerTreeGroup*>(node->parent());
+    if (parent == cad)
+      return;
+    // Move only. Keep the user's on/off. Snap refresh used to force both on.
+    auto* clone = node->clone();
+    cad->insertChildNode(0, clone);
+    if (parent) parent->removeChildNode(node);
+  } else {
+    if (auto* added = cad->addLayer(layer))
+      added->setItemVisibilityChecked(true);
+    cad->setItemVisibilityChecked(true);
+  }
+  if (created)
+    cad->setItemVisibilityChecked(true);
+  pruneEmptyLegendGroups(project);
 }
 
 void LayerOps::applyThematicOverlayScaleRange(QgsMapLayer* layer) {
@@ -1335,8 +1378,83 @@ void LayerOps::applyLegendCrsLabel(QgsMapLayer* layer) {
   }
 }
 
+bool LayerOps::isCadastralLayer(const QgsMapLayer* layer) {
+  if (!layer) return false;
+  if (!layerKeyOf(layer).isEmpty()) return false;
+  if (layer->customProperty(QStringLiteral("ka_hgis/cadastral")).toBool()) return true;
+  if (layer->customProperty(QString::fromUtf8(kPropLayerRole)).toString() ==
+      QLatin1String(kRoleCadastral))
+    return true;
+  if (isBasemapLayer(layer)) return false;
+  const QString n = layer->name();
+  if (n.contains(QStringLiteral("VWorld"))) return false;
+  if (!n.contains(QStringLiteral("지적"))) return false;
+  return layer->providerType().compare(QLatin1String("ogr"), Qt::CaseInsensitive) == 0;
+}
+
+bool LayerOps::isVworldCadastralPicture(const QgsMapLayer* layer) {
+  if (!layer || isCadastralLayer(layer)) return false;
+  const QString n = layer->name();
+  if (n.contains(QStringLiteral("VWorld")) && n.contains(QStringLiteral("지적")))
+    return true;
+  if (n == QLatin1String("지적") || n.startsWith(QLatin1String("지적 본번")) ||
+      n.startsWith(QLatin1String("지적 부번")) || n.startsWith(QLatin1String("지적(")))
+    return true;
+  return isBasemapLayer(layer) && n.contains(QStringLiteral("지적"));
+}
+
+bool LayerOps::projectHasCadastralLayer(const QgsProject* project) {
+  if (!project) return false;
+  for (QgsMapLayer* layer : project->mapLayers()) {
+    if (!layer || !layer->isValid()) continue;
+    if (isCadastralLayer(layer) || isVworldCadastralPicture(layer))
+      return true;
+  }
+  return false;
+}
+
+bool LayerOps::userRemovedCadastral(const QgsProject* project) {
+  return project && project->readBoolEntry(QStringLiteral("ka_hgis"),
+                                           QString::fromUtf8(kPropSkipAutoCadastral), false);
+}
+
+void LayerOps::rememberUserRemovedCadastral(QgsProject* project) {
+  if (!project) return;
+  project->writeEntry(QStringLiteral("ka_hgis"), QString::fromUtf8(kPropSkipAutoCadastral), true);
+}
+
+void LayerOps::clearUserRemovedCadastral(QgsProject* project) {
+  if (!project) return;
+  project->removeEntry(QStringLiteral("ka_hgis"), QString::fromUtf8(kPropSkipAutoCadastral));
+}
+
+QList<QgsMapLayer*> LayerOps::removableCadastralLayersFromNode(QgsLayerTreeNode* node) {
+  QList<QgsMapLayer*> out;
+  if (!node) return out;
+  auto push = [&](QgsMapLayer* layer) {
+    if (!layer || !layerKeyOf(layer).isEmpty() || out.contains(layer)) return;
+    if (isCadastralLayer(layer) || isVworldCadastralPicture(layer))
+      out.append(layer);
+  };
+  if (auto* leaf = qobject_cast<QgsLayerTreeLayer*>(node)) {
+    push(leaf->layer());
+    return out;
+  }
+  auto* group = qobject_cast<QgsLayerTreeGroup*>(node);
+  if (!group) return out;
+  const bool cadastralGroup = group->name() == QString::fromUtf8(kGroupCadastral);
+  for (QgsLayerTreeLayer* child : group->findLayers()) {
+    QgsMapLayer* layer = child ? child->layer() : nullptr;
+    if (!layer || !layerKeyOf(layer).isEmpty() || out.contains(layer)) continue;
+    if (cadastralGroup || isCadastralLayer(layer) || isVworldCadastralPicture(layer))
+      out.append(layer);
+  }
+  return out;
+}
+
 bool LayerOps::isReferenceLayer(const QgsMapLayer* layer) {
   if (!layer) return false;
+  if (isCadastralLayer(layer)) return false;
   if (layer->customProperty(QString::fromUtf8(kPropLayerRole)).toString() ==
       QLatin1String(kRoleReference))
     return true;
@@ -1350,6 +1468,12 @@ bool LayerOps::isReferenceLayer(const QgsMapLayer* layer) {
          n.contains(QStringLiteral("1919 조선지형도"));
 }
 
+bool LayerOps::isSnapSourceLayer(const QgsVectorLayer* layer) {
+  if (!layer || !layer->isValid()) return false;
+  if (isCadastralLayer(layer)) return true;
+  return !isReferenceLayer(layer);
+}
+
 bool LayerOps::isBasemapLayer(const QgsMapLayer* layer) {
   if (!layer) return false;
   // Live tiles only. A user SHP named "지적…" must not survive 새 조사.
@@ -1361,6 +1485,7 @@ bool LayerOps::isReferenceOrBasemapLayer(const QgsMapLayer* layer) {
   if (!layer) return false;
   // 조사 도메인 레이어(survey_area, feature_poly, feature_line 등)는 절대 배경지도가 아니다.
   if (!layerKeyOf(layer).isEmpty()) return false;
+  if (isCadastralLayer(layer)) return true;
 
   // 명시적 참조 역할
   if (layer->customProperty(QString::fromUtf8(kPropLayerRole)).toString() ==
@@ -1464,7 +1589,10 @@ QList<QgsVectorLayer*> LayerOps::domainLayersForKey(QgsProject* project, const Q
   found.removeIf([](QgsVectorLayer* v) {
     return !v || !v->isValid() ||
            v->customProperty(QString::fromUtf8(kPropLayerRole)).toString() ==
-               QLatin1String(kRoleReference);
+               QLatin1String(kRoleReference) ||
+           v->customProperty(QString::fromUtf8(kPropLayerRole)).toString() ==
+               QLatin1String(kRoleCadastral) ||
+           isCadastralLayer(v);
   });
   return found;
 }
@@ -2320,8 +2448,15 @@ int LayerOps::reviveInvalidLayers(QgsProject* project, QStringList* revived,
   return n;
 }
 
+void LayerOps::applyWheelZoomFactor(QgsMapCanvas* canvas) {
+  QgsSettings().setValue(QStringLiteral("qgis/zoom_factor"), kWheelZoomFactor);
+  if (canvas)
+    canvas->setWheelFactor(kWheelZoomFactor);
+}
+
 void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoomKorea) {
   if (!project || !canvas) return;
+  applyWheelZoomFactor(canvas);
   knockOutProjectRasterPaper(project);
   applyCanvasScreenDpi(canvas);
 
@@ -2388,7 +2523,8 @@ bool LayerOps::isolateAndZoomToLayer(QgsProject* project, QgsMapCanvas* canvas, 
         if (!n) continue;
         const bool show =
             (l == layer) ||
-            (keepReference && !isReferenceLayer(layer) && isReferenceLayer(l));
+            (keepReference && !isReferenceLayer(layer) && !isCadastralLayer(layer) &&
+             (isReferenceLayer(l) || isCadastralLayer(l)));
         n->setItemVisibilityChecked(show);
       }
     }
@@ -2396,9 +2532,9 @@ bool LayerOps::isolateAndZoomToLayer(QgsProject* project, QgsMapCanvas* canvas, 
   if (canvas) {
     QList<QgsMapLayer*> vis;
     vis.append(layer);
-    if (project && keepReference && !isReferenceLayer(layer)) {
+    if (project && keepReference && !isReferenceLayer(layer) && !isCadastralLayer(layer)) {
       for (QgsMapLayer* l : project->mapLayers()) {
-        if (l && l != layer && l->isValid() && isReferenceLayer(l))
+        if (l && l != layer && l->isValid() && (isReferenceLayer(l) || isCadastralLayer(l)))
           vis.append(l);
       }
     }
@@ -2687,14 +2823,18 @@ bool stackCanRedo(QgsVectorLayer* layer) {
 
 template <typename Pred>
 QgsVectorLayer* firstMatchingSurveyLayer(QgsProject* project, QgsVectorLayer* preferred, Pred pred) {
-  if (pred(preferred) && !LayerOps::isReferenceLayer(preferred)) return preferred;
+  if (pred(preferred) && !LayerOps::isReferenceLayer(preferred) &&
+      !LayerOps::isCadastralLayer(preferred))
+    return preferred;
   if (!project) return nullptr;
   QgsLayerTree* root = project->layerTreeRoot();
   if (!root) return nullptr;
   const QList<QgsLayerTreeLayer*> nodes = root->findLayers();
   for (auto it = nodes.crbegin(); it != nodes.crend(); ++it) {
     auto* vector = qobject_cast<QgsVectorLayer*>((*it)->layer());
-    if (pred(vector) && !LayerOps::isReferenceLayer(vector)) return vector;
+    if (pred(vector) && !LayerOps::isReferenceLayer(vector) &&
+        !LayerOps::isCadastralLayer(vector))
+      return vector;
   }
   return nullptr;
 }
@@ -2708,6 +2848,8 @@ bool LayerOps::runEditCommand(QgsVectorLayer* layer, const QString& title,
   };
   if (!layer || !layer->isValid())
     return fail(QStringLiteral("도형이 있는 조사 레이어를 먼저 선택하세요."));
+  if (isCadastralLayer(layer))
+    return fail(QStringLiteral("지적도는 편집할 수 없습니다."));
   if (isReferenceLayer(layer))
     return fail(QStringLiteral("참조 지도는 편집할 수 없습니다."));
   if (layer->isEditCommandActive())
@@ -2756,6 +2898,10 @@ bool LayerOps::undoCommittedFeature(QgsVectorLayer* layer, qint64 featureId, QSt
     if (errorOut) *errorOut = QStringLiteral("레이어가 없습니다.");
     return false;
   }
+  if (isCadastralLayer(layer)) {
+    if (errorOut) *errorOut = QStringLiteral("지적도는 되돌릴 수 없습니다.");
+    return false;
+  }
   if (isReferenceLayer(layer)) {
     if (errorOut) *errorOut = QStringLiteral("참조 지도는 되돌릴 수 없습니다.");
     return false;
@@ -2795,6 +2941,10 @@ bool LayerOps::restoreDeletedFeature(QgsVectorLayer* layer, const QgsFeature& fe
     if (errorOut) *errorOut = QStringLiteral("레이어가 없습니다.");
     return false;
   }
+  if (isCadastralLayer(layer)) {
+    if (errorOut) *errorOut = QStringLiteral("지적도는 복원할 수 없습니다.");
+    return false;
+  }
   if (isReferenceLayer(layer)) {
     if (errorOut) *errorOut = QStringLiteral("참조 지도는 복원할 수 없습니다.");
     return false;
@@ -2827,6 +2977,10 @@ bool LayerOps::restoreDeletedFeature(QgsVectorLayer* layer, const QgsFeature& fe
 bool LayerOps::purgeCommittedFeatures(QgsVectorLayer* layer, QString* errorOut) {
   if (!layer || !layer->isValid()) {
     if (errorOut) *errorOut = QStringLiteral("레이어가 없습니다.");
+    return false;
+  }
+  if (isCadastralLayer(layer)) {
+    if (errorOut) *errorOut = QStringLiteral("지적도는 비울 수 없습니다.");
     return false;
   }
   if (isReferenceLayer(layer)) {
@@ -2894,6 +3048,9 @@ void LayerOps::applySnapSettings(QgsProject* project, const SnapSettings& settin
   cfg.setIntersectionSnapping(true);
   cfg.setSelfSnapping(true);
   cfg.clearIndividualLayerSettings();
+  for (QgsMapLayer* layer : project->mapLayers()) {
+    if (isCadastralLayer(layer)) placeCadastralLayer(project, layer);
+  }
   if (settings.target == SnapTarget::CurrentLayer) {
     cfg.setMode(Qgis::SnappingMode::ActiveLayer);
   } else {
@@ -2903,7 +3060,7 @@ void LayerOps::applySnapSettings(QgsProject* project, const SnapSettings& settin
       auto* vector = qobject_cast<QgsVectorLayer*>(layer);
       if (!vector || !vector->isValid()) continue;
       cfg.setIndividualLayerSettings(vector, QgsSnappingConfig::IndividualLayerSettings(
-          !isReferenceLayer(vector), types, tolerance, Qgis::MapToolUnit::Pixels));
+          isSnapSourceLayer(vector), types, tolerance, Qgis::MapToolUnit::Pixels));
     }
   }
   project->writeEntry(QStringLiteral("ka_hgis"), QStringLiteral("snap_target"),
@@ -2934,6 +3091,10 @@ bool LayerOps::moveFeatureVertex(QgsVectorLayer* layer, qint64 featureId, int ve
                                  double x, double y, QString* errorOut) {
   if (!layer || !layer->isValid()) {
     if (errorOut) *errorOut = QStringLiteral("레이어가 없습니다.");
+    return false;
+  }
+  if (isCadastralLayer(layer)) {
+    if (errorOut) *errorOut = QStringLiteral("지적도는 고칠 수 없습니다.");
     return false;
   }
   if (isReferenceLayer(layer)) {
@@ -2967,6 +3128,10 @@ bool LayerOps::applyVertexMove(QgsVectorLayer* layer, qint64 featureId, int vert
                                double x, double y, bool topological, QString* errorOut) {
   if (!layer || !layer->isValid()) {
     if (errorOut) *errorOut = QStringLiteral("레이어가 없습니다.");
+    return false;
+  }
+  if (isCadastralLayer(layer)) {
+    if (errorOut) *errorOut = QStringLiteral("지적도는 고칠 수 없습니다.");
     return false;
   }
   if (isReferenceLayer(layer)) {

@@ -15,7 +15,7 @@ KaSnapSettingsWidget::KaSnapSettingsWidget(QWidget* parent) : QWidget(parent) {
   row->setSpacing(6);
   m_on = new QCheckBox(QStringLiteral("자석"), this);
   m_on->setToolTip(QStringLiteral(
-      "켜면 조사구역·유구·불러온 벡터의 모서리와 선에 붙습니다. 위성·지적 그림에는 붙지 않습니다"));
+      "켜면 조사구역·유구·지적 선에 붙습니다. 위성 그림에는 붙지 않습니다"));
   m_tolerance = new QDoubleSpinBox(this);
   m_tolerance->setRange(4.0, 64.0);
   m_tolerance->setDecimals(0);
@@ -24,7 +24,7 @@ KaSnapSettingsWidget::KaSnapSettingsWidget(QWidget* parent) : QWidget(parent) {
   m_target = new QComboBox(this);
   m_target->addItem(QStringLiteral("모든 조사 레이어"), QStringLiteral("survey"));
   m_target->addItem(QStringLiteral("현재 레이어"), QStringLiteral("current"));
-  m_target->setToolTip(QStringLiteral("조사 레이어만 붙습니다. 참조 지도는 빼 둡니다"));
+  m_target->setToolTip(QStringLiteral("조사 도형과 지적 선에 붙습니다. 위성 그림은 제외"));
   m_topo = new QCheckBox(QStringLiteral("공유 경계"), this);
   m_topo->setToolTip(QStringLiteral(
       "켜면 맞닿은 유구의 같은 꼭짓점을 같이 옮깁니다. QgsProject 위상 편집"));

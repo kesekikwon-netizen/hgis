@@ -188,7 +188,8 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
         if (!l || !l->isValid()) continue;
         if (l->name() == QLatin1String("layout_blank") || l->name() == QLatin1String("ka_section_blank"))
           continue;
-        if (LayerOps::isReferenceLayer(l) || LayerOps::isBasemapLayer(l))
+        if (LayerOps::isReferenceLayer(l) || LayerOps::isCadastralLayer(l) ||
+            LayerOps::isBasemapLayer(l))
           continue;
         if (auto* vl = qobject_cast<QgsVectorLayer*>(l)) {
           if (vl->featureCount() > 0) return true;
@@ -221,9 +222,9 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
       (slCount > 0 && namedLayoutComposed(QStringLiteral("section")));
   st.insert(QStringLiteral("layout_exists:section"), sectionPass);
 
-  // 5. 개별유구실측도: 유구 피처 존재 및 feature_detail 조판 필요
+  // 5. 개별유구실측도: 유구 피처 존재 및 (user_sheet 또는 feature_detail 조판)
   const bool featureDetailPass = hasFeatures &&
-      namedLayoutComposed(QStringLiteral("feature_detail"));
+      (composedUserSheet || namedLayoutComposed(QStringLiteral("feature_detail")));
   st.insert(QStringLiteral("layout_exists:feature_detail"), featureDetailPass);
 
   return st;

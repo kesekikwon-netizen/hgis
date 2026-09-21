@@ -1,3 +1,219 @@
+## 2026-09-21 맵·조판 휠 한 칸 1.2배
+
+- 맵 QGIS 기본 2.0, 조판 1.35를 `LayerOps::kWheelZoomFactor` 1.2로 맞춤. 부팅 `qgis/zoom_factor`, 메인·정합·지형 미리보기 `setWheelFactor`, 조판 휠 같은 칸.
+- 공식: https://qgis.org/pyqgis/master/gui/QgsMapCanvas.html (`setWheelFactor` > 1)
+- CTest: `wheelZoomFactorIsFinerThanQgisDefault` 0, `layoutWheelZoom_keepsPointUnderCursor` 0. 전체 layer_state/workflow는 기존 flake(임시폴더·유산받기·perf 0.555ms). smoke 0.
+- Graft `applyWheelZoomFactor` L2451. clangd L2454 col 13 → qgsmapcanvas.h L643; L2451 col 16 → LayerOps.h L41. diagnostic_error_count 14(QGIS 헤더).
+- Archify wheel-zoom-step validate/deliver 9/9, visual-check 1440–2048 pass.
+- EXE SHA256 B12AE2AC0ABD266D606D5ED5D19444C18CF142745A8C15144B2E6B58683683B3. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-21 조판 주변유적 전체·덧지도 동기
+
+- 주변유적은 아래 글자가 없어도 덧그림에 모은다. 본지도에도 남겨 여섯 자료 도형·범례가 빠지지 않는다. 번호는 이름당 하나, 형제 도형은 그대로.
+- `applyLayersToMap`이 같은 호출에서 `syncAboveLabelsMap`. 번호 지도는 본지도+덧지도 레이어.
+- CTest: layer_state 6.40s, heritage_style 15.19s, save_open_drawing 22.17s. smoke 0.
+- Graft `numberedSourceLayers` L268–L284. clangd `raiseAboveGeometries` L1021. Archify sheet-overlay-stable validate/deliver 9/9, visual-check 1440–2048 pass.
+- EXE SHA256 6F49FF9023F2E0292C0A9A76BBB4F8686D391A305ED65E056803EEEEF75182E2. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-21 지적도 Delete·우클릭 삭제
+
+- 지적도 레이어·묶음은 Delete와 우클릭 삭제로 목록에서 뺀다. 지운 뒤 자동 VWorld 지적을 다시 올리지 않는다.
+- layer_state 6.01s PASS. 지적 삭제 3테스트 PASS. save_open_edit 전체는 글자크기 메뉴 flake.
+- Graft `rememberUserRemovedCadastral` L1420. clangd L1430 col 33 → h L352.
+- Archify cadastral-delete validate/deliver 9/9, visual-check 1440–2048 pass.
+- EXE 510B713765B3B9CD0222CDAF93FAC26B9C1ACA2A818BCB3570F3B44D8B09C490. smoke 0. 커밋·푸시 없음.
+
+## 2026-09-21 개인 포터블(5km 빌드)
+
+- `C:\Users\kwonyoungin1\Desktop\HGIS-포터블-개인-20260921-5km`. EXE 863847A3B96FD775AC58C8CDF36ECD61D0777307E7E2267CC6D7FFA570AC1B5C.
+- 기존 `HGIS-포터블-개인-20260921` 유지. VWorld·1919 HistoryGis·지형도·유산·지적 계정 hash 일치. 값 미기록. SDK A:\OSGeo4W. verify 0, SDK 없이 smoke 0. 커밋·푸시 없음.
+
+## 2026-09-21 조사구역 5km 클립·명칭 축척·조판 한 번
+
+- 받은 뒤 조사구역 5km만 올린다(지적은 기존). 맵 명칭 1:10000 제한. 조판 본지도에서 덧그림 도형 제외.
+- CTest 7종 통과. smoke 0. clangd L75→h L23. Archify survey-5km-clip 9/9.
+- EXE 863847A3B96FD775AC58C8CDF36ECD61D0777307E7E2267CC6D7FFA570AC1B5C. 커밋·푸시 없음.
+
+## 2026-09-21 개인 포터블(키 포함)
+
+- `C:\Users\kwonyoungin1\Desktop\HGIS-포터블-개인-20260921`. EXE D80E554E0463AF3A93844AB179497A44C8CA404804517D923432C7E8D7C8D483.
+- VWorld·1919 HistoryGis·지형도·유산·지적 계정 파일 hash 일치. 값 미기록. verify 0, SDK 없이 smoke 0. 커밋·푸시 없음.
+
+## 2026-09-20 바탕화면 포터블
+
+- `C:\Users\kwonyoungin1\Desktop\HGIS-포터블-20260920`. EXE SHA256 D80E554E0463AF3A93844AB179497A44C8CA404804517D923432C7E8D7C8D483.
+- verify-portable-pack 0. SDK PATH 없이 smoke 0. 계정·키 미포함. 기존 바로가기 유지. 커밋·푸시 없음.
+
+## 2026-09-20 전체 끄기 후 개별 체크가 지도를 켠다
+
+- 전체 끄기는 그룹까지 끈다. 자식만 체크하면 체크만 되고 `isVisible()`은 거짓이다. 체크된 노드의 조상을 연다.
+- RED `checkingLayerAfterAllOffShowsOnMap` 실패 → GREEN. CTest layer_state 3.69초. smoke 0.
+- Graft `revealCheckedLegendNode` L2217. clangd L2217 col 16 → h L237.
+- Archify legend-check-shows-map validate/deliver 9/9, visual-check pass.
+- EXE SHA256 D80E554E0463AF3A93844AB179497A44C8CA404804517D923432C7E8D7C8D483. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 끈 지적도는 다른 지도를 받아도 꺼진 채
+
+- 자석 갱신이 꺼 둔 지적을 다시 켜지 않음. CTest workflow 66.10초. smoke 0.
+- Graft `placeCadastralLayer` L1266. clangd → h L329.
+- EXE SHA256 6722A79AE3B44E1027D1CEAEFF4068C730813B6AF4B0820CDB230F1B29E0E8A7. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 주변유적 깜빡임·줄자 겹침
+
+- 유적 도형은 덧그림에 다시 올림. 줄자는 투명도 막대 오른쪽. smoke 0.
+- CTest layer_state 6.25초, heritage_import 7.50초, workflow 69.76초.
+- EXE SHA256 CB17CA041C2B9AA28CD3E0F4617D76F33966B133D019866D699A1501B03A2FC7. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 번호 선은 같은 점만 짧게
+
+- 근처 유적은 각자 위. 같은 점만 2.4mm 한두 칸. CTest heritage_style 12.93초.
+- Graft `stackedPins` L155. clangd L166 col 12. smoke 0.
+- EXE SHA256 08FED8B73186F20FBF49AEB77A8E89A4C0D060F448DD182FF5FA7A33165DE114. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 조판 렉·A4 세로 기본
+
+- 기본 용지 A4 세로. 덧지도 재페인트 생략. 번호 범례는 다음 틱.
+- CTest save_open_drawing 20.70초. smoke 0.
+- Graft `applyHeritageNumberChrome`. clangd L3303 → h L150.
+- EXE SHA256 1991346D7F96B3ED81DCA6658550A4BD828099DA9A33A5F02656B7121CFB5816. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 조판 여백 1cm
+
+- 위·좌·우 10mm. 전면 칸은 조판을 열 때 맞춘다. 아래 축척 띠는 그대로.
+- CTest save_open_drawing 23.04초. smoke 0.
+- Graft `defaultMapRect`. clangd L1707 → h L69.
+- EXE SHA256 A0D6468406344A3F74BFE168E95595135C6386697A8748375450973E9A4A2843. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 현장 조판 317×220
+
+- A4 가로 297×210을 좌·우·위 1cm 키워 317×220. 저장된 시트는 조판을 열 때 키운다.
+- CTest save_open_drawing 20.78초. smoke 0.
+- Graft `applyFieldPageGrow` L917. clangd L917 → h L70.
+- EXE SHA256 7500A6C541F12D3A62A2BD9932DF22047573DB13419AF1400B75AA87F7C63001. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 범례 번호가 지도와 같게
+
+- 단색 원본 노드에 뱃지를 먼저 붙이면 모든 줄이 1이 된다. override 노드를 만든 뒤 다시 찍는다. 번호 갱신마다 범례 트리를 갈아엎지 않는다.
+- CTest heritage_style 12.93초, save_open_drawing 20.31초. smoke 0.
+- Graft `applyLegend` L1036. clangd L1036 → HeritageLayoutNumbers.h L37.
+- EXE SHA256 A194D1F3543323A4494FDD1A3893ACE1A6F2B56954794E3DD1F61C1FDD103F7C. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 용지 이동은 클론 재사용
+
+- 발자국만 바뀌면 `update()`가 레이어 clone·전체 심볼 순회를 하지 않는다. 원본 분류표에서 페이지 범주만 그린다. 원본에 `startRender` 없음.
+- CTest heritage_style 11.79초, save_open_drawing 19.61초. smoke 0.
+- Graft `update` L636. clangd L636 → HeritageLayoutNumbers.h L34. Archify validate/deliver 9/9. visual-check 1440 높이 넘침 미완.
+- EXE SHA256 84B02ECA3E3A8850B9B18055C91E69792E2BAB737E89DB121DEC33E04C422B64. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 덧그림은 조사·지적만
+
+- 2차 패스에서 `isReferenceLayer` 제외. 조사 선은 지번 위. CTest layer_state 4.97초, workflow 67.28초. smoke 0.
+- EXE SHA256 BCB46FF3ECB6F861307BE819503C9CE7BFE63749B50C9DBD84933022676E7C65. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 조판 번호 PAL 한 번
+
+- 본 지도·덧지도는 `labelsEnabled=0`. PAL은 `ka_map_numbers`만. 번호는 도형 위. 숨긴 레이어는 번호 지도에서 뺀다.
+- CTest heritage_style 12.68초, save_open_drawing 20.42초. smoke 0.
+- EXE SHA256 540A3F20D8BF851BC722F6E9DC7B8AA87F5120C75343ED8B5E4B0CF363971FC9. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 용지에서 밀면 발자국으로 번호 다시 잡음
+
+- `sizePositionChanged` → `update()`. 테스트는 남은 유적 수. CTest drawing 19.96초, heritage_style 11.81초.
+- smoke 0. EXE SHA256 BE79823D68804E4F60C938D31B94A80DB53B95A3278515E9F60DB9FFF54BC694.
+- 커밋·푸시·포터블 없음.
+
+## 2026-09-20 번호 30%·검정 테두리·도형 위
+
+- 2.99mm / 5.2pt, 검정 0.15mm, `ka_map_numbers` 최상. CTest 12.63초. smoke 0.
+- EXE SHA256 D3A2CF8F896D0FF960C4583AEB0AE007FDC47CA0ED0A8441692951F8CDC871FD. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 조판 번호 절반·선은 겹칠 때만
+
+- 원 2.3mm / 4pt. 겹칠 때만 짧은 선. CTest 11.05초. smoke 0.
+- EXE SHA256 A728A45BE3D17928E39A7A2D0E6C095C8FE64F4F96A3B5B11321E268C1C4E06F. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 조판 번호 전부 비키고 선
+
+- 모든 번호 7mm 이탈 + 콜아웃. CTest heritage_style 11.53초. smoke 0.
+- EXE SHA256 D6F2314BF7F6AA2A8C8EC9F99B8A0601D1657EB70B5873AA43C62BE285C06BE7. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 완료 계약 skill·설계도
+
+- `.agents/skills/ka-hgis-sheet/` + `docs/architecture/ka-hgis-sheet-contracts.workflow.json`.
+- 커밋·푸시·포터블 없음.
+
+## 2026-09-20 페이지 안 주변유적 전부 표시
+
+- 페이지에 걸린 점은 번호를 유지. 겹쳐도 남김. 면은 중심 점.
+- CTest heritage_style 10.75초. smoke 0.
+- EXE SHA256 011CC0586578A06011857486A1BF9ACDAB3E4297F5BB95F8D028C8671D6DF80C. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 조판 여백·접힌 레이어·페이지 범례
+
+- 위·좌·우 18mm. 추가 종류 그룹은 접힘. 범례는 페이지에 걸린 유적만.
+- CTest heritage_style 21.01초, heritage_import 14.38초, workflow_engine 69.05초. smoke 0.
+- EXE SHA256 EA56B7A79B53875F4D26044002D82E19E9EFB39F40DA2699E870389C9D0C42E5. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 정합 지적 자석·주변유적 번호 선
+
+- 지적도 별도 그룹. 정합 자석은 조사 도형+지적 선. 조판 번호는 하나+콜아웃 선.
+- CTest workflow 81.97초, dem_trench 2.78초, heritage_style 11.80초. smoke 0.
+- EXE SHA256 40AC1D833777C152DDD90418297328DF38E546E9C77F80EDB520B9469018F15C. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 팬해도 수치지형도 SHP를 다시 열지 않음
+
+- 팬마다 점·면 SHP를 다시 열던 경로를 끊었다. 올린 회색 0.2mm 선은 유지. 중심 500m 안이면 조회 없음. 공간 인덱스.
+- CTest `topographic_import` 12.54초, `heritage_style` 9.21초. smoke 0.
+- EXE SHA256 B979D09CF1DF616352F78736D487382FAD669C4413C4B314D59D3636E3FD76B0. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 시작 모션그래픽(영상 없음)
+
+- MP4 제거. 왼쪽은 현장 도면이 조립되는 새 모션. CTest `startup_splash` 15.97초. smoke 0.
+- EXE SHA256 A9A5F2C7F11B81E4B1A85B652533C0E0450BD432F458B9C1DF869350200B38ED. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 시작 창 16:9·영상 재생
+
+- 창을 1280×720 영상에 맞춘다. `QVideoWidget` KeepAspectRatio. CTest `startup_splash` 17.25초. smoke 0.
+- EXE SHA256 353801C8049A7D347EC402652348C05EB836E35B1EF3F17B4898711DBE3361A0. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 시작 안내 10초·영상 표시
+
+- 안내 10초. `QVideoSink`로 모션 MP4를 왼쪽 칸에 그린다. CTest `startup_splash` 18.83초. smoke 0.
+- EXE SHA256 46B49C76945D5CD8FBE29F944F08AD15685A56B09249BF2139F88E32A123455F. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 수치지형도 재신청 금지·시작 라운드 영상
+
+- 같은 도엽이면 포털 신청을 다시 하지 않는다. 시작 화면은 흰 라운드·글로시·`startup-motion.mp4`.
+- CTest scope/browser/splash 통과. smoke 0. EXE SHA256 9649D279C5130183330B896C24FA21E10E2BCEC9357CE90C31424DB45FE5D690.
+- 커밋·푸시·포터블 없음.
+
+## 2026-09-20 부분 저장·범례 재사용·CTest 64/64
+
+- 저장 가능한 레이어를 먼저 커밋한 뒤, 막힌 레이어가 있으면 복구본만 만든다. 같은 연번 시리즈는 범례 노드를 재사용한다.
+- 단독 drawing 35.23초·commit 8.72초. 전체 **64/64** 286.95초. 62/64 기록은 유지.
+- EXE SHA256 9FDE583C54D72EF242C2C1A85819DEDAB71EEDCE160A1B9F8CB8619F06A0DAD7. smoke 0. 커밋·푸시·포터블 없음. N1·N6·N9·N10·N12 사용자 대기.
+
+## 2026-09-20 도면 연번 용지 이동·PDF 단추
+
+- `save_open_drawing` Passed 33.77초. `theme_qss` Passed. 용지에서 지도를 밀면 1..K 압축, 되돌리면 후보 복원.
+- QSS `sampleTile` min-width 제거. EXE SHA256 1FD5A25743807D5F3E5FF8D11BF4FFD36D625627AF63278B109F4E888D97E312. 커밋·푸시·포터블 없음. N1·N6·N9·N10·N12 사용자 대기.
+
+## 2026-09-20 복사 재연결·N4·N7·N11
+
+- 완료: 조사 파일만 복사해도 흡수 레이어가 복사본을 가리킴. N7 200% 목록 1px 아님. N11 고지 감사. N4 64개 기록 60/64.
+- `remountCopiedSurveyLayers`는 연 파일에 테이블이 있을 때만. 원본 열기는 reload 없음.
+- CTest: `surveyFileTravelsAloneWithAbsorbedShp` PASS. `layer_information` Passed 4.57초. 전체 60/64. 이후 단독 `save_open_edit` 33.74초·`save_open_commit` 8.87초 통과.
+- clangd L1042→L108. Archify `build/qa/absorb-remount-20260920/` 9/9 visual-check pass.
+- `ka-hgis.exe` LNK1104(사용자 앱 열림). 커밋·푸시·포터블 없음. N1·N6·N9·N10·N12 사용자 대기.
+
+## 2026-09-20 제출 PDF 필수 (N13–N15)
+
+- 완료 조건: 도면만들기 용지가 없으면 제출 실패. 있으면 그 용지만 `조사도면.pdf`.
+- `ExportService`는 프로젝트가 있을 때 `isComposedStudioSheet(user_sheet)`가 아니면 중단. `LayoutService::markStudioSheetComposed`는 도면만들기에서 `user_composed=true`. `exportDrawingPdfs`는 5종 폴백 없음. `feature_detail`은 `user_sheet` 인정.
+- 대상 CTest: checklist / export_survey_areas / e2e 통과. workflow 199/1 — 남은 실패는 `surveyFileTravelsAloneWithAbsorbedShp`(흡수 경로), 제출 PDF와 무관.
+- 오늘 `heritage_flow` / `e2e_opaque` / `topographic_browser`를 실패·비활성으로 쓰지 않는다.
+- clangd L208 → `LayoutService.h` L80. Archify `build/qa/submit-pdf-20260920/`. EXE SHA256 BF870DD47D5C715F07255457446B669FB1D33268E4348ED7488FF71D3AC93FEE. 커밋·푸시·포터블 없음.
+
 ## 2026-09-20 조판 번호 겹침 금지·화면=범례
 
 - 원인: 범위 유적을 전부 범례에 남기고 `compactRenderedNumbers`를 끄면, PAL이 숨긴 번호와 범례가 어긋난다.

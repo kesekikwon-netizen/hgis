@@ -730,8 +730,11 @@ void TestDemTrench::applySnapConfig_vertexAndSegmentNotWmsPromise() {
   QVERIFY2(fn.contains(QLatin1String("SnappingType::Vertex")), "꼭짓점 자석");
   QVERIFY2(fn.contains(QLatin1String("SnappingType::Segment")),
            "선에도 붙어야 조사구역·SHP 그리기가 편하다");
-  QVERIFY2(src.contains(QStringLiteral("위성·지적 그림")),
-           "지적 WMS는 그림이라 자석이 안 붙는다고 안내해야 한다");
+  QVERIFY2(src.contains(QStringLiteral("위성 그림은 제외")) ||
+               src.contains(QStringLiteral("위성 그림에는 붙지 않습니다")),
+           "위성 WMS는 그림이라 자석이 안 붙는다고 안내해야 한다");
+  QVERIFY2(src.contains(QStringLiteral("지적 선")),
+           "정합에서 지적 선에도 자석이 붙어야 한다");
 }
 
 void TestDemTrench::startTrenchGrid_placesOnMapWithoutApplyClick() {

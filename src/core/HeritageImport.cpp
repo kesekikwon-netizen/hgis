@@ -2,6 +2,7 @@
 
 #include "HeritageSiteLegend.h"
 #include "LayerOps.h"
+#include "SurveyScopeClip.h"
 #include "TopographicArchive.h"
 
 #include <qgslayertree.h>
@@ -237,6 +238,15 @@ HeritageImport::Result HeritageImport::loadDataset(QgsProject* project, Heritage
       qDeleteAll(loaded);
       return out;
     }
+    if (!SurveyScopeClip::keepIntersectingIfSurvey(project, layer, &out.error)) {
+      delete layer;
+      qDeleteAll(loaded);
+      return out;
+    }
+    if (layer->featureCount() == 0) {
+      delete layer;
+      continue;
+    }
 
     // 유적명은 실제 필드에서 고른다. 없으면 그렇다고 말한다.
     const QString nameField = chooseNameField(layer);
@@ -248,7 +258,7 @@ HeritageImport::Result HeritageImport::loadDataset(QgsProject* project, Heritage
     // (레이어창에서는 「지정유산」 그룹으로 묶어 구분한다).
     const HeritageStyleResult styled = HeritageStyle::apply(layer, dataset, nameField);
     if (!styled.message.isEmpty()) out.messages << styled.message;
-    // 레이어창에는 종류 이름만, 도면 범례에는 유적명 한 줄씩.
+    if (layer->dataProvider()) layer->dataProvider()->createSpatialIndex();
     HeritageSiteLegend::install(layer);
 
     // 참조 자료다. 조사 데이터와 섞이지 않게 한다.
@@ -288,10 +298,13 @@ HeritageImport::Result HeritageImport::loadDataset(QgsProject* project, Heritage
       if (!group) break;
       QgsLayerTreeLayer* node = group->addLayer(layer);
       if (!node) continue;
-      node->setItemVisibilityChecked(true);
+      // 참조 지도가 꺼져 있으면 자식만 체크돼도 화면에 안 나온다.
+      node->setItemVisibilityCheckedParentRecursive(true);
       // 유적명이 수백 줄이면 레이어창을 덮는다. 접은 채로 올린다.
       node->setExpanded(false);
     }
+    if (group && group != reference)
+      group->setExpanded(false);
   }
 
   LayerOps::ensureSatelliteAtBottom(project);

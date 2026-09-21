@@ -10,7 +10,7 @@ Reply in the user's language, usually Korean. Code, paths, and identifiers may r
 
 - Use Cursor native Agent, subagents (Task), MCP, hooks, and skills when they are available and useful.
 - Prefer a fixed model chosen in the Cursor model picker (not Auto) for consistency. Do not treat Auto or ad-hoc model switching as a required execution path.
-- Legacy `.codex/`, `.grok`, and `.agents` dispatch/history files may remain for history or compatibility; they are not the authoritative harness. Current project skills remain `.agents/skills/ka-hgis-gis/`, [Archify](.agents/skills/archify/SKILL.md), and [문화재인트라넷](.agents/skills/heritage-intranet/SKILL.md).
+- Legacy `.codex/`, `.grok`, and `.agents` dispatch/history files may remain for history or compatibility; they are not the authoritative harness. Current project skills remain `.agents/skills/ka-hgis-gis/`, [ka-hgis-sheet](.agents/skills/ka-hgis-sheet/SKILL.md), [Archify](.agents/skills/archify/SKILL.md), and [문화재인트라넷](.agents/skills/heritage-intranet/SKILL.md).
 - Do not introduce OpenCode, Sisyphus, hidden auto-push, or hardcoded personal credentials.
 - Work directly for small and local changes. Use Cursor Task subagents only for bounded independent research, review, or verification when that improves correctness or throughput.
 - Commit only when the user explicitly asks.
@@ -32,6 +32,7 @@ Reply in the user's language, usually Korean. Code, paths, and identifiers may r
 - Cursor user rules and global settings supply general C++ guidance. GIS rules belong only to this repository; do not copy them to global user rules or global skills.
 - Use [ka-hgis-gis](.agents/skills/ka-hgis-gis/SKILL.md) for HGIS implementation, diagnosis and review. It routes to relevant evidence and tests without requiring a GIS investigation for an unrelated edit.
 - Use [문화재인트라넷](.agents/skills/heritage-intranet/SKILL.md) for nearby-heritage intranet downloads, related legends and recovery; it records the confirmed success contract and the stale-object-file restore failure.
+- Use [ka-hgis-sheet](.agents/skills/ka-hgis-sheet/SKILL.md) when a completed sheet/snap/heritage-number behavior regresses, or when a newly finished field contract must be recorded. Design map: [ka-hgis-sheet-contracts.workflow.json](docs/architecture/ka-hgis-sheet-contracts.workflow.json).
 - Resolve historical documentation against current user requirements, `.codex/NOW.md`, current handoffs and actual code. The original ADR's C++17/LTR baseline and the schema's legacy 5179 default do not override the current C++20/Qt6/qgis-dev build or selected survey CRS.
 - Use the repo PowerShell environment and installed OSGeo4W SDK. Do not replace this application's Qt/QGIS build, runtime plugins or package layout with the global standalone C++ template.
 
@@ -59,7 +60,7 @@ Use official online documentation only when local repo evidence is missing or ve
 - Architecture B only: link `qgis_core` / `qgis_gui`; do not fork QGIS; do not reimplement PROJ, GDAL, QGIS rendering, or CRS transformation.
 - Domain layer logic keys are `survey_area`, `feature_poly`, `feature_line`, `section_line`, `control_points`, and existing `artifact_point` where already supported.
 - Store logical domain identity in `ka_hgis/layer_key`; Korean titles are UI labels only.
-- Keep legend groups separated as **조사 데이터** and **참조 지도**. Basemaps, WMS, XYZ, soil, geology, masks, and aligned rasters are reference maps, not survey data.
+- Keep legend groups separated as **조사 데이터**, **지적도**, and **참조 지도**. Official cadastral vectors are not reference maps. Basemaps, WMS, XYZ, soil, geology, masks, and aligned rasters are reference maps, not survey data. VWorld cadastral WMS is a picture and cannot snap.
 - Work CRS may be EPSG:5186 or EPSG:5187. Upload/export output is EPSG:5179 SHP + PDF + MANIFEST.
 - `loadSurveyLayers` must not call `removeAllMapLayers()`. Drop domain layers only and keep basemaps/reference layers when the workflow requires it.
 - `loadSurveyLayers` must not auto-add empty domain layers. GPKG schema can exist on disk; legend entries appear only after an explicit user draw/import/open action.

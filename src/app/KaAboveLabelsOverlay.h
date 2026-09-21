@@ -21,8 +21,8 @@ class QgsMapCanvas;
 // 렌더(QgsMapRendererCustomPainterJob)를 쓰므로 그 속성이 무시된다.
 //
 // 그래서 지도가 다 그려진 뒤 이 캔버스 항목이 대상 레이어만 2차 패스로 다시 그린다.
-// 대상은 완전히 불투명한 벡터만 골라(LayerOps::layersDrawnAboveLabels) 두 번 그려도
-// 화면이 달라지지 않게 하고, WMS·위성 같은 그림 배경은 넣지 않는다.
+// 대상은 조사 도형·지적처럼 아래 글자를 덮어야 하는 불투명 벡터만
+// (LayerOps::layersDrawnAboveLabels). 주변유적·지질·지형도·위성은 넣지 않는다.
 class KaAboveLabelsOverlay : public QgsMapCanvasItem {
 public:
   explicit KaAboveLabelsOverlay(QgsMapCanvas* canvas);

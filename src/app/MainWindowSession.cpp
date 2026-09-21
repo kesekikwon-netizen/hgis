@@ -850,6 +850,7 @@ bool MainWindow::persistSurveyWork() {
     }
     rememberSurvey(m_surveyPath, file.completeBaseName());
     rememberSurveyDir(m_surveyPath);
+    remapUndoFeatureIdsAfterSave();
     markSurveySaved();
     saved = true;
     if (!attempt.skippedRaster.isEmpty())
@@ -1059,7 +1060,9 @@ void MainWindow::captureRecoverySnapshot() {
     auto* vector = qobject_cast<QgsVectorLayer*>(layer);
     if (!vector) continue;
     const bool unsavedEdit = vector->isEditable() && vector->isModified();
-    if (LayerOps::isReferenceLayer(vector) && !unsavedEdit) continue;
+    if ((LayerOps::isReferenceLayer(vector) || LayerOps::isCadastralLayer(vector)) &&
+        !unsavedEdit)
+      continue;
     ids << vector->id();
   }
   if (ids.isEmpty()) return;

@@ -762,6 +762,7 @@ int KaApplication::run(int argc, char** argv) {
     // QgsMapCanvas reads this; ParallelJob + provider_wms nested QEventLoop
     // → deleteLater ACCESS_VIOLATION on Windows (field dumps 2026-08-31).
     tileSettings.setValue(QStringLiteral("qgis/parallel_rendering"), false);
+    tileSettings.setValue(QStringLiteral("qgis/zoom_factor"), LayerOps::kWheelZoomFactor);
     // 예전에는 여기서 setMaxThreads(1)을 불렀다. QGIS 문서가 "must be between 2
     // and #cores"라고 못박은 범위 밖이고, 전역 QThreadPool을 작업자 1개로 묶어
     // 렌더 작업·미리보기 작업·타일 내려받기가 전부 그 하나를 두고 줄을 선다.
@@ -834,7 +835,7 @@ int KaApplication::run(int argc, char** argv) {
       QObject::connect(splash.get(), &KaStartupSplash::readyToShow, &w, [&]() {
         w.show();
         splash->close();
-        KaCrashGuard::logLine(QStringLiteral("[boot] 5초 안내 후 창 표시 %1 ms")
+        KaCrashGuard::logLine(QStringLiteral("[boot] 10초 안내 후 창 표시 %1 ms")
                                   .arg(bootTimer.elapsed()));
       });
       splash->markReady();

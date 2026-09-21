@@ -281,12 +281,10 @@ QgsVectorLayer* CadastralImport::addPrepared(QgsProject* project, QgsMapCanvas* 
       if (auto* node = project->layerTreeRoot()->findLayer(existing->id())) node->setItemVisibilityChecked(false);
   }
   applyStyle(layer.get(), retainedColor, retainedLabels);
-  LayerOps::markReferenceLayer(layer.get());
+  LayerOps::markCadastralLayer(layer.get());
+  LayerOps::clearUserRemovedCadastral(project);
   auto* added = layer.release(); project->addMapLayer(added, false);
-  auto* references = project->layerTreeRoot()->findGroup(QStringLiteral("참조 지도"));
-  if (!references) references = project->layerTreeRoot()->addGroup(QStringLiteral("참조 지도"));
-  references->addLayer(added); references->setItemVisibilityChecked(true);
-  LayerOps::placeInLegendGroup(project, added, QStringLiteral("참조 지도"));
+  LayerOps::placeCadastralLayer(project, added);
   prepared.retainFiles(); project->removeMapLayers(previous);
   if (canvas) { LayerOps::syncMapCanvas(project, canvas, false); LayerOps::refreshCanvasIfIdle(canvas); }
   return added;

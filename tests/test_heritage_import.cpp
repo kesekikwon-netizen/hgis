@@ -9,6 +9,8 @@
 #include <optional>
 #include <qgsapplication.h>
 #include <qgscategorizedsymbolrenderer.h>
+#include <qgssinglesymbolrenderer.h>
+#include <qgsvectorlayerlabeling.h>
 #include <qgslayertree.h>
 #include <qgslayertreegroup.h>
 #include <qgslayertreelayer.h>
@@ -20,10 +22,13 @@
 #include <qgsvectorfilewriter.h>
 #include <qgsfeature.h>
 #include <qgsgeometry.h>
+#include <qgscoordinatereferencesystem.h>
+#include <qgsrectangle.h>
 
 #include "core/HeritageImport.h"
 #include "core/HeritageSiteLegend.h"
 #include "core/HeritageStyle.h"
+#include "core/LayerOps.h"
 
 namespace {
 bool writeZip(const QString& path, const QList<QPair<QString, QByteArray>>& entries) {
@@ -123,6 +128,13 @@ private slots:
     QVERIFY(readFile(workingFile).contains(name.toUtf8()));
     QCOMPARE(imported.layers.first()->crs(), source.crs());
     QCOMPARE(imported.layers.first()->featureCount(), source.featureCount());
+    auto* reference = project.layerTreeRoot()->findGroup(HeritageImport::referenceGroupName());
+    QVERIFY(reference);
+    auto* kind = reference->findGroup(HeritageStyle::layerName(HeritageDataset::DesignatedHeritage));
+    QVERIFY(kind);
+    QVERIFY2(!kind->isExpanded(), "added heritage groups must open collapsed");
+    for (QgsLayerTreeNode* child : kind->children())
+      QVERIFY2(!child->isExpanded(), "added child layers must open collapsed");
     for (auto it = originals.cbegin(); it != originals.cend(); ++it)
       QCOMPARE(readFile(base + it.key()), it.value());
     QCOMPARE(QFileInfo::exists(base + QStringLiteral(".cpg")), withCpg);
@@ -132,9 +144,11 @@ private slots:
     QCOMPARE(read.attribute(koreanField).toString(), name);
     QCOMPARE(read.attribute(QStringLiteral("NOTE")).toString(), longText);
     QVERIFY(read.geometry().isTopologicallyEqual(feature.geometry()));
-    const auto* renderer = dynamic_cast<const QgsCategorizedSymbolRenderer*>(imported.layers.first()->renderer());
+    const auto* renderer = dynamic_cast<const QgsSingleSymbolRenderer*>(imported.layers.first()->renderer());
     QVERIFY(renderer);
-    QCOMPARE(renderer->categories().first().label(), name);
+    QVERIFY(imported.layers.first()->labelsEnabled());
+    const QString labelField = imported.layers.first()->labeling()->settings().fieldName;
+    QVERIFY(labelField.contains(koreanField) || labelField.contains(QLatin1String("NAME")));
     const QString projectPath = temp.filePath(QStringLiteral("saved.qgs"));
     QVERIFY(project.write(projectPath));
     project.clear();
@@ -279,7 +293,10 @@ private slots:
 
       // 한 레이어 안에서는 색이 하나다(유적마다 갈리지 않는다).
       // 레이어끼리는 서로 다르다 — 아래에서 따로 확인한다.
-      if (auto* cat = dynamic_cast<QgsCategorizedSymbolRenderer*>(layer->renderer())) {
+      if (auto* single = dynamic_cast<QgsSingleSymbolRenderer*>(layer->renderer())) {
+        QVERIFY(single->symbol());
+        layerColors.insert(single->symbol()->color().name());
+      } else if (auto* cat = dynamic_cast<QgsCategorizedSymbolRenderer*>(layer->renderer())) {
         QString one;
         for (const QgsRendererCategory& c : cat->categories()) {
           QVERIFY(c.symbol());
@@ -312,8 +329,16 @@ private slots:
     QgsLayerTreeGroup* kind =
         reference->findGroup(HeritageStyle::layerName(HeritageDataset::DesignatedHeritage));
     QVERIFY2(kind, "「지정유산」 그룹이 없습니다.");
+    QVERIFY2(!kind->isExpanded(), "지정유산 그룹은 접힌 채 올라와야 한다");
+    QVERIFY2(reference->isVisible(), "참조 지도가 꺼져 있으면 유적이 안 보인다");
+    QVERIFY2(kind->isVisible(), "지정유산 그룹이 꺼져 있으면 유적이 안 보인다");
     for (QgsVectorLayer* layer : result.layers)
       QVERIFY2(kind->findLayer(layer->id()), qPrintable(layer->name()));
+    for (QgsVectorLayer* layer : result.layers) {
+      QgsLayerTreeLayer* node = kind->findLayer(layer->id());
+      QVERIFY(node);
+      QVERIFY2(node->isVisible(), qPrintable(layer->name() + QStringLiteral(" 이 그룹에 가려 있다")));
+    }
   }
 
   void siteNameFieldIsPickedFromRealAttributes() {
@@ -332,6 +357,53 @@ private slots:
       if (field.isEmpty()) continue;  // 못 고르면 호출자가 알린다(그 자체는 실패가 아니다)
       QVERIFY2(layer->fields().indexOf(field) >= 0, qPrintable(field));
     }
+  }
+
+  void loadKeepsOnlySurveyBuffer() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    QgsVectorLayer source(QStringLiteral("Polygon?crs=EPSG:5186&field=nm:string(40)"),
+                          QStringLiteral("fixture"), QStringLiteral("memory"));
+    QVERIFY(source.startEditing());
+    QgsFeature near(source.fields());
+    near.setAttribute(0, QStringLiteral("근처"));
+    near.setGeometry(QgsGeometry::fromWkt(QStringLiteral(
+        "POLYGON((200000 450000,200020 450000,200020 450020,200000 450020,200000 450000))")));
+    QVERIFY(source.addFeature(near));
+    QgsFeature far(source.fields());
+    far.setAttribute(0, QStringLiteral("멀리"));
+    far.setGeometry(QgsGeometry::fromWkt(QStringLiteral(
+        "POLYGON((230000 480000,230020 480000,230020 480020,230000 480020,230000 480000))")));
+    QVERIFY(source.addFeature(far));
+    QVERIFY(source.commitChanges());
+    QgsVectorFileWriter::SaveVectorOptions options;
+    options.driverName = QStringLiteral("ESRI Shapefile");
+    options.fileEncoding = QStringLiteral("UTF-8");
+    const QString shp = temp.filePath(QStringLiteral("유적.shp"));
+    QCOMPARE(QgsVectorFileWriter::writeAsVectorFormatV3(&source, shp, QgsCoordinateTransformContext(), options),
+             QgsVectorFileWriter::NoError);
+
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* survey = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                      QStringLiteral("조사구역"), QStringLiteral("memory"));
+    LayerOps::markSurveyLayer(survey, QStringLiteral("survey_area"));
+    QVERIFY(survey->startEditing());
+    QgsFeature sa(survey->fields());
+    sa.setGeometry(QgsGeometry::fromRect(QgsRectangle(200000., 450000., 200010., 450010.)));
+    QVERIFY(survey->addFeature(sa));
+    QVERIFY(survey->commitChanges());
+    project.addMapLayer(survey);
+
+    const auto imported = HeritageImport::loadDataset(&project, HeritageDataset::DesignatedHeritage,
+                                                      {shp}, temp.filePath(QStringLiteral("cache")));
+    QVERIFY2(imported.ok(), qPrintable(imported.error));
+    QCOMPARE(imported.featureCount, 1);
+    QgsFeature kept;
+    QVERIFY(imported.layers.first()->getFeatures().nextFeature(kept));
+    QCOMPARE(kept.attribute(HeritageImport::chooseNameField(imported.layers.first())).toString(),
+             QStringLiteral("근처"));
+    QVERIFY(QFileInfo::exists(shp));
   }
 };
 

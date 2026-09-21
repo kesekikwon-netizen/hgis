@@ -119,6 +119,7 @@ private:
   QString m_lastAutomationMessage;
   QByteArray m_lastDiagnostic;
   QString m_scopeKey;
+  QStringList m_requestedNumbers;
   QJsonObject m_scope;
   QJsonObject m_pendingScope;
   QJsonObject m_currentRecord;

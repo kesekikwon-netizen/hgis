@@ -76,6 +76,7 @@
 #include <qgsrenderer.h>
 #include <qgsrectangle.h>
 #include <qgslayertree.h>
+#include <qgslayertreenode.h>
 #include <qgslayertreelayer.h>
 #include <qgsbilinearrasterresampler.h>
 #include <qgsrasterresamplefilter.h>
@@ -831,7 +832,11 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
     return false;
   }
   tuneBasemapLayer(rl, crispText);
-  LayerOps::markReferenceLayer(rl);
+  const bool cadastralPicture = name.contains(QStringLiteral("지적"));
+  if (cadastralPicture)
+    LayerOps::markCadastralLayer(rl);
+  else
+    LayerOps::markReferenceLayer(rl);
   QgsMapLayer* added = project->addMapLayer(rl, false);
   if (!added) {
     if (errorOut)
@@ -846,6 +851,8 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
       node->setItemVisibilityChecked(true);
     }
   }
+  if (cadastralPicture)
+    LayerOps::placeCadastralLayer(project, added);
   LayerOps::ensureSatelliteAtBottom(project);
   LayerOps::pruneEmptyLegendGroups(project);
   if (project->mapLayer(added->id()) == nullptr) {
@@ -1207,15 +1214,16 @@ static bool addGdalVworldCadastral(QgsProject* project, QgsMapCanvas* canvas, co
   }
   // OTF only works if the layer CRS is the server CRS (3857), not the work CRS.
   rl->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:3857")));
-  LayerOps::markReferenceLayer(rl);
+  LayerOps::markCadastralLayer(rl);
   rl->setOpacity(1.0);
-  QgsMapLayer* added = project->addMapLayer(rl, true);
+  QgsMapLayer* added = project->addMapLayer(rl, false);
   if (!added) {
     delete rl;
     if (errorOut) *errorOut = QStringLiteral("지적 레이어를 프로젝트에 넣지 못했습니다.");
     return false;
   }
   LayerOps::applyLegendCrsLabel(added);
+  LayerOps::placeCadastralLayer(project, added);
   if (canvas) {
     const QString workAuth = project->crs().isValid() ? project->crs().authid()
                                                       : QStringLiteral("EPSG:5186");
@@ -2211,6 +2219,12 @@ bool LayerOps::toggleLayerVisibility(QgsProject* project, QgsMapCanvas* canvas, 
   }
   refreshCanvasIfIdle(canvas);
   return true;
+}
+
+void LayerOps::revealCheckedLegendNode(QgsLayerTreeNode* node) {
+  if (!node || !node->itemVisibilityChecked() || node->isVisible())
+    return;
+  node->setItemVisibilityCheckedParentRecursive(true);
 }
 
 bool LayerOps::isLayerVisible(QgsProject* project, const QString& name) {

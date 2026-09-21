@@ -121,6 +121,7 @@ private:
       std::function<void(const PreparedReferenceMap&)> apply);
   void startDemDownload();
   void watchUndoFeatureIds(QgsVectorLayer* layer);
+  void remapUndoFeatureIdsAfterSave();
   void populateMapContextMenu(QMenu* menu, const QPoint& pos);
   void showLayerAreaSummary(QgsVectorLayer* layer, bool showRatio);
 
@@ -437,6 +438,7 @@ private:
   // 라벨 위에 위 레이어를 한 번 더 그리는 덧그림(2차 패스).
   KaAboveLabelsOverlay* m_aboveLabels = nullptr;
   int m_aboveLabelsCount = -1;
+  bool m_labelOrderQueued = false;
   QCheckBox* m_mapGridCheck = nullptr;
   QDoubleSpinBox* m_mapGridStep = nullptr;
   QDoubleSpinBox* m_mapGridRot = nullptr;

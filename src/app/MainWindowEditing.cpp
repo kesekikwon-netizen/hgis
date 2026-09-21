@@ -140,6 +140,9 @@ void MainWindow::applySnapConfig() {
   if (!project) return;
   LayerOps::SnapSettings settings = LayerOps::readSnapSettings(project);
   settings.enabled = m_snapEnabled;
+  // 정합은 맞출 사진이 현재 레이어라 CurrentLayer면 지적 선에 안 붙는다.
+  if (m_subToolsMode == QLatin1String("align"))
+    settings.target = LayerOps::SnapTarget::SurveyLayers;
   LayerOps::applySnapSettings(project, settings);
   QgsSnappingConfig cfg = project->snappingConfig();
   cfg.setTypeFlag(Qgis::SnappingType::Vertex | Qgis::SnappingType::Segment);
@@ -182,8 +185,14 @@ void MainWindow::startSelectTool() {
     connect(m_featureSelectTool, &KaFeatureSelectTool::requestSplit, this, &MainWindow::startSplitPolygonTool);
     connect(m_featureSelectTool, &KaFeatureSelectTool::requestClip, this, &MainWindow::clipOverlappingLayers);
     connect(m_featureSelectTool, &KaFeatureSelectTool::featureGeometryEdited, this,
-            [this](QgsVectorLayer* layer, const QgsFeature&) {
-      if (!layer) return;
+            [this](QgsVectorLayer* layer, const QgsFeature& before) {
+      if (!layer || !before.isValid()) return;
+      KaUndoAction action;
+      action.type = KaUndoAction::FeatureChanged;
+      action.layerId = layer->id();
+      action.featureId = before.id();
+      action.featureData = before;
+      m_undoActions.append(action);
       QgsProject::instance()->setDirty(true);
       updateUndoRedoActions();
     });
@@ -420,9 +429,9 @@ void MainWindow::editCurrentLayerStyle(QgsMapLayer* targetLayer) {
                              QStringLiteral("벡터 레이어를 선택한 뒤 다시 실행하세요."));
     return;
   }
-  if (LayerOps::isReferenceLayer(layer)) {
+  if (LayerOps::isCadastralLayer(layer) || LayerOps::isReferenceLayer(layer)) {
     QMessageBox::information(this, QStringLiteral("모양"),
-                             QStringLiteral("배경(참조) 지도는 여기서 색을 바꾸지 않습니다.\n"
+                             QStringLiteral("지적도·배경 지도는 여기서 색을 바꾸지 않습니다.\n"
                                             "조사 데이터 레이어(유구·구역 등)를 선택하세요."));
     return;
   }

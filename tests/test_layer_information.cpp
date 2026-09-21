@@ -179,6 +179,7 @@ private slots:
     QTest::newRow("1920x1080-100") << QSize(1920, 1080);
     QTest::newRow("1920x1080-150") << QSize(1280, 720);
     QTest::newRow("1920x1080-200") << QSize(960, 540);
+    QTest::newRow("1366x768-200") << QSize(683, 384);
   }
 
   void listKeepsFiveRowsAtFieldWindowSizes() {
@@ -226,6 +227,11 @@ private slots:
     host.show();
     QVERIFY(QTest::qWaitForWindowExposed(&host));
     KaLayerInformationView::protectSidebarList(split, tree, cap, files, panel);
+    QVERIFY2(tree->viewport()->height() > 1,
+             qPrintable(QStringLiteral("viewport=%1px window=%2x%3")
+                            .arg(tree->viewport()->height())
+                            .arg(window.width())
+                            .arg(window.height())));
     QTRY_VERIFY(tree->viewport()->height() >= tree->minimumListHeight() - tree->header()->height());
     const int row = qMax(22, tree->sizeHintForRow(0));
     QVERIFY2(tree->viewport()->height() >= row * KaLayerInformationView::kMinVisibleRows,

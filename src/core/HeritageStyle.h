@@ -46,11 +46,11 @@ public:
   static bool isReservedColor(const QColor& c);
 
   static double outlineWidthMm();       // 조사 도형보다 얇게, 밑그림(0.2)보다는 굵게
+  static double nameLabelMinScale();    // 이보다 작은 축척(예: 1:25000)에서는 맵 유적명을 끈다
   static int maxLegendCategories();     // 유적명 줄 수 상한
   static QString unnamedLabel();        // 유적명이 빈 레코드가 들어갈 자리
 
-  // 유적명 필드로 카테고리 렌더러를 걸되 색은 전부 같은 값을 준다.
-  // 줄은 유적마다 하나, 색은 종류마다 하나.
+  // 종류 색 한 줄과 유적명 글자만 건다. 유적마다 분류 심볼을 만들지 않는다.
   // shadeIndex 는 한 ZIP 안의 몇 번째 SHP 인지. 0 이면 종류 대표색을 쓴다.
   static HeritageStyleResult apply(QgsVectorLayer* layer, HeritageDataset ds,
                                    const QString& nameField, int shadeIndex = 0);

@@ -931,7 +931,7 @@ void MainWindow::showSubToolsDraw() {
     applySnapConfig();
     snap->syncFromProject();
     statusBar()->showMessage(m_snapEnabled
-                                 ? QStringLiteral("자석 켜짐 — 선·꼭짓점에 붙습니다. 위성·지적 그림은 제외")
+                                 ? QStringLiteral("자석 켜짐 — 조사 도형·지적 선에 붙습니다. 위성 그림은 제외")
                                  : QStringLiteral("자석 꺼짐"),
                              4000);
   });
@@ -1123,6 +1123,7 @@ void MainWindow::buildUi() {
     statusBar()->showMessage(title + QStringLiteral(": ") + message, 8000);
   });
   m_canvas->setObjectName(QStringLiteral("mapCanvas"));
+  LayerOps::applyWheelZoomFactor(m_canvas);
   KaTheme::excludeMapSurface(m_canvas);
   m_canvas->setCanvasColor(KaTheme::tokens().canvasNeutral);
   m_canvas->enableAntiAliasing(true);
@@ -1441,10 +1442,17 @@ void MainWindow::buildUi() {
   // visibilityChanged 는 트리 안 어느 노드가 바뀌어도 뿌리까지 올라온다.
   if (QgsLayerTree* visibilityRoot = QgsProject::instance()->layerTreeRoot()) {
     connect(visibilityRoot, &QgsLayerTreeNode::visibilityChanged, this,
-            [this](QgsLayerTreeNode*) {
+            [this](QgsLayerTreeNode* node) {
+              LayerOps::revealCheckedLegendNode(node);
               refreshLayerCheckAllButton();
-              // 켜고 끄면 「위에 글자 있는 레이어가 있는지」가 달라진다.
-              applyLabelStackOrder();
+              // 체크 하나마다 전 레이어 setLabeling 을 하면 유적 글자가
+              // 보였다가 사라진다. 한 틱에 한 번만 다시 쌓는다.
+              if (m_labelOrderQueued) return;
+              m_labelOrderQueued = true;
+              QTimer::singleShot(0, this, [this]() {
+                m_labelOrderQueued = false;
+                applyLabelStackOrder();
+              });
             });
   }
   connect(QgsProject::instance(), &QgsProject::layersAdded, this,
@@ -1940,29 +1948,23 @@ void MainWindow::ensureDefaultBasemaps() {
   }
   LayerOps::pruneDuplicateSatelliteLayers(proj);
   bool hasSat = false;
-  bool hasCad = false;
   for (QgsMapLayer* l : proj->mapLayers()) {
     if (!l) continue;
     // 이름만 보고 "이미 있다"고 판단하면, 원본이 깨진 배경지도가 이름만 남아 영영
     // 다시 만들어지지 않는다(지적 설정 파일이 지워진 경우가 그랬다). 살아 있는
     // 레이어만 있다고 친다.
     if (!l->isValid()) continue;
-    const QString n = l->name();
-    if (n.contains(QStringLiteral("위성")))
+    if (l->name().contains(QStringLiteral("위성")))
       hasSat = true;
-    if (n.contains(QStringLiteral("VWorld")) && n.contains(QStringLiteral("지적")))
-      hasCad = true;
-    else if (n == QLatin1String("지적") || n.startsWith(QLatin1String("지적 본번")) ||
-             n.startsWith(QLatin1String("지적 부번")) || n.startsWith(QLatin1String("지적(")))
-      hasCad = true;
   }
+  bool hasCad = LayerOps::projectHasCadastralLayer(proj);
   const QString key = VworldSettings::loadApiKey();
   QString satErr;
   QString cadErr;
   // Add without canvas so LayerOps does not rewrite the current extent/scale.
   if (!hasSat)
     hasSat = LayerOps::addVworldSatelliteMap(proj, nullptr, key, &satErr);
-  if (!hasCad && !key.isEmpty())
+  if (!hasCad && !key.isEmpty() && !LayerOps::userRemovedCadastral(proj))
     hasCad = LayerOps::addVworldCadastralMap(proj, nullptr, key, &cadErr);
   LayerOps::ensureSatelliteAtBottom(proj);
   // 예전에는 실패해도 사라지는 상태바 메시지뿐이라 현장 로그에 아무 흔적이 없었다.
@@ -2935,7 +2937,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
           QgsVectorLayer* layer = nullptr;
           QgsFeature feat;
           if (m_attributeTool->pickAtScreen(me->pos(), &layer, &feat) && layer &&
-              !LayerOps::isReferenceLayer(layer)) {
+              !LayerOps::isReferenceLayer(layer) && !LayerOps::isCadastralLayer(layer)) {
             if (m_layerTree) m_layerTree->setCurrentLayer(layer);
             editCurrentLayerStyle();
             return true;
@@ -3234,6 +3236,7 @@ void MainWindow::addBasemapVworldCadastral() {
 #if KA_HGIS_HAS_QGIS
   const QString key = vworldApiKeyOrPrompt();
   if (key.isEmpty()) return;
+  LayerOps::clearUserRemovedCadastral(QgsProject::instance());
   QString err;
   if (!LayerOps::addVworldCadastralMap(QgsProject::instance(), m_canvas, key, &err))
     notify(Notice::Warning, QStringLiteral("지적도"),
@@ -3592,6 +3595,7 @@ void MainWindow::ensureAlignSplit() {
   ll->addWidget(m_alignImage, 1);
 
   m_alignLeftCanvas = new QgsMapCanvas(m_alignLeftPane);
+  LayerOps::applyWheelZoomFactor(m_alignLeftCanvas);
   KaTheme::excludeMapSurface(m_alignLeftCanvas);
   m_alignLeftCanvas->setCanvasColor(KaTheme::tokens().canvasNeutral);
   m_alignLeftCanvas->enableAntiAliasing(true);
@@ -5399,7 +5403,8 @@ void MainWindow::showAbout() {
                      "저작권·라이선스\n") + KaStartupSplash::attributionText() +
       QStringLiteral("\n선택한 지도에 따라 OpenStreetMap·CARTO·OpenTopoMap·NASA GIBS·"
                      "Copernicus DEM·Google 자료를 사용합니다. 각 제공처의 표시·이용조건을 따릅니다.\n\n"
-                     "본 소프트웨어는 GNU GPL v2 이상으로 배포됩니다.\n\n") +
+                     "본 소프트웨어는 GNU GPL v2 이상으로 배포됩니다.\n"
+                     "자세한 의존 고지는 앱 폴더의 THIRD_PARTY_NOTICES.md를 봅니다.\n\n") +
       KaCrashGuard::dumpHint());
 }
 

@@ -7,7 +7,7 @@ description: Implement, diagnose or review GIS behavior in the ka-hgis C++20/Qt6
 
 ## Scope and authority
 
-Work from the repository root containing `AGENTS.md` and `src/core/SurveyProjectFactory.h`. This skill supplements global C++ rules only for ka-hgis. Read root `AGENTS.md`, `.codex/NOW.md` and current handoffs before non-trivial GIS work; use [the task map](references/task-map.md) to locate relevant code and checks. Map paths are relative to the repository root.
+Work from the repository root containing `AGENTS.md` and `src/core/SurveyProjectFactory.h`. This skill supplements global C++ rules only for ka-hgis. Read root `AGENTS.md`, `.codex/NOW.md` and current handoffs before non-trivial GIS work; use [the task map](references/task-map.md) to locate relevant code and checks. Map paths are relative to the repository root. For completed 조판·정합·주변유적 번호 contracts, read [ka-hgis-sheet](../ka-hgis-sheet/SKILL.md) before changing those paths.
 
 Follow explicit user intent. Explanation/review remains read-only; authorized implementation includes investigation, change and verification. Do not turn this skill into a repeated approval gate. Ask for missing input only when it cannot be established from available evidence and materially affects the task.
 

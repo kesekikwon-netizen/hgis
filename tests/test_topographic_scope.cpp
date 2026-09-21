@@ -103,7 +103,7 @@ private slots:
     for (const auto& position : {QgsPointXY(126.98,37.56), QgsPointXY(128.9,37.75), QgsPointXY(126.3,33.4)}) {
       const auto center=transform.transform(position);
       canvas.setExtent(QgsRectangle(center.x()-1000,center.y()-1000,center.x()+1000,center.y()+1000));
-      const auto expected=TopographicSheets::select(center,work,10.,project->transformContext());
+      const auto expected=TopographicSheets::select(center,work,5.,project->transformContext());
       QVERIFY2(expected.error.isEmpty(),qPrintable(expected.error));
       QStringList numbers; for(const auto& sheet:expected.sheets) numbers.append(sheet.number);
       // Exercise the real extent-change debounce, without calling refreshScope.
@@ -112,11 +112,35 @@ private slots:
       for(const auto* item:canvas.scene()->items()) {
         const auto* band=dynamic_cast<const QgsRubberBand*>(item); if(!band) continue;
         const auto box=band->asGeometry().boundingBox();
-        centered |= qAbs(box.width()-20000.)<.001 && box.center().distance(center)<.001;
+        centered |= qAbs(box.width()-10000.)<.001 && box.center().distance(center)<.001;
       }
       QVERIFY(centered);
       QCOMPARE(survey->featureCount(),1);
     }
+  }
+  void sameSheetSetDoesNotRestartAfterSmallCenterWobble() {
+    QTemporaryDir library;
+    const QgsCoordinateReferenceSystem work(QStringLiteral("EPSG:5186"));
+    auto* project=QgsProject::instance();
+    project->setCrs(work);
+    const QgsCoordinateTransform transform(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4737")),
+                                          work, project);
+    const auto center=transform.transform(QgsPointXY(126.98,37.56));
+    QgsMapCanvas canvas;
+    canvas.resize(900,600); canvas.setDestinationCrs(work);
+    canvas.setExtent(QgsRectangle(center.x()-1000,center.y()-1000,center.x()+1000,center.y()+1000));
+    KaTopographicScopePanel panel(&canvas,nullptr,nullptr,nullptr,library.path());
+    panel.refreshScope();
+    auto* count=panel.findChild<QLabel*>(QStringLiteral("topographicSheetCount"));
+    auto* status=panel.findChild<QLabel*>(QStringLiteral("topographicScopeStatus"));
+    QVERIFY(count && status);
+    QTRY_VERIFY_WITH_TIMEOUT(!count->toolTip().isEmpty(),3000);
+    const QString sheets=count->toolTip();
+    QSignalSpy statusChanged(&panel,&KaTopographicScopePanel::statusChanged);
+    canvas.setExtent(QgsRectangle(center.x()-997,center.y()-1003,center.x()+1003,center.y()+997));
+    QTest::qWait(600);
+    QCOMPARE(count->toolTip(),sheets);
+    QCOMPARE(statusChanged.size(),0);
   }
   void fixedTenKilometresIgnoresPreviousTwentyKilometreSettings() {
     QSettings().setValue(QStringLiteral("topographic/radiusKm"), 20.);
@@ -133,28 +157,28 @@ private slots:
     auto* radius = panel.findChild<QLabel*>(QStringLiteral("topographicRadiusKm"));
     auto* count = panel.findChild<QLabel*>(QStringLiteral("topographicSheetCount"));
     QVERIFY(radius && count);
-    QCOMPARE(radius->text(), QStringLiteral("10 km"));
+    QCOMPARE(radius->text(), QStringLiteral("5 km"));
     QVERIFY(panel.findChildren<QDoubleSpinBox*>().isEmpty());
     panel.refreshScope();
-    const auto ten=TopographicSheets::select(center,work,10.,QgsProject::instance()->transformContext());
+    const auto five=TopographicSheets::select(center,work,5.,QgsProject::instance()->transformContext());
     const auto twenty=TopographicSheets::select(center,work,20.,QgsProject::instance()->transformContext());
-    QVERIFY2(ten.error.isEmpty(),qPrintable(ten.error));
+    QVERIFY2(five.error.isEmpty(),qPrintable(five.error));
     QVERIFY2(twenty.error.isEmpty(),qPrintable(twenty.error));
-    QVERIFY(!ten.sheets.isEmpty()); QVERIFY(ten.sheets.size()<twenty.sheets.size());
-    QCOMPARE(count->property("candidateCount").toInt(),ten.sheets.size());
+    QVERIFY(!five.sheets.isEmpty()); QVERIFY(five.sheets.size()<twenty.sheets.size());
+    QCOMPARE(count->property("candidateCount").toInt(),five.sheets.size());
     QStringList wanted;
-    for (const auto& sheet:ten.sheets) wanted.append(sheet.number);
+    for (const auto& sheet:five.sheets) wanted.append(sheet.number);
     QCOMPARE(count->toolTip(),wanted.join(QStringLiteral(", ")));
-    bool foundTenKilometreCircle=false;
+    bool foundFiveKilometreCircle=false;
     for (const auto* item:canvas.scene()->items()) {
       const auto* band=dynamic_cast<const QgsRubberBand*>(item);
       if (!band) continue;
       const auto bounds=band->asGeometry().boundingBox();
-      if (qAbs(bounds.width()-20000.)<.001 && qAbs(bounds.height()-20000.)<.001 &&
+      if (qAbs(bounds.width()-10000.)<.001 && qAbs(bounds.height()-10000.)<.001 &&
           qAbs(bounds.center().x()-center.x())<.001 && qAbs(bounds.center().y()-center.y())<.001)
-        foundTenKilometreCircle=true;
+        foundFiveKilometreCircle=true;
     }
-    QVERIFY(foundTenKilometreCircle);
+    QVERIFY(foundFiveKilometreCircle);
     QCOMPARE(QgsProject::instance()->mapLayers().size(), 0);
     const QString outputDirectory=qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
     if (!outputDirectory.isEmpty()) {
@@ -162,19 +186,19 @@ private slots:
       // for the opt-in pixel evidence instead of the initial 2 km map view.
       auto* layout=new QVBoxLayout(&evidenceHost);
       layout->addWidget(&panel);
-      layout->addWidget(new QLabel(QStringLiteral("합성 검증 · EPSG:5187 · 10km 원과 예상 도엽 경계"),&evidenceHost));
+      layout->addWidget(new QLabel(QStringLiteral("합성 검증 · EPSG:5187 · 5km 원과 예상 도엽 경계"),&evidenceHost));
       layout->addWidget(&canvas,1);
       std::vector<std::unique_ptr<QgsRubberBand>> sheetBoundaries;
-      for (const auto& sheet:ten.sheets) {
+      for (const auto& sheet:five.sheets) {
         auto band=std::make_unique<QgsRubberBand>(&canvas,Qgis::GeometryType::Polygon);
         band->setColor(QColor(120,120,120)); band->setFillColor(Qt::transparent); band->setWidth(1);
         band->setToGeometry(QgsGeometry::fromRect(sheet.geographicExtent).densifyByDistance(.001),
           QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4737")));
         sheetBoundaries.push_back(std::move(band));
       }
-      evidenceHost.setWindowTitle(QStringLiteral("수치지형도 반경 10km — 합성 범위 검증"));
+      evidenceHost.setWindowTitle(QStringLiteral("수치지형도 반경 5km — 합성 범위 검증"));
       evidenceHost.resize(1000,850); evidenceHost.show();
-      auto visible=ten.searchArea.boundingBox(); visible.scale(1.12); canvas.setExtent(visible);
+      auto visible=five.searchArea.boundingBox(); visible.scale(1.12); canvas.setExtent(visible);
       canvas.refresh();
       QImage screenshot;
       const auto boundaryVisible=[&] {
@@ -189,7 +213,7 @@ private slots:
       };
       QTRY_VERIFY_WITH_TIMEOUT(boundaryVisible(),10000);
       QVERIFY(QDir().mkpath(outputDirectory));
-      QVERIFY(screenshot.save(QDir(outputDirectory).filePath(QStringLiteral("topographic-radius-10km.png"))));
+      QVERIFY(screenshot.save(QDir(outputDirectory).filePath(QStringLiteral("topographic-radius-5km.png"))));
     }
   }
   void receivedDxfIsValidatedAndLoadedWithoutAnImportDialog() {

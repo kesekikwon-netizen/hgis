@@ -204,6 +204,13 @@ QString ExportService::exportSubmissionPackage(QgsProject* project,
   }
   QDir dir(staging.path());
 
+  if (project &&
+      !LayoutService::isComposedStudioSheet(project, QStringLiteral("user_sheet"))) {
+    if (errorOut)
+      *errorOut = QStringLiteral("도면만들기에서 용지를 만든 뒤 다시 보내기 하세요.");
+    return {};
+  }
+
   const QString enc = (encoding.compare(QStringLiteral("EUC-KR"), Qt::CaseInsensitive) == 0
                        || encoding.compare(QStringLiteral("CP949"), Qt::CaseInsensitive) == 0)
                           ? QStringLiteral("CP949")
@@ -312,9 +319,8 @@ QString ExportService::exportSubmissionPackage(QgsProject* project,
     return {};
   }
 
-  // 1. Export user_sheet as 조사도면.pdf if composed
-  const bool hasUserSheet = project && LayoutService::isComposedStudioSheet(project, QStringLiteral("user_sheet"));
-  if (hasUserSheet) {
+  // 1. 프로젝트가 있으면 조판된 user_sheet만 조사도면.pdf 로 넣는다.
+  if (project) {
     QString pdfErr;
     const QString pdfResult = LayoutService::exportLayoutPdf(
         project, QStringLiteral("user_sheet"),

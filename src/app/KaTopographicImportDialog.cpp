@@ -1,6 +1,9 @@
 #include "KaCrashGuard.h"
 #include "KaTopographicImportDialog.h"
 #include "core/LayerOps.h"
+#include "core/SurveyScopeClip.h"
+#include <qgsgeometry.h>
+#include <qgsrectangle.h>
 #include <QComboBox>
 #include <QCheckBox>
 #include <QColor>
@@ -22,6 +25,7 @@
 #include <QVBoxLayout>
 #include <memory>
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <qgsapplication.h>
 #include <qgscoordinatetransform.h>
@@ -67,6 +71,15 @@ QString geomWord(Qgis::GeometryType type) {
     default: return QString();
   }
 }
+bool isLineGeometryName(const QString& type) {
+  const QString t = type.toUpper();
+  return t.contains(QLatin1String("LINE")) || t.contains(QLatin1String("CURVE"));
+}
+bool discardsWithoutOpen(const TopographicCatalog::Record& record) {
+  using C = TopographicCatalog::Category;
+  if (record.category == C::ElevationPoint || record.category == C::PlaceName) return true;
+  return !record.geometryType.isEmpty() && !isLineGeometryName(record.geometryType);
+}
 QgsVectorLayer* mergeTopographicLayers(const QList<QgsVectorLayer*>& srcs, const QString& name) {
   if (srcs.isEmpty() || !srcs.first()) return nullptr;
   QgsVectorLayer* first = srcs.first();
@@ -98,74 +111,36 @@ QgsVectorLayer* mergeTopographicLayers(const QList<QgsVectorLayer*>& srcs, const
   }
   mem->dataProvider()->addFeatures(outs);
   mem->updateExtents();
+  mem->dataProvider()->createSpatialIndex();
   if (first->renderer()) mem->setRenderer(first->renderer()->clone());
-  if (first->labelsEnabled() && first->labeling()) {
-    mem->setLabeling(first->labeling()->clone());
-    mem->setLabelsEnabled(true);
-  }
+  mem->setLabeling(nullptr);
+  mem->setLabelsEnabled(false);
   mem->setCrs(first->crs());
   mem->setReadOnly(true);
   LayerOps::markReferenceLayer(mem);
   return mem;
 }
-void styleTopographic(QgsVectorLayer* layer, const TopographicCatalog::Record& record) {
-  const auto category = record.category;
-  const bool dxf = !record.geometryType.isEmpty();
-  // A 1:25,000 index contour is 50 m. z_min/z_max inspect the complete geometry,
-  // so a nonlevel line or missing Z never receives an invented elevation label.
-  const QString levelZ = QStringLiteral("z_min($geometry) IS NOT NULL AND z_max($geometry) IS NOT NULL AND abs(z_max($geometry)-z_min($geometry)) < 0.001");
-  const QString majorZ = QStringLiteral("(%1) AND abs(z_min($geometry)-50*round(z_min($geometry)/50)) < 0.001").arg(levelZ);
-  using C = TopographicCatalog::Category;
+void styleTopographic(QgsVectorLayer* layer, const TopographicCatalog::Record&) {
   const QColor color(128, 128, 128);
   if (layer->geometryType() == Qgis::GeometryType::Line) {
     auto line = QgsLineSymbol::createSimple({{QStringLiteral("line_color"), color.name()},
       {QStringLiteral("line_width"), QStringLiteral("0.2")}, {QStringLiteral("line_width_unit"), QStringLiteral("MM")}});
     layer->setRenderer(new QgsSingleSymbolRenderer(line.release()));
   } else if (layer->geometryType() == Qgis::GeometryType::Polygon) {
-    const bool house = category == C::Building;
     layer->setRenderer(new QgsSingleSymbolRenderer(QgsFillSymbol::createSimple({
-      {QStringLiteral("color"), house ? QColor(128, 128, 128, 70).name(QColor::HexArgb) : color.name()},
+      {QStringLiteral("color"), color.name()},
       {QStringLiteral("outline_color"), color.name()},
-      {QStringLiteral("outline_width"), house ? QStringLiteral("0.25") : QStringLiteral("0.2")},
+      {QStringLiteral("outline_width"), QStringLiteral("0.2")},
       {QStringLiteral("outline_width_unit"), QStringLiteral("MM")},
-      {QStringLiteral("style"), house ? QStringLiteral("solid") : QStringLiteral("no")}}).release()));
+      {QStringLiteral("style"), QStringLiteral("no")}}).release()));
   } else if (layer->geometryType() == Qgis::GeometryType::Point) {
     layer->setRenderer(new QgsSingleSymbolRenderer(QgsMarkerSymbol::createSimple({
       {QStringLiteral("color"), color.name()}, {QStringLiteral("outline_color"), color.name()},
       {QStringLiteral("outline_width"), QStringLiteral("0.2")}, {QStringLiteral("outline_width_unit"), QStringLiteral("MM")},
       {QStringLiteral("size"), QStringLiteral("1.2")}}).release()));
   }
-  QString expression;
-  if (category == C::Contour && layer->geometryType() == Qgis::GeometryType::Line && layer->fields().indexOf(QStringLiteral("z_valid")) >= 0)
-    expression = QStringLiteral("CASE WHEN \"z_valid\" = 1 AND abs(\"elevation\"-50*round(\"elevation\"/50)) < 0.001 THEN format_number(\"elevation\", 0) END");
-  else if (category == C::ElevationPoint && layer->geometryType() == Qgis::GeometryType::Point && layer->fields().indexOf(QStringLiteral("z_valid")) >= 0)
-    expression = QStringLiteral("CASE WHEN \"z_valid\" = 1 THEN format_number(\"elevation\", 1) END");
-  else if (dxf && category == C::Contour && layer->geometryType() == Qgis::GeometryType::Line)
-    expression = QStringLiteral("CASE WHEN %1 THEN format_number(z_min($geometry), 0) END").arg(majorZ);
-  else if (dxf && category == C::ElevationPoint && layer->geometryType() == Qgis::GeometryType::Point)
-    expression = QStringLiteral("CASE WHEN %1 THEN format_number(z_min($geometry), 1) END").arg(levelZ);
-  else if (category == C::PlaceName && layer->fields().indexOf(QStringLiteral("Text")) >= 0)
-    expression = QStringLiteral("trim(\"Text\")");
-  else if (category == C::Contour && layer->fields().indexOf(QStringLiteral("구분")) >= 0 &&
-      layer->fields().indexOf(QStringLiteral("등고수치")) >= 0)
-    expression = QStringLiteral("CASE WHEN \"구분\" = '계곡선' THEN format_number(\"등고수치\", 0) END");
-  else if (category == C::ElevationPoint && layer->fields().indexOf(QStringLiteral("수치")) >= 0)
-    expression = QStringLiteral("format_number(\"수치\", 1)");
-  if (category == C::ElevationPoint && layer->geometryType() == Qgis::GeometryType::Point &&
-      layer->fields().indexOf(QStringLiteral("Layer")) >= 0 && layer->fields().indexOf(QStringLiteral("Text")) >= 0) {
-    // NGII F0027132 is a surveyed elevation annotation. Its DXF text insertion
-    // Z can be zero even when Text is 119.2; preserve real point Z for other codes.
-    const auto geometricLabel=expression.isEmpty()?QStringLiteral("NULL"):expression;
-    expression=QStringLiteral("CASE WHEN \"Layer\" = 'F0027132' THEN CASE WHEN "
-      "regexp_match(trim(\"Text\"), '^[+-]?[0-9]+([.][0-9]+)?$') = 1 "
-      "THEN format_number(try(to_real(trim(\"Text\"))), 1) END ELSE %1 END").arg(geometricLabel);
-  }
-  if (!expression.isEmpty()) {
-    QgsPalLayerSettings labels; labels.fieldName = expression; labels.isExpression = true;
-    labels.placement = category == C::Contour ? Qgis::LabelPlacement::Line : Qgis::LabelPlacement::OrderedPositionsAroundPoint;
-    QgsTextFormat format; format.setSize(8); format.setColor(color); labels.setFormat(format);
-    layer->setLabeling(new QgsVectorLayerSimpleLabeling(labels)); layer->setLabelsEnabled(true);
-  }
+  layer->setLabeling(nullptr);
+  layer->setLabelsEnabled(false);
 }
 QString uri(const TopographicCatalog::Record& record) {
   QVariantMap parts{{QStringLiteral("path"), record.source}};
@@ -246,6 +221,7 @@ KaTopographicImportDialog::KaTopographicImportDialog(QgsMapCanvas* canvas, QWidg
   m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
   layout->addWidget(m_table, 1);
   m_preview = new QgsMapCanvas(this); m_preview->setMinimumHeight(180);
+  LayerOps::applyWheelZoomFactor(m_preview);
   m_preview->setCanvasColor(Qt::white); layout->addWidget(m_preview, 1);
   auto* controls = new QHBoxLayout;
   auto* enabled = new QCheckBox(QStringLiteral("수치지형도 표시"), this);
@@ -285,7 +261,9 @@ KaTopographicImportDialog::KaTopographicImportDialog(QgsMapCanvas* canvas, QWidg
   connect(QgsProject::instance(), &QgsProject::aboutToBeCleared, this, [this] {
     ++m_coverageGeneration; m_prepared.clear();
     ++m_generation; if (m_task) m_task->cancel(); m_panTimer->stop(); m_loadTimer->stop(); m_pending.clear();
-    m_confirmed.clear(); m_loaded.clear(); m_styles.clear(); m_visibility.clear(); m_userDeleted.clear(); m_reviewReasons.clear();
+    m_confirmed.clear(); m_loaded.clear(); m_styles.clear(); m_visibility.clear(); m_userDeleted.clear();
+    m_ignored.clear(); m_hasSettledCoverage = false;
+    m_reviewReasons.clear();
     m_automaticRecords.clear(); m_manualRecords.clear(); updateAutomaticLoading();
     clearPreview();
     m_records.clear(); m_table->setRowCount(0); m_import->setEnabled(false);
@@ -314,7 +292,26 @@ void KaTopographicImportDialog::clearPreview() {
   delete m_previewLayer; m_previewLayer = nullptr;
 }
 void KaTopographicImportDialog::setMapsEnabled(bool enabled) {
+  if (m_mapsEnabled == enabled) {
+    if (enabled) updateCoverage();
+    return;
+  }
   m_mapsEnabled = enabled;
+  auto* project = QgsProject::instance();
+  for (auto it = m_loaded.cbegin(); it != m_loaded.cend(); ++it) {
+    auto* layer = project->mapLayer(it.value());
+    if (!layer) continue;
+    if (auto* node = project->layerTreeRoot()->findLayer(layer))
+      node->setItemVisibilityChecked(enabled);
+  }
+  if (!enabled) {
+    ++m_coverageGeneration;
+    m_pending.clear();
+    m_prepared.clear();
+    m_loadTimer->stop();
+    updateAutomaticLoading();
+    return;
+  }
   updateCoverage();
 }
 QString KaTopographicImportDialog::recordKey(const TopographicCatalog::Record& record) const {
@@ -475,28 +472,44 @@ void KaTopographicImportDialog::importSelected() {
     if (auto* node = QgsProject::instance()->layerTreeRoot()->findLayer(m_loaded.value(key)))
       node->setItemVisibilityChecked(true);
   }
+  m_hasSettledCoverage = false;
   mergeConfirmed(selected);
 }
 void KaTopographicImportDialog::mergeConfirmed(const QList<TopographicCatalog::Record>& records) {
+  bool invalidateCoverage = false;
   for (const auto& record : records) {
     const auto key = recordKey(record);
     bool exists = false;
     for (auto& known : m_confirmed) if (recordKey(known) == key) {
       exists = true;
       if (known.crsWkt != record.crsWkt) {
-        clearPreview();
-        if (m_canvas) m_canvas->stopRendering();
-        if (auto* layer = QgsProject::instance()->mapLayer(m_loaded.value(key))) {
-          const QScopedValueRollback<bool> updating(m_updatingCoverage, true);
-          QgsProject::instance()->removeMapLayer(layer);
+        const QgsCoordinateReferenceSystem knownCrs(known.crsWkt);
+        const QgsCoordinateReferenceSystem nextCrs(record.crsWkt);
+        if (knownCrs.isValid() && nextCrs.isValid() && knownCrs == nextCrs) {
+          known.crsWkt = record.crsWkt;
+        } else {
+          clearPreview();
+          if (m_canvas) m_canvas->stopRendering();
+          if (auto* layer = QgsProject::instance()->mapLayer(m_loaded.value(key))) {
+            const QScopedValueRollback<bool> updating(m_updatingCoverage, true);
+            QgsProject::instance()->removeMapLayer(layer);
+          }
+          m_loaded.remove(key);
+          m_ignored.remove(key);
+          known = record;
+          invalidateCoverage = true;
         }
-        m_loaded.remove(key);
-        known = record;
       }
       break;
     }
-    if (!exists) m_confirmed.append(record);
+    if (!exists) {
+      m_confirmed.append(record);
+      invalidateCoverage = true;
+    } else if (!m_loaded.contains(key) && !m_ignored.contains(key)) {
+      invalidateCoverage = true;
+    }
   }
+  if (invalidateCoverage) m_hasSettledCoverage = false;
   updateCoverage();
 }
 bool KaTopographicImportDialog::importVerified(const QList<TopographicCatalog::Record>& records, QString* error) {
@@ -530,6 +543,7 @@ bool KaTopographicImportDialog::importVerified(const QList<TopographicCatalog::R
     if (!m_manualRecords.contains(key)) m_automaticRecords.insert(key);
   }
   mergeConfirmed(allowed);
+  emit referenceLayersChanged();
   return true;
 }
 void KaTopographicImportDialog::retainForReview(const QList<TopographicCatalog::Record>& records, const QString& reason) {
@@ -560,25 +574,17 @@ void KaTopographicImportDialog::retainForReview(const QList<TopographicCatalog::
 }
 void KaTopographicImportDialog::updateCoverage() {
   if (!m_canvas) return;
-  ++m_coverageGeneration; m_prepared.clear();
-  m_loadTimer->stop(); m_pending.clear(); m_loadErrors.clear();
   const QScopedValueRollback<bool> updating(m_updatingCoverage, true);
   auto* project = QgsProject::instance();
-  const auto found = TopographicCatalog::query(m_confirmed,
-      TopographicCatalog::coverageBounds(m_canvas->extent()),
-      m_canvas->mapSettings().destinationCrs().toWkt(), project->transformContext(),
-      nullptr, {}, m_canvas->scale());
-  if (found.canceled || !found.error.isEmpty()) {
-    m_status->setText(found.error);
-    if (!found.error.isEmpty() && m_automaticLoadingEnabled && !m_automaticRecords.isEmpty())
-      emit automaticLoadingAttention(found.error);
-    updateAutomaticLoading(); return;
+  const QgsPointXY center = m_canvas->extent().center();
+  // 마우스 팬은 400ms마다 이 함수를 부른다. 이미 올린 밑그림을 다시 열지 않는다.
+  // https://doc.qt.io/qt-6.8/qtimer.html start()는 드래그 중 타이머를 재시작한다.
+  if (m_mapsEnabled && m_hasSettledCoverage && m_pending.isEmpty() && m_prepared.empty()
+      && std::isfinite(center.x()) && std::isfinite(center.y())
+      && m_settledCenter.distance(center) < 500.) {
+    updateAutomaticLoading();
+    return;
   }
-  QSet<QString> wanted;
-  if (m_mapsEnabled) for (const auto& record : found.matches) wanted.insert(recordKey(record));
-  // Explicit project-open may already have restored these reference layers.
-  // Adopt them before scheduling datasource opens, preserving the user's stored
-  // layer identity, renderer, opacity and visibility instead of adding duplicates.
   QSet<QString> confirmed;
   for (const auto& record : m_confirmed) confirmed.insert(recordKey(record));
   for (auto* raw : project->mapLayers()) {
@@ -589,6 +595,14 @@ void KaTopographicImportDialog::updateCoverage() {
       const QString key = layer->customProperty(QStringLiteral("ka_hgis/topographic_source")).toString();
       if (!key.isEmpty()) keys.append(key);
     }
+    bool needsAdopt = false;
+    for (const QString& key : keys) {
+      if (!key.isEmpty() && confirmed.contains(key) && !m_loaded.contains(key)) {
+        needsAdopt = true;
+        break;
+      }
+    }
+    if (!needsAdopt) continue;
     QgsMapLayerStyle style; style.readFromLayer(layer);
     const auto* node = project->layerTreeRoot()->findLayer(layer);
     const bool vis = node && node->itemVisibilityChecked();
@@ -609,78 +623,80 @@ void KaTopographicImportDialog::updateCoverage() {
       }
     }
   }
-  clearPreview();
-  bool stoppedForRemoval=false;
-  const auto drawing = m_canvas->layers();
-  QSet<QString> lostMembers;
   for (auto it = m_loaded.begin(); it != m_loaded.end();) {
-    auto* layer = project->mapLayer(it.value());
-    if (!wanted.contains(it.key())) {
-      if (layer) {
-        QgsMapLayerStyle style; style.readFromLayer(layer);
-        m_styles[it.key()] = style.xmlData();
-        const auto* node = project->layerTreeRoot()->findLayer(layer);
-        m_visibility[it.key()] = node && node->itemVisibilityChecked();
-        lostMembers.insert(layer->id());
-      }
-      it = m_loaded.erase(it);
-    } else if (!layer) {
-      it = m_loaded.erase(it);
-    } else {
-      ++it;
-    }
+    if (!project->mapLayer(it.value())) it = m_loaded.erase(it);
+    else ++it;
   }
-  QHash<QString, TopographicCatalog::Record> byKey;
-  for (const auto& record : m_confirmed) byKey.insert(recordKey(record), record);
-  for (const QString& lid : lostMembers) {
-    QStringList remain;
-    for (auto it = m_loaded.cbegin(); it != m_loaded.cend(); ++it) {
-      if (it.value() == lid) remain.append(it.key());
-    }
-    auto* layer = project->mapLayer(lid);
-    if (!layer) continue;
-    if (!stoppedForRemoval && m_canvas->isDrawing() && drawing.contains(layer)) {
-      m_canvas->stopRendering();
-      stoppedForRemoval = true;
-    }
-    if (remain.isEmpty()) {
-      project->removeMapLayer(layer);
+  if (!m_mapsEnabled) {
+    updateAutomaticLoading();
+    return;
+  }
+
+  QgsRectangle cover = TopographicCatalog::coverageBounds(m_canvas->extent());
+  QString scopeError;
+  const QgsGeometry survey = SurveyScopeClip::surveyUnion(
+      project, m_canvas->mapSettings().destinationCrs(), project->transformContext(), &scopeError);
+  if (scopeError.isEmpty() && !survey.isEmpty()) {
+    const QgsGeometry scope = SurveyScopeClip::bufferMeters(survey);
+    if (!scope.isEmpty()) cover = scope.boundingBox();
+  }
+  const auto found = TopographicCatalog::query(m_confirmed, cover,
+      m_canvas->mapSettings().destinationCrs().toWkt(), project->transformContext(),
+      nullptr, {}, m_canvas->scale());
+  if (found.canceled || !found.error.isEmpty()) {
+    m_status->setText(found.error);
+    if (!found.error.isEmpty() && m_automaticLoadingEnabled && !m_automaticRecords.isEmpty())
+      emit automaticLoadingAttention(found.error);
+    updateAutomaticLoading();
+    return;
+  }
+
+  QSet<QString> wanted;
+  for (const auto& record : found.matches) wanted.insert(recordKey(record));
+  const int pendingBefore = m_pending.size();
+  const auto preparedBefore = m_prepared.size();
+  m_pending.removeIf([this, &wanted](const auto& record) {
+    const auto key = recordKey(record);
+    return !wanted.contains(key) || m_loaded.contains(key);
+  });
+  std::erase_if(m_prepared, [&wanted, this](const auto& item) {
+    return !wanted.contains(item.key) || m_loaded.contains(item.key);
+  });
+  const bool droppedInFlight = m_pending.size() != pendingBefore || m_prepared.size() != preparedBefore;
+
+  bool queued = false;
+  for (const auto& record : found.matches) {
+    const auto key = recordKey(record);
+    if (m_userDeleted.contains(key) || m_ignored.contains(key) || discardsWithoutOpen(record)) {
+      m_ignored.insert(key);
       continue;
     }
-    QgsMapLayerStyle style; style.readFromLayer(layer);
-    const QString xml = style.xmlData();
-    const auto* node = project->layerTreeRoot()->findLayer(layer);
-    const bool vis = node && node->itemVisibilityChecked();
-    for (const QString& key : remain) {
-      m_styles[key] = xml;
-      m_visibility[key] = vis;
-    }
-    project->removeMapLayer(layer);
-    for (auto it = m_loaded.begin(); it != m_loaded.end();) {
-      if (it.value() == lid) it = m_loaded.erase(it);
-      else ++it;
-    }
-    for (const QString& key : remain) {
-      const auto rec = byKey.constFind(key);
-      if (rec != byKey.cend() && wanted.contains(key)) m_pending.append(*rec);
-    }
-  }
-  if (m_mapsEnabled) for (const auto& record : found.matches) {
-    if (record.category == TopographicCatalog::Category::ElevationPoint) continue;
-    const auto key=recordKey(record);
     if (m_loaded.contains(key)) continue;
-    bool queued = false;
+    bool already = false;
     for (const auto& pending : m_pending) {
-      if (recordKey(pending) == key) { queued = true; break; }
+      if (recordKey(pending) == key) { already = true; break; }
     }
-    if (queued) continue;
-    if (m_automaticLoadingEnabled || !m_automaticRecords.contains(key)) m_pending.append(record);
+    if (already) continue;
+    for (const auto& item : m_prepared) {
+      if (item.key == key) { already = true; break; }
+    }
+    if (already) continue;
+    if (m_automaticLoadingEnabled || !m_automaticRecords.contains(key)) {
+      m_pending.append(record);
+      queued = true;
+    }
   }
+
+  if (!queued && !droppedInFlight && m_pending.isEmpty() && m_prepared.empty()) {
+    if (!m_loaded.isEmpty()) {
+      m_hasSettledCoverage = true;
+      m_settledCenter = center;
+    }
+    updateAutomaticLoading();
+    return;
+  }
+  if (droppedInFlight) ++m_coverageGeneration;
   updateAutomaticLoading();
-  LayerOps::syncMapCanvas(project, m_canvas, false);
-  // Removing a hidden/subset layer can leave the visible list unchanged, so
-  // syncMapCanvas need not schedule a replacement for the job we canceled.
-  if (stoppedForRemoval && !m_canvas->isDrawing()) m_canvas->refresh();
   if (!m_pending.isEmpty()) m_loadTimer->start();
   else loadNext();
 }
@@ -694,7 +710,8 @@ void KaTopographicImportDialog::loadNext() {
     const auto key = recordKey(record);
     const bool automatic=m_automaticRecords.contains(key);
     const auto generation=m_coverageGeneration;
-    if (record.category == TopographicCatalog::Category::ElevationPoint) {
+    if (discardsWithoutOpen(record)) {
+      m_ignored.insert(key);
       updateAutomaticLoading();
     } else {
     auto layer = openVector(record);
@@ -704,8 +721,26 @@ void KaTopographicImportDialog::loadNext() {
       updateAutomaticLoading(); return;
     }
     bool failed=!layer || !layer->isValid();
-    if (!failed) {
-      layer->setCrs(QgsCoordinateReferenceSystem(record.crsWkt));
+    if (!failed && layer->geometryType() != Qgis::GeometryType::Line) {
+      m_ignored.insert(key);
+      failed = false;
+      layer.reset();
+    } else if (!failed) {
+      QString clipError;
+      QgsVectorLayer* clipped = SurveyScopeClip::intersectingCopyIfSurvey(
+          project, layer.get(), layer->name(), &clipError);
+      if (!clipError.isEmpty()) {
+        failed = true;
+      } else if (clipped && clipped != layer.get()) {
+        layer.reset(clipped);
+      }
+      if (!failed && layer && layer->featureCount() == 0) {
+        m_ignored.insert(key);
+        layer.reset();
+      }
+    }
+    if (!failed && layer) {
+      layer->setCrs(layer->crs().isValid() ? layer->crs() : QgsCoordinateReferenceSystem(record.crsWkt));
       layer->setReadOnly(true);
       LayerOps::markReferenceLayer(layer.get());
       layer->setCustomProperty(QStringLiteral("ka_hgis/topographic_source"), key);
@@ -721,11 +756,12 @@ void KaTopographicImportDialog::loadNext() {
           layer->setName(base + QStringLiteral(" · ") + word);
       }
       if (m_styles.contains(key)) QgsMapLayerStyle(m_styles.value(key)).writeToLayer(layer.get());
-      // Opening yields between files, but project/legend changes wait for the
-      // complete set. Otherwise every file restarts the full map and label pass.
+      layer->setLabeling(nullptr);
+      layer->setLabelsEnabled(false);
       m_prepared.push_back({key,std::move(layer),m_visibility.value(key,initiallySelected(record.category)),record.category});
     }
     if (failed) {
+      m_ignored.insert(key);
       m_loadErrors.append(record.layerName);
       if (automatic)
         emit automaticLoadingAttention(QStringLiteral("받은 수치지형도 레이어를 열지 못했습니다: %1. 기존 지도와 받은 원본은 유지됩니다.")
@@ -735,8 +771,13 @@ void KaTopographicImportDialog::loadNext() {
   }
   if (m_pending.isEmpty()) {
     m_loadTimer->stop();
-    publishPrepared();
-    LayerOps::syncMapCanvas(project, m_canvas, false); emit referenceLayersChanged();
+    if (!m_prepared.empty()) {
+      publishPrepared();
+      LayerOps::syncMapCanvas(project, m_canvas, false);
+      emit referenceLayersChanged();
+    }
+    m_hasSettledCoverage = true;
+    m_settledCenter = m_canvas->extent().center();
   }
   m_status->setText(QStringLiteral("현재 화면 레이어 %1개 적재 · 대기 %2개 · 확인한 전체 %3개%4")
       .arg(m_loaded.size()).arg(m_pending.size()).arg(m_confirmed.size())
@@ -828,6 +869,9 @@ void KaTopographicImportDialog::publishPrepared() {
     out->setCustomProperty(QStringLiteral("ka_hgis/topographic_source_keys"), keys);
     out->setCustomProperty(QStringLiteral("ka_hgis/topographic_sources"), sources);
     out->setCustomProperty(QStringLiteral("ka_hgis/topographic_group"), group);
+    out->setLabeling(nullptr);
+    out->setLabelsEnabled(false);
+    if (out->dataProvider()) out->dataProvider()->createSpatialIndex();
     toAdd.append(out);
     pubs.append({keys, out, visible});
   }

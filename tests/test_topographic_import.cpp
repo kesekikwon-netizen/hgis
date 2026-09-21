@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QSignalSpy>
 #include <QComboBox>
 #include <QPushButton>
 #include <QSettings>
@@ -41,6 +42,25 @@ bool fixture(const QString& path, bool metadata, double x) {
   OGRLineString line; line.addPoint(x, 450000.); line.addPoint(x + 100., 450100.);
   std::unique_ptr<OGRFeature, decltype(&OGRFeature::DestroyFeature)> feature(OGRFeature::CreateFeature(layer->GetLayerDefn()), OGRFeature::DestroyFeature);
   return feature->SetGeometry(&line) == OGRERR_NONE && layer->CreateFeature(feature.get()) == OGRERR_NONE;
+}
+bool polygonFixture(const QString& path) {
+  auto* driver = GetGDALDriverManager()->GetDriverByName("ESRI Shapefile");
+  if (!driver) return false;
+  std::unique_ptr<GDALDataset, decltype(&GDALClose)> ds(driver->Create(path.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr), GDALClose);
+  if (!ds) return false;
+  OGRSpatialReference crs; if (crs.importFromEPSG(5186) != OGRERR_NONE) return false;
+  auto* layer = ds->CreateLayer("building", &crs, wkbPolygon, nullptr);
+  if (!layer) return false;
+  OGRLinearRing ring;
+  ring.addPoint(200000., 450000.);
+  ring.addPoint(200080., 450000.);
+  ring.addPoint(200080., 450080.);
+  ring.addPoint(200000., 450080.);
+  ring.addPoint(200000., 450000.);
+  OGRPolygon polygon;
+  polygon.addRing(&ring);
+  std::unique_ptr<OGRFeature, decltype(&OGRFeature::DestroyFeature)> feature(OGRFeature::CreateFeature(layer->GetLayerDefn()), OGRFeature::DestroyFeature);
+  return feature->SetGeometry(&polygon) == OGRERR_NONE && layer->CreateFeature(feature.get()) == OGRERR_NONE;
 }
 QByteArray digest(const QString& path) {
   QFile file(path); if (!file.open(QIODevice::ReadOnly)) return {};
@@ -286,8 +306,8 @@ private slots:
     QCOMPARE(renderer->symbol()->color(), QColor(128, 128, 128));
     QCOMPARE(renderer->symbol()->symbolLayer(0)->properties().value(QStringLiteral("line_width")).toDouble(), .2);
     QCOMPARE(renderer->symbol()->symbolLayer(0)->properties().value(QStringLiteral("line_width_unit")).toString(), QStringLiteral("MM"));
-    const auto* labeling = dynamic_cast<QgsVectorLayerSimpleLabeling*>(layer->labeling()); QVERIFY(labeling);
-    QCOMPARE(labeling->settings().format().color(), QColor(128, 128, 128));
+    QVERIFY2(!layer->labelsEnabled(), "수치지형도는 선만 보입니다");
+    QVERIFY(!layer->labeling());
     QSignalSpy rendered(&canvas,&QgsMapCanvas::mapCanvasRefreshed);
     canvas.setLayers({layer}); canvas.refresh();
     QTRY_VERIFY_WITH_TIMEOUT(!rendered.isEmpty() && !canvas.isDrawing(),10000);
@@ -501,8 +521,10 @@ private slots:
       QVERIFY(!project->layerTreeRoot()->findLayer(layer)->itemVisibilityChecked());
     };
     checkStyle();
-    // Saved presentation also survives automatic unload and reload after panning.
-    canvas.setExtent(QgsRectangle(299900., 449900., 300200., 450200.)); QTRY_VERIFY(!topographic());
+    canvas.setExtent(QgsRectangle(299900., 449900., 300200., 450200.));
+    QTRY_VERIFY(topographic());
+    QCOMPARE(project->mapLayers().size(), 1);
+    checkStyle();
     canvas.setExtent(near); QTRY_VERIFY(topographic()); QCOMPARE(project->mapLayers().size(), 1);
     checkStyle();
     canvas.stopRendering(); canvas.setLayers({}); project->clear();
@@ -622,10 +644,9 @@ private slots:
     QVERIFY(LayerOps::isReferenceLayer(topographic()));
     QVERIFY(topographic()->property("readOnly").toBool());
     QVERIFY(topoMentions(topographic(), QStringLiteral("near")));
-    const QString oldId = topographic()->id();
     canvas.setExtent(QgsRectangle(299900., 449900., 300200., 450200.));
     QTRY_VERIFY_WITH_TIMEOUT(topographic() && topoMentions(topographic(), QStringLiteral("far")), 10000);
-    QVERIFY(!QgsProject::instance()->mapLayer(oldId));
+    QVERIFY(topoMentions(topographic(), QStringLiteral("near")));
     canvas.setExtent(nearExtent);
     QTRY_VERIFY_WITH_TIMEOUT(topographic() && topoMentions(topographic(), QStringLiteral("near")), 10000);
     QgsProject::instance()->removeMapLayer(topographic());
@@ -638,14 +659,18 @@ private slots:
     canvas.setDestinationCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
     canvas.setExtent(nearExtent); add->click();
     QTRY_VERIFY_WITH_TIMEOUT(topographic() && topographic()->crs().authid() == QStringLiteral("EPSG:5187"), 10000);
-    dialog.setMapsEnabled(false); QTRY_VERIFY(!topographic());
-    dialog.setMapsEnabled(true); QTRY_VERIFY(topographic());
+    dialog.setMapsEnabled(false);
+    QVERIFY(topographic());
+    QVERIFY(!QgsProject::instance()->layerTreeRoot()->findLayer(topographic())->itemVisibilityChecked());
+    dialog.setMapsEnabled(true);
+    QTRY_VERIFY(topographic());
+    QVERIFY(QgsProject::instance()->layerTreeRoot()->findLayer(topographic())->itemVisibilityChecked());
     QDir().mkpath(QStringLiteral("build/qa/topographic"));
     dialog.grab().save(QStringLiteral("build/qa/topographic/crs-confirmation.png"));
     QCOMPARE(digest(first), firstHash); QCOMPARE(digest(second), secondHash);
     canvas.stopRendering(); canvas.setLayers({}); QgsProject::instance()->clear();
   }
-  void overviewScaleLoadsBoundaryNotBuildingAndStillUnloadsWhenPannedAway() {
+  void overviewScaleLoadsBoundaryAndKeepsLayerWhenPannedAway() {
     QTemporaryDir dir; QTemporaryDir cache;
     QVERIFY(fixture(dir.filePath(QStringLiteral("B0010000.shp")), true, 200000.));
     QVERIFY(fixture(dir.filePath(QStringLiteral("G0010000.shp")), true, 200000.));
@@ -688,7 +713,9 @@ private slots:
     QTRY_COMPARE_WITH_TIMEOUT(countContaining("B0010000"), 1, 10000);
     QCOMPARE(countContaining("G0010000"), 1);
     canvas.setExtent(QgsRectangle(299900., 449900., 300200., 450200.));
-    QTRY_VERIFY_WITH_TIMEOUT(!topographic(), 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(topographic(), 10000);
+    QCOMPARE(countContaining("B0010000"), 1);
+    QCOMPARE(countContaining("G0010000"), 1);
     canvas.stopRendering(); canvas.setLayers({}); project->clear();
   }
   void scaleBecomingValidUnloadsDetailWithoutMovingExtent() {
@@ -762,10 +789,10 @@ private slots:
     QCOMPARE(countContaining("D0010000"), 0);
     canvas.stopRendering(); canvas.setLayers({}); project->clear();
   }
-  void tenKilometerCoverageLoadsNeighborSheetNotFarSheet() {
+  void fiveKilometerCoverageLoadsNeighborSheetNotFarSheet() {
     QTemporaryDir dir; QTemporaryDir cache;
     QVERIFY(fixture(dir.filePath(QStringLiteral("A0010000_near.shp")), true, 200000.));
-    QVERIFY(fixture(dir.filePath(QStringLiteral("A0010000_mid.shp")), true, 208000.));
+    QVERIFY(fixture(dir.filePath(QStringLiteral("A0010000_mid.shp")), true, 204000.));
     QVERIFY(fixture(dir.filePath(QStringLiteral("A0010000_far.shp")), true, 220000.));
     auto records = TopographicCatalog::scan(dir.path(), nullptr, cache.path()).records;
     QCOMPARE(records.size(), 3);
@@ -791,8 +818,42 @@ private slots:
     }
     QCOMPARE(topoLayers, 1);
     canvas.setExtent(QgsRectangle(299900., 449900., 300200., 450200.));
-    QTRY_VERIFY_WITH_TIMEOUT(!topographic(), 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(topographic(), 10000);
+    QVERIFY(anyTopoMentions(QStringLiteral("near")));
+    QVERIFY(anyTopoMentions(QStringLiteral("mid")));
     canvas.stopRendering(); canvas.setLayers({}); project->clear();
+  }
+  void panDoesNotReopenPublishedOrDiscardedSources() {
+    QTemporaryDir dir; QTemporaryDir cache;
+    QVERIFY(fixture(dir.filePath(QStringLiteral("A0010000.shp")), true, 200000.));
+    QVERIFY(polygonFixture(dir.filePath(QStringLiteral("B0010000.shp"))));
+    auto records = TopographicCatalog::scan(dir.path(), nullptr, cache.path()).records;
+    QCOMPARE(records.size(), 2);
+    for (auto& record : records) record.sourceSheet = QStringLiteral("37701");
+    const auto crs = QgsCoordinateReferenceSystem(records.first().crsWkt);
+    QgsProject::instance()->setCrs(crs);
+    QgsMapCanvas canvas; canvas.setDestinationCrs(crs);
+    canvas.setExtent(QgsRectangle(199900., 449900., 200200., 450200.));
+    KaTopographicImportDialog dialog(&canvas);
+    QVERIFY(dialog.importVerified(records));
+    QTRY_VERIFY_WITH_TIMEOUT(!dialog.isAutomaticLoading() && topographic(), 10000);
+    QCOMPARE(QgsProject::instance()->mapLayers().size(), 1);
+    const QString id = topographic()->id();
+    QSignalSpy loading(&dialog, &KaTopographicImportDialog::automaticLoadingChanged);
+    QSignalSpy changed(&dialog, &KaTopographicImportDialog::referenceLayersChanged);
+    canvas.setExtent(QgsRectangle(199950., 449950., 200250., 450250.));
+    QTest::qWait(700);
+    QCoreApplication::processEvents();
+    QCOMPARE(loading.size(), 0);
+    QCOMPARE(changed.size(), 0);
+    QCOMPARE(QgsProject::instance()->mapLayers().size(), 1);
+    QCOMPARE(topographic()->id(), id);
+    QVERIFY(!dialog.isAutomaticLoading());
+    canvas.setExtent(QgsRectangle(200020., 450020., 200320., 450320.));
+    QTest::qWait(700);
+    QCOMPARE(loading.size(), 0);
+    QCOMPARE(topographic()->id(), id);
+    canvas.stopRendering(); canvas.setLayers({}); QgsProject::instance()->clear();
   }
   void destroyedDuringScanDoesNotAddLayers() {
     QTemporaryDir dir;

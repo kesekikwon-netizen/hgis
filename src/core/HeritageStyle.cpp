@@ -1,16 +1,15 @@
 #include "HeritageStyle.h"
+#include "LayerOps.h"
 
-#include <qgscategorizedsymbolrenderer.h>
 #include <qgsfillsymbol.h>
 #include <qgslinesymbol.h>
 #include <qgsmarkersymbol.h>
+#include <qgspallabeling.h>
 #include <qgssinglesymbolrenderer.h>
 #include <qgssymbol.h>
 #include <qgsvectorlayer.h>
+#include <qgsvectorlayerlabeling.h>
 
-#include <QSet>
-#include <QStringList>
-#include <QVariant>
 #include <memory>
 
 namespace {
@@ -133,6 +132,8 @@ bool HeritageStyle::isReservedColor(const QColor& c) {
 
 double HeritageStyle::outlineWidthMm() { return 0.35; }
 
+double HeritageStyle::nameLabelMinScale() { return 10000.; }
+
 int HeritageStyle::maxLegendCategories() { return 2000; }
 
 QString HeritageStyle::unnamedLabel() { return QStringLiteral("무명"); }
@@ -151,72 +152,30 @@ HeritageStyleResult HeritageStyle::apply(QgsVectorLayer* layer, HeritageDataset 
     return out;
   }
   const Qgis::GeometryType gt = layer->geometryType();
+  if (QgsSymbol* sym = makeSymbol(c, gt)) layer->setRenderer(new QgsSingleSymbolRenderer(sym));
 
-  const int idx = nameField.trimmed().isEmpty() ? -1 : layer->fields().indexOf(nameField.trimmed());
+  const QString field = nameField.trimmed();
+  const int idx = field.isEmpty() ? -1 : layer->fields().indexOf(field);
   if (idx < 0) {
-    // 유적명 필드를 못 찾았다. 단색으로 걸되 그렇다고 말한다.
-    if (QgsSymbol* sym = makeSymbol(c, gt)) layer->setRenderer(new QgsSingleSymbolRenderer(sym));
+    layer->setLabeling(nullptr);
+    layer->setLabelsEnabled(false);
     layer->triggerRepaint();
     out.ok = true;
     out.categoryCount = 1;
-    out.message = QStringLiteral("'%1' 필드가 없어 범례에 유적명을 넣지 못했습니다. 속성 컬럼 이름을 확인하세요.")
-                      .arg(nameField.trimmed());
+    out.message = QStringLiteral("'%1' 필드가 없어 유적명을 넣지 못했습니다. 속성 컬럼 이름을 확인하세요.")
+                      .arg(field);
     return out;
   }
 
-  const int cap = maxLegendCategories();
-  const QSet<QVariant> uniq = layer->uniqueValues(idx, cap + 1);
-
-  QStringList names;
-  QHash<QString, QVariant> byText;
-  bool sawEmpty = false;
-  for (const QVariant& v : uniq) {
-    const QString t = v.toString().trimmed();
-    if (t.isEmpty()) {
-      sawEmpty = true;
-      continue;
-    }
-    if (!byText.contains(t)) {
-      byText.insert(t, v);
-      names.append(t);
-    }
+  LayerOps::applyNameAttributeLabels(layer, field, 7., false);
+  if (layer->labeling()) {
+    QgsPalLayerSettings labels = layer->labeling()->settings();
+    labels.scaleVisibility = true;
+    labels.minimumScale = nameLabelMinScale();
+    labels.maximumScale = 0.;
+    layer->setLabeling(new QgsVectorLayerSimpleLabeling(labels));
   }
-  names.sort();
-
-  if (names.size() > cap) {
-    // 조용히 단색으로 떨어뜨리지 않는다. 호출자가 사용자에게 말해야 한다.
-    if (QgsSymbol* sym = makeSymbol(c, gt)) layer->setRenderer(new QgsSingleSymbolRenderer(sym));
-    layer->triggerRepaint();
-    out.ok = true;
-    out.overCap = true;
-    out.categoryCount = 1;
-    out.message = QStringLiteral("유적이 %1곳을 넘어 범례에 유적명을 한 줄씩 넣지 못했습니다. 범위를 좁혀 주세요.")
-                      .arg(cap);
-    return out;
-  }
-
-  QgsCategoryList cats;
-  for (const QString& t : std::as_const(names)) {
-    if (QgsSymbol* sym = makeSymbol(c, gt))
-      cats.append(QgsRendererCategory(byText.value(t), sym, t));
-  }
-  // 유적명이 빈 레코드와 뒤에 늘어난 값을 받는 자리. 이게 없으면 그 도형이 아예 안 그려진다.
-  if (QgsSymbol* rest = makeSymbol(c, gt))
-    cats.append(QgsRendererCategory(QVariant(), rest, unnamedLabel()));
-
-  if (cats.isEmpty()) {
-    if (QgsSymbol* sym = makeSymbol(c, gt)) layer->setRenderer(new QgsSingleSymbolRenderer(sym));
-    layer->triggerRepaint();
-    out.ok = true;
-    out.categoryCount = 1;
-    return out;
-  }
-
-  layer->setRenderer(new QgsCategorizedSymbolRenderer(nameField.trimmed(), cats));
-  layer->triggerRepaint();
   out.ok = true;
-  out.categoryCount = cats.size();
-  if (sawEmpty)
-    out.message = QStringLiteral("유적명이 비어 있는 도형이 있어 '%1'으로 묶었습니다.").arg(unnamedLabel());
+  out.categoryCount = 1;
   return out;
 }

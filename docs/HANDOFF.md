@@ -1,3 +1,257 @@
+## 2026-09-21 맵·조판 휠 한 칸 1.2배
+
+- 휠 한 칸이 맵 2배·조판 1.35배였던 것을 둘 다 1.2배로 맞춤. 조판 Ctrl+휠은 더 작게.
+- CTest zoom 슬롯 0. smoke 0. Archify wheel-zoom-step 9/9.
+- EXE SHA256 B12AE2AC0ABD266D606D5ED5D19444C18CF142745A8C15144B2E6B58683683B3. 커밋·푸시·포터블 없음.
+
+## 2026-09-21 조판 주변유적 전체·덧지도 동기
+
+- 조판에서 주변유적 도형이 하나만 남던 이유: 첫 자료만 본지도, 나머지는 덧지도. 덧지도가 번호 갱신 때만 맞춰져 빠졌다.
+- 이제 여섯 자료를 덧그림에 모으고 본지도에도 남긴다. `applyLayersToMap`이 덧지도를 같이 맞춘다. 같은 이름 번호는 하나, 형제 도형은 전부.
+- CTest layer_state 6.40s, heritage_style 15.19s, save_open_drawing 22.17s. smoke 0. Archify sheet-overlay-stable 9/9.
+- EXE SHA256 6F49FF9023F2E0292C0A9A76BBB4F8686D391A305ED65E056803EEEEF75182E2. 커밋·푸시·포터블 없음.
+
+## 2026-09-21 지적도 Delete·우클릭 삭제
+
+- 범례에서 지적도 레이어나 **지적도** 묶음을 고른 뒤 Delete 또는 우클릭 「레이어 삭제」로 뺀다. 원본 파일은 그대로. Ctrl+Z로 복원.
+- 지운 뒤에는 기본 배경이 VWorld 지적을 다시 올리지 않는다. 이미 공식 지적이 있으면 같은 그림을 추가하지 않는다.
+- CTest: layer_state_regressions 6.01s. `layerDeleteKeyRemovesCadastralAndKeepsItGone`, `cadastralGroupDeleteKeyRemovesChildren`, `cadastralGroupContextMenuCanRemove` PASS.
+- Graft `rememberUserRemovedCadastral` LayerOps.cpp L1420. clangd L1430 col 33 → LayerOps.h L352.
+- Archify cadastral-delete validate/deliver 9/9, visual-check 1440–2048 pass.
+- EXE SHA256 510B713765B3B9CD0222CDAF93FAC26B9C1ACA2A818BCB3570F3B44D8B09C490. smoke 0. 커밋·푸시·사용자 앱 없음.
+
+## 2026-09-21 개인 포터블(5km 빌드)
+
+- 바탕화면 `HGIS-포터블-개인-20260921-5km`. 현재 Release와 같은 EXE SHA256 863847A3B96FD775AC58C8CDF36ECD61D0777307E7E2267CC6D7FFA570AC1B5C.
+- 기존 `HGIS-포터블-개인-20260921`은 덮어쓰지 않음. 이 PC 설정 파일 원본과 hash 일치: VWorld, 1919 HistoryGis, 수치지형도, 국가유산, 지적 계정. 값은 기록하지 않음. 지형도·유산·지적 비밀번호는 이 Windows 계정 DPAPI.
+- `verify-portable-pack` 0. OSGeo4W PATH 없이 smoke 0. 런타임은 `A:\OSGeo4W`. 실행 중이던 앱은 닫지 않음. 커밋·푸시 없음.
+
+## 2026-09-21 조사구역 5km 클립·명칭 축척·조판 한 번
+
+- 지적도는 그대로. 주변유적·수치지형도는 받은 뒤 조사구역 5km만 올린다. 원본 ZIP/도엽은 안 바꾼다. 지형 도엽 검색 반경 10km→5km.
+- 맵 유적명 PAL은 1:10000보다 작으면 끔. 조판 `ka_map`은 조사·지적·유적을 빼고 `ka_map_above`만 그린다.
+- CTest: survey_scope_clip 4.59s, heritage_import 10.09s, heritage_style 18.62s, layer_state 9.04s, topographic_catalog 4.90s, topographic_import 10.51s, topographic_scope 7.78s. smoke 0.
+- Graft `keepIntersectingIfSurvey` L75. clangd L75 col 6 → h L23. diagnostic_error_count 8(QGIS 헤더).
+- Archify survey-5km-clip validate/deliver 9/9, visual-check 1440–2048 pass.
+- EXE SHA256 863847A3B96FD775AC58C8CDF36ECD61D0777307E7E2267CC6D7FFA570AC1B5C. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-21 개인 포터블(키 포함)
+
+- 바탕화면 `HGIS-포터블-개인-20260921`. 현재 Release와 같은 EXE SHA256 D80E554E0463AF3A93844AB179497A44C8CA404804517D923432C7E8D7C8D483.
+- 이 PC 설정 파일 원본과 hash 일치: VWorld, 1919 HistoryGis, 수치지형도, 국가유산, 지적 계정. 값은 기록하지 않음. 지형도·유산·지적 비밀번호는 이 Windows 계정 DPAPI.
+- `verify-portable-pack` 0. OSGeo4W PATH 없이 smoke 0. 실행 중이던 앱은 닫지 않음. 커밋·푸시 없음.
+
+## 2026-09-20 바탕화면 포터블
+
+- 새 폴더 `C:\Users\kwonyoungin1\Desktop\HGIS-포터블-20260920`. 약 1013 MB. EXE는 현재 Release와 동일 SHA256 D80E554E0463AF3A93844AB179497A44C8CA404804517D923432C7E8D7C8D483.
+- `verify-portable-pack` 통과. OSGeo4W PATH 없이 `--smoke-quit` 0. VWorld·지형도·유산 계정은 넣지 않았다. `고고학 전용 HGIS.lnk`는 그대로.
+- 미서명. 다른 PC는 미검증. 커밋·푸시 없음.
+
+## 2026-09-20 전체 끄기 후 개별 체크가 지도를 켠다
+
+- 전체 끄기는 그룹과 자식을 같이 끈다. 그다음 레이어만 체크하면 QGIS는 체크만 하고 부모 그룹이 꺼져 있어 지도를 그리지 않는다. https://qgis.org/pyqgis/master/core/QgsLayerTreeNode.html
+- 체크된 노드의 조상을 연다. 꺼 둔 형제는 그대로 끈다. 메인 범례와 조판 범례 둘 다.
+- CTest `layer_state_regressions` 3.69초. smoke 0.
+- Graft `revealCheckedLegendNode` L2217. clangd L2217 col 16 → h L237.
+- Archify `docs/architecture/legend-check-shows-map.html` validate/deliver 9/9, visual-check 1440–2048 pass. Viewer UI는 영어.
+- EXE SHA256 D80E554E0463AF3A93844AB179497A44C8CA404804517D923432C7E8D7C8D483. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-20 끈 지적도는 다른 지도를 받아도 꺼진 채
+
+- 레이어를 받을 때마다 자석 설정이 `placeCadastralLayer`를 다시 돌려 꺼 둔 지적·그룹을 켰다. 이미 지적도 그룹에 있으면 켜짐/꺼짐을 건드리지 않는다.
+- CTest `workflow_engine` 66.10초. smoke 0.
+- Graft `placeCadastralLayer` L1266. clangd L1266 → h L329.
+- EXE SHA256 6722A79AE3B44E1027D1CEAEFF4068C730813B6AF4B0820CDB230F1B29E0E8A7. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-20 주변유적 깜빡임·줄자 겹침
+
+- 지적 덧그림이 주변유적을 가렸다. 지정유산 등 유적 도형은 2차 패스에 다시 올린다. 지질·토양·지형도·위성은 그대로 한 번만. 참조 지도가 꺼져 있으면 부모까지 켠다. 체크마다 라벨을 다시 쌓지 않는다.
+- 줄자 창은 투명도·밝기 막대 오른쪽.
+- CTest layer_state 6.25초, heritage_import 7.50초, workflow 69.76초. smoke 0.
+- Graft `refreshLabelOrderCache` L413, `placeHud` L159. clangd L454 col 16.
+- EXE SHA256 CB17CA041C2B9AA28CD3E0F4617D76F33966B133D019866D699A1501B03A2FC7. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-20 번호 선은 같은 점만 짧게
+
+- 1:25000에서 배지 지름으로 마을 전체를 밀면 선이 수십 미터다. 용지 1.0mm 넘게 떨어진 유적은 각자 위에 두고, 같은 점만 2.4mm 한두 칸 비키고 잇는다. https://docs.qgis.org/3.44/en/docs/user_manual/style_library/label_settings.html
+- CTest `heritage_style` 12.93초. smoke 0.
+- Graft `stackedPins` L155, `offsetHeritageNumber` L166. clangd L155 col 21, L166 col 12. Archify 기존 도 재사용(번호 노드 그대로).
+- EXE SHA256 08FED8B73186F20FBF49AEB77A8E89A4C0D060F448DD182FF5FA7A33165DE114. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-20 조판 렉·A4 세로 기본
+
+- 용지 기본은 A4 세로 210×297. 같은 축척에서 가로보다 번호가 적다. 덧지도는 범위·레이어가 같으면 다시 그리지 않는다. 번호 범례는 다음 틱에 한 번 올린다. 병렬 렌더는 크래시 우회라 켜지 않는다.
+- CTest `save_open_drawing` 20.70초. smoke 0.
+- Graft `applyHeritageNumberChrome` L150. clangd L3303→h L150.
+- EXE SHA256 1991346D7F96B3ED81DCA6658550A4BD828099DA9A33A5F02656B7121CFB5816. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 조판 여백 1cm
+
+- 전면 지도 칸 위·좌·우는 10mm만 남긴다. 아래 축척 띠는 그대로. 저장된 18mm 전면 칸은 조판을 열 때 맞춘다. https://docs.qgis.org/3.44/en/docs/user_manual/print_layout/layout_items/layout_items_options.html
+- CTest `save_open_drawing` 23.04초. smoke 0.
+- Graft `defaultMapRect` / `applyFieldEdge`. clangd L1707→`KaDrawingStudio.h` L69. Archify validate/deliver 9/9. visual-check 1440 높이 넘침 미완(기존 도).
+- EXE SHA256 A0D6468406344A3F74BFE168E95595135C6386697A8748375450973E9A4A2843. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 현장 조판 317×220
+
+- A4 가로를 좌·우·위 각 10mm 키운다. 저장된 297×210은 조판을 열 때 키운다. 여백 18mm는 그대로. https://qgis.org/pyqgis/master/core/QgsLayoutItemPage.html
+- CTest `save_open_drawing` 20.78초. smoke 0.
+- Graft `applyFieldPageGrow` L917. clangd L917→`KaDrawingStudio.h` L70. Archify validate/deliver 9/9. visual-check 1440 높이 넘침 미완(기존 도).
+- EXE SHA256 7500A6C541F12D3A62A2BD9932DF22047573DB13419AF1400B75AA87F7C63001. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 범례 번호가 지도와 같게
+
+- 원본 주변유적은 단색이라 범례 노드가 하나다. 뱃지를 그 전에 붙이면 모든 줄이 1로 남는다. override 분류 노드를 만든 뒤 다시 찍는다. https://qgis.org/pyqgis/master/core/QgsMapLayerLegendUtils.html
+- CTest `heritage_style` 12.93초, `save_open_drawing` 20.31초. smoke 0.
+- Graft `applyLegend` L1036. clangd L1036→`HeritageLayoutNumbers.h` L37.
+- EXE SHA256 A194D1F3543323A4494FDD1A3893ACE1A6F2B56954794E3DD1F61C1FDD103F7C. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 용지 이동은 클론 재사용
+
+- 용지·발자국만 바뀌면 `HeritageLayoutNumbers::update`가 레이어 `clone()`과 전체 심볼 순회를 하지 않는다. 원본 분류표에서 페이지에 보이는 범주만 맞춘다. https://qgis.org/pyqgis/master/core/QgsFeatureRequest.html
+- CTest `heritage_style` 11.79초, `save_open_drawing` 19.61초. smoke 0.
+- Graft `update` L636. clangd L636→`HeritageLayoutNumbers.h` L34. Archify validate/deliver 9/9. visual-check 1440 높이 넘침 미완(기존 도).
+- EXE SHA256 84B02ECA3E3A8850B9B18055C91E69792E2BAB737E89DB121DEC33E04C422B64. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 덧그림은 조사·지적만
+
+- 본 지도·조판 2차 패스는 조사 도형·지적만. 주변유적·지질·지형도·위성은 한 번만 그린다. 조사 선이 아래 지번을 덮는 계약은 유지. https://docs.qgis.org/3.44/en/docs/user_manual/working_with_vector/vector_properties.html
+- CTest `layer_state_regressions` 4.97초, `workflow_engine` 67.28초. smoke 0.
+- Graft `layersDrawnAboveLabels`. clangd L452 `isReferenceLayer`. Archify validate/deliver 9/9.
+- EXE SHA256 BCB46FF3ECB6F861307BE819503C9CE7BFE63749B50C9DBD84933022676E7C65. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 조판 번호 PAL 한 번
+
+- 본 지도 override는 도형만. PAL은 `ka_map_numbers`에서 한 번. follow/export는 그 UUID 결과를 읽는다. https://qgis.org/pyqgis/master/core/QgsLayoutExporter.html
+- CTest `heritage_style` 12.68초, `save_open_drawing` 20.42초. smoke 0.
+- Graft `applyBaseStyleOverrides` L231. clangd L909→L231. Archify validate/deliver 9/9. visual-check 1440 높이 넘침 미완.
+- EXE SHA256 540A3F20D8BF851BC722F6E9DC7B8AA87F5120C75343ED8B5E4B0CF363971FC9. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 용지에서 밀면 발자국으로 번호 다시 잡음
+
+- 지도를 용지 밖으로 밀면 `sizePositionChanged`가 `update()`를 다시 돌려 `mapFootprintOnPaper` 멤버십을 맞춘다. PAL compact(`number==0`)에 의존하지 않는다. https://qgis.org/pyqgis/master/core/QgsLayoutItemShape-all-members.html
+- CTest `save_open_drawing` 19.96초, `heritage_style` 11.81초. smoke 0.
+- Graft `followRenderedLabels` / `update`. clangd L420 `update` → L508. Archify validate/deliver 9/9. visual-check 1440 높이 넘침 미완(기존 도).
+- EXE SHA256 BE79823D68804E4F60C938D31B94A80DB53B95A3278515E9F60DB9FFF54BC694. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 번호 30%·검정 테두리·도형 위
+
+- 원 2.99mm / 5.2pt. 검정 외곽선 0.15mm. 조판 번호는 `ka_map_numbers`로 덧지도 위. https://docs.qgis.org/3.44/en/docs/user_manual/style_library/label_settings.html
+- CTest `heritage_style` 12.63초. smoke 0.
+- Graft `raiseAboveGeometries`. clangd L847→h L35. Archify validate/deliver 9/9. visual-check 1440 높이 넘침 미완.
+- EXE SHA256 D3A2CF8F896D0FF960C4583AEB0AE007FDC47CA0ED0A8441692951F8CDC871FD. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-20 조판 번호 절반·선은 겹칠 때만
+
+- 이전처럼 모든 번호에 긴 선을 단 것은 틀림. 원·숫자 2.3mm / 4pt. 자리가 비면 유적 위. 겹칠 때만 3mm 비키고 0.10mm 선. https://docs.qgis.org/3.44/en/docs/user_manual/style_library/label_settings.html
+- CTest `heritage_style` 11.05초. smoke 0.
+- Graft `circleSize` L73. clangd L73 col 8. Archify validate/deliver 9/9. visual-check 1440 높이 넘침 미완.
+- EXE SHA256 A728A45BE3D17928E39A7A2D0E6C095C8FE64F4F96A3B5B11321E268C1C4E06F. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-20 조판 번호 전부 비키고 선
+
+- 페이지 안 번호는 모두 같은 규칙: `offsetHeritageNumber`가 용지 7mm 비키고 `QgsSimpleLineCallout`이 유적과 잇는다. 혼자 있는 번호도 유적 위에 두지 않는다. https://docs.qgis.org/3.44/en/docs/user_manual/style_library/label_settings.html
+- CTest `heritage_style` 11.53초. smoke 0.
+- Graft `offsetHeritageNumber` L80. clangd L80 col 12. Archify validate/deliver 9/9, visual-check는 1440 높이 넘침으로 미완.
+- EXE SHA256 D6F2314BF7F6AA2A8C8EC9F99B8A0601D1657EB70B5873AA43C62BE285C06BE7. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-20 완료 계약 skill·설계도
+
+- 조판·정합·주변유적 완료 동작은 `.agents/skills/ka-hgis-sheet/`와 `docs/architecture/ka-hgis-sheet-contracts.workflow.json`에 남긴다. 깨지면 그 계약을 먼저 본다.
+- 커밋·푸시·포터블 없음.
+
+## 2026-09-20 페이지 안 주변유적 전부 표시
+
+- 점이 페이지에 있어도 `intersection`이 비면 번호가 빠졌다. 걸린 점은 유지하고 좌표를 박는다. 겹쳐도 번호를 남긴다(`AllowOverlapAtNoCost`). 면은 중심 점으로 1:50000에서도 보이게 한다. https://docs.qgis.org/3.44/en/docs/user_manual/style_library/label_settings.html
+- CTest `heritage_style` 10.75초. smoke 0.
+- clangd `applyHeritageNumberCallout` L75. Graft 동일. Archify validate 9/9, visual-check는 1440 높이 넘침으로 미완.
+- EXE SHA256 011CC0586578A06011857486A1BF9ACDAB3E4297F5BB95F8D028C8671D6DF80C. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-20 조판 여백·접힌 레이어·페이지 범례
+
+- 지도 칸 위·좌·우 여백을 18mm로 맞춤. 아래만 축척띠. 저장 도면도 전면 칸이면 연다. https://docs.qgis.org/3.44/en/docs/user_manual/print_layout/create_output.html
+- 주변유적 종류 그룹은 접힌 채 올라온다.
+- 범례·번호는 용지에 걸린 도형만. 큰 유적은 페이지 교집합에 번호를 둔다. https://docs.qgis.org/3.44/en/docs/user_manual/style_library/label_settings.html
+- CTest `heritage_style` 21.01초, `heritage_import` 14.38초, `workflow_engine` 통과. smoke 0.
+- clangd `equalFullSheetMapRect` `LayoutService.h` L138. Graft `applyHeritageNumberCallout`/`equalFullSheetMapRect`. Archify validate 9/9, visual-check는 1440 높이 넘침으로 미완.
+- EXE SHA256 EA56B7A79B53875F4D26044002D82E19E9EFB39F40DA2699E870389C9D0C42E5. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-20 정합 지적 자석·주변유적 번호 선
+
+- 지적도는 참조 지도가 아니다. `ka_hgis/cadastral` + **지적도** 그룹. 정합은 SurveyLayers로 조사 도형·지적 선에 붙는다. 위성 WMS 그림은 제외. https://docs.qgis.org/3.44/en/docs/user_manual/working_with_vector/editing_geometry_attributes.html
+- 조판 번호는 같은 이름에 하나만. `OrderedPositionsAroundPoint` + `QgsSimpleLineCallout`로 비키고 선으로 잇는다. https://docs.qgis.org/3.44/en/docs/user_manual/style_library/label_settings.html
+- CTest `workflow_engine` 81.97초, `dem_trench_engine` 2.78초, `heritage_style` 11.80초. smoke 0.
+- clangd `isCadastralLayer` L1378→`LayerOps.h` L339. Graft `markCadastralLayer`/`applyHeritageNumberCallout`. Archify validate 9/9, visual-check는 1440 높이 넘침으로 미완.
+- EXE SHA256 40AC1D833777C152DDD90418297328DF38E546E9C77F80EDB520B9469018F15C. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-20 팬해도 수치지형도 SHP를 다시 열지 않음
+
+- 원인: 팬마다 `updateCoverage`가 점·면 SHP를 다시 열고, 합친 메모리 레이어에 공간 인덱스가 없었다.
+- 수정: 올린 선은 유지. 점·면·실패 키는 한 번만 보고 버린다. 중심이 500m 안이면 조회하지 않는다. 선 레이어에 `createSpatialIndex`. 수치지형도는 회색 0.2mm 선만.
+- 주변유적은 단색 도형+명칭. 조판 번호는 용지 발자국 전부, `AllowOverlapAtNoCost`. https://docs.qgis.org/3.44/en/docs/user_manual/style_library/label_settings.html https://doc.qt.io/qt-6.8/qtimer.html
+- CTest `topographic_import` Passed 12.54초(`panDoesNotReopenPublishedOrDiscardedSources`). `heritage_style` Passed 9.21초. smoke 0.
+- clangd `updateCoverage` L571→`KaTopographicImportDialog.h` L47. `diagnostic_error_count` 21은 기존 compile DB. Graft `updateCoverage`. Archify `build/qa/topo-no-reread-20260920/` showcase 9/9 visual-check pass.
+- EXE SHA256 B979D09CF1DF616352F78736D487382FAD669C4413C4B314D59D3636E3FD76B0. 커밋·푸시·포터블·사용자 앱 없음.
+
+## 2026-09-20 시작은 MP4 없이 새 현장도면 모션
+
+- 왼쪽 칸은 영상 파일이 아니다. 격자·조사구역·등고·번호·북화살·광택이 10초 동안 그려진다.
+- CTest `startup_splash` Passed 15.97초. smoke 0.
+- EXE SHA256 A9A5F2C7F11B81E4B1A85B652533C0E0450BD432F458B9C1DF869350200B38ED. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 시작 창을 16:9 영상에 맞춤·재생 유지
+
+- 모션은 1280×720. 창을 그 비율+표제란에 맞추고 `QVideoWidget` KeepAspectRatio로 재생한다. 프레임을 붙잡던 `toImage` 경로는 멈춤의 원인이라 제거했다.
+- CTest `startup_splash` Passed 17.25초. smoke 0.
+- EXE SHA256 353801C8049A7D347EC402652348C05EB836E35B1EF3F17B4898711DBE3361A0. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 시작 안내 10초·영상 프레임 표시
+
+- 안내 시간은 10초. 왼쪽 모션은 `QVideoSink` 프레임을 창에 그린다. 반투명 라운드 창에서 `QVideoWidget`이 비던 문제를 막는다.
+- CTest `startup_splash` Passed 18.83초(10초 유지·프레임 도착). smoke 0.
+- EXE SHA256 46B49C76945D5CD8FBE29F944F08AD15685A56B09249BF2139F88E32A123455F. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 수치지형도 같은 도엽 재신청 금지·시작 라운드 영상
+
+- 수치지형도는 도엽 집합이 같으면 공식 신청을 다시 하지 않는다. 지도 새로고침은 트리거가 아니다.
+- 시작 안내: 바깥 흰 라운드, 파랑 글로시 카드, 왼쪽 모션에 `data/theme/startup-motion.mp4`.
+- CTest `topographic_scope` 6.75초, `topographic_browser` 95.09초, `startup_splash` 18.65초. smoke 0.
+- EXE SHA256 9649D279C5130183330B896C24FA21E10E2BCEC9357CE90C31424DB45FE5D690. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 부분 저장 순서·범례 노드 재사용·CTest 64/64
+
+- 트리에서 막힌 레이어가 앞에 있어도, 저장 가능한 레이어는 먼저 원본에 커밋한다. 막힌 레이어가 있으면 세대는 올리지 않고 복구본만 남긴다.
+- 같은 연번 시리즈면 범례 노드를 다시 만들지 않는다. `save_open_drawing` Passed 35.23초, `save_open_commit` Passed 8.72초.
+- N4 전체 CTest **64/64** (286.95초). 직전 병렬 62/64 기록은 `build/qa/ctest-64-20260920b/`에 유지.
+- Graft `persistWorkspace` L707. clangd L707→`SurveyStorage.h` L76, `applyLegend` L755→헤더 L35. Archify `build/qa/persist-legend-20260920/` showcase 9/9 visual-check pass.
+- EXE SHA256 9FDE583C54D72EF242C2C1A85819DEDAB71EEDCE160A1B9F8CB8619F06A0DAD7. smoke 0. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 도면 연번 용지 이동·PDF 단추 폭
+
+- 지도를 용지 밖으로 옮기면 범례 연번이 줄어들고, 되돌리면 후보다시 올라온다. 용지 면적이 줄 때는 후보를 다시 짜지 않고 압축만 한다.
+- `sampleTile` QSS `min-width:0`이 PDF 내보내기 단추를 잘랐다. 최소 폭은 `sizeHint`. `theme_qss` Passed. `save_open_drawing` Passed 33.77초.
+- Archify `build/qa/sheet-compact-20260920/` showcase 9/9. EXE SHA256 1FD5A25743807D5F3E5FF8D11BF4FFD36D625627AF63278B109F4E888D97E312. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 조사 파일 복사·200% 목록·고지·CTest 64
+
+- 조사 GPKG만 복사해 열면 흡수 레이어를 연 파일로 다시 붙인다. `readEmbedded` → `remountCopiedSurveyLayers`. 테이블이 있을 때만. 원본을 연 경우에는 reload 없음.
+- `surveyFileTravelsAloneWithAbsorbedShp` PASS. `layer_information` Passed 4.57초(1366@200%, viewport>1). 09-16 1px 기록은 닫음.
+- `THIRD_PARTY_NOTICES.md` 2026-09-20 공식 URL 확인. 키 없음. About에 파일 이름. 포터블 복사는 스크립트에 이미 있음. 포터블은 만들지 않음.
+- N4 전체 CTest 60/64 (281.66초). `heritage_style`·`save_open_saveas`는 병렬 60초 한도. 이후 단독 `save_open_edit` Passed 33.74초, `save_open_commit` Passed 8.87초. 실패를 지워 다시 돌리지는 않음.
+- Graft·clangd L1042→L108. Archify showcase 9/9 visual-check pass → `build/qa/absorb-remount-20260920/`.
+- 사용자 앱을 닫지 않아 `ka-hgis.exe` 재링크는 LNK1104. 커밋·푸시·포터블 없음.
+
+## 2026-09-20 제출은 도면만들기 용지 PDF가 필수
+
+- 프로젝트가 있으면 조판된 `user_sheet`가 없으면 제출 패키지를 확정하지 않는다. README만 “조사도면.pdf 없음”으로 성공하지 않는다.
+- 있으면 그 용지만 `조사도면.pdf`로 넣는다. 5종 자동 템플릿 PDF로 떨어지지 않는다. 단면도만 있어도 계획 용지가 없으면 실패한다.
+- 도면만들기에서 지도를 올리면 `ka_hgis/user_composed=true`. 자동 5종(`auto_template`이고 미조판)은 검수·제출 조판으로 보지 않는다. `feature_detail`도 `user_sheet`를 인정한다.
+- 리본 도면 PDF는 도면만들기 `savePdf`와 같다. 검수·제출 전에 5종 템플릿을 심지 않는다.
+- 오늘 대상 CTest: `checklist_engine` Passed 13.83초, `export_survey_areas` Passed 5.66초, `e2e_opaque_suite` Passed 8.51초. 흡수 SHP는 이후 `surveyFileTravelsAloneWithAbsorbedShp` PASS.
+- 오늘 `heritage_flow` / `e2e_opaque` / `topographic_browser`를 실패·비활성으로 쓰지 않는다. 이전 날짜 항목의 그 문장은 당시 기록이다.
+- Graft 인덱스 갱신. clangd `ExportService.cpp` L208 `isComposedStudioSheet` → `LayoutService.h` L80. `diagnostic_error_count` 13은 기존 compile DB. Archify showcase 9/9 deliver visual-check pass → `build/qa/submit-pdf-20260920/`.
+- EXE SHA256 BF870DD47D5C715F07255457446B669FB1D33268E4348ED7488FF71D3AC93FEE. 커밋·푸시·포터블 없음. 사용자 앱은 조작하지 않음.
+
 ## 2026-09-20 조판 번호는 겹치지 않고 범례와 같음
 
 - 도면 안 번호 원은 겹치지 않는다. 유적에서 최대 28mm까지 옮겨도 된다. `PreventOverlap` + 13방향. 놓인 번호만 분류별 1..K.

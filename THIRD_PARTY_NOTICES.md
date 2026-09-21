@@ -3,7 +3,8 @@
 이 앱은 OSGeo4W `qgis-dev`의 `qgis_core` / `qgis_gui`에 링크한다(Architecture B).  
 앱 자체는 GNU GPLv2 이상(`LICENSE`). 아래는 **배포 시 같이 두는** 의존 고지다. 전문은 공식 URL과 SDK `licenses/`를 본다.
 
-측정 시점 2026-09-19. 이 PC 핀: `VERSION_QGIS_PIN.txt` — QGIS 4.3.0-Master, Qt 6.11.1 (OSGeo4W).
+측정 시점 2026-09-20. 이 PC 핀: `VERSION_QGIS_PIN.txt` — QGIS 4.3.0-Master, Qt 6.11.1 (OSGeo4W).  
+오늘 공식 페이지: [QGIS GPL v2+·Qt 링크 예외](https://qgis.org/license/), [Qt 6.11 라이선스](https://doc.qt.io/qt-6/licensing.html), [Qt WebEngine](https://doc.qt.io/qt-6/qtwebengine-licensing.html), [GDAL MIT](https://gdal.org/en/stable/license.html), [PROJ MIT · contributors (2026)](https://proj.org/en/stable/about.html), [SQLite public domain](https://www.sqlite.org/copyright.html). API 키·계정은 이 파일에 없다.
 
 ## 앱이 링크하는 핵심
 
