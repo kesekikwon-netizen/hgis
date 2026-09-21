@@ -199,7 +199,7 @@ QString safeName(const QString& suggested) {
 KaHeritageBrowser::KaHeritageBrowser(QWidget* parent) : QDialog(parent) {
   setWindowTitle(QStringLiteral("주변유적 받기"));
   setModal(false);
-  resize(680, 330);
+  KaWindowGeometry::placeDownload(this);
 
   auto* root = new QVBoxLayout(this);
   KaDownloadUi::configure(this, root, QStringLiteral("주변유적 다운로드"),
@@ -275,8 +275,12 @@ KaHeritageBrowser::KaHeritageBrowser(QWidget* parent) : QDialog(parent) {
   connect(detailsButton, &QPushButton::toggled, this, [this](bool on) {
     if (m_tabs) m_tabs->setVisible(on);
     if (m_outline) m_outline->setVisible(on);
-    resize(on ? 980 : 680, on ? 720 : 330);
-    KaWindowGeometry::fit(this);
+    if (on) {
+      resize(980, 720);
+      KaWindowGeometry::fit(this);
+    } else {
+      KaWindowGeometry::placeDownload(this);
+    }
   });
   buttons->addWidget(detailsButton);
   buttons->addStretch(1);
@@ -297,7 +301,11 @@ KaHeritageBrowser::~KaHeritageBrowser() { stop(); m_poll->stop(); }
 
 void KaHeritageBrowser::showEvent(QShowEvent* event) {
   QDialog::showEvent(event);
-  KaWindowGeometry::fit(this);
+  if (auto* details = findChild<QPushButton*>(QStringLiteral("heritageDetails"));
+      !details || !details->isChecked())
+    KaWindowGeometry::placeDownload(this);
+  else
+    KaWindowGeometry::fit(this);
 }
 
 void KaHeritageBrowser::setDownloadRoot(const QString& directory) {
@@ -503,8 +511,7 @@ void KaHeritageBrowser::showWaiting(const QString& message) {
 void KaHeritageBrowser::start() {
   stop();
   if (auto* details = findChild<QPushButton*>(QStringLiteral("heritageDetails"))) details->setChecked(false);
-  resize(680, 170);
-  KaWindowGeometry::fit(this);
+  KaWindowGeometry::placeDownload(this);
   m_downloadRequests.clear();
   m_pendingDownloads = 0;
   m_downloadRetryReason.clear();

@@ -25,13 +25,18 @@ bool validateForOpen(const QString& gpkgPath, QString* errorOut = nullptr);
 // .gpkg 안에 프로젝트가 들어 있는지(qgis_projects 테이블). 파일을 읽기만 한다.
 bool hasEmbeddedProject(const QString& gpkgPath);
 
+// 요청 경로의 상위 폴더가 없으면 fallbackDir 아래 같은 파일명으로 옮긴다.
+QString writableSurveyPath(const QString& requestedPath, const QString& fallbackDir);
+
 // 커밋된 WAL과 내장 작업공간까지 일관된 사본으로 만든 뒤 대상 파일을 원자적으로 교체한다.
 // 실패하면 원본과 기존 대상 파일을 유지한다. 원본·대상이 같으면 아무것도 바꾸지 않는다.
-bool copySurvey(const QString& sourceGpkg, const QString& targetGpkg, QString* errorOut = nullptr);
+// 대상이 열려 있으면 옆의 -저장.gpkg 로 두고 writtenPath에 그 경로를 넣는다.
+bool copySurvey(const QString& sourceGpkg, const QString& targetGpkg, QString* errorOut = nullptr,
+                QString* writtenPath = nullptr);
 
 // 검증된 다음 세대 GPKG로 원본을 원자적으로 교체한다. 실패하면 원본 바이트를 유지한다.
 bool publishSurveyGeneration(const QString& generationGpkg, const QString& targetGpkg,
-                             QString* errorOut = nullptr);
+                             QString* errorOut = nullptr, QString* writtenPath = nullptr);
 
 // 커밋하지 않은 현재 벡터 편집을 새 복구 GPKG에 보관한다. 원본 레이어/작업공간은 바꾸지
 // 않으며 매번 별도 폴더를 만든다. 래스터는 외부 참조로 유지하고 조판은 포함하지 않는다.
@@ -66,6 +71,7 @@ AbsorbResult absorbExternalVectors(QgsProject* project, const QString& gpkgPath,
 // 한 단계라도 실패하면 saved=false 이고 원본 바이트와 미저장 편집을 유지한다.
 struct PersistAttempt {
     bool saved = false;
+    QString surveyPath;
     QString recoveryPath;
     QString error;
     QStringList committedLayers;
@@ -74,7 +80,8 @@ struct PersistAttempt {
     QStringList skippedReference;
   };
 PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
-                                const QString& recoveryDirectory);
+                                const QString& recoveryDirectory,
+                                const QString& fallbackDirectory = {});
 
 // 조사 GPKG 안에 들어 있는 참조 벡터 레이어 이름. 도메인 키는 제외한다.
 QStringList embeddedReferenceVectorNames(QgsProject* project, const QString& gpkgPath);

@@ -1,3 +1,52 @@
+## 2026-09-22 My Machines worker ka-hgis-pc
+
+- `scripts/start-cursor-worker.ps1`. 시스템 Node 22로 `A:\qgis`에 연결. https://cursor.com/docs/cloud-agent/self-hosted/my-machines
+- 번들 Node 24는 better-sqlite3 ABI가 안 맞는다. 로그오프하면 worker도 끊긴다.
+
+## 2026-09-22 클라우드 에이전트는 Ubuntu
+
+- `.cursor/environment.json` + Dockerfile. https://cursor.com/docs/cloud-agent/setup
+- OSGeo4W 빌드·CTest·smoke는 Windows. 클라우드에서 그 통과를 말하지 않는다.
+- 훅은 `node .cursor/hooks/dev-loop.mjs`. 커밋·푸시 없음.
+
+## 2026-09-22 Cursor 기본은 Grok 4.7
+
+- 고정 모델 Grok 4.7. Auto·Fast 아님. https://cursor.com/docs/models
+- 사용자 Cursor에서 Copilot·Claude Code·Gemini·Tabnine 설정, Orca `hooks.json`, `build/`용 Ninja CMake 설정을 지웠다.
+- 워크스페이스는 `cmake.useCMakePresets: always`, `configureOnOpen: false`. 커밋·푸시 없음.
+
+## 2026-09-21 복구사본 창 반복 제거
+
+- 스크린샷 `저장 실패` + `D:\회사작업-QGIS 작업\저장경로\복구사본\…` 은 예전 「사용 중」 저장이다. `…-이동` 포터블에는 수정 없음.
+- 2분 백업은 폴더에만 남긴다. 상태줄·시작 「복구 사본이 있습니다」 창은 끈다. pending 은 시작 때 지운다.
+- Graft `offerRecoverySnapshot`. clangd L1105 → clearRecoveryOffer L1047. storage_safety 0. Archify 9/9 visual-check pass.
+- 바탕화면 `HGIS-포터블-개인-20260921-복구` EXE 852434B7D5E2C39E1368D0F7D7B4FCE033B0B7963D8501E3744EA896C8EC68EC. verify 0. smoke 0.
+- 커밋·푸시·실행 중 앱 없음.
+
+## 2026-09-21 다른 PC 저장·복구사본 창
+
+- `copySurvey`가 대상 `-wal`만 보고 「사용 중」실패 → 복구사본 대화상자. 다른 PC의 `D:\회사작업-QGIS 작업\저장경로\복구사본\…` 이 그 창이다.
+- 저널을 지우고 교체한다. 잠기면 `-저장.gpkg` 또는 fallback. `persistWorkspace_staleWalDoesNotBlockSave` 0. 잠긴 원본 테스트는 옆 파일 성공으로 바꿈.
+- Graft `copySurvey` L418. clangd L418 → SurveyStorage.h L34. diagnostic_error_count 16(QGIS 헤더).
+- Archify survey-save-open-lock 9/9, visual-check 1440–2048 pass.
+- 바탕화면 `HGIS-포터블-개인-20260921-저장`. EXE SHA256 C83523E0EF2BF206124A1BE8F3CFEE5A215A9966868DBCB06501432A47350C56. verify-portable-pack 0. 계정 password= (DPAPI 없음). 기존 `…-이동`은 이 수정 없음.
+- 커밋·푸시·실행 중 앱 없음.
+
+## 2026-09-21 개인 포터블(다른 PC)
+
+- 바탕화면 `HGIS-포터블-개인-20260921-이동`. EXE SHA256 CEDCB7BDC05324E137DDDD9B7CC8B7D12AD6F0797B5FDFC87B44E984E1744195. 기존 `HGIS-포터블-개인-20260921`·`…-5km` 유지.
+- VWorld·1919 HistoryGis ini hash 원본과 일치. 지형도·유산·지적은 password= 로 풀어 실음. DPAPI 없음. 값 미기록.
+- verify-portable-pack 0. OSGeo4W PATH 없이 smoke 0. SDK A:\OSGeo4W. 약 1013 MB. 커밋·푸시·사용자 앱 없음.
+
+## 2026-09-21 포터블을 다른 PC에서도 같게
+
+- 비밀번호는 설치본만 DPAPI. 포터블은 `password_portable`이라 폴더 복사로 로그인된다. https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata
+- 원래 `D:\…` 조사 파일이 없으면 쓸 수 있는 폴더에 다시 저장한다. 원본은 덮지 않는다.
+- `make-portable -IncludeLocalCredentials`가 이 PC DPAPI를 풀어 config에 넣는다. 값은 로그에 안 남긴다.
+- CTest: topographic_settings 2슬롯 0, heritage_flow 계정 0, storage_safety 경로 2슬롯 0. smoke 0.
+- Graft `writableSurveyPath` L243. clangd writePassword L115 → KaSecretStore.h L17. Archify portable-any-pc 9/9, visual-check 1440–2048 pass.
+- EXE SHA256 CEDCB7BDC05324E137DDDD9B7CC8B7D12AD6F0797B5FDFC87B44E984E1744195. 커밋·푸시·포터블·사용자 앱 없음.
+
 ## 2026-09-21 맵·조판 휠 한 칸 1.2배
 
 - 맵 QGIS 기본 2.0, 조판 1.35를 `LayerOps::kWheelZoomFactor` 1.2로 맞춤. 부팅 `qgis/zoom_factor`, 메인·정합·지형 미리보기 `setWheelFactor`, 조판 휠 같은 칸.

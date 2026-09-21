@@ -540,6 +540,75 @@ private slots:
     QCOMPARE(LayerOps::removableCadastralLayersFromNode(refs), QList<QgsMapLayer*>{picture});
   }
 
+  void heritageKindGroupListsChildrenForDelete() {
+    QgsProject project;
+    auto* refs = project.layerTreeRoot()->addGroup(QString::fromUtf8(LayerOps::kGroupReference));
+    auto* kind = refs->addGroup(QStringLiteral("지표조사구역"));
+    auto* permit = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                      QStringLiteral("지표사업허가요역"), QStringLiteral("memory"));
+    auto* points = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5186"),
+                                      QStringLiteral("지표조사위치도"), QStringLiteral("memory"));
+    auto* survey = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                      QStringLiteral("조사구역"), QStringLiteral("memory"));
+    QVERIFY(permit->isValid() && points->isValid() && survey->isValid());
+    LayerOps::markReferenceLayer(permit);
+    LayerOps::markReferenceLayer(points);
+    survey->setCustomProperty(QStringLiteral("ka_hgis/layer_key"), QStringLiteral("survey_area"));
+    project.addMapLayer(permit, false);
+    project.addMapLayer(points, false);
+    project.addMapLayer(survey, false);
+    kind->addLayer(permit);
+    kind->addLayer(points);
+    const QList<QgsMapLayer*> fromKind = LayerOps::removableReferenceLayersFromNode(kind);
+    QCOMPARE(fromKind.size(), 2);
+    QVERIFY(fromKind.contains(permit));
+    QVERIFY(fromKind.contains(points));
+    QVERIFY(!fromKind.contains(survey));
+    const QList<QgsMapLayer*> fromRoot = LayerOps::removableLegendLayersFromNode(refs);
+    QVERIFY(fromRoot.contains(permit));
+    QVERIFY(fromRoot.contains(points));
+    QVERIFY(!fromRoot.contains(survey));
+    auto* surveyGroup = project.layerTreeRoot()->addGroup(QString::fromUtf8(LayerOps::kGroupSurveyData));
+    surveyGroup->addLayer(survey);
+    QVERIFY(LayerOps::removableLegendLayersFromNode(surveyGroup).isEmpty());
+  }
+
+  void referenceRootDeleteKeepsCadastralOut() {
+    QgsProject project;
+    auto* refs = project.layerTreeRoot()->addGroup(QString::fromUtf8(LayerOps::kGroupReference));
+    auto* sat = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("위성"), QStringLiteral("memory"));
+    auto* heritage = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5186"),
+                                        QStringLiteral("문화유적분포지도"), QStringLiteral("memory"));
+    QVERIFY(sat->isValid() && heritage->isValid());
+    LayerOps::markReferenceLayer(sat);
+    LayerOps::markReferenceLayer(heritage);
+    project.addMapLayer(sat, false);
+    project.addMapLayer(heritage, false);
+    refs->addLayer(sat);
+    auto* kind = refs->addGroup(QStringLiteral("문화유적분포지도"));
+    kind->addLayer(heritage);
+    const QList<QgsMapLayer*> out = LayerOps::removableReferenceLayersFromNode(refs);
+    QVERIFY(out.contains(sat));
+    QVERIFY(out.contains(heritage));
+    QVERIFY(!out.contains(nullptr));
+  }
+
+  void anyReferenceBundleListsUnmarkedChildrenForDelete() {
+    QgsProject project;
+    auto* refs = project.layerTreeRoot()->addGroup(QString::fromUtf8(LayerOps::kGroupReference));
+    auto* topo = refs->addGroup(QStringLiteral("수치지형도"));
+    auto* lines = new QgsVectorLayer(QStringLiteral("LineString?crs=EPSG:5186"),
+                                     QStringLiteral("가져온선"), QStringLiteral("memory"));
+    QVERIFY(lines->isValid());
+    project.addMapLayer(lines, false);
+    topo->addLayer(lines);
+    const QList<QgsMapLayer*> fromBundle = LayerOps::removableReferenceLayersFromNode(topo);
+    QCOMPARE(fromBundle, QList<QgsMapLayer*>{lines});
+    const QList<QgsMapLayer*> fromRoot = LayerOps::removableLegendLayersFromNode(refs);
+    QCOMPARE(fromRoot, QList<QgsMapLayer*>{lines});
+  }
+
   void wheelZoomFactorIsFinerThanQgisDefault() {
     QCOMPARE(LayerOps::kWheelZoomFactor, 1.2);
     QVERIFY(LayerOps::kWheelZoomFactor > 1.0);

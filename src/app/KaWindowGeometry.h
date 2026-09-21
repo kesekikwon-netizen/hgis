@@ -28,4 +28,17 @@ inline void fit(QWidget* window) {
   window->setGeometry(fittedClientRect(client, screen->availableGeometry(), frame));
 }
 
+// 주변유적·수치지형도·지적도 받기 창. 같은 크기, 부모 창 가운데.
+inline void placeDownload(QWidget* window) {
+  if (!window || !window->isWindow() || window->isMaximized() || window->isFullScreen()) return;
+  window->resize(680, 330);
+  QWidget* anchor = window->parentWidget();
+  const QRect area = anchor && anchor->isVisible()
+      ? anchor->frameGeometry()
+      : (window->screen() ? window->screen()->availableGeometry() : QRect());
+  if (area.isValid())
+    window->move(area.center().x() - window->width() / 2, area.center().y() - window->height() / 2);
+  fit(window);
+}
+
 }  // namespace KaWindowGeometry

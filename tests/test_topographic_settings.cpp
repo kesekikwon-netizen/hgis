@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QSettings>
 #include <QTemporaryDir>
+#include "core/KaSecretStore.h"
 #include "core/TopographicSettings.h"
 
 class TopographicSettingsTest : public QObject {
@@ -70,6 +71,42 @@ private slots:
     QVERIFY(TopographicSettings::readFromFiles(personal, {fallback}).username.isEmpty());
     const auto directory = temp.filePath(QStringLiteral("directory.ini")); QVERIFY(QDir().mkpath(directory));
     QVERIFY(TopographicSettings::readFromFiles(directory, {fallback}).username.isEmpty());
+  }
+
+  void portableSecretsTravelWithoutDpapi() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const auto personal = temp.filePath(QStringLiteral("ngii-account.ini"));
+    const TopographicSettings::Credentials expected{QStringLiteral("portable-user"),
+                                                    QStringLiteral("pw-across-pc")};
+    KaSecretStore::setPortableSecretsForTests(true);
+    QString error;
+    QVERIFY2(TopographicSettings::saveToFile(personal, expected, &error), qPrintable(error));
+    const auto actual = TopographicSettings::readFromFiles(personal, {});
+    QCOMPARE(actual.username, expected.username);
+    QCOMPARE(actual.password, expected.password);
+    QSettings stored(personal, QSettings::IniFormat);
+    stored.setFallbacksEnabled(false);
+    QVERIFY(stored.contains(QStringLiteral("ngii/password_portable")));
+    QVERIFY(!stored.contains(QStringLiteral("ngii/password_dpapi")));
+    QVERIFY(!stored.contains(QStringLiteral("ngii/password")));
+    KaSecretStore::resetPortableSecretsForTests();
+  }
+
+  void deadDpapiPersonalFallsBackToBundledPlaintext() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const auto personal = temp.filePath(QStringLiteral("personal.ini"));
+    const auto bundled = temp.filePath(QStringLiteral("bundled.ini"));
+    QVERIFY(fixture(bundled, QStringLiteral("fixture-bundled"), QStringLiteral("fixture-secret")));
+    QSettings dead(personal, QSettings::IniFormat);
+    dead.setFallbacksEnabled(false);
+    dead.setValue(QStringLiteral("ngii/username"), QStringLiteral("stale-user"));
+    dead.setValue(QStringLiteral("ngii/password_dpapi"), QStringLiteral("not-valid-dpapi"));
+    dead.sync();
+    const auto value = TopographicSettings::readFromFiles(personal, {bundled});
+    QCOMPARE(value.username, QStringLiteral("fixture-bundled"));
+    QCOMPARE(value.password, QStringLiteral("fixture-secret"));
   }
 };
 QTEST_GUILESS_MAIN(TopographicSettingsTest)

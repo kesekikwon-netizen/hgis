@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Survey save when file is open",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "ui", "label": "Save" },
+    { "id": "app", "label": "App" }
+  ],
+  "phases": [
+    { "id": "try", "label": "Write", "fromCol": 0, "toCol": 1 },
+    { "id": "lock", "label": "If open", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "keep", "label": "Done", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["save", "copy", "drop", "keep"],
+  "nodes": [
+    { "id": "save", "lane": "ui", "col": 0, "type": "frontend", "label": "저장", "sublabel": "Ctrl+S" },
+    { "id": "copy", "lane": "app", "col": 1, "type": "backend", "label": "copySurvey", "sublabel": "next gen" },
+    { "id": "drop", "lane": "app", "col": 2, "type": "database", "label": "drop WAL", "sublabel": "or sibling" },
+    { "id": "keep", "lane": "app", "col": 5, "type": "backend", "label": "adopt path", "sublabel": "no dialog" }
+  ],
+  "edges": [
+    { "from": "save", "to": "copy" },
+    { "from": "copy", "to": "drop", "variant": "emphasis" },
+    { "from": "drop", "to": "keep", "label": "locked file" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Was", "items": ["WAL = 사용 중 dialog + D:\\ recovery"] },
+    { "dot": "emerald", "title": "Now", "items": ["Save finishes; sibling if still locked. 2-min backup is silent"] },
+    { "dot": "cyan", "title": "Keep", "items": ["Original bytes; no auto-restore"] }
+  ]
+}

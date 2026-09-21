@@ -32,6 +32,7 @@ description: 조판 여백, 정합 지적 자석, 주변유적 번호·범례·�
 |---|---|---|
 | 정합이 지적에 안 붙음 / 지적이 참조 지도 | 정합·지적 | `workflow_engine`, `dem_trench_engine` |
 | 지적도를 Delete·우클릭으로 못 지움 | 정합·지적 | `layer_state_regressions`, `save_open_edit` |
+| 참조 지도 묶음 우클릭에 삭제 없음 | 참조 지도 묶음 삭제 | `layer_state_regressions` |
 | 다른 지도를 받으면 끈 지적도가 켜짐 | 정합·지적 | `workflow_engine` (`applySnapSettingsKeepsCadastralUnchecked`) |
 | 조판 위·좌·우 여백이 다름 | 조판 여백 | `workflow_engine` (`layoutEqualFullSheetMapRect_matchesTopToSides`), `save_open_drawing` |
 | 페이지가 작아 번호가 범례와 다름 | 조판 여백 | `save_open_drawing` (`drawingStudio_fieldPageGrowsA4LandscapeByOneCentimetre`) |

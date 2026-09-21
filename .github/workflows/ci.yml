@@ -67,15 +67,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Configure (VS 2022 x64)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if (-not $env:OSGEO4W_ROOT) { $env:OSGEO4W_ROOT = 'D:\OSGeo4W' }
-          if (-not (Test-Path $env:OSGEO4W_ROOT)) {
-            throw "OSGEO4W_ROOT not found: $($env:OSGEO4W_ROOT)"
-          }
           . .\scripts\dev-env.ps1
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DKA_HGIS_BUILD_TESTS=ON
 
@@ -85,6 +83,14 @@ jobs:
           $ErrorActionPreference = 'Stop'
           . .\scripts\dev-env.ps1
           cmake --build build --config Release
+
+      - name: clang-tidy changed lines
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . .\scripts\dev-env.ps1
+          .\scripts\gen-compile-commands.ps1
+          .\scripts\clang-tidy-changed.ps1 -Base HEAD^
 
       - name: CTest
         shell: pwsh

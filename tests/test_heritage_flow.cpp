@@ -433,6 +433,7 @@ private slots:
     QVERIFY(!text.contains(QStringLiteral("[ngii]")));
     QVERIFY(text.contains(QStringLiteral("password_dpapi=")));
     QVERIFY(!text.contains(QStringLiteral("\npassword=")));
+    QVERIFY(!text.contains(QStringLiteral("password_portable=")));
   }
 
   void logDescriptionNeverCarriesThePassword() {

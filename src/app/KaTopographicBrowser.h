@@ -85,7 +85,7 @@ private:
   QWidget* m_compactActions = nullptr;
   QPushButton* m_expandButton = nullptr;
   QPushButton* m_compactCancel = nullptr;
-  bool m_compactMode = false;
+  bool m_compactMode = true;
   bool m_processing = false;
   bool m_cancelNotified = false;
   QString m_activityAttention;

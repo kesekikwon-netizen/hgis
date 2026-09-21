@@ -40,7 +40,14 @@ HeritageIntranetSettings::Credentials HeritageIntranetSettings::readFromFiles(
     const QString& personalFile, const QStringList& fallbackFiles) {
   // 존재 여부가 우선순위를 정한다. 빈 값을 저장하면 이 PC의 기본 로그인을 끄는 것이지
   // 번들 계정으로 되돌아가는 것이 아니다. (TopographicSettings 와 같은 규칙)
-  if (!personalFile.isEmpty() && QFileInfo::exists(personalFile)) return readIni(personalFile, true);
+  if (!personalFile.isEmpty() && QFileInfo::exists(personalFile)) {
+    const Credentials personal = readIni(personalFile, true);
+    if (!personal.password.isEmpty()) return personal;
+    QSettings probe(personalFile, QSettings::IniFormat);
+    probe.setFallbacksEnabled(false);
+    if (!KaSecretStore::hasUndecryptablePassword(probe, QStringLiteral("heritage")))
+      return personal;
+  }
   for (const auto& fallback : fallbackFiles)
     if (QFileInfo::exists(fallback)) return readIni(fallback, false);
   return {};
@@ -80,7 +87,7 @@ bool HeritageIntranetSettings::saveToFile(const QString& personalFile,
     return fail(QStringLiteral("계정 설정을 준비하지 못했습니다. 폴더 권한을 확인하세요."));
   const auto serialized = staging.filePath(QStringLiteral("account.ini"));
   {
-    // 사용자 이름은 평문이다. 비밀번호는 DPAPI 암호문으로만 저장한다.
+    // 사용자 이름은 평문이다. 비밀번호는 설치본 DPAPI, 포터블은 password_portable.
     QSettings settings(serialized, QSettings::IniFormat);
     settings.setFallbacksEnabled(false);
     settings.setValue(QStringLiteral("heritage/username"), credentials.username);

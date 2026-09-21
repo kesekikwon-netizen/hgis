@@ -823,8 +823,12 @@ bool MainWindow::persistSurveyWork() {
   try {
     SurveySession::PersistInput in;
     in.surveyPath = m_surveyPath;
-    in.recoveryDirectory = SurveySession::recoveryDirectoryFor(m_surveyPath);
+    in.fallbackDirectory = preferredSurveyDir();
+    in.recoveryDirectory = SurveySession::recoveryDirectoryFor(
+        SurveyStorage::writableSurveyPath(m_surveyPath, in.fallbackDirectory));
     const SurveySession::PersistResult result = SurveySession::persistWork(project, in);
+    if (!result.surveyPath.isEmpty() && result.surveyPath != m_surveyPath)
+      m_surveyPath = result.surveyPath;
     const auto& attempt = result.workspace;
     if (!result.saved) {
       QString message = attempt.error.isEmpty()
@@ -1069,8 +1073,8 @@ void MainWindow::captureRecoverySnapshot() {
   m_recoverySnapshotBusy = true;
   const auto busy = qScopeGuard([this] { m_recoverySnapshotBusy = false; });
   if (m_canvas) m_canvas->stopRendering();
-  const QString recoveryDirectory =
-      QDir(QFileInfo(m_surveyPath).absolutePath()).filePath(QStringLiteral("복구사본"));
+  const QString recoveryDirectory = SurveySession::recoveryDirectoryFor(
+      SurveyStorage::writableSurveyPath(m_surveyPath, preferredSurveyDir()));
   QString error;
   const QString path = SurveyStorage::writeRecoverySnapshot(project, recoveryDirectory, &error, ids);
   LayerOps::reloadSurveyGpkgReaders(project, m_surveyPath);
@@ -1078,27 +1082,18 @@ void MainWindow::captureRecoverySnapshot() {
     KaCrashGuard::logLine(QStringLiteral("[recovery] 복구 사본 실패 — %1").arg(error));
     return;
   }
-  if (!SurveyStorage::noteRecoveryPending(recoveryDirectory, path, &error)) {
-    KaCrashGuard::logLine(QStringLiteral("[recovery] 표시 실패 — %1").arg(error));
-    return;
-  }
   SurveyStorage::pruneRecoverySnapshots(recoveryDirectory, 3, path);
-  QSettings st = RecentSurveys::userSettings();
-  st.setValue(QStringLiteral("Survey/PendingRecoveryDir"), QDir::cleanPath(recoveryDirectory));
   KaCrashGuard::logLine(QStringLiteral("[recovery] %1").arg(QDir::toNativeSeparators(path)));
-  statusBar()->showMessage(QStringLiteral("복구 사본을 남겼습니다. 원본은 바꾸지 않았습니다."), 4000);
 #else
   return;
 #endif
 }
 
 void MainWindow::offerRecoverySnapshot() {
-#if KA_HGIS_HAS_QGIS
-  if (m_recoveryOfferDone || m_isOpeningSurvey || !m_surveyPath.isEmpty()) return;
+  // 2분 백업은 폴더에만 남긴다. 시작 화면·상태줄·대화상자로 묻지 않는다.
+  // 예전에 남은 pending.txt 도 다시 띄우지 않는다.
   m_recoveryOfferDone = true;
-  if (QCoreApplication::applicationName() != QLatin1String("ka-hgis")) return;
-  const QStringList args = QCoreApplication::arguments();
-  if (args.contains(QStringLiteral("--smoke-quit")) || args.contains(QStringLiteral("--qa-phase1"))) return;
+#if KA_HGIS_HAS_QGIS
   QSettings st = RecentSurveys::userSettings();
   QString recoveryDirectory = st.value(QStringLiteral("Survey/PendingRecoveryDir")).toString();
   if (recoveryDirectory.isEmpty()) {
@@ -1106,22 +1101,8 @@ void MainWindow::offerRecoverySnapshot() {
     if (!last.isEmpty())
       recoveryDirectory = QDir(QFileInfo(last).absolutePath()).filePath(QStringLiteral("복구사본"));
   }
-  const QString path = SurveyStorage::pendingRecoverySnapshot(recoveryDirectory);
-  if (path.isEmpty()) return;
-  QMessageBox box(this);
-  box.setIcon(QMessageBox::Warning);
-  box.setWindowTitle(QStringLiteral("복구 사본"));
-  box.setText(QStringLiteral("저장하지 않은 작업의 복구 사본이 있습니다.\n"
-                             "원본 조사 파일은 바꾸지 않습니다. 이 사본을 열까요?"));
-  box.setInformativeText(QDir::toNativeSeparators(path));
-  auto* openButton = box.addButton(QStringLiteral("복구 사본 열기"), QMessageBox::AcceptRole);
-  box.addButton(QStringLiteral("나중에"), QMessageBox::RejectRole);
-  box.exec();
-  if (box.clickedButton() != openButton) return;
-  clearRecoveryOffer(recoveryDirectory);
-  openSurveyGpkg(path);
-#else
-  m_recoveryOfferDone = true;
+  if (!recoveryDirectory.isEmpty())
+    clearRecoveryOffer(recoveryDirectory);
 #endif
 }
 

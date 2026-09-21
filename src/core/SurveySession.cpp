@@ -24,15 +24,20 @@ SurveySession::PersistResult SurveySession::persistWork(QgsProject* project,
     out.workspace.error = QStringLiteral("조사 경로가 없습니다.");
     return out;
   }
+  const QString surveyPath = SurveyStorage::writableSurveyPath(input.surveyPath, input.fallbackDirectory);
+  out.surveyPath = surveyPath;
   const QString recovery = input.recoveryDirectory.isEmpty()
-      ? recoveryDirectoryFor(input.surveyPath)
+      ? recoveryDirectoryFor(surveyPath)
       : input.recoveryDirectory;
   try {
-    out.workspace = SurveyStorage::persistWorkspace(project, input.surveyPath, recovery);
+    out.workspace = SurveyStorage::persistWorkspace(project, surveyPath, recovery,
+                                                    input.fallbackDirectory);
+    if (!out.workspace.surveyPath.isEmpty())
+      out.surveyPath = out.workspace.surveyPath;
     if (!out.workspace.saved) return out;
-    kaClearQgisProjectUnsafeMark(input.surveyPath);
+    kaClearQgisProjectUnsafeMark(out.surveyPath);
     if (input.writeCompanionQgz) {
-      out.companionQgzPath = companionQgzPathFor(input.surveyPath);
+      out.companionQgzPath = companionQgzPathFor(out.surveyPath);
       out.companionSaved = kaWriteQgisProjectAtomic(project, out.companionQgzPath,
                                                     &out.companionError);
       if (out.companionSaved)

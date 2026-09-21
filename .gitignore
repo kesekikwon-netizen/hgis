@@ -20,7 +20,8 @@ _deps/
 
 # IDE / OS
 .vs/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 .idea/
 *.suo
 *.ncb
@@ -45,6 +46,7 @@ Desktop.ini
 .mcp.json
 .grok/.state/
 .cursor/.state/
+.cursor/hooks/state/
 .unlazy/
 .unlazy-hook-state.json
 unlazy-status.log

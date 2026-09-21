@@ -24,6 +24,18 @@
 
 되돌리지 말 것: 지적을 참조 예외로 다시 묶기, 정합에서 CurrentLayer만 쓰기, 자석 갱신으로 꺼 둔 지적을 다시 켜기, 지운 지적도를 시작 배경이 다시 올리기.
 
+## 참조 지도 묶음 삭제
+
+- 참조 지도 루트와 그 아래 모든 묶음(유산·지형·가져온 SHP)은 펼치지 않고 맨 위에 「레이어 삭제」가 있다. Delete 키도 같다.
+- 표시·유산 여부와 관계없이 묶음 아래 레이어를 모은다. 조사 데이터(`layer_key`)와 지적도 그룹은 넣지 않는다.
+- 자식 하나만 고르면 그 레이어만 지운다. 묶음 노드는 아래를 모두 뺀다. 원본 파일은 그대로다.
+
+파일: `LayerOps.cpp` (`removableReferenceLayersFromNode`, `removableLegendLayersFromNode`), `MainWindowContextMenus.cpp`, `MainWindowUndo.cpp`.
+
+테스트: `layer_state_regressions` (`heritageKindGroupListsChildrenForDelete`, `referenceRootDeleteKeepsCadastralOut`, `anyReferenceBundleListsUnmarkedChildrenForDelete`).
+
+되돌리지 말 것: 그룹 우클릭을 다시 불러오기만 남기기, 지적을 참조 지도 삭제로 다시 묶기.
+
 ## 줌 한 칸
 
 - 맵·조판 휠 한 칸은 `LayerOps::kWheelZoomFactor` 1.2(20%). QGIS 기본 2.0과 조판 옛 1.35는 쓰지 않는다.
@@ -62,7 +74,8 @@
 
 ## 번호·범례
 
-- 조판 번호는 `HeritageLayoutNumbers` override만. 원본 레이어·명칭 라벨은 그대로.
+- 조판 번호는 `HeritageLayoutNumbers`가 이름마다 하나씩 계산한다. 원본 레이어·명칭 라벨은 그대로.
+- 번호 동그라미는 용지 위 점 레이어(`numberLayer`)에 직접 그린다. 유적 전체의 `CASE WHEN $id` 글자 배치는 쓰지 않는다. 범례는 그 번호와 유적명이다. 1mm 안 겹침만 2.4mm 옆으로 옮기고 짧은 선을 긋는다.
 - 같은 이름은 번호 하나. 페이지에 가장 많이 걸린 도형 `$id`에만 찍는다.
 - 페이지 안 번호 원·글자는 2.99mm / 5.2pt(절반에서 30%만 키움). 얇은 검정 외곽선 0.15mm. 유적이 용지에서 1.0mm 넘게 떨어져 있으면 각자 유적 위. 같은 점(1.0mm 안)만 2.4mm 한두 칸 비키고 가는 선. 칸이 없으면 유적 위. 마을 전체를 배지 지름으로 밀지 않는다.
 - 조판 번호는 `ka_map_numbers`에서 도형 위에 다시 그린다. 본 지도·덧지도(`ka_map_above`)는 `labelsEnabled=0`. PAL은 번호 지도에서만 한 번 돈다. zIndex 10000.

@@ -148,7 +148,7 @@ void MainWindow::removeLayersFromTree(QgsLayerTreeView* tree) {
     if (legend->layerNode()) nodes.insert(legend->layerNode());
   }
   for (QgsLayerTreeNode* node : nodes) {
-    for (QgsMapLayer* layer : LayerOps::removableCadastralLayersFromNode(node))
+    for (QgsMapLayer* layer : LayerOps::removableLegendLayersFromNode(node))
       addLayer(layer);
   }
   auto* project = QgsProject::instance();
@@ -399,7 +399,7 @@ void MainWindow::deleteFeaturesOrSelectedReferenceLayers() {
     return;
   }
   if (m_layerTree &&
-      !LayerOps::removableCadastralLayersFromNode(m_layerTree->currentNode()).isEmpty()) {
+      !LayerOps::removableLegendLayersFromNode(m_layerTree->currentNode()).isEmpty()) {
     removeSelectedLayers();
     return;
   }

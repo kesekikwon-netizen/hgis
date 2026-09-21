@@ -1,3 +1,36 @@
+## 2026-09-22 조판 번호는 점 레이어로 그린다
+
+- 이름마다 번호·범례 이름은 그대로 계산한다. 동그라미는 `numberLayer` 점에 직접 그린다. 유적 전체 `CASE WHEN $id` 글자 배치는 쓰지 않는다.
+- CTest `heritage_style` 통과. 커밋·푸시 없음.
+
+## 2026-09-21 복구사본 창 반복 제거
+
+- 저장 실패 창의 `D:\…\복구사본` 경로는 예전 「사용 중」 저장이 남긴 것이다. 저장은 옆 파일로 끝낸다.
+- 2분 백업은 폴더에만 남기고 상태줄·시작 「복구 사본이 있습니다」 창은 띄우지 않는다. 「나중에」로 남은 pending 도 지운다.
+- Graft `offerRecoverySnapshot` L1092. clangd L1105 → `clearRecoveryOffer` L1047. diagnostic_error_count 17(QGIS 헤더).
+- CTest storage_safety 0, heritage_flow 0. Archify survey-save-open-lock 9/9, visual-check 1440–2048 pass.
+- 바탕화면 `HGIS-포터블-개인-20260921-복구`. EXE SHA256 852434B7D5E2C39E1368D0F7D7B4FCE033B0B7963D8501E3744EA896C8EC68EC. verify 0. `…-이동`·`…-저장`은 이 무음 수정 없음.
+- 커밋·푸시·실행 중 앱 없음.
+
+## 2026-09-21 다른 PC 저장·복구사본 창
+
+- 조사 GPKG가 열린 채(WAL)이거나 복사본에 `-wal`이 있으면 `copySurvey`가 「사용 중」으로 끊고 `D:\…\복구사본` 창을 띄웠다.
+- 이제 저널을 지우고 저장한다. 원본이 잠겨 있으면 `-저장.gpkg` 또는 fallback 폴더에 두고 그 경로를 이어 쓴다. 복구 창은 실제 실패일 때만.
+- CTest `storage_safety` 0. clangd `copySurvey` L418 → SurveyStorage.h L34.
+- 바탕화면 `HGIS-포터블-개인-20260921-저장`. EXE SHA256 C83523E0EF2BF206124A1BE8F3CFEE5A215A9966868DBCB06501432A47350C56. verify 0. `…-이동`은 이 수정 없음.
+- 커밋·푸시·실행 중 앱 없음.
+
+## 2026-09-21 개인 포터블(다른 PC)
+
+- 바탕화면 `HGIS-포터블-개인-20260921-이동`. 현재 Release와 같은 EXE SHA256 CEDCB7BDC05324E137DDDD9B7CC8B7D12AD6F0797B5FDFC87B44E984E1744195.
+- 기존 `HGIS-포터블-개인-20260921`·`…-5km`는 덮지 않음. 계정은 폴더와 같이 옮김. verify 0, SDK 없이 smoke 0. 커밋·푸시 없음.
+
+## 2026-09-21 포터블을 다른 PC에서도 같게
+
+- 지형도·유산·지적 비밀번호는 포터블 폴더와 같이 옮긴다. 이 Windows 계정 DPAPI만 쓰면 다른 PC에서 풀린다.
+- 조사 파일이 `D:\…`처럼 그 PC에 없으면 저장이 실패하지 않고 쓸 수 있는 폴더에 만든다.
+- EXE SHA256 CEDCB7BDC05324E137DDDD9B7CC8B7D12AD6F0797B5FDFC87B44E984E1744195. smoke 0. 커밋·푸시·포터블 없음.
+
 ## 2026-09-21 맵·조판 휠 한 칸 1.2배
 
 - 휠 한 칸이 맵 2배·조판 1.35배였던 것을 둘 다 1.2배로 맞춤. 조판 Ctrl+휠은 더 작게.

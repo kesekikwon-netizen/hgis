@@ -2,6 +2,7 @@
 #include "LayerOps.h"
 #include "LayerOpsInternal.h"
 #include "LayerLabelControls.h"
+#include "HeritageStyle.h"
 #include "DemPresentation.h"
 #include "DemColorRampLegend.h"
 #include <QSignalBlocker>
@@ -1447,6 +1448,51 @@ QList<QgsMapLayer*> LayerOps::removableCadastralLayersFromNode(QgsLayerTreeNode*
     QgsMapLayer* layer = child ? child->layer() : nullptr;
     if (!layer || !layerKeyOf(layer).isEmpty() || out.contains(layer)) continue;
     if (cadastralGroup || isCadastralLayer(layer) || isVworldCadastralPicture(layer))
+      out.append(layer);
+  }
+  return out;
+}
+
+QList<QgsMapLayer*> LayerOps::removableReferenceLayersFromNode(QgsLayerTreeNode* node) {
+  QList<QgsMapLayer*> out;
+  if (!node) return out;
+  auto push = [&](QgsMapLayer* layer) {
+    if (!layer || out.contains(layer) || !layerKeyOf(layer).isEmpty()) return;
+    if (isCadastralLayer(layer) || isVworldCadastralPicture(layer)) return;
+    out.append(layer);
+  };
+  if (auto* leaf = qobject_cast<QgsLayerTreeLayer*>(node)) {
+    push(leaf->layer());
+    return out;
+  }
+  auto* group = qobject_cast<QgsLayerTreeGroup*>(node);
+  if (!group) return out;
+  const QString name = group->name();
+  if (name == QString::fromUtf8(kGroupSurveyData) || name == QString::fromUtf8(kGroupCadastral))
+    return out;
+  const bool heritageKind = HeritageStyle::fromLayerName(name).has_value();
+  const bool referenceRoot = name == QString::fromUtf8(kGroupReference);
+  if (referenceRoot) {
+    for (QgsLayerTreeLayer* child : group->findLayers())
+      push(child ? child->layer() : nullptr);
+    return out;
+  }
+  bool underReference = heritageKind;
+  for (QgsLayerTreeNode* parent = group->parent(); !underReference && parent;
+       parent = parent->parent()) {
+    if (parent->name() == QString::fromUtf8(kGroupReference))
+      underReference = true;
+  }
+  if (!underReference) return out;
+  for (QgsLayerTreeLayer* child : group->findLayers())
+    push(child ? child->layer() : nullptr);
+  return out;
+}
+
+QList<QgsMapLayer*> LayerOps::removableLegendLayersFromNode(QgsLayerTreeNode* node) {
+  QList<QgsMapLayer*> out = removableCadastralLayersFromNode(node);
+  for (QgsMapLayer* layer : removableReferenceLayersFromNode(node)) {
+    if (layer && !out.contains(layer))
       out.append(layer);
   }
   return out;

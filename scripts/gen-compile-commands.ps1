@@ -20,19 +20,28 @@ try {
   & cmake --preset compiledb
   if ($LASTEXITCODE -ne 0) { throw "CMake compile database configure failed." }
   $dbFile = Join-Path $Root 'build-clangd\compile_commands.json'
-  $entries = @(Get-Content -LiteralPath $dbFile -Raw | ConvertFrom-Json)
-  if ($entries.Count -eq 0) { throw "CMake generated an empty compiler database." }
-  $includeArgs = @($env:INCLUDE -split ';' | Where-Object { $_ -and (Test-Path -LiteralPath $_) } |
-    ForEach-Object { '/I"' + ($_ -replace '\\', '/') + '"' }) -join ' '
-  foreach ($entry in $entries) {
-    $entry.command += " $includeArgs"
-  }
   $outDir = Join-Path $Root 'build'
   New-Item -ItemType Directory -Force -Path $outDir | Out-Null
   $outFile = Join-Path $outDir 'compile_commands.json'
-  $json = ConvertTo-Json -InputObject $entries -Depth 6
-  [System.IO.File]::WriteAllText($outFile, $json, [System.Text.UTF8Encoding]::new($false))
-  Write-Host "CMake compiler database with MSVC/SDK includes: $outFile ($($entries.Count) entries)"
+  # Windows PowerShell 5 ConvertFrom-Json collapses this array. Python keeps every entry.
+  $py = @'
+import json, os, sys
+src, dst = sys.argv[1], sys.argv[2]
+includes = [p for p in os.environ.get("INCLUDE", "").split(";") if p and os.path.isdir(p)]
+extra = " ".join('/I"' + p.replace("\\", "/") + '"' for p in includes)
+with open(src, encoding="utf-8") as handle:
+    entries = json.load(handle)
+if not entries:
+    raise SystemExit("empty compiler database")
+for entry in entries:
+    entry["command"] = entry.get("command", "") + " " + extra
+with open(dst, "w", encoding="utf-8", newline="\n") as handle:
+    json.dump(entries, handle, ensure_ascii=False)
+print(len(entries))
+'@
+  $count = $py | & py.exe -3 - $dbFile $outFile
+  if ($LASTEXITCODE -ne 0) { throw "Failed to add MSVC include paths to compile_commands.json." }
+  Write-Host "CMake compiler database with MSVC/SDK includes: $outFile ($count entries)"
 } finally {
   Pop-Location
 }

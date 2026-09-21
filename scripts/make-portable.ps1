@@ -1,4 +1,4 @@
-﻿# Build a self-contained Windows folder: USB copy, no OSGeo4W install on the target PC.
+# Build a self-contained Windows folder: USB copy, no OSGeo4W install on the target PC.
 param(
   [string]$OutDir = "",
   [switch]$IncludeLocalCredentials
@@ -216,7 +216,8 @@ Visual Studio 설치도 필요 없습니다. Windows 화면 배율과 현재 모
 소스: https://github.com/kwonyoungin11/hgis
 "@
 Set-Content -LiteralPath (Join-Path $out "README.txt") -Value $readmeKo -Encoding UTF8
-Set-Content -LiteralPath (Join-Path $out "사용법.txt") -Value $readmeKo -Encoding UTF8
+$guideName = (-join ([char]0xC0AC, [char]0xC6A9, [char]0xBC95)) + '.txt'
+Set-Content -LiteralPath (Join-Path $out $guideName) -Value $readmeKo -Encoding UTF8
 
 function Copy-VworldKeyToPortable([string]$portableRoot) {
   $dstDir = Join-Path $portableRoot "config"
@@ -260,50 +261,78 @@ function Copy-VworldKeyToPortable([string]$portableRoot) {
 
 if ($IncludeLocalCredentials) { Copy-VworldKeyToPortable $out }
 
-# 수치지형도(국토정보플랫폼) 계정을 포터블에 실어 보낸다. VWorld 키와 같은 방식이다.
-# 앱은 config 폴더의 ngii-local.ini 를 대체 파일로 이미 읽는다(TopographicSettings).
-# 소스나 실행 파일에 박지 않는다 — git 에 들어가지 않고, 계정이 바뀌면 이 파일만
-# 고치면 되며 재빌드가 필요 없다. 값은 화면에 찍지 않는다.
-function Copy-NgiiAccountToPortable([string]$portableRoot) {
-  $dstDir = Join-Path $portableRoot "config"
-  New-Item -ItemType Directory -Force -Path $dstDir | Out-Null
-  $dst = Join-Path $dstDir "ngii-local.ini"
-  $cands = @(
-    (Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA "ka-hgis") "ka-hgis") "ngii-account.ini"),
-    (Join-Path (Join-Path $env:APPDATA "ka-hgis") "ngii-account.ini"),
-    (Join-Path (Join-Path $env:LOCALAPPDATA "ka-hgis") "ngii-account.ini"),
-    (Join-Path (Join-Path (Join-Path $env:APPDATA "ka-hgis") "ka-hgis") "ngii-account.ini"),
-    (Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA "ka-hgis") "ka-hgis") "ngii-account.ini")
-  )
-  $src = $null
-  foreach ($p in $cands) { if (Test-Path -LiteralPath $p) { $src = $p; break } }
-  if (-not $src) {
-    Write-Host "NGII account: not found on this PC (other PC will need 더보기 -> 계정 설정)"
-    return
+# DPAPI 암호문은 이 Windows 사용자만 푼다. 포터블에는 평문 password= 로 풀어 실어
+# 다른 PC에서도 같은 폴더가 로그인된다. 값은 화면에 찍지 않는다.
+function Convert-KaAccountIniToPortable([string]$path) {
+  if (-not (Test-Path -LiteralPath $path)) { return $false }
+  Add-Type -AssemblyName System.Security
+  $entropy = [System.Text.Encoding]::UTF8.GetBytes('ka-hgis-account-v1')
+  $lines = Get-Content -LiteralPath $path -Encoding UTF8
+  $changed = $false
+  $failed = $false
+  $outLines = foreach ($line in $lines) {
+    if ($line -match '^\s*password_dpapi\s*=\s*(.+)\s*$') {
+      $b64 = $Matches[1].Trim().Trim('"')
+      try {
+        $blob = [Convert]::FromBase64String($b64)
+        $plain = [System.Security.Cryptography.ProtectedData]::Unprotect($blob, $entropy, 'CurrentUser')
+        $text = [System.Text.Encoding]::UTF8.GetString($plain)
+        $changed = $true
+        'password=' + $text
+      } catch {
+        $failed = $true
+        $line
+      }
+    } else {
+      $line
+    }
   }
-  Copy-Item -LiteralPath $src -Destination $dst -Force
-  Write-Host "NGII account: copied into portable config/ngii-local.ini (values not printed)"
+  if ($changed) {
+    [System.IO.File]::WriteAllLines($path, $outLines, [System.Text.UTF8Encoding]::new($false))
+  }
+  if ($failed) { return $false }
+  $text = Get-Content -LiteralPath $path -Raw -Encoding UTF8
+  return ($text -match '(?m)^\s*password\s*=') -or ($text -match '(?m)^\s*password_portable\s*=') -or -not ($text -match '(?m)^\s*password_dpapi\s*=')
 }
 
-if ($IncludeLocalCredentials) { Copy-NgiiAccountToPortable $out }
+function Copy-AccountIniToPortable([string]$portableRoot, [string]$destName, [string[]]$candidates, [string]$label) {
+  $dstDir = Join-Path $portableRoot "config"
+  New-Item -ItemType Directory -Force -Path $dstDir | Out-Null
+  $src = $null
+  foreach ($p in $candidates) { if (Test-Path -LiteralPath $p) { $src = $p; break } }
+  if (-not $src) {
+    Write-Host "$label : not found on this PC"
+    return
+  }
+  $dst = Join-Path $dstDir $destName
+  Copy-Item -LiteralPath $src -Destination $dst -Force
+  if (Convert-KaAccountIniToPortable $dst) {
+    Write-Host "$label : copied for any PC (values not printed)"
+  } else {
+    Write-Host "$label : copied, but this Windows user could not unlock the password for another PC"
+  }
+}
 
 if ($IncludeLocalCredentials) {
-  $heritageCandidates = @(
-    (Join-Path $env:LOCALAPPDATA 'ka-hgis/ka-hgis/heritage-account.ini'),
-    (Join-Path $env:APPDATA 'ka-hgis/ka-hgis/heritage-account.ini'),
-    (Join-Path $root 'config/heritage-local.ini')
+  $accountRoots = @(
+    (Join-Path (Join-Path $env:LOCALAPPDATA "ka-hgis") "ka-hgis"),
+    (Join-Path $env:APPDATA "ka-hgis"),
+    (Join-Path $env:LOCALAPPDATA "ka-hgis"),
+    (Join-Path (Join-Path $env:APPDATA "ka-hgis") "ka-hgis")
   )
-  $heritageSource = $heritageCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-  if ($heritageSource) {
-    $configDir = Join-Path $out 'config'
-    New-Item -ItemType Directory -Force -Path $configDir | Out-Null
-    Copy-Item -LiteralPath $heritageSource -Destination (Join-Path $configDir 'heritage-account.ini')
-    Write-Host 'Heritage account: included (values not printed)'
-  } else {
-    Write-Host 'Heritage account: not found; enter it in the app.'
-  }
-  Add-Content -LiteralPath (Join-Path $out 'README.txt') -Encoding UTF8 -Value "`r`n개인용 패키지: 이 PC에 저장된 API 키와 계정 파일을 포함했습니다."
-  Add-Content -LiteralPath (Join-Path $out '사용법.txt') -Encoding UTF8 -Value "`r`n개인용 패키지: 이 PC에 저장된 API 키와 계정 파일을 포함했습니다."
+  Copy-AccountIniToPortable $out "ngii-local.ini" (@(
+      ($accountRoots | ForEach-Object { Join-Path $_ "ngii-account.ini" })
+    ) + (Join-Path $root "config/ngii-local.ini")) "NGII account"
+  Copy-Item -LiteralPath (Join-Path $out "config/ngii-local.ini") -Destination (Join-Path $out "config/ngii-account.ini") -Force -ErrorAction SilentlyContinue
+  Copy-AccountIniToPortable $out "heritage-account.ini" (@(
+      ($accountRoots | ForEach-Object { Join-Path $_ "heritage-account.ini" })
+    ) + (Join-Path $root "config/heritage-local.ini")) "Heritage account"
+  Copy-AccountIniToPortable $out "vworld-account.ini" @(
+      $accountRoots | ForEach-Object { Join-Path $_ "vworld-account.ini" }
+    ) "VWorld cadastral account"
+  Add-Content -LiteralPath (Join-Path $out 'README.txt') -Encoding UTF8 -Value "`r`n개인용 패키지: 이 PC에 저장된 API 키와 계정 파일을 포함했습니다. 다른 PC에서도 같은 폴더로 로그인됩니다."
+  $guideName = (-join ([char]0xC0AC, [char]0xC6A9, [char]0xBC95)) + '.txt'
+  Add-Content -LiteralPath (Join-Path $out $guideName) -Encoding UTF8 -Value "`r`n개인용 패키지: 계정은 이 폴더 config 에 있습니다. 다른 컴퓨터로 폴더를 통째로 복사하세요."
 }
 
 Write-Host "Portable folder ready: $out"

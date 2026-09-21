@@ -1,5 +1,6 @@
 #include "KaTopographicBrowser.h"
 #include "KaDownloadUi.h"
+#include "KaWindowGeometry.h"
 #include <QCoreApplication>
 #include <QDebug>
 #include <QScreen>
@@ -117,7 +118,6 @@ KaTopographicBrowser::KaTopographicBrowser(QWidget* parent, const QString& downl
   setObjectName(QStringLiteral("topographicBrowser"));
   setWindowTitle(QStringLiteral("수치지형도 내려받기"));
   setModal(false);
-  resize(1100, 780);
   m_downloadDirectory = downloadDirectory.isEmpty()
       ? QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + QStringLiteral("/topographic-downloads")
       : QDir(downloadDirectory).absolutePath();
@@ -243,6 +243,7 @@ KaTopographicBrowser::KaTopographicBrowser(QWidget* parent, const QString& downl
     if(script.open(QIODevice::ReadOnly)){m_automationScript=QString::fromUtf8(script.readAll());break;}
   }
   addPage();
+  setCompactMode(true);
   QTimer::singleShot(0, this, [this] { if (!m_explicitNavigation) navigate(kHome); });
 }
 
@@ -303,7 +304,11 @@ void KaTopographicBrowser::fitToAvailableScreen() {
   const QSize decorations=frameGeometry().size()-size();
   const QSize clientLimit=(available.size()-decorations).expandedTo(QSize(1,1));
   setMaximumSize(clientLimit);
-  const QSize wanted=m_compactMode?QSize(680,330).expandedTo(minimumSizeHint()):QSize(1100,780);
+  if (m_compactMode) {
+    KaWindowGeometry::placeDownload(this);
+    return;
+  }
+  const QSize wanted = QSize(1100, 780);
   resize(wanted.boundedTo(clientLimit));
   const int x=std::clamp(pos().x(),available.left(),std::max(available.left(),available.right()-width()-decorations.width()));
   const int y=std::clamp(pos().y(),available.top(),std::max(available.top(),available.bottom()-height()-decorations.height()));
@@ -311,7 +316,9 @@ void KaTopographicBrowser::fitToAvailableScreen() {
 }
 
 void KaTopographicBrowser::showEvent(QShowEvent* event) {
-  QDialog::showEvent(event);fitToAvailableScreen();
+  QDialog::showEvent(event);
+  if (m_compactMode) KaWindowGeometry::placeDownload(this);
+  else fitToAvailableScreen();
 }
 
 void KaTopographicBrowser::cancelFromUser() {

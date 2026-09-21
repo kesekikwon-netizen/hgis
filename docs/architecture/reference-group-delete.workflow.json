@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Reference group delete",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "ui", "label": "Legend" },
+    { "id": "app", "label": "App" }
+  ],
+  "phases": [
+    { "id": "pick", "label": "Select", "fromCol": 0, "toCol": 1 },
+    { "id": "drop", "label": "Remove", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "keep", "label": "Keep", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["group", "menu", "take", "stay"],
+  "nodes": [
+    { "id": "group", "lane": "ui", "col": 0, "type": "frontend", "label": "참조 지도", "sublabel": "any bundle" },
+    { "id": "menu", "lane": "ui", "col": 1, "type": "frontend", "label": "레이어 삭제", "sublabel": "first row" },
+    { "id": "take", "lane": "app", "col": 2, "type": "backend", "label": "takeMapLayer", "sublabel": "all children" },
+    { "id": "stay", "lane": "app", "col": 5, "type": "backend", "label": "survey + 지적", "sublabel": "untouched" }
+  ],
+  "edges": [
+    { "from": "group", "to": "menu" },
+    { "from": "menu", "to": "take", "variant": "emphasis" },
+    { "from": "take", "to": "stay", "label": "not those" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Was", "items": ["Group click = import only"] },
+    { "dot": "emerald", "title": "Now", "items": ["Delete any 참조 지도 bundle"] },
+    { "dot": "cyan", "title": "Keep", "items": ["조사 데이터; 지적도 group"] }
+  ]
+}

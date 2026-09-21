@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Portable any PC",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "pack", "label": "Pack" },
+    { "id": "pc", "label": "Other PC" }
+  ],
+  "phases": [
+    { "id": "src", "label": "Source", "fromCol": 0, "toCol": 1 },
+    { "id": "move", "label": "Copy", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "use", "label": "Use", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["account", "folder", "login", "save"],
+  "nodes": [
+    { "id": "account", "lane": "pack", "col": 0, "type": "security", "label": "Accounts", "sublabel": "password_portable" },
+    { "id": "folder", "lane": "pack", "col": 2, "type": "backend", "label": "Folder", "sublabel": "copy whole pack" },
+    { "id": "login", "lane": "pc", "col": 4, "type": "frontend", "label": "Login", "sublabel": "same ids" },
+    { "id": "save", "lane": "pc", "col": 5, "type": "database", "label": "Save", "sublabel": "local gpkg" }
+  ],
+  "edges": [
+    { "from": "account", "to": "folder", "label": "not DPAPI" },
+    { "from": "folder", "to": "login", "variant": "emphasis" },
+    { "from": "login", "to": "save", "label": "writable path" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Was", "items": ["This-PC DPAPI; D: path"] },
+    { "dot": "emerald", "title": "Now", "items": ["Folder travels; save relocates"] },
+    { "dot": "cyan", "title": "Keep", "items": ["No hardcoded keys"] }
+  ]
+}

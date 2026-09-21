@@ -12,12 +12,14 @@ namespace SurveySession {
 struct PersistInput {
   QString surveyPath;
   QString recoveryDirectory;
+  QString fallbackDirectory;
   bool writeCompanionQgz = true;
 };
 
 struct PersistResult {
   bool saved = false;
   bool companionSaved = true;
+  QString surveyPath;
   QString companionQgzPath;
   QString companionError;
   SurveyStorage::PersistAttempt workspace;

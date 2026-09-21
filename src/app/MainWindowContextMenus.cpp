@@ -198,10 +198,9 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
   menu.setObjectName(QStringLiteral("layerContextMenu"));
   menu.setToolTipsVisible(true);
   if (!layer) {
-    addMenuAction(&menu, "layer.import", QStringLiteral("참고 자료 불러오기…"), {}, [this]() { addUserLayer(); });
-    const QList<QgsMapLayer*> cadastral =
-        LayerOps::removableCadastralLayersFromNode(raw ? raw : treeView->currentNode());
-    if (!cadastral.isEmpty()) {
+    QgsLayerTreeNode* target = raw ? raw : treeView->currentNode();
+    const QList<QgsMapLayer*> removable = LayerOps::removableLegendLayersFromNode(target);
+    if (!removable.isEmpty()) {
       addMenuAction(&menu, "layer.remove", QStringLiteral("레이어 삭제"), {},
           [this, treeView, index]() {
             if (index.isValid())
@@ -210,6 +209,7 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
           },
           QStringLiteral("목록에서 제거합니다. 원본 파일은 보존하며 Ctrl+Z로 복원할 수 있습니다."));
     }
+    addMenuAction(&menu, "layer.import", QStringLiteral("참고 자료 불러오기…"), {}, [this]() { addUserLayer(); });
     menu.exec(treeView->viewport()->mapToGlobal(pos));
     return;
   }

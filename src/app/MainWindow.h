@@ -505,7 +505,7 @@ private:
   QTimer* m_displayRefresh = nullptr;
   // 20초 자동 저장은 없앴다. 저장은 사용자가 「저장」을 누를 때만 일어나고,
   // 저장 안 된 작업은 창 제목 뒤 * 와 닫기 확인창으로 알린다.
-  // 2분 타이머는 원본을 쓰지 않고 복구사본/에만 미저장 조사 도형을 남긴다.
+  // 2분 타이머는 원본을 쓰지 않고 복구사본/에만 미저장 조사 도형을 남긴다. 창·상태줄은 띄우지 않는다.
   QTimer* m_recoverySnapshotTimer = nullptr;
   bool m_recoverySnapshotBusy = false;
   bool m_recoveryOfferDone = false;

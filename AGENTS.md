@@ -9,7 +9,7 @@ Reply in the user's language, usually Korean. Code, paths, and identifiers may r
 ## Cursor Runtime
 
 - Use Cursor native Agent, subagents (Task), MCP, hooks, and skills when they are available and useful.
-- Prefer a fixed model chosen in the Cursor model picker (not Auto) for consistency. Do not treat Auto or ad-hoc model switching as a required execution path.
+- The fixed model for this repository is Grok 4.7 in the Cursor model picker. Do not use Auto, Fast, or a different model unless the user switches it for that turn. https://cursor.com/docs/models
 - Legacy `.codex/`, `.grok`, and `.agents` dispatch/history files may remain for history or compatibility; they are not the authoritative harness. Current project skills remain `.agents/skills/ka-hgis-gis/`, [ka-hgis-sheet](.agents/skills/ka-hgis-sheet/SKILL.md), [Archify](.agents/skills/archify/SKILL.md), and [문화재인트라넷](.agents/skills/heritage-intranet/SKILL.md).
 - Do not introduce OpenCode, Sisyphus, hidden auto-push, or hardcoded personal credentials.
 - Work directly for small and local changes. Use Cursor Task subagents only for bounded independent research, review, or verification when that improves correctness or throughput.
@@ -17,6 +17,8 @@ Reply in the user's language, usually Korean. Code, paths, and identifiers may r
 
 ### Verified developer tools
 
+- Product C++ edits under `src/` or `tests/` are not done until this session has run Graft (`hgis_graft`), `scripts/clangd-definition.py`, `scripts/archify.ps1`, and the matching `ctest`. `.cursor/hooks.json` `stop` sends that follow-up when the record is missing. Naming a tool is not evidence. Docs-only edits do not require the four.
+- Cloud agents run on Ubuntu from `.cursor/environment.json`. https://cursor.com/docs/cloud-agent/setup They do not have OSGeo4W, Visual Studio, or `qgis-dev`. Do not configure, build, ctest, or smoke there, and do not report those as passed. The Windows machine remains the build gate.
 - **Mandatory development workflow (user requirement, 2026-09-15; harness switched to Cursor 2026-09-18): `Cursor Agent + AGENTS.md + clangd + Graft + Archify + CMake/CTest`.** Use all six for product-code implementation and fixes, including small changes. Read the current repository instructions/state first; use Cursor Agent execution, Graft retrieval confirmed against source, clangd declaration/definition navigation and diagnostics, an Archify view of the affected behavior, and the required CMake/CTest checks. Record concrete inputs, artifacts and results in the task plan or QA report; naming a tool is not evidence of using it.
 - Setup and evidence: [developer-tools.md](docs/developer-tools.md). Keep the existing source, compiler and tests authoritative.
 - For C++ changes, use the real `build/compile_commands.json`; regenerate with `scripts/gen-compile-commands.ps1` after CMake/SDK changes. Use [clangd navigation](docs/clangd-navigation.md) for a concrete call location's declaration/definition and clangd checks for compiler diagnostics.
@@ -170,5 +172,5 @@ Do not ask the user to diagnose EPSG, WMS, QGIS provider, or CRS behavior.
 - Reintroducing automatic startup restore.
 - Hardcoding VWorld keys.
 - Adding DXF as primary submit output.
-- Reintroducing Codex/Grok/Antigravity-only requirements as prerequisites; Cursor is the harness.
+- Reintroducing Codex, Antigravity, OpenCode, Sisyphus, or a second harness. Cursor with Grok 4.7 is the harness.
 - Forcing large agent graphs for local one-file fixes.

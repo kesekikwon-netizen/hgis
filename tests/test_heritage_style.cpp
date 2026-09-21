@@ -19,6 +19,7 @@
 #include <qgsfeature.h>
 #include <qgsfillsymbollayer.h>
 #include <qgsgeometry.h>
+#include <qgsgeometrygeneratorsymbollayer.h>
 #include <qgslabelingresults.h>
 #include <qgslayertree.h>
 #include <qgslayertreelayer.h>
@@ -409,9 +410,20 @@ private slots:
       auto* source = qobject_cast<QgsVectorLayer*>(project.mapLayer(entry.layerId));
       QVERIFY(source);
       QCOMPARE(entry.color, expectedColors.value(entry.layerId));
+      auto* pins = numbers.numberLayer();
+      QVERIFY(pins);
+      bool foundPin = false;
+      QgsFeature pinFeature;
+      auto pinRows = pins->getFeatures();
+      while (pinRows.nextFeature(pinFeature)) {
+        if (pinFeature.attribute(QStringLiteral("layer")).toString() != entry.layerId) continue;
+        QCOMPARE(pinFeature.attribute(QStringLiteral("fill")).toString(), entry.color.name(QColor::HexArgb));
+        foundPin = true;
+      }
+      QVERIFY(foundPin);
       std::unique_ptr<QgsVectorLayer> drawing(source->clone());
       QgsMapLayerStyle(numbers.overrides().value(entry.layerId)).writeToLayer(drawing.get());
-      QCOMPARE(drawing->labeling()->settings().format().background().fillColor(), entry.color);
+      QVERIFY(!drawing->labelsEnabled());
       auto* renderer = dynamic_cast<QgsCategorizedSymbolRenderer*>(drawing->renderer());
       QVERIFY(renderer);
       const auto* fill = dynamic_cast<QgsSimpleFillSymbolLayer*>(renderer->categories().first().symbol()->symbolLayer(0));
@@ -682,12 +694,10 @@ private slots:
     QVERIFY(names.contains(QStringLiteral("걸친 유적")));
     QVERIFY(!names.contains(QStringLiteral("페이지 밖")));
     QCOMPARE(numbers.entries().size(), 2);
-    std::unique_ptr<QgsVectorLayer> drawing(layer->clone());
-    QgsMapLayerStyle(numbers.overrides().value(layer->id())).writeToLayer(drawing.get());
-    const QgsPalLayerSettings settings = drawing->labeling()->settings();
-    QVERIFY(settings.dataDefinedProperties().isActive(QgsPalLayerSettings::Property::PositionX));
-    QVERIFY(settings.dataDefinedProperties().isActive(QgsPalLayerSettings::Property::PositionY));
-    QCOMPARE(settings.placementSettings().overlapHandling(), Qgis::LabelOverlapHandling::AllowOverlapAtNoCost);
+    auto* pins = numbers.numberLayer();
+    QVERIFY(pins);
+    QCOMPARE(int(pins->featureCount()), 2);
+    QVERIFY(!pins->labelsEnabled());
     auto* legend = new QgsLayoutItemLegend(&layout);
     layout.addLayoutItem(legend);
     legend->setLinkedMap(map);
@@ -726,8 +736,10 @@ private slots:
     numbers.raiseAboveGeometries(map);
     auto* raised = HeritageLayoutNumbers::numbersMapOf(map);
     QVERIFY(raised);
-    QVERIFY(raised->layers().contains(first));
-    QVERIFY(raised->layers().contains(second));
+    auto* pins = numbers.numberLayer();
+    QVERIFY(pins);
+    QCOMPARE(raised->layers(), QList<QgsMapLayer*>{pins});
+    QCOMPARE(int(pins->featureCount()), 3);
     QVERIFY(!raised->layers().contains(dummy));
   }
 
@@ -801,26 +813,16 @@ private slots:
     for (const auto& entry : numbers.entries()) names.insert(entry.name);
     QCOMPARE(names, (QSet<QString>{QStringLiteral("점 가"), QStringLiteral("점 나")}));
     QCOMPARE(numbers.entries().size(), 2);
-    std::unique_ptr<QgsVectorLayer> drawing(layer->clone());
-    QgsMapLayerStyle(numbers.overrides().value(layer->id())).writeToLayer(drawing.get());
-    const QgsPalLayerSettings keepSettings = drawing->labeling()->settings();
-    QVERIFY(keepSettings.callout());
-    QVERIFY(keepSettings.callout()->enabled());
-    const auto& keepProps = keepSettings.dataDefinedProperties();
-    QgsExpression keepX(keepProps.property(QgsPalLayerSettings::Property::PositionX).asExpression());
-    QgsExpression keepY(keepProps.property(QgsPalLayerSettings::Property::PositionY).asExpression());
-    QgsExpressionContext keepContext;
-    keepContext.appendScopes(QgsExpressionContextUtils::globalProjectLayerScopes(drawing.get()));
+    auto* keepPins = numbers.numberLayer();
+    QVERIFY(keepPins);
     int keepOffset = 0;
-    auto keepFeatures = drawing->getFeatures();
-    QgsFeature keepFeature;
-    while (keepFeatures.nextFeature(keepFeature)) {
-      const QgsPointXY site = keepFeature.geometry().asPoint();
-      if (qAbs(site.x() - 191000.) < 1.) continue;
-      keepContext.setFeature(keepFeature);
-      const double x = keepX.evaluate(&keepContext).toDouble();
-      const double y = keepY.evaluate(&keepContext).toDouble();
-      if (qAbs(x - site.x()) > 1. || qAbs(y - site.y()) > 1.) ++keepOffset;
+    QgsFeature keepPin;
+    auto keepRows = keepPins->getFeatures();
+    while (keepRows.nextFeature(keepPin)) {
+      const QgsPointXY pin = keepPin.geometry().asPoint();
+      const QgsPointXY origin(keepPin.attribute(QStringLiteral("ox")).toDouble(),
+                              keepPin.attribute(QStringLiteral("oy")).toDouble());
+      if (pin.distance(origin) > 1.) ++keepOffset;
     }
     QCOMPARE(keepOffset, 0);
     auto* legend = new QgsLayoutItemLegend(&layout);
@@ -860,32 +862,18 @@ private slots:
     numbers.update(map, true);
     QVERIFY2(numbers.error().isEmpty(), qPrintable(numbers.error()));
     QCOMPARE(numbers.entries().size(), 4);
-    std::unique_ptr<QgsVectorLayer> drawing(layer->clone());
-    QgsMapLayerStyle(numbers.overrides().value(layer->id())).writeToLayer(drawing.get());
-    const QgsPalLayerSettings settings = drawing->labeling()->settings();
-    QCOMPARE(settings.placement, Qgis::LabelPlacement::OverPoint);
-    QVERIFY(settings.callout());
-    QVERIFY(settings.callout()->enabled());
-    QCOMPARE(settings.callout()->type(), QStringLiteral("simple"));
-    const auto& properties = settings.dataDefinedProperties();
-    QgsExpression xExpression(properties.property(QgsPalLayerSettings::Property::PositionX).asExpression());
-    QgsExpression yExpression(properties.property(QgsPalLayerSettings::Property::PositionY).asExpression());
-    QVERIFY2(!xExpression.hasParserError(), qPrintable(xExpression.parserErrorString()));
-    QVERIFY2(!yExpression.hasParserError(), qPrintable(yExpression.parserErrorString()));
-    QgsExpressionContext context;
-    context.appendScopes(QgsExpressionContextUtils::globalProjectLayerScopes(drawing.get()));
+    auto* pinLayer = numbers.numberLayer();
+    QVERIFY(pinLayer);
+    auto* pinSymbol = dynamic_cast<QgsSingleSymbolRenderer*>(pinLayer->renderer());
+    QVERIFY(pinSymbol && dynamic_cast<QgsGeometryGeneratorSymbolLayer*>(pinSymbol->symbol()->symbolLayer(2)));
     QSet<QString> pins;
     int offset = 0;
-    auto features = drawing->getFeatures();
     QgsFeature feature;
+    auto features = pinLayer->getFeatures();
     while (features.nextFeature(feature)) {
-      context.setFeature(feature);
-      const double x = xExpression.evaluate(&context).toDouble();
-      const double y = yExpression.evaluate(&context).toDouble();
-      QVERIFY2(!xExpression.hasEvalError(), qPrintable(xExpression.evalErrorString()));
-      QVERIFY2(!yExpression.hasEvalError(), qPrintable(yExpression.evalErrorString()));
-      pins.insert(QStringLiteral("%1,%2").arg(x, 0, 'g', 12).arg(y, 0, 'g', 12));
-      if (qAbs(x - stack.x()) > 1. || qAbs(y - stack.y()) > 1.) ++offset;
+      const QgsPointXY pin = feature.geometry().asPoint();
+      pins.insert(QStringLiteral("%1,%2").arg(pin.x(), 0, 'g', 12).arg(pin.y(), 0, 'g', 12));
+      if (qAbs(pin.x() - stack.x()) > 1. || qAbs(pin.y() - stack.y()) > 1.) ++offset;
     }
     QCOMPARE(pins.size(), 4);
     QCOMPARE(offset, 3);
@@ -918,23 +906,15 @@ private slots:
     numbers.update(map, true);
     QVERIFY2(numbers.error().isEmpty(), qPrintable(numbers.error()));
     QCOMPARE(numbers.entries().size(), 20);
-    std::unique_ptr<QgsVectorLayer> drawing(layer->clone());
-    QgsMapLayerStyle(numbers.overrides().value(layer->id())).writeToLayer(drawing.get());
-    const QgsPalLayerSettings settings = drawing->labeling()->settings();
-    const auto& properties = settings.dataDefinedProperties();
-    QgsExpression xExpression(properties.property(QgsPalLayerSettings::Property::PositionX).asExpression());
-    QgsExpression yExpression(properties.property(QgsPalLayerSettings::Property::PositionY).asExpression());
-    QgsExpressionContext context;
-    context.appendScopes(QgsExpressionContextUtils::globalProjectLayerScopes(drawing.get()));
+    auto* pinLayer = numbers.numberLayer();
+    QVERIFY(pinLayer);
     const double scale = map->scale() > 0. ? map->scale() : 50000.;
     const double maxSep = (2.4 / 1000.0) * scale * 2.0 + 1.;
     int onSite = 0;
-    auto features = drawing->getFeatures();
     QgsFeature feature;
+    auto features = pinLayer->getFeatures();
     while (features.nextFeature(feature)) {
-      context.setFeature(feature);
-      const QgsPointXY pin(xExpression.evaluate(&context).toDouble(),
-                           yExpression.evaluate(&context).toDouble());
+      const QgsPointXY pin = feature.geometry().asPoint();
       QVERIFY2(pin.distance(stack) <= maxSep, "dense cluster must not grow long leaders");
       if (pin.distance(stack) < 1.) ++onSite;
     }
@@ -975,22 +955,15 @@ private slots:
     numbers.update(map, true);
     QVERIFY2(numbers.error().isEmpty(), qPrintable(numbers.error()));
     QCOMPARE(numbers.entries().size(), 8);
-    std::unique_ptr<QgsVectorLayer> drawing(layer->clone());
-    QgsMapLayerStyle(numbers.overrides().value(layer->id())).writeToLayer(drawing.get());
-    const QgsPalLayerSettings settings = drawing->labeling()->settings();
-    const auto& properties = settings.dataDefinedProperties();
-    QgsExpression xExpression(properties.property(QgsPalLayerSettings::Property::PositionX).asExpression());
-    QgsExpression yExpression(properties.property(QgsPalLayerSettings::Property::PositionY).asExpression());
-    QgsExpressionContext context;
-    context.appendScopes(QgsExpressionContextUtils::globalProjectLayerScopes(drawing.get()));
+    auto* pinLayer = numbers.numberLayer();
+    QVERIFY(pinLayer);
     int offset = 0;
-    auto features = drawing->getFeatures();
     QgsFeature feature;
+    auto features = pinLayer->getFeatures();
     while (features.nextFeature(feature)) {
-      context.setFeature(feature);
-      const QgsPointXY site = feature.geometry().asPoint();
-      const QgsPointXY pin(xExpression.evaluate(&context).toDouble(),
-                           yExpression.evaluate(&context).toDouble());
+      const QgsPointXY pin = feature.geometry().asPoint();
+      const QgsPointXY site(feature.attribute(QStringLiteral("ox")).toDouble(),
+                            feature.attribute(QStringLiteral("oy")).toDouble());
       if (pin.distance(site) > 1.) ++offset;
     }
     QCOMPARE(offset, 0);
@@ -1106,20 +1079,26 @@ private slots:
     QVERIFY(numbers.overrides().contains(layer->id()));
     const auto entry = numbers.entries().first();
 
-    // Deserialize the layout-only style onto an isolated clone to examine the
-    // actual QGIS label settings and evaluate the expression for both features.
     std::unique_ptr<QgsVectorLayer> drawing(layer->clone());
     QgsMapLayerStyle(numbers.overrides().value(layer->id())).writeToLayer(drawing.get());
-    QVERIFY(drawing->labelsEnabled());
-    QVERIFY(drawing->labeling());
-    const QgsPalLayerSettings settings = drawing->labeling()->settings();
-    const QgsTextBackgroundSettings background = settings.format().background();
-    QVERIFY(background.enabled());
-    QCOMPARE(background.type(), QgsTextBackgroundSettings::ShapeCircle);
-    QCOMPARE(background.fillColor(), entry.color);
-    QCOMPARE(background.strokeColor(), QColor(Qt::black));
-    QCOMPARE(background.strokeWidth(), 0.15);
-    QCOMPARE(settings.zIndex, 10000.);
+    QVERIFY(!drawing->labelsEnabled());
+    auto* pins = numbers.numberLayer();
+    QVERIFY(pins);
+    QCOMPARE(int(pins->featureCount()), 1);
+    QVERIFY(!pins->labelsEnabled());
+    auto* pinSymbol = dynamic_cast<QgsSingleSymbolRenderer*>(pins->renderer());
+    QVERIFY(pinSymbol);
+    auto* glyph = dynamic_cast<QgsFontMarkerSymbolLayer*>(pinSymbol->symbol()->symbolLayer(1));
+    QVERIFY(glyph);
+    auto* leader = dynamic_cast<QgsGeometryGeneratorSymbolLayer*>(pinSymbol->symbol()->symbolLayer(2));
+    QVERIFY(leader);
+    QCOMPARE(leader->symbolType(), Qgis::SymbolType::Line);
+    QgsFeature pin;
+    QVERIFY(pins->getFeatures().nextFeature(pin));
+    QCOMPARE(pin.attribute(QStringLiteral("num")).toInt(), entry.number);
+    QCOMPARE(pin.attribute(QStringLiteral("fill")).toString(), entry.color.name(QColor::HexArgb));
+    QVERIFY(pin.attribute(QStringLiteral("size")).toDouble() >= 2.3);
+    QCOMPARE(entry.featureIds.size(), 2);
     QgsLayoutItemMap* raised = nullptr;
     for (QGraphicsItem* item : layout.items()) {
       auto* candidate = dynamic_cast<QgsLayoutItemMap*>(item);
@@ -1127,42 +1106,10 @@ private slots:
     }
     QVERIFY(raised);
     QVERIFY(raised->zValue() > map->zValue());
+    QCOMPARE(raised->layers(), QList<QgsMapLayer*>{pins});
     QDomDocument baseStyle;
     QVERIFY(baseStyle.setContent(map->layerStyleOverrides().value(layer->id())));
     QCOMPARE(baseStyle.documentElement().attribute(QStringLiteral("labelsEnabled")), QStringLiteral("0"));
-    QDomDocument numberStyle;
-    QVERIFY(numberStyle.setContent(raised->layerStyleOverrides().value(layer->id())));
-    QCOMPARE(numberStyle.documentElement().attribute(QStringLiteral("labelsEnabled")), QStringLiteral("1"));
-    QVERIFY(settings.isExpression);
-    QCOMPARE(settings.placement, Qgis::LabelPlacement::OverPoint);
-    QCOMPARE(settings.placementSettings().overlapHandling(), Qgis::LabelOverlapHandling::AllowOverlapAtNoCost);
-    QVERIFY(settings.geometryGeneratorEnabled);
-    QVERIFY2(settings.geometryGenerator.contains(QLatin1String("point_on_surface")),
-             qPrintable(settings.geometryGenerator));
-    QVERIFY(settings.dataDefinedProperties().isActive(QgsPalLayerSettings::Property::PositionX));
-    QVERIFY(settings.dataDefinedProperties().isActive(QgsPalLayerSettings::Property::PositionY));
-    QVERIFY(settings.callout());
-    QVERIFY(settings.callout()->enabled());
-    QCOMPARE(settings.callout()->type(), QStringLiteral("simple"));
-    QgsExpression expression(settings.fieldName);
-    QVERIFY2(!expression.hasParserError(), qPrintable(expression.parserErrorString()));
-    QgsExpressionContext context;
-    context.appendScopes(QgsExpressionContextUtils::globalProjectLayerScopes(drawing.get()));
-    auto features = drawing->getFeatures();
-    QgsFeature feature;
-    int labeled = 0;
-    int siblings = 0;
-    while (features.nextFeature(feature)) {
-      context.setFeature(feature);
-      const QString value = expression.evaluate(&context).toString();
-      QVERIFY2(!expression.hasEvalError(), qPrintable(expression.evalErrorString()));
-      if (value == QString::number(entry.number))
-        ++labeled;
-      else
-        ++siblings;
-    }
-    QCOMPARE(labeled, 1);
-    QCOMPARE(siblings, 1);
 
     auto* legend = new QgsLayoutItemLegend(&layout);
     layout.addLayoutItem(legend);
@@ -1308,9 +1255,20 @@ private slots:
       distinctColors.insert(entry.color.name());
       auto* source = qobject_cast<QgsVectorLayer*>(project.mapLayer(entry.layerId));
       QVERIFY(source);
+      auto* pins = numbers.numberLayer();
+      QVERIFY(pins);
+      bool foundPin = false;
+      QgsFeature pinFeature;
+      auto pinRows = pins->getFeatures();
+      while (pinRows.nextFeature(pinFeature)) {
+        if (pinFeature.attribute(QStringLiteral("layer")).toString() != entry.layerId) continue;
+        QCOMPARE(pinFeature.attribute(QStringLiteral("fill")).toString(), entry.color.name(QColor::HexArgb));
+        foundPin = true;
+      }
+      QVERIFY(foundPin);
       std::unique_ptr<QgsVectorLayer> drawing(source->clone());
       QgsMapLayerStyle(numbers.overrides().value(entry.layerId)).writeToLayer(drawing.get());
-      QCOMPARE(drawing->labeling()->settings().format().background().fillColor(), entry.color);
+      QVERIFY(!drawing->labelsEnabled());
       auto* renderer = dynamic_cast<QgsCategorizedSymbolRenderer*>(drawing->renderer());
       QVERIFY(renderer && !renderer->categories().isEmpty());
       const auto* fill = dynamic_cast<QgsSimpleFillSymbolLayer*>(renderer->categories().first().symbol()->symbolLayer(0));
@@ -1388,16 +1346,18 @@ private slots:
     QVERIFY(numbers.update(map));
     QCOMPARE(numbers.entries().size(), 12);
     QMap<QString, double> badgeDiameterMm;
-    for (auto* source : layers) {
-      std::unique_ptr<QgsVectorLayer> drawing(qobject_cast<QgsVectorLayer*>(source)->clone());
-      QgsMapLayerStyle(numbers.overrides().value(source->id())).writeToLayer(drawing.get());
-      const auto background = drawing->labeling()->settings().format().background();
-      QCOMPARE(background.type(), QgsTextBackgroundSettings::ShapeCircle);
-      QCOMPARE(background.sizeUnit(), Qgis::RenderUnit::Millimeters);
-      badgeDiameterMm.insert(source->id(), background.size().width());
-      QVERIFY(background.size().width() >= 2.3);
-      QVERIFY(background.size().width() < 4.6);
+    auto* pins = numbers.numberLayer();
+    QVERIFY(pins);
+    QgsFeature pinFeature;
+    auto pinRows = pins->getFeatures();
+    while (pinRows.nextFeature(pinFeature)) {
+      const QString layerId = pinFeature.attribute(QStringLiteral("layer")).toString();
+      const double size = pinFeature.attribute(QStringLiteral("size")).toDouble();
+      badgeDiameterMm.insert(layerId, size);
+      QVERIFY(size >= 2.3);
+      QVERIFY(size < 4.6);
     }
+    QCOMPARE(badgeDiameterMm.size(), layers.size());
     auto* legend = new QgsLayoutItemLegend(&layout);
     layout.addLayoutItem(legend);
     legend->setTitle(QStringLiteral("밀집 유적 · 페이지 안 번호"));
@@ -1426,22 +1386,20 @@ private slots:
     QgsLayoutExporter::PdfExportSettings settings;
     settings.dpi = 150.;
     QCOMPARE(exporter.exportToPdf(temporary.filePath(QStringLiteral("independent-dense-check.pdf")), settings), QgsLayoutExporter::Success);
-    auto* results = sheetNumberResults(exporter, map);
-    QVERIFY(results);
     QCOMPARE(deliveredKeys, numberedEntryKeys(numbers.entries()));
     QVERIFY(!deliveredKeys.isEmpty());
     QCOMPARE(deliveredKeys.size(), numbers.entries().size());
-    QList<QgsLabelPosition> placed;
-    for (const auto& label : results->allLabels()) {
-      if (!label.isUnplaced && badgeDiameterMm.contains(label.layerID)) placed.append(label);
+    int placed = 0;
+    QgsFeature placedPin;
+    auto placedRows = pins->getFeatures();
+    while (placedRows.nextFeature(placedPin)) {
+      if (!badgeDiameterMm.contains(placedPin.attribute(QStringLiteral("layer")).toString())) continue;
+      const int number = placedPin.attribute(QStringLiteral("num")).toInt();
+      QVERIFY(number >= 1 && number <= 2);
+      ++placed;
     }
-    QVERIFY2(!placed.isEmpty(), "On-page number labels must draw");
-    for (const auto& label : placed) {
-      bool numeric = false;
-      const int number = label.labelText.toInt(&numeric);
-      QVERIFY(numeric && number >= 1 && number <= 2);
-    }
-    qInfo() << "DENSE_NUMBER_EXPORT placed=" << placed.size() << "of12";
+    QVERIFY2(placed > 0, "On-page number labels must draw");
+    qInfo() << "DENSE_NUMBER_EXPORT placed=" << placed << "of12";
     if (!qaDir.isEmpty())
       QVERIFY(exporter.renderPageToImage(0, QSize(), 150.).save(base + QStringLiteral(".png")));
     for (auto* source : layers) {
@@ -1521,18 +1479,19 @@ private slots:
     QCOMPARE(wideKeys, numbers.legendKeys());
     QCOMPARE(exporter.exportToPdf(temporary.filePath(QStringLiteral("scale-25000-check.pdf")), settings),
              QgsLayoutExporter::Success);
-    const auto* wideResults = sheetNumberResults(exporter, map);
     QCOMPARE(wideKeys.size(), wideCandidates);
     QCOMPARE(wideKeys, numberedEntryKeys(numbers.entries()));
     QCOMPARE(wideKeys, numberedEntryKeys(numbers.entries()));
     QVERIFY2(consecutiveLegendError(legend, numbers.entries()).isEmpty(),
              "On-page numbers must stay consecutive and match the legend");
     QSet<int> mapNumbers;
-    for (const auto& label : wideResults->allLabels()) {
-      if (label.isUnplaced || label.isDiagram || label.layerID != layer->id()) continue;
-      bool numeric = false;
-      const int number = label.labelText.toInt(&numeric);
-      if (numeric) mapNumbers.insert(number);
+    auto* widePins = numbers.numberLayer();
+    QVERIFY(widePins);
+    QgsFeature widePin;
+    auto wideRows = widePins->getFeatures();
+    while (wideRows.nextFeature(widePin)) {
+      if (widePin.attribute(QStringLiteral("layer")).toString() != layer->id()) continue;
+      mapNumbers.insert(widePin.attribute(QStringLiteral("num")).toInt());
     }
     QCOMPARE(mapNumbers.size(), wideKeys.size());
     for (int n = 1; n <= mapNumbers.size(); ++n)
@@ -1689,8 +1648,8 @@ private slots:
     QCOMPARE(numbers.entries().first().number, 1);
     QCOMPARE(numbers.entries().last().number, 2);
     QgsMapLayerStyle(numbers.overrides().value(layer->id())).writeToLayer(hidden.get());
-    QVERIFY(hidden->labelsEnabled());
-    QVERIFY(hidden->labeling()->settings().isExpression);
+    QVERIFY(!hidden->labelsEnabled());
+    QCOMPARE(int(numbers.numberLayer()->featureCount()), 2);
     // Restore the originally absent preference before comparing all style XML.
     layer->removeCustomProperty(QStringLiteral("ka_hgis/layout_numbers_visible"));
     QgsMapLayerStyle after;
@@ -2042,17 +2001,21 @@ private slots:
     settings.dpi = 300.;
     settings.forceVectorOutput = true;
     QCOMPARE(rawExport.exportToPdf(output.filePath(QStringLiteral("tail-original.pdf")), settings), QgsLayoutExporter::Success);
-    const auto* raw = sheetNumberResults(rawExport, map);
-    QVERIFY(raw);
+    auto* rawPins = numbers.numberLayer();
+    QVERIFY(rawPins);
     const QTransform mapToLayout = layoutToMap.inverted();
     QMap<qint64, QPointF> originalCenters;
-    for (const auto& label : raw->allLabels()) {
-      if (label.isUnplaced || label.layerID != layer->id() || !expectedVisibleFeatures.contains(label.featureId)) continue;
-      QVERIFY(label.labelText.toInt() >= 1);
-      originalCenters.insert(label.featureId, mapToLayout.map(QPointF(label.labelRect.center().x(), label.labelRect.center().y())));
+    QgsFeature rawPin;
+    auto rawRows = rawPins->getFeatures();
+    while (rawRows.nextFeature(rawPin)) {
+      const qint64 sourceId = rawPin.attribute(QStringLiteral("fid")).toString().toLongLong();
+      if (!expectedVisibleFeatures.contains(sourceId)) continue;
+      QVERIFY(rawPin.attribute(QStringLiteral("num")).toInt() >= 1);
+      const QgsPointXY pin = rawPin.geometry().asPoint();
+      originalCenters.insert(sourceId, mapToLayout.map(QPointF(pin.x(), pin.y())));
     }
     QCOMPARE(originalCenters.size(), 2);
-    QVERIFY(placedNumberKeys(raw, map, numbers.entries()).size() >= 2);
+    QVERIFY(rawPins->featureCount() >= 2);
     QString error;
     const QString qa = qEnvironmentVariable("KA_HGIS_QA_DIR");
     const QString directory = qa.isEmpty() ? output.path() : qa;
@@ -2066,19 +2029,22 @@ private slots:
     QVERIFY(numbers.visibleKeys().size() >= 2);
     QgsLayoutExporter finalExport(&layout);
     QCOMPARE(finalExport.exportToPdf(output.filePath(QStringLiteral("tail-final-independent.pdf")), settings), QgsLayoutExporter::Success);
-    const auto* finalResults = sheetNumberResults(finalExport, map);
-    QVERIFY(finalResults);
+    auto* finalPins = numbers.numberLayer();
+    QVERIFY(finalPins);
     QCOMPARE(numbers.visibleKeys(), numberedEntryKeys(numbers.entries()));
     QSet<qint64> finalFeatures;
-    for (const auto& label : finalResults->allLabels()) {
-      if (label.isUnplaced || label.layerID != layer->id()) continue;
-      QVERIFY(label.featureId != hiddenDuplicate);
-      if (originalCenters.contains(label.featureId)) {
-        const QPointF position = mapToLayout.map(QPointF(label.labelRect.center().x(), label.labelRect.center().y()));
-        const double movement = QLineF(position, originalCenters.value(label.featureId)).length();
+    QgsFeature finalPin;
+    auto finalRows = finalPins->getFeatures();
+    while (finalRows.nextFeature(finalPin)) {
+      const qint64 sourceId = finalPin.attribute(QStringLiteral("fid")).toString().toLongLong();
+      QVERIFY(sourceId != hiddenDuplicate);
+      if (originalCenters.contains(sourceId)) {
+        const QgsPointXY pin = finalPin.geometry().asPoint();
+        const QPointF position = mapToLayout.map(QPointF(pin.x(), pin.y()));
+        const double movement = QLineF(position, originalCenters.value(sourceId)).length();
         QVERIFY2(movement < 2., qPrintable(QStringLiteral("On-paper badge moved by %1 mm").arg(movement)));
       }
-      finalFeatures.insert(label.featureId);
+      finalFeatures.insert(sourceId);
     }
     QVERIFY(finalFeatures.contains(*expectedVisibleFeatures.begin()));
     QgsMapLayerStyle after;
@@ -2163,19 +2129,16 @@ private slots:
       QCOMPARE(entry.legendIndex, i);
       QCOMPARE(movedRenderer->categories().at(i).label(), entry.name);
     }
-    const auto labelSettings = movedDrawing->labeling()->settings();
-    QgsExpression label(labelSettings.fieldName);
-    QgsExpressionContext context;
-    context.appendScopes(QgsExpressionContextUtils::globalProjectLayerScopes(movedDrawing.get()));
-    auto features = layer->getFeatures(QgsFeatureRequest().setFilterRect(map->extent()));
-    QgsFeature feature;
+    auto* movedPins = numbers.numberLayer();
+    QVERIFY(movedPins);
+    QCOMPARE(int(movedPins->featureCount()), visible);
+    QgsFeature pin;
+    auto pinRows = movedPins->getFeatures();
     int evaluated = 0;
-    while (features.nextFeature(feature)) {
-      context.setFeature(feature);
-      const int sourceIndex = names.indexOf(feature.attribute(QStringLiteral("nm")).toString());
+    while (pinRows.nextFeature(pin)) {
+      const int sourceIndex = names.indexOf(pin.attribute(QStringLiteral("nm")).toString());
       QVERIFY(sourceIndex >= firstMovedSite && sourceIndex < firstMovedSite + visible);
-      QCOMPARE(label.evaluate(&context).toInt(), sourceIndex - firstMovedSite + 1);
-      QVERIFY2(!label.hasEvalError(), qPrintable(label.evalErrorString()));
+      QCOMPARE(pin.attribute(QStringLiteral("num")).toInt(), sourceIndex - firstMovedSite + 1);
       ++evaluated;
     }
     QCOMPARE(evaluated, visible);

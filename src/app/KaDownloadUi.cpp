@@ -63,7 +63,7 @@ KaDownloadProgressDialog::KaDownloadProgressDialog(const QString& title, const Q
   auto* cancel = new QPushButton(QStringLiteral("취소"), this); cancel->setObjectName(QStringLiteral("downloadCancel"));
   actions->addWidget(cancel); root->addLayout(actions);
   connect(cancel, &QPushButton::clicked, this, &KaDownloadProgressDialog::reject);
-  resize(680, 330); KaWindowGeometry::fit(this);
+  KaWindowGeometry::placeDownload(this);
 }
 void KaDownloadProgressDialog::setRange(int minimum, int maximum) { m_progress->setRange(minimum, maximum); }
 void KaDownloadProgressDialog::setValue(int value) { m_progress->setValue(value); }

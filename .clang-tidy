@@ -38,8 +38,8 @@ HeaderFilterRegex: '^.*[\\/]src[\\/].*\.(h|hpp)$'
 #   clang-tidy -p build --checks='misc-const-correctness,misc-use-anonymous-namespace' <file>
 # 실측: 코어 3개 파일에서만 83건이 나와, 켜두면 진짜 버그가 묻힌다.
 #
-# 아직 기존 경고가 남아 있으므로 에러로 승격하지 않는다.
-# 기존 건을 정리한 뒤 아래 줄을 켜면 회귀를 막을 수 있다.
+# 아직 기존 경고가 남아 있으므로 파일 전체를 에러로 승격하지 않는다.
+# 변경 줄만 scripts/clang-tidy-changed.ps1 가 bugprone/performance 를 에러로 본다.
 # WarningsAsErrors: 'bugprone-*,performance-*'
 
 FormatStyle: file

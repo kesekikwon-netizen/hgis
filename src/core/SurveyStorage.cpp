@@ -240,6 +240,18 @@ bool readGuarded(QgsProject* project, const QString& uri, bool* crashed, bool lo
 
 namespace SurveyStorage {
 
+QString writableSurveyPath(const QString& requestedPath, const QString& fallbackDir) {
+  if (requestedPath.trimmed().isEmpty()) return {};
+  const QFileInfo requested(requestedPath);
+  const QString abs = requested.absoluteFilePath();
+  if (QFileInfo::exists(abs) || QFileInfo(requested.absolutePath()).isDir())
+    return abs;
+  const QFileInfo fallback(fallbackDir);
+  if (!fallbackDir.trimmed().isEmpty() && (fallback.isDir() || QDir().mkpath(fallback.absoluteFilePath())))
+    return QDir(fallback.absoluteFilePath()).filePath(requested.fileName());
+  return abs;
+}
+
 QString projectUri(const QString& gpkgPath) {
   if (gpkgPath.isEmpty()) return {};
   return QStringLiteral("geopackage:%1?projectName=survey")
@@ -350,8 +362,63 @@ bool overwriteInPlace(const QString& staged, const QString& target, QString* err
   return QFileInfo(target).size() == QFileInfo(staged).size();
 }
 
-bool copySurvey(const QString& sourceGpkg, const QString& targetGpkg, QString* errorOut) {
+QString siblingSurveyPath(const QFileInfo& target) {
+  const QString suffix = target.suffix().isEmpty() ? QStringLiteral("gpkg") : target.suffix();
+  QString path = target.dir().filePath(target.completeBaseName() + QStringLiteral("-저장.") + suffix);
+  int n = 2;
+  while (QFileInfo::exists(path)) {
+    path = target.dir().filePath(target.completeBaseName() +
+                                 QStringLiteral("-저장%1.").arg(n++) + suffix);
+  }
+  return QFileInfo(path).absoluteFilePath();
+}
+
+bool finishStagedSurvey(const QString& staged, const QString& targetPath, QString* errorOut,
+                        QString* writtenPath) {
+  const auto fail = [errorOut](const QString& message) {
+    if (errorOut) *errorOut = message;
+    return false;
+  };
+  dropIdleJournals(targetPath);
+  QString replaceError;
+  if (replaceWithStaged(staged, targetPath, &replaceError)) {
+    dropIdleJournals(targetPath);
+    if (writtenPath) *writtenPath = QFileInfo(targetPath).absoluteFilePath();
+    return true;
+  }
+  KaSessionLog::line(QStringLiteral("[save] 이름 교체 거부 — 같은 파일에 덮어쓴다: %1")
+                         .arg(replaceError));
+  QString overwriteError;
+  bool journalLeft = false;
+  for (const QString& suffix : {QStringLiteral("-wal"), QStringLiteral("-shm"),
+                                QStringLiteral("-journal")}) {
+    if (QFileInfo::exists(targetPath + suffix)) journalLeft = true;
+  }
+  if (!journalLeft && overwriteInPlace(staged, targetPath, &overwriteError)) {
+    dropIdleJournals(targetPath);
+    if (writtenPath) *writtenPath = QFileInfo(targetPath).absoluteFilePath();
+    return true;
+  }
+  const QString alt = siblingSurveyPath(QFileInfo(targetPath));
+  if (QFile::rename(staged, alt) ||
+      (QFile::copy(staged, alt) && QFileInfo(alt).size() == QFileInfo(staged).size())) {
+    QFile::remove(staged);
+    dropIdleJournals(alt);
+    if (writtenPath) *writtenPath = alt;
+    KaSessionLog::line(QStringLiteral("[save] 원본이 열려 옆 파일에 저장 — %1")
+                           .arg(QDir::toNativeSeparators(alt)));
+    return true;
+  }
+  return fail(QStringLiteral("저장 파일을 교체하지 못했습니다: %1 · 새로 만든 조사 파일은 "
+                             "%2 에 남겨 두었습니다.")
+                  .arg(overwriteError.isEmpty() ? replaceError : overwriteError,
+                       QDir::toNativeSeparators(staged)));
+}
+
+bool copySurvey(const QString& sourceGpkg, const QString& targetGpkg, QString* errorOut,
+                QString* writtenPath) {
   if (errorOut) errorOut->clear();
+  if (writtenPath) writtenPath->clear();
   const auto fail = [errorOut](const QString& message) {
     if (errorOut) *errorOut = message;
     return false;
@@ -360,15 +427,11 @@ bool copySurvey(const QString& sourceGpkg, const QString& targetGpkg, QString* e
   if (sourceGpkg.isEmpty() || targetGpkg.isEmpty() || !source.isFile())
     return fail(QStringLiteral("복사할 조사 파일 또는 저장 경로가 없습니다."));
   if (source.canonicalFilePath().compare(target.canonicalFilePath(), Qt::CaseInsensitive) == 0 ||
-      source.absoluteFilePath().compare(target.absoluteFilePath(), Qt::CaseInsensitive) == 0)
+      source.absoluteFilePath().compare(target.absoluteFilePath(), Qt::CaseInsensitive) == 0) {
+    if (writtenPath) *writtenPath = source.absoluteFilePath();
     return true;
-  const auto targetHasJournal = [&target]() {
-    for (const QString& suffix : {QStringLiteral("-wal"), QStringLiteral("-shm"), QStringLiteral("-journal")})
-      if (QFileInfo::exists(target.absoluteFilePath() + suffix)) return true;
-    return false;
-  };
-  if (targetHasJournal())
-    return fail(QStringLiteral("저장 대상 조사 파일이 사용 중입니다. 해당 파일을 닫고 다시 저장하세요."));
+  }
+  dropIdleJournals(target.absoluteFilePath());
   QTemporaryDir temporary(target.dir().filePath(QStringLiteral(".ka-survey-copy-XXXXXX")));
   if (!temporary.isValid()) return fail(QStringLiteral("저장 폴더에 임시 사본을 만들 수 없습니다."));
   const QString snapshot = temporary.filePath(QStringLiteral("survey.gpkg"));
@@ -413,30 +476,18 @@ bool copySurvey(const QString& sourceGpkg, const QString& targetGpkg, QString* e
     dropStaged();
     return fail(QStringLiteral("조사 파일 사본을 끝까지 기록하지 못했습니다."));
   }
-  if (targetHasJournal()) {
+  if (!finishStagedSurvey(staged, target.absoluteFilePath(), errorOut, writtenPath)) {
     dropStaged();
-    return fail(QStringLiteral("저장 도중 대상 조사 파일이 열려 저장을 멈췄습니다."));
-  }
-  QString replaceError;
-  if (!replaceWithStaged(staged, target.absoluteFilePath(), &replaceError)) {
-    KaSessionLog::line(QStringLiteral("[save] 이름 교체 거부 — 같은 파일에 덮어쓴다: %1")
-                           .arg(replaceError));
-    QString overwriteError;
-    if (!overwriteInPlace(staged, target.absoluteFilePath(), &overwriteError)) {
-      return fail(QStringLiteral("저장 파일을 교체하지 못했습니다: %1 · 새로 만든 조사 파일은 "
-                                 "%2 에 남겨 두었습니다.")
-                      .arg(overwriteError.isEmpty() ? replaceError : overwriteError,
-                           QDir::toNativeSeparators(staged)));
-    }
+    return false;
   }
   dropStaged();
   return true;
 }
 
 bool publishSurveyGeneration(const QString& generationGpkg, const QString& targetGpkg,
-                             QString* errorOut) {
+                             QString* errorOut, QString* writtenPath) {
   if (!validateForOpen(generationGpkg, errorOut)) return false;
-  return copySurvey(generationGpkg, targetGpkg, errorOut);
+  return copySurvey(generationGpkg, targetGpkg, errorOut, writtenPath);
 }
 
 bool noteRecoveryPending(const QString& recoveryDirectory, const QString& snapshotPath, QString* errorOut) {
@@ -706,7 +757,8 @@ AbsorbResult absorbExternalVectors(QgsProject* project, const QString& gpkgPath,
 }
 
 PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
-                                const QString& recoveryDirectory) {
+                                const QString& recoveryDirectory,
+                                const QString& fallbackDirectory) {
   PersistAttempt attempt;
   if (!project || gpkgPath.isEmpty()) {
     attempt.error = QStringLiteral("저장 경로가 없습니다.");
@@ -775,7 +827,18 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
     return attempt;
   }
   QString copyError;
-  if (!copySurvey(gpkgPath, generation, &copyError)) {
+  if (!QFileInfo::exists(gpkgPath)) {
+    QString snapshotError;
+    const QString snapshot = writeRecoverySnapshot(project, recoveryDirectory, &snapshotError);
+    if (snapshot.isEmpty() || !copySurvey(snapshot, generation, &copyError)) {
+      recover(snapshotError.isEmpty()
+                  ? (copyError.isEmpty() ? QStringLiteral("원래 조사 파일이 없어 새 조사 파일을 만들지 못했습니다.")
+                                         : copyError)
+                  : snapshotError);
+      return attempt;
+    }
+    remountCopiedSurveyLayers(project, generation);
+  } else if (!copySurvey(gpkgPath, generation, &copyError)) {
     recover(copyError.isEmpty() ? QStringLiteral("다음 세대 조사 파일을 만들지 못했습니다.")
                                 : copyError);
     return attempt;
@@ -862,21 +925,44 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
   QgsOgrProviderUtils::invalidateCachedDatasets(QFileInfo(gpkgPath).absoluteFilePath());
   dropIdleJournals(gpkgPath);
   QString publishError;
-  if (!publishSurveyGeneration(generation, gpkgPath, &publishError)) {
-    recover(publishError.isEmpty() ? QStringLiteral("검증된 다음 세대로 원본을 교체하지 못했습니다.")
-                                   : publishError);
-    return attempt;
+  QString published = QFileInfo(gpkgPath).absoluteFilePath();
+  if (!publishSurveyGeneration(generation, gpkgPath, &publishError, &published)) {
+    QString fallbackError;
+    const QFileInfo requested(gpkgPath);
+    const QString fallbackDir =
+        !fallbackDirectory.trimmed().isEmpty() &&
+                (QFileInfo(fallbackDirectory).isDir() || QDir().mkpath(fallbackDirectory))
+            ? QFileInfo(fallbackDirectory).absoluteFilePath()
+            : QString();
+    const QString fallbackTarget = fallbackDir.isEmpty()
+        ? QString()
+        : QDir(fallbackDir).filePath(requested.fileName());
+    if (!fallbackTarget.isEmpty() &&
+        fallbackTarget.compare(published, Qt::CaseInsensitive) != 0 &&
+        publishSurveyGeneration(generation, fallbackTarget, &fallbackError, &published)) {
+      KaSessionLog::line(QStringLiteral("[save] 원래 경로에 쓸 수 없어 이 폴더에 저장 — %1")
+                             .arg(QDir::toNativeSeparators(published)));
+    } else {
+      recover(publishError.isEmpty() ? QStringLiteral("검증된 다음 세대로 원본을 교체하지 못했습니다.")
+                                     : publishError);
+      return attempt;
+    }
   }
 
-  const QString originalAbs = QFileInfo(gpkgPath).absoluteFilePath();
+  const QString originalAbs = QFileInfo(published).absoluteFilePath();
   project->setFileName(originalAbs);
   project->setPresetHomePath(QFileInfo(originalAbs).absolutePath());
   for (QgsVectorLayer* vector : ordered) {
     if (vector && livesInGpkg(vector, gpkgPath) && vector->isModified())
       vector->rollBack(false);
+    if (vector && livesInGpkg(vector, published) && vector->isModified())
+      vector->rollBack(false);
   }
-  retargetGpkgLayers(project, generation, gpkgPath);
-  LayerOps::reloadSurveyGpkgReaders(project, gpkgPath);
+  retargetGpkgLayers(project, generation, published);
+  if (published.compare(QFileInfo(gpkgPath).absoluteFilePath(), Qt::CaseInsensitive) != 0)
+    remountCopiedSurveyLayers(project, published);
+  LayerOps::reloadSurveyGpkgReaders(project, published);
+  attempt.surveyPath = originalAbs;
   attempt.saved = true;
   return attempt;
 }

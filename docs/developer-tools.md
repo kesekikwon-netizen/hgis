@@ -6,7 +6,7 @@
 
 | 도구 | 실제 개발에서 사용 | 범위 |
 | --- | --- | --- |
-| Cursor Agent | Agent·Task·MCP·hooks·skills로 조사·계획·수정·검증 실행 | Cursor 모델 선택기의 고정 모델(Auto 아님); 필요한 경우 Task 하위 작업 |
+| Cursor Agent | Agent·Task·MCP·hooks·skills로 조사·계획·수정·검증 실행 | 모델 선택기 고정 모델은 Grok 4.7. Auto·Fast 아님. https://cursor.com/docs/models |
 | AGENTS.md | Cursor가 읽는 워크스페이스 규칙. 작업 시작 전 제약·순서·완료 기준 확인 | 현재 상태·handoff·소스와 함께 확인 |
 | clangd + 실제 컴파일 DB | 진단, 호출 위치의 선언·정의 확인 | [탐색 명령](clangd-navigation.md), 표본 정의 조회 10/10 |
 | Graft MCP | 후보 정의 검색, 파일 구조, 인덱싱된 파일의 문자열 검색 | `src/`, `tests/`; 전체 호출/영향 분석 제외 |
@@ -34,7 +34,7 @@ Graft는 저장소 `.cursor/mcp.json`이 아니라 USER-level `%USERPROFILE%\.cu
 }
 ```
 
-clangd는 Cursor clangd 확장과 저장소 `.clangd`의 `CompilationDatabase: build`를 사용한다. Archify는 `scripts/archify.ps1`로 실행한다. CMake는 Visual Studio 17 2022 x64 생성기를 쓰는 기존 `build/`를 유지한다. Cursor CMake Tools가 `generator=Ninja`로 `build/`를 덮어쓰지 않게 한다.
+clangd는 Cursor clangd 확장과 저장소 `.clangd`의 `CompilationDatabase: build`를 사용한다. Archify는 `scripts/archify.ps1`로 실행한다. CMake는 `CMakePresets.json`의 `vs`(Visual Studio 17 2022 x64)와 기존 `build/`를 유지한다. 워크스페이스 `.vscode/settings.json`은 `cmake.useCMakePresets: always`이고, 폴더를 열 때 자동 구성하지 않는다. `compiledb` 프리셋만 `build-clangd`에 Ninja를 쓴다.
 
 ## Graft 설치와 재현
 
@@ -77,6 +77,12 @@ Graft의 기본 추출은 실제 호출 표본 10개 중 1개, Windows clangd �
 
 이번 설정의 실행 로그는 `build/qa/dev-tools-setup-20260914/`, 이전 전체 제품 빌드·테스트 기록은 `build/qa/tooling-validation-20260914/REPORT.md`에 있다. 로컬 QA 결과는 저장소에 커밋되지 않는다.
 
-이전 Release 빌드와 시작 스모크는 통과했다. 전체 CTest는 43개 중 39개 통과·4개 실패였고, 그중 두 테스트는 단독 재검사에서 통과했다. 반복 재현되는 heritage_flow/WMTS 검사 실패 및 save_open의 240초 제한 근접 문제는 남아 있다. 이번 도구 설정은 제품 C++나 테스트를 수정하지 않는다.
+2026-09-14의 43개 중 39개 실패 기록은 현재 기준이 아니다. 2026-09-20에 `save_open_drawing`과 `heritage_style`은 통과했고 smoke는 0이었다. 사용자 Cursor의 Orca 훅과 `build/`용 Ninja 설정은 2026-09-22에 제거했다. clangd 헤더 삽입은 `never`다. 변경 줄 clang-tidy는 `scripts/clang-tidy-changed.ps1`다.
+
+Grok이 여섯 도구를 빠뜨리던 이유는 지시가 `AGENTS.md` 안에만 있고, 빼먹어도 턴이 끝났기 때문이다. `src/`·`tests/` C++를 고친 Windows 세션은 `.cursor/hooks.json`의 `stop`이 Graft·clangd·Archify·ctest 기록이 없을 때 follow-up을 보낸다. 훅은 Node라서 Ubuntu 클라우드에서도 실행된다. https://cursor.com/docs/hooks
+
+클라우드 에이전트는 Ubuntu다. 설정은 `.cursor/environment.json`과 `.cursor/Dockerfile`이다. https://cursor.com/docs/cloud-agent/setup 그 VM에는 OSGeo4W와 Visual Studio가 없다. Release·CTest·smoke는 이 Windows PC에서만 한다. 클라우드에 비밀키를 파일로 넣지 않는다. 대시보드 Secrets를 쓴다. https://cursor.com/dashboard/cloud-agents#environments
+
+Windows CI는 비공개 저장소의 self-hosted runner다. https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners 이 문서 수정은 제품 C++를 바꾸지 않는다.
 
 과거 Codex 설정 근거(호환): [프로젝트 MCP 설정](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), [프로젝트 스킬](https://learn.chatgpt.com/docs/build-skills). Cursor는 USER MCP와 위 Cursor 설정을 우선한다. 실제 이 PC의 유효 설정과 실행 결과를 우선한다.

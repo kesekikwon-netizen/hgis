@@ -37,7 +37,14 @@ TopographicSettings::Credentials TopographicSettings::readFromFiles(
     const QString& personalFile, const QStringList& fallbackFiles) {
   // Existence, not a non-empty password, controls priority. Saving empty values
   // disables this PC's default login instead of restoring the bundled account.
-  if (!personalFile.isEmpty() && QFileInfo::exists(personalFile)) return readIni(personalFile, true);
+  if (!personalFile.isEmpty() && QFileInfo::exists(personalFile)) {
+    const Credentials personal = readIni(personalFile, true);
+    if (!personal.password.isEmpty()) return personal;
+    QSettings probe(personalFile, QSettings::IniFormat);
+    probe.setFallbacksEnabled(false);
+    if (!KaSecretStore::hasUndecryptablePassword(probe, QStringLiteral("ngii")))
+      return personal;
+  }
   for (const auto& fallback : fallbackFiles)
     if (QFileInfo::exists(fallback)) return readIni(fallback, false);
   return {};
@@ -57,8 +64,8 @@ bool TopographicSettings::saveToFile(const QString& personalFile, const Credenti
   if (!staging.isValid()) return fail(QStringLiteral("계정 설정을 준비하지 못했습니다. 폴더 권한을 확인하세요."));
   const auto serialized = staging.filePath(QStringLiteral("account.ini"));
   {
-    // Username stays plain. The password is DPAPI ciphertext, so INI escaping
-    // never sees the secret. Empty password removes both keys.
+    // Username stays plain. Installed builds use DPAPI; portable uses
+    // password_portable so another PC can read the same folder.
     QSettings settings(serialized, QSettings::IniFormat);
     settings.setFallbacksEnabled(false);
     settings.setValue(QStringLiteral("ngii/username"), credentials.username);
