@@ -1,17 +1,18 @@
 #include "KaStartupSplash.h"
 
+#include "KaSplashArt.h"
 #include "KaSplashCredits.h"
 #include "KaSplashPalette.h"
-#include "KaSplashScene.h"
 
+#include <QCoreApplication>
+#include <QFontMetricsF>
 #include <QGuiApplication>
-#include <QLinearGradient>
-#include <QMouseEvent>
+#include <QImage>
 #include <QPainter>
-#include <QPainterPath>
 #include <QScreen>
-#include <QShowEvent>
 #include <QTimer>
+
+#include <algorithm>
 
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -20,7 +21,16 @@
 #include <windows.h>
 #endif
 
+using namespace KaSplashPalette;
+
 namespace {
+
+// Transparent margin around the card; the lower edge is wider for the shadow.
+constexpr double kSide = 16, kTopMargin = 10, kBottomMargin = 24;
+constexpr double kCardWidth = 700, kCardHeight = 400, kRadius = 16;
+
+const QString kPreparing = QStringLiteral("앱을 준비하고 있습니다");
+const QString kOpening = QStringLiteral("잠시 후 홈 화면이 열립니다");
 
 // Honors Windows "애니메이션 효과 표시". KA_HGIS_REDUCED_MOTION=1 or 0 forces it
 // on or off for QA.
@@ -36,31 +46,29 @@ bool reducedMotionRequested() {
 }
 
 struct Layout {
-  QRectF frame;
   QRectF card;
-  QRectF plan;
-  QRectF header;
-  QRectF block;
-  QRectF bar;
+  QRectF icon;
+  QPointF title;
+  QPointF status;
+  QRectF dots;
+  QRectF notices;
   double unit = 1.0;
-  double frameRadius = 22.0;
-  double cardRadius = 16.0;
 };
 
 Layout layoutFor(const QRectF& bounds) {
   Layout l;
-  l.frame = bounds.adjusted(16, 14, -16, -18);
-  l.card = l.frame.adjusted(9, 9, -9, -9);
-  l.unit = l.card.height() / 500.0;
-  const double u = qMax(0.7, l.unit), margin = 26 * u;
-  const double top = l.card.top() + margin, bottom = l.card.bottom() - 46 * u;
-  const QRectF content(l.card.left() + margin, top, l.card.width() - 2 * margin, bottom - top);
-  l.plan = QRectF(content.left(), content.top(), content.width() * 0.48, content.height());
-  const double right = l.plan.right() + 22 * u;
-  l.header = QRectF(right, content.top(), content.right() - right, 52 * u);
-  l.block = QRectF(right, l.header.bottom() + 14 * u, content.right() - right,
-                   content.bottom() - l.header.bottom() - 14 * u);
-  l.bar = QRectF(l.card.left() + 18 * u, l.card.bottom() - 18 * u, l.card.width() - 36 * u, 3);
+  l.card = bounds.adjusted(kSide, kTopMargin, -kSide, -kBottomMargin);
+  const double u = l.unit = std::max(0.6, l.card.height() / kCardHeight);
+  const double left = l.card.left() + 40 * u, width = l.card.width() - 80 * u;
+  const double side = 76 * u;
+  const QPointF summit(l.card.left() + l.card.width() * 0.78, l.card.top() + l.card.height() * 0.36);
+  l.icon = QRectF(summit.x() - side / 2, summit.y() - side / 2, side, side);
+  l.title = QPointF(left, l.card.bottom() - 106 * u);
+  l.status = QPointF(left, l.card.bottom() - 80 * u);
+  const QFontMetricsF metrics(uiFont(12.5 * u));
+  const double text = std::max(metrics.horizontalAdvance(kPreparing), metrics.horizontalAdvance(kOpening));
+  l.dots = QRectF(left + text + 16 * u, l.status.y() - 9.5 * u, 96 * u, 9 * u);
+  l.notices = QRectF(left, l.card.bottom() - 61 * u, width, 36 * u);
   return l;
 }
 
@@ -75,7 +83,7 @@ QString KaStartupSplash::attributionText() {
       "PROJ  © PROJ contributors · MIT\n"
       "GEOS  © GEOS contributors · LGPLv2.1\n"
       "SQLite · Public domain\n"
-      "지도·자료: VWorld · 국토정보플랫폼 · 국가유산 공간정보 · 흙토람 · KIGAM 등\n"
+      "지도·자료: VWorld · 국토정보플랫폼 · 국가유산 공간정보 · 흙토람 · KIGAM · 국사편찬위원회 등\n"
       "지도·자료 및 PROJ 데이터는 제공처의 저작권·이용조건을 따릅니다.");
 }
 
@@ -87,19 +95,16 @@ QString KaStartupSplash::creditsText() {
 KaStartupSplash::KaStartupSplash(QWidget* parent, int readingDurationMs)
     : QWidget(parent, Qt::SplashScreen | Qt::FramelessWindowHint),
       m_readingDurationMs(qMax(1, readingDurationMs)),
-      m_scene(std::make_unique<KaSplashScene>()),
       m_icon(QStringLiteral(":/ka-hgis/app-icon.png")),
       m_reducedMotion(reducedMotionRequested()) {
   setObjectName(QStringLiteral("startupSplash"));
-  setWindowTitle(QStringLiteral("필드고고학GIS v2 · 시작 안내"));
+  setWindowTitle(QStringLiteral("Strata · 필드고고학 GIS 시작 안내"));
   setAttribute(Qt::WA_TranslucentBackground);
-  setAutoFillBackground(false);
-  setMouseTracking(true);
-  setAccessibleName(QStringLiteral("필드고고학GIS v2 시작 안내"));
+  setAccessibleName(QStringLiteral("Strata 필드고고학 GIS 시작 안내"));
   setAccessibleDescription(creditsText());
 
   m_timer = new QTimer(this);
-  m_timer->setInterval(25);
+  m_timer->setInterval(16);
   m_timer->setTimerType(Qt::PreciseTimer);
   connect(m_timer, &QTimer::timeout, this, &KaStartupSplash::tick);
   placeWindow();
@@ -111,36 +116,33 @@ void KaStartupSplash::placeWindow() {
   const QRect available = QGuiApplication::primaryScreen()
                               ? QGuiApplication::primaryScreen()->availableGeometry()
                               : QRect(0, 0, 1024, 768);
-  setFixedSize(qMin(920, available.width() - 24), qMin(536, available.height() - 24));
+  const double w = kCardWidth + 2 * kSide, h = kCardHeight + kTopMargin + kBottomMargin;
+  // Small screens shrink the whole notice evenly instead of cropping it.
+  const double scale = std::min({1.0, (available.width() - 24) / w, (available.height() - 24) / h});
+  setFixedSize(int(w * scale), int(h * scale));
   move(available.center() - rect().center());
-  layoutScene();
+}
+
+QRectF KaStartupSplash::cardRect() const {
+  return layoutFor(QRectF(rect())).card;
+}
+
+QRectF KaStartupSplash::dotsRect() const {
+  return layoutFor(QRectF(rect())).dots;
 }
 
 void KaStartupSplash::markReady() {
   if (m_readingClock.isValid())
     return;
   m_readingClock.start();
-  m_frameClock.start();
-  tick();
+  update();  // the status line changes
   m_timer->start();
 }
 
-double KaStartupSplash::phase() const {
-  if (!m_readingClock.isValid()) return 0.0;
-  return m_reducedMotion ? 1.0 : m_progress / 1000.0;
-}
-
 QString KaStartupSplash::statusText() const {
-  if (!m_readingClock.isValid()) return QStringLiteral("앱을 준비하고 있습니다…");
+  if (!m_readingClock.isValid()) return kPreparing;
   if (m_completed) return QStringLiteral("준비 완료");
-  return QStringLiteral("잠시 후 홈 화면이 열립니다.");
-}
-
-QString KaStartupSplash::secondsText() const {
-  if (!m_readingClock.isValid())
-    return QStringLiteral("안내 시간 %1초").arg((m_readingDurationMs + 999) / 1000);
-  const qint64 left = qMax<qint64>(0, m_readingDurationMs - m_readingClock.elapsed());
-  return QStringLiteral("%1초 남음").arg((left + 999) / 1000);
+  return kOpening;
 }
 
 void KaStartupSplash::tick() {
@@ -148,10 +150,10 @@ void KaStartupSplash::tick() {
     return;
   const qint64 elapsed = m_readingClock.elapsed();
   m_progress = int(qMin<qint64>(1000, elapsed * 1000 / m_readingDurationMs));
-  const double dt = qMin(0.1, m_frameClock.restart() / 1000.0);
-  layoutScene();
-  m_scene->advance(phase(), m_reducedMotion ? 0.0 : dt);
-  update();
+  if (!m_reducedMotion) {
+    const Layout l = layoutFor(QRectF(rect()));
+    update(l.dots.toAlignedRect().adjusted(-4, -4, 4, 4));
+  }
   if (elapsed < m_readingDurationMs)
     return;
   m_completed = true;
@@ -159,102 +161,39 @@ void KaStartupSplash::tick() {
   emit readyToShow();
 }
 
-void KaStartupSplash::layoutScene() {
+const QPixmap& KaStartupSplash::staticLayer() {
+  const qreal dpr = devicePixelRatioF();
+  const QSize pixels = (QSizeF(size()) * dpr).toSize();
+  if (m_static.size() == pixels && qFuzzyCompare(m_static.devicePixelRatioF(), dpr))
+    return m_static;
+  m_static = QPixmap(pixels);
+  m_static.setDevicePixelRatio(dpr);
+  m_static.fill(Qt::transparent);
   const Layout l = layoutFor(QRectF(rect()));
-  m_scene->setRect(l.plan, devicePixelRatioF());
-}
-
-QRectF KaStartupSplash::planRect() const {
-  return layoutFor(QRectF(rect())).plan;
-}
-
-double KaStartupSplash::revealedFraction() const {
-  return m_scene->revealedFraction();
-}
-
-double KaStartupSplash::motionClock() const {
-  return m_scene->clock();
-}
-
-void KaStartupSplash::resizeEvent(QResizeEvent*) {
-  layoutScene();
-}
-
-void KaStartupSplash::showEvent(QShowEvent* event) {
-  QWidget::showEvent(event);
-  layoutScene();
-}
-
-void KaStartupSplash::trackPointer(const QPointF& pos, bool pressed) {
-  if (m_reducedMotion || !m_readingClock.isValid() || m_completed) return;
-  layoutScene();
-  m_scene->pointerMoved(pos, pressed);
-}
-
-void KaStartupSplash::mouseMoveEvent(QMouseEvent* event) {
-  trackPointer(event->position(), event->buttons() & Qt::LeftButton);
-}
-
-void KaStartupSplash::mousePressEvent(QMouseEvent* event) {
-  trackPointer(event->position(), true);
-}
-
-void KaStartupSplash::leaveEvent(QEvent*) {
-  m_scene->pointerLeft();
-  unsetCursor();
-  update();
+  QPainter painter(&m_static);
+  painter.setRenderHint(QPainter::Antialiasing);
+  painter.setRenderHint(QPainter::TextAntialiasing);
+  KaSplashArt::paintShadow(painter, l.card, kRadius);
+  KaSplashArt::paintCard(painter, l.card, kRadius,
+                         KaSplashArt::contours(l.card.size(), dpr, l.icon.center() - l.card.topLeft()));
+  KaSplashArt::paintIcon(painter, l.icon, m_icon);
+  KaSplashCredits::paintTitle(painter, l.title, l.unit, QCoreApplication::applicationVersion());
+  KaSplashCredits::paintNotices(painter, l.notices, l.unit);
+  return m_static;
 }
 
 void KaStartupSplash::paintEvent(QPaintEvent*) {
-  layoutScene();
+  const QPixmap& layer = staticLayer();
   const Layout l = layoutFor(QRectF(rect()));
   QPainter painter(this);
-  painter.setRenderHint(QPainter::Antialiasing);
-  painter.setRenderHint(QPainter::SmoothPixmapTransform);
   painter.setCompositionMode(QPainter::CompositionMode_Source);
-  painter.fillRect(rect(), Qt::transparent);
+  painter.drawPixmap(0, 0, layer);
   painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
-
-  QPainterPath shadow;
-  shadow.addRoundedRect(l.frame.translated(0, 5), l.frameRadius + 2, l.frameRadius + 2);
-  painter.fillPath(shadow, QColor(12, 28, 48, 70));
-
-  QLinearGradient mat(l.frame.topLeft(), l.frame.bottomLeft());
-  mat.setColorAt(0, QColor(255, 255, 255));
-  mat.setColorAt(0.42, QColor(246, 249, 252));
-  mat.setColorAt(1, QColor(214, 221, 232));
-  QPainterPath frame;
-  frame.addRoundedRect(l.frame, l.frameRadius, l.frameRadius);
-  painter.fillPath(frame, mat);
-  painter.setPen(QPen(QColor(255, 255, 255, 220), 1.4));
-  painter.setBrush(Qt::NoBrush);
-  painter.drawPath(frame);
-
-  QLinearGradient blue(l.card.topLeft(), l.card.bottomRight());
-  blue.setColorAt(0, QColor(QStringLiteral("#2b86c9")));
-  blue.setColorAt(0.38, QColor(QStringLiteral("#12558d")));
-  blue.setColorAt(1, QColor(QStringLiteral("#092f56")));
-  QPainterPath card;
-  card.addRoundedRect(l.card, l.cardRadius, l.cardRadius);
-  painter.fillPath(card, blue);
-
-  QLinearGradient gloss(l.card.topLeft(), QPointF(l.card.left(), l.card.top() + l.card.height() * 0.46));
-  gloss.setColorAt(0, QColor(255, 255, 255, 96));
-  gloss.setColorAt(0.55, QColor(255, 255, 255, 22));
-  gloss.setColorAt(1, QColor(255, 255, 255, 0));
-  painter.fillPath(card, gloss);
-  painter.setPen(QPen(QColor(255, 255, 255, 110), 1.3));
-  painter.drawRoundedRect(l.card.adjusted(1.2, 1.2, -1.2, -1.2), l.cardRadius - 1, l.cardRadius - 1);
-
-  const double ph = phase();
-  painter.save();
-  QPainterPath planClip;
-  planClip.addRoundedRect(l.plan, 10, 10);
-  painter.setClipPath(planClip);
-  m_scene->paint(painter, ph, m_icon);
-  painter.restore();
-  KaSplashCredits::paintHeader(painter, l.header, m_icon, 1.0);
-  KaSplashCredits::paintTitleBlock(painter, l.block, 1.0);
-  KaSplashCredits::paintFooter(painter, l.bar, l.card, l.unit, m_progress / 1000.0,
-                               statusText(), QString());
+  painter.setRenderHint(QPainter::Antialiasing);
+  painter.setFont(uiFont(12.5 * l.unit));
+  painter.setPen(withAlpha(kInk, 0.90));
+  painter.drawText(l.status, statusText());
+  const bool still = m_reducedMotion || !m_readingClock.isValid();
+  const double seconds = m_readingClock.isValid() ? m_readingClock.elapsed() / 1000.0 : 0.0;
+  KaSplashArt::paintFlowDots(painter, l.dots, seconds, still);
 }

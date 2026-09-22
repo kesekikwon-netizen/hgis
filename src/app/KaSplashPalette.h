@@ -5,27 +5,17 @@
 
 #include <algorithm>
 
-// Colors, fonts and easing shared by the startup splash. Blues match the app
-// accent. Earth tones remain for leftover scrape helpers that no longer paint.
+// Colors and fonts shared by the startup splash. The blues are the app's glossy
+// accent; sky and ink are the light text tones used on it.
 namespace KaSplashPalette {
 
+inline const QColor kTop{0x2B, 0x86, 0xC9};
+inline const QColor kMid{0x12, 0x55, 0x8D};
+inline const QColor kDeep{0x09, 0x2F, 0x56};
 inline const QColor kInk{0xE5, 0xF2, 0xFF};
 inline const QColor kSky{0xA8, 0xE7, 0xFF};
-inline const QColor kLine{182, 225, 255};
-inline const QColor kGold{0xD9, 0xA9, 0x3A};
-inline const QColor kSand{0xD8, 0xBB, 0x7B};
-inline const QColor kSoil{0x93, 0x60, 0x39};
-inline const QColor kOchre{0x95, 0x60, 0x29};
-inline const QColor kStone{0x79, 0x6B, 0x62};
-inline const QColor kLoam{0xA6, 0x74, 0x45};
-inline const QColor kPlanShade{6, 34, 64, 120};
 
 inline double clamp01(double v) { return std::clamp(v, 0.0, 1.0); }
-
-inline double easeOut(double v) {
-  const double t = 1.0 - clamp01(v);
-  return 1.0 - t * t * t;
-}
 
 inline QColor withAlpha(QColor color, double alpha) {
   color.setAlphaF(float(clamp01(alpha)));
@@ -39,10 +29,21 @@ inline QFont uiFont(double pixels, bool bold = false) {
   return font;
 }
 
-inline QFont monoFont(double pixels) {
-  QFont font(QStringLiteral("Consolas"));
-  font.setStyleHint(QFont::Monospace);
+// Lighter face for secondary lines; falls back to Malgun Gothic when missing.
+inline QFont lightFont(double pixels) {
+  QFont font(QStringLiteral("Malgun Gothic Semilight"));
+  font.setFamilies({QStringLiteral("Malgun Gothic Semilight"), QStringLiteral("Malgun Gothic")});
   font.setPixelSize(std::max(9, int(pixels + 0.5)));
+  return font;
+}
+
+// Latin face for the Strata wordmark.
+inline QFont wordmarkFont(double pixels) {
+  QFont font(QStringLiteral("Segoe UI"));
+  font.setFamilies({QStringLiteral("Segoe UI"), QStringLiteral("Malgun Gothic")});
+  font.setPixelSize(std::max(9, int(pixels + 0.5)));
+  font.setWeight(QFont::DemiBold);
+  font.setLetterSpacing(QFont::AbsoluteSpacing, pixels * 0.02);
   return font;
 }
 

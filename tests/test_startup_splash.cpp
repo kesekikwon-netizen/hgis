@@ -1,10 +1,10 @@
+#include "app/KaSplashCredits.h"
 #include "app/KaStartupSplash.h"
 
 #include <QApplication>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QImage>
-#include <QMouseEvent>
 #include <QSignalSpy>
 #include <QTimer>
 #include <QtTest>
@@ -20,10 +20,8 @@ void saveFrame(QWidget& widget, const QString& name) {
   widget.grab().save(QDir(output).filePath(name));
 }
 
-void moveMouse(QWidget& widget, const QPointF& pos, Qt::MouseButtons buttons = Qt::NoButton) {
-  QMouseEvent move(QEvent::MouseMove, pos, widget.mapToGlobal(pos), Qt::NoButton, buttons,
-                   Qt::NoModifier);
-  QApplication::sendEvent(&widget, &move);
+QImage grabArea(QWidget& widget, const QRectF& area) {
+  return widget.grab(area.toAlignedRect()).toImage();
 }
 
 }  // namespace
@@ -74,20 +72,26 @@ private slots:
     connect(&heartbeat, &QTimer::timeout, this, [&]() { ++beats; });
     heartbeat.start(20);
     QTest::qWait(250);
-    const QString output = qEnvironmentVariable("KA_STARTUP_QA_OUTPUT_DIR");
-    if (!output.isEmpty()) {
-      QDir().mkpath(output);
-      QVERIFY(splash.grab().save(QDir(output).filePath(QStringLiteral("startup-v2.png"))));
-    }
+    saveFrame(splash, QStringLiteral("startup-v2.png"));
     const QString credits = KaStartupSplash::creditsText();
-    for (const QString& text : {QStringLiteral("만든이"), QStringLiteral("권영인"),
-                                QStringLiteral("동국문화재연구원"),
-                                QStringLiteral("v2"), QStringLiteral("GPL"),
-                                QStringLiteral("VWorld"), QStringLiteral("국가유산")})
+    for (const QString& text : {QStringLiteral("Strata"), QStringLiteral("필드고고학 GIS"),
+                                QStringLiteral("만든이"), QStringLiteral("권영인"),
+                                QStringLiteral("동국문화재연구원"), QStringLiteral("v2"),
+                                QStringLiteral("GPL"), QStringLiteral("VWorld"),
+                                QStringLiteral("국가유산")})
       QVERIFY2(credits.contains(text), qPrintable(text));
     QVERIFY2(!credits.contains(QStringLiteral("조유량")), "splash must not list 조유량");
     QVERIFY2(!credits.contains(QStringLiteral("박종환")), "splash must not list 박종환");
     QCOMPARE(splash.accessibleDescription(), credits);
+    // The painted short form keeps the creator, the licence and every provider.
+    QVERIFY(KaSplashCredits::copyrightLine().contains(QStringLiteral("권영인")));
+    QVERIFY(KaSplashCredits::copyrightLine().contains(QStringLiteral("GPL")));
+    for (const QString& provider : {QStringLiteral("VWorld"), QStringLiteral("국토정보플랫폼"),
+                                    QStringLiteral("국가유산"), QStringLiteral("흙토람"),
+                                    QStringLiteral("KIGAM"), QStringLiteral("국사편찬위원회")})
+      QVERIFY2(KaSplashCredits::dataLine().contains(provider), qPrintable(provider));
+    QCOMPARE(KaSplashCredits::productSubtitle(QStringLiteral("2.0.0")),
+             QStringLiteral("필드고고학 GIS · v2.0.0"));
     const QString attribution = KaStartupSplash::attributionText();
     for (const QString& library : {QStringLiteral("QGIS"), QStringLiteral("Qt"),
                                   QStringLiteral("GDAL"), QStringLiteral("PROJ"),
@@ -103,62 +107,62 @@ private slots:
     QVERIFY(elapsed.elapsed() < 8000);
   }
 
-  void plateIsOpaqueAndMotionChangesTheFrame() {
+  void cardIsRoundedOpaqueAndOnlyTheDotsMove() {
     KaStartupSplash splash(nullptr, 3000);
     splash.show();
     QTest::qWait(80);
     saveFrame(splash, QStringLiteral("startup-cover.png"));
     const QImage cover = splash.grab().toImage();
-    // Rounded card: the window corners stay clear so the white mat can sit outside.
-    QVERIFY(qAlpha(cover.pixel(1, 1)) < 40);
-    QVERIFY(qAlpha(cover.pixel(cover.width() - 2, cover.height() - 2)) < 40);
-    QVERIFY(qAlpha(cover.pixel(cover.width() / 2, cover.height() / 2)) > 200);
-    const QColor rim = cover.pixelColor(20, cover.height() / 2);
-    QVERIFY(rim.red() > 180 && rim.green() > 180 && rim.blue() > 180);
+    const qreal dpr = cover.devicePixelRatio();
+    auto pixel = [&](const QPointF& p) { return cover.pixelColor((p * dpr).toPoint()); };
+    const QRectF card = splash.cardRect();
+    // The window and the rounded card corners stay clear.
+    QVERIFY(pixel(QPointF(1, 1)).alpha() < 40);
+    QVERIFY(pixel(card.topLeft() + QPointF(1.5, 1.5)).alpha() < 40);
+    // The card itself is the opaque theme blue.
+    const QColor centre = pixel(card.center());
+    QCOMPARE(centre.alpha(), 255);
+    QVERIFY(centre.blue() > centre.red() + 40);
+
+    const QRectF dots = splash.dotsRect();
+    QVERIFY(card.contains(dots));
+    QVERIFY(dots.top() > card.center().y());  // every line of text sits in the lower part
+    const QRectF art(card.left(), card.top(), card.width(), dots.top() - card.top() - 30);
     splash.markReady();
-    const QRect plan = splash.planRect().toRect();
-    const QImage first = splash.grab(plan).toImage();
-    QTRY_VERIFY_WITH_TIMEOUT(splash.motionClock() > 0.25, 2000);
+    QTest::qWait(30);
+    const QImage artBefore = grabArea(splash, art);
+    const QImage dotsBefore = grabArea(splash, dots);
+    QTest::qWait(350);
     saveFrame(splash, QStringLiteral("startup-motion.png"));
-    const QImage moving = splash.grab().toImage();
-    const QImage later = splash.grab(plan).toImage();
-    QVERIFY(qAlpha(moving.pixel(1, 1)) < 40);
-    QVERIFY(qAlpha(moving.pixel(moving.width() / 2, moving.height() / 2)) > 200);
-    QVERIFY(first != later);
+    QCOMPARE(grabArea(splash, art), artBefore);  // the artwork never moves
+    QVERIFY(grabArea(splash, dots) != dotsBefore);  // the dots flow
   }
 
   void clickNeverClosesTheNotice() {
-    KaStartupSplash splash(nullptr, 4000);
+    KaStartupSplash splash(nullptr, 1500);
     QSignalSpy ready(&splash, &KaStartupSplash::readyToShow);
     splash.show();
     splash.markReady();
     QTest::qWait(60);
-    const QRectF plan = splash.planRect();
-    QVERIFY(splash.revealedFraction() < 1.0);
-    moveMouse(splash, QPointF(plan.left() + plan.width() * 0.3, plan.top() + plan.height() * 0.4));
-    saveFrame(splash, QStringLiteral("startup-scrape.png"));
-    QTest::mouseClick(&splash, Qt::LeftButton, Qt::NoModifier, plan.center().toPoint());
+    QTest::mouseClick(&splash, Qt::LeftButton, Qt::NoModifier, splash.cardRect().center().toPoint());
+    QTest::keyClick(&splash, Qt::Key_Escape);
     QVERIFY(splash.isVisible());
     QCOMPARE(ready.count(), 0);
-    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 6000);
-    QVERIFY(splash.revealedFraction() >= 0.99);
-    QEvent leave(QEvent::Leave);
-    QApplication::sendEvent(&splash, &leave);
-    splash.update();
-    QTest::qWait(30);
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 4000);
     saveFrame(splash, QStringLiteral("startup-final.png"));
   }
 
-  void reducedMotionShowsTheFinishedDrawing() {
+  void reducedMotionKeepsTheDotsStill() {
     qputenv("KA_HGIS_REDUCED_MOTION", "1");
-    KaStartupSplash splash(nullptr, 1000);
+    KaStartupSplash splash(nullptr, 1500);
     qputenv("KA_HGIS_REDUCED_MOTION", "0");
     splash.show();
     splash.markReady();
     QTest::qWait(60);
-    QCOMPARE(splash.revealedFraction(), 1.0);
-    moveMouse(splash, splash.planRect().center());
-    QVERIFY(splash.readingProgress() < 1000);
+    const QImage first = grabArea(splash, splash.dotsRect());
+    QTest::qWait(300);
+    QCOMPARE(grabArea(splash, splash.dotsRect()), first);
+    QVERIFY(splash.readingProgress() > 0 && splash.readingProgress() < 1000);
   }
 };
 

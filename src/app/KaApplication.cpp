@@ -835,7 +835,7 @@ int KaApplication::run(int argc, char** argv) {
       QObject::connect(splash.get(), &KaStartupSplash::readyToShow, &w, [&]() {
         w.show();
         splash->close();
-        KaCrashGuard::logLine(QStringLiteral("[boot] 10초 안내 후 창 표시 %1 ms")
+        KaCrashGuard::logLine(QStringLiteral("[boot] 시작 안내 후 창 표시 %1 ms")
                                   .arg(bootTimer.elapsed()));
       });
       splash->markReady();
