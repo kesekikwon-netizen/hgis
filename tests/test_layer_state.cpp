@@ -495,6 +495,38 @@ private slots:
     QVERIFY(base.contains(labels));
     QVERIFY(!base.contains(survey));
     QVERIFY2(!base.contains(heritage), "주변유적은 덧그림에서만 그린다");
+
+    auto* cadastral = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                         QStringLiteral("지적도"), QStringLiteral("memory"));
+    cadastral->setCustomProperty(QStringLiteral("ka_hgis/cadastral"), true);
+    cadastral->setRenderer(new QgsSingleSymbolRenderer(QgsFillSymbol::createSimple(
+        {{QStringLiteral("style"), QStringLiteral("no")},
+         {QStringLiteral("outline_color"), QStringLiteral("0,0,0,255")},
+         {QStringLiteral("outline_width"), QStringLiteral("0.2")}}).release()));
+    QgsPalLayerSettings lotSettings;
+    lotSettings.fieldName = QStringLiteral("'12'");
+    lotSettings.isExpression = true;
+    cadastral->setLabeling(new QgsVectorLayerSimpleLabeling(lotSettings));
+    cadastral->setLabelsEnabled(true);
+    project.addMapLayer(cadastral);
+    QgsLayerTreeLayer* labelNode = root->findLayer(labels->id());
+    const int labelIndex = root->children().indexOf(labelNode);
+    QVERIFY(labelIndex >= 0);
+    root->insertLayer(labelIndex, cadastral);
+    const QList<QgsMapLayer*> withLots = LayerOps::layersDrawnAboveLabels(&project);
+    QVERIFY2(!withLots.contains(cadastral), "지적 지번은 본 화면에 남긴다");
+    QVERIFY(withLots.contains(survey));
+    QVERIFY(LayerOps::sheetBasePaintLayers(&project).contains(cadastral));
+
+    QgsMapCanvas canvas;
+    canvas.resize(400, 300);
+    LayerOps::syncMapCanvas(&project, &canvas, false);
+    const QList<QgsMapLayer*> painted = canvas.layers();
+    QVERIFY(painted.contains(labels));
+    QVERIFY(painted.contains(cadastral));
+    QVERIFY(painted.contains(topo));
+    QVERIFY2(!painted.contains(survey), "조사선은 덧그림에서 한 번만 그린다");
+    QVERIFY2(!painted.contains(heritage), "유적 도형은 덧그림에서 한 번만 그린다");
   }
 
   void officialCadastralCountsSoAutoVworldIsNotNeeded() {

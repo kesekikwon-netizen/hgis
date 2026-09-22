@@ -452,10 +452,13 @@ bool refreshLabelOrderCache(QgsProject* project) {
     // 지번을 덮는 지적·조사 덧그림이 유적 도형·이름을 가리고, 범례를
     // 전부 껐다 켜야 다시 보인다. 지질·토양·지형도·위성은 그대로 뺀다.
     const bool keepHeritage = LayerLabelControls::isHeritage(vl);
+    // 지적도는 덧그림에 넣지 않는다. 지번은 본 화면에 남고, 그 위를 조사선·유적이
+    // 한 번만 덮는다. 지적 폴리곤을 덧그림에 넣으면 같은 면을 두 번 그린다.
+    const bool cadastral = LayerOps::isCadastralLayer(vl);
     // 주변유적은 아래 글자가 없어도 덧그림에 모은다. labeledBelow에만 넣으면
     // 첫 자료만 본지도에 남고 나머지 다섯은 덧지도에만 가서, 덧지도가
     // 비는 순간 조판에 유적 도형이 하나만 남거나 전부 사라진다.
-    if (visible && vl && !hidesOwn && !isBackdrop && paintsFullyOpaque(vl)
+    if (visible && vl && !hidesOwn && !isBackdrop && !cadastral && paintsFullyOpaque(vl)
         && (!LayerOps::isReferenceLayer(vl) || keepHeritage)
         && (labeledBelow || keepHeritage))
       bottomUp.append(QPointer<QgsMapLayer>(ml));

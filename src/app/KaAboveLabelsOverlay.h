@@ -20,9 +20,9 @@ class QgsMapCanvas;
 // (QgsMapRendererJob::composeImage) 쓰인다. 이 앱은 WMS 크래시를 피하려고 순차
 // 렌더(QgsMapRendererCustomPainterJob)를 쓰므로 그 속성이 무시된다.
 //
-// 그래서 지도가 다 그려진 뒤 이 캔버스 항목이 대상 레이어만 2차 패스로 다시 그린다.
-// 대상은 조사 도형·지적처럼 아래 글자를 덮어야 하는 불투명 벡터만
-// (LayerOps::layersDrawnAboveLabels). 주변유적·지질·지형도·위성은 넣지 않는다.
+// 본 화면 목록에서는 이 대상이 빠져 있다. 이 항목이 그 도형을 한 번만 그리고,
+// 글자가 있는 레이어는 심볼 없이 이름만 얹는다. 지적 지번은 본 화면에 남는다.
+// 대상은 LayerOps::layersDrawnAboveLabels. 지질·지형도·위성은 넣지 않는다.
 class KaAboveLabelsOverlay : public QgsMapCanvasItem {
 public:
   explicit KaAboveLabelsOverlay(QgsMapCanvas* canvas);
@@ -37,6 +37,7 @@ protected:
   void paint(QPainter* painter) override;
 
 private:
+  QList<QgsMapLayer*> currentLayers() const;
   void rebuildCache();
 
   QList<QPointer<QgsMapLayer>> m_layers;

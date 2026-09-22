@@ -143,6 +143,7 @@ constexpr const char* kIdMap = "ka_map";
 constexpr const char* kIdLegend = "ka_legend";
 // 라벨 위에 위 레이어를 한 번 더 그리는 덧지도. 본 지도 바로 위에 놓는다.
 constexpr const char* kIdMapAbove = "ka_map_above";
+constexpr const char* kIdMapNumbers = "ka_map_numbers";
 constexpr const char* kIdNorth = "ka_north";
 constexpr const char* kIdScaleBar = "ka_scalebar";
 constexpr const char* kIdScale = "ka_scale";
@@ -3365,7 +3366,11 @@ void KaDrawingStudio::applyHeritageNumberChrome() {
     LayoutService::tuneSheetLegend(legend);
     m_heritageNumbers.applyLegend(legend);
   }
-  map->refresh();
+  // 번호만 바뀌면 번호 레이어만 다시 그린다. 수치지형도가 있는 본지도는 그대로 둔다.
+  if (auto* numbers = dynamic_cast<QgsLayoutItemMap*>(findItemById(ly, kIdMapNumbers))) {
+    if (!map->property("ka_interacting").toBool())
+      numbers->refresh();
+  }
 }
 
 void KaDrawingStudio::syncScaleChips() {

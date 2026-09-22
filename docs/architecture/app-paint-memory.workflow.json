@@ -28,7 +28,7 @@
   ],
   "cards": [
     { "dot": "rose", "title": "Was", "items": ["Memory copy and a second heritage paint"] },
-    { "dot": "emerald", "title": "Now", "items": ["GPKG lines; heritage on the overlay only"] },
+    { "dot": "emerald", "title": "Now", "items": ["Canvas paints survey and heritage once on the overlay", "Number changes refresh ka_map_numbers only"] },
     { "dot": "cyan", "title": "Keep", "items": ["Numbers; legend names; 5 km clip"] }
   ]
 }

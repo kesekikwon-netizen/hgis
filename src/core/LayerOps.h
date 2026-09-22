@@ -96,11 +96,11 @@ public:
   static bool hasToggleableLabels(const QgsMapLayer* layer);
   // 레이어가 밑에 있으면 글자도 밑으로. 레이어 순서가 바뀔 때마다 부른다.
   static void applyLayerOrderToLabels(QgsProject* project, QgsMapCanvas* canvas = nullptr);
-  // 라벨 뒤(위)에 한 번 더 그려야 하는 레이어들. 맨 위가 앞이다.
-  // QGIS 는 도형을 모두 그린 뒤 라벨을 한 번에 얹으므로, 위 레이어가 아래
-  // 레이어의 글자에 가린다. 그 레이어들을 2차 패스로 다시 그리기 위한 목록이다.
+  // 라벨 뒤(위)에 한 번만 그릴 레이어들. 맨 위가 앞이다.
+  // 본 화면 목록에서는 빠진다. 지적 지번은 여기 넣지 않고 본 화면에 남긴다.
   static QList<QgsMapLayer*> layersDrawnAboveLabels(QgsProject* project);
-  // 조판 본지도: 덧그림 조사·지적을 뺀다. 주변유적은 본지도에 남긴다.
+  // 본 화면·조판 본지도. 덧그림에 올라간 조사·유적은 빼서 한 번만 그린다.
+  // 지적 지번은 이 목록에 남는다.
   static QList<QgsMapLayer*> sheetBasePaintLayers(QgsProject* project);
   static bool labelsVisible(const QgsMapLayer* layer);
   static bool setLabelsVisible(QgsMapLayer* layer, bool on);

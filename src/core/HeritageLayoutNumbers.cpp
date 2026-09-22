@@ -1242,9 +1242,33 @@ void HeritageLayoutNumbers::applyLegend(QgsLayoutItemLegend* legend) const {
     });
   }
   if (!rebuilt) return;
-  // The native override-change connection is suppressed above to avoid two
-  // rebuilds. Refresh its filter explicitly after the complete model snapshot.
-  if (needsMapFilter) legend->updateFilterByMap(false);
+  // Number badges already know which sites are on the sheet. The spatial hit
+  // test is only for other vectors (geology/soil) and only when the linked
+  // map extent or that layer set actually changed.
+  if (needsMapFilter) {
+    QStringList ids;
+    for (auto* node : model->rootGroup()->findLayers()) {
+      auto* layer = qobject_cast<QgsVectorLayer*>(node->layer());
+      if (!layer || layer == m_numberLayer || datasetFor(layer)) continue;
+      ids.append(layer->id());
+    }
+    ids.sort();
+    QString filterKey = ids.join(QLatin1Char('|'));
+    if (auto* linked = legend->linkedMap()) {
+      const QgsRectangle extent = linked->extent();
+      filterKey += QStringLiteral("@%1,%2,%3,%4,%5")
+                       .arg(extent.xMinimum(), 0, 'f', 2)
+                       .arg(extent.yMinimum(), 0, 'f', 2)
+                       .arg(extent.xMaximum(), 0, 'f', 2)
+                       .arg(extent.yMaximum(), 0, 'f', 2)
+                       .arg(linked->scale(), 0, 'f', 1);
+    }
+    const QString filterProp = QStringLiteral("ka_hgis/legend_map_filter_key");
+    if (legend->customProperty(filterProp).toString() != filterKey) {
+      legend->setCustomProperty(filterProp, filterKey);
+      legend->updateFilterByMap(false);
+    }
+  }
   LayoutService::flowSheetLegend(legend);
   legend->update();
 }

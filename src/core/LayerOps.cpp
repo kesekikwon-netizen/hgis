@@ -2512,7 +2512,9 @@ void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoo
   repairPersistedFileSources(project);
   reviveInvalidLayers(project);
 
-  QList<QgsMapLayer*> visible = visibleLayersPaintOrder(project);
+  // 덧그림 조사·유적은 캔버스 목록에서 뺀다. 오버레이가 그 도형을 한 번만 그린다.
+  // 지적 지번은 이 목록에 남아 그 선 아래에 있다.
+  QList<QgsMapLayer*> visible = sheetBasePaintLayers(project);
   const bool layersChanged = (visible != canvas->layers());
 
   if (project->crs().isValid())

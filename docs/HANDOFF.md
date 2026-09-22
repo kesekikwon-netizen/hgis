@@ -1,3 +1,12 @@
+## 2026-09-22 지도는 한 번만 그린다
+
+- 조사선·유적 도형은 본 화면 목록에서 빼고 덧그림에서 한 번만 그린다. 지적 지번은 본 화면에 남아 그 선 아래에 있다. 유적 이름은 심볼 없이 덧그림 위에 얹는다.
+- 조판에서 번호만 바뀌면 `ka_map_numbers`만 다시 그린다. 수치지형도가 있는 본지도는 그대로 둔다.
+- 범례 공간 검사는 지도 범위나 지질·토양 레이어가 바뀔 때만 한 번 돈다. 번호만 바뀔 때는 돌리지 않는다.
+- CTest `layer_state_regressions` 7.52초, `heritage_style` 14.49초, `above_labels` 1.51초. smoke 0.
+- Graft `layersDrawnAboveLabels` L496, `currentLayers` L34, `applyLegend` L1133. clangd `sheetBasePaintLayers` LayerOps.cpp L2517 col 33 → LayerOps.h L104. diagnostic 0. Archify app-paint-memory validate 9/9.
+- 커밋·푸시 없음. 실행 중 앱은 다시 열어야 반영된다.
+
 ## 2026-09-22 조판 페이지가 비는 경우
 
 - 용지가 없거나 화면 밖에 있으면 페이지를 만들고 창 크기가 잡힌 뒤 맞춘다. 있는 용지는 그대로 둔다.

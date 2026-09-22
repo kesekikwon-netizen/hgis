@@ -1,3 +1,9 @@
+## 2026-09-22 지도는 한 번만 그린다
+
+- 조사선·유적은 덧그림에서 한 번. 지적 지번은 본 화면. 번호만 바뀌면 `ka_map_numbers`만 갱신. 범례 공간 검사는 범위·지질·토양이 바뀔 때만.
+- CTest layer_state_regressions 7.52s, heritage_style 14.49s, above_labels 1.51s. smoke 0. clangd L2517 col 33 → LayerOps.h L104, diagnostic 0. Archify app-paint-memory 9/9.
+- 커밋·푸시 없음. 앱은 다시 열어야 반영.
+
 ## 2026-09-22 조판 페이지가 비는 경우
 
 - `ensureLayoutPage`가 없는 용지를 다시 만든다. 화면 밖이면 맞춘다. `layoutRegainsPageWhenTheSheetHasNone` 통과. smoke 0.
@@ -12,6 +18,12 @@
 - 시작 왼쪽 그림은 창을 한 번 그리고 멈춘다. 5초. `ReadingDurationMs` 5000.
 - 조판 번호 중심 간격 4.6mm, 여섯 링. 겹치면 유적 위로 되돌리지 않는다.
 - CTest startup_splash 11.09초, heritage_style 11.98초. smoke 0. 커밋·푸시 없음.
+
+## 2026-09-22 개발설정 점수 근거
+
+- runner `ka-hgis-pc` online. `ENABLE_SELF_HOSTED_BUILD=true`.
+- `heritage_style` 재빌드 후 Passed 13.64초. 아침 7개 실패는 옛 테스트 exe였다.
+- 설정 파일은 `.cursor/`, `.vscode/settings.json`, tidy·worker 스크립트.
 
 ## 2026-09-22 My Machines worker ka-hgis-pc
 
