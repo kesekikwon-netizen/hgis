@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "node .cursor/hooks/dev-loop.mjs sessionStart",
+        "timeout": 15
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "node .cursor/hooks/dev-loop.mjs afterFileEdit",
+        "timeout": 15
+      }
+    ],
+    "afterShellExecution": [
+      {
+        "command": "node .cursor/hooks/dev-loop.mjs afterShellExecution",
+        "timeout": 15
+      }
+    ],
+    "afterMCPExecution": [
+      {
+        "command": "node .cursor/hooks/dev-loop.mjs afterMCPExecution",
+        "timeout": 15
+      }
+    ],
+    "stop": [
+      {
+        "command": "node .cursor/hooks/dev-loop.mjs stop",
+        "timeout": 15,
+        "loop_limit": 2
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": false,
+  "cmake.automaticReconfigure": false,
+  "cmake.buildBeforeRun": false,
+  "cmake.preferredGenerators": [
+    "Visual Studio 17 2022"
+  ],
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "clangd.arguments": [
+    "--background-index",
+    "--clang-tidy",
+    "--header-insertion=never",
+    "--completion-style=detailed",
+    "--function-arg-placeholders",
+    "--pch-storage=memory",
+    "--all-scopes-completion",
+    "-j=8"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "ka-hgis",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "install": "bash .cursor/cloud-install.sh"
+}
