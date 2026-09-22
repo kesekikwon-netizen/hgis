@@ -1061,9 +1061,37 @@ void KaDrawingStudio::ensureBlankLayout() {
   attachLayoutToView();
 }
 
+void KaDrawingStudio::ensureSheetPage() {
+  if (auto* ly = layout())
+    LayoutService::ensureLayoutPage(ly, m_paperW, m_paperH);
+}
+
+bool KaDrawingStudio::sheetPageInView() const {
+  auto* ly = layout();
+  if (!m_view || !m_view->viewport() || !ly || !ly->pageCollection())
+    return false;
+  if (m_view->viewport()->width() < 32 || m_view->viewport()->height() < 32)
+    return false;
+  QgsLayoutItemPage* page = ly->pageCollection()->page(0);
+  if (!page)
+    return false;
+  const QRectF paper = page->mapRectToScene(page->rect());
+  if (paper.width() < 8.0 || paper.height() < 8.0)
+    return false;
+  const QRectF visible = m_view->mapToScene(m_view->viewport()->rect()).boundingRect();
+  return visible.intersects(paper);
+}
+
+void KaDrawingStudio::showSheetPage() {
+  ensureSheetPage();
+  if (!sheetPageInView())
+    zoomPaperVisible();
+}
+
 void KaDrawingStudio::attachLayoutToView() {
   auto* ly = layout();
   if (!m_view || !ly) return;
+  ensureSheetPage();
   // 위성 배경이 조각 단위로 빈 채 남는 것을 막는다(다시 열린 조판까지 포함).
   LayoutService::applySingleRasterPassRendering(ly);
   // 화면 미리보기는 화면 해상도로 그린다. 300 DPI로 미리보기를 그리면 A4가
@@ -2326,6 +2354,11 @@ void KaDrawingStudio::zoomFull() {
 void KaDrawingStudio::recenterPaper() {
   auto* ly = layout();
   if (!m_view || !ly) return;
+  ensureSheetPage();
+  if (!m_view->viewport() || m_view->viewport()->width() < 32 || m_view->viewport()->height() < 32) {
+    m_paperFitPending = true;
+    return;
+  }
   QgsLayoutItemPage* page = ly->pageCollection() ? ly->pageCollection()->page(0) : nullptr;
   QRectF pr = page ? page->rect() : QRectF();
   if (page)
@@ -2469,9 +2502,16 @@ void KaDrawingStudio::showEvent(QShowEvent* event) {
     if (northPictureNeedsRebuild(north))
       placeNorth(QRectF(north->pos(), north->rect().size()), false);
   }
-  if (m_paperFitPending) {
-    m_paperFitPending = false;
-    QTimer::singleShot(0, this, [this]() { zoomPaperVisible(); });
+  ensureSheetPage();
+  const bool viewReady = m_view && m_view->viewport() && m_view->viewport()->width() >= 32
+      && m_view->viewport()->height() >= 32;
+  if (m_paperFitPending || !sheetPageInView()) {
+    if (viewReady) {
+      m_paperFitPending = false;
+      QTimer::singleShot(0, this, [this]() { zoomPaperVisible(); });
+    } else {
+      m_paperFitPending = true;
+    }
   }
 }
 
@@ -3051,6 +3091,15 @@ void KaDrawingStudio::relinkDecorations() {
     legend->setLinkedMap(map);
     legend->setResizeToContents(false);
     m_heritageNumbers.applyLegend(legend);
+    const QRectF page(0.0, 0.0, m_paperW, m_paperH);
+    const QRectF box = itemPaperRect(legend);
+    if (!legend->customProperty(QStringLiteral("ka_hgis/legend_kept_on_page")).toBool()
+        && page.isValid() && box.isValid() && !page.contains(box.center())) {
+      legend->setReferencePoint(QgsLayoutItem::UpperLeft);
+      legend->attemptSetSceneRect(defaultItemRect(kIdLegend));
+      legend->setCustomProperty(QStringLiteral("ka_hgis/legend_kept_on_page"), true);
+      LayoutService::flowSheetLegend(legend);
+    }
   }
   if (auto* sb = dynamic_cast<QgsLayoutItemScaleBar*>(findItemById(ly, kIdScaleBar)))
     applyNiceScaleBar(sb);

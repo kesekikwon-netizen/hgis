@@ -1084,14 +1084,33 @@ QString LayoutService::createBlankSheet(QgsProject* project, double widthMm, dou
   layout->setName(name);
   layout->setUnits(Qgis::LayoutUnit::Millimeters);
   applySingleRasterPassRendering(layout);
-  if (layout->pageCollection() && layout->pageCollection()->pageCount() > 0) {
-    if (QgsLayoutItemPage* page = layout->pageCollection()->page(0))
-      page->setPageSize(QgsLayoutSize(widthMm, heightMm, Qgis::LayoutUnit::Millimeters));
-  }
+  ensureLayoutPage(layout, widthMm, heightMm);
   layout->setCustomProperty(QStringLiteral("ka_hgis/auto_template"), false);
   layout->setCustomProperty(QStringLiteral("ka_hgis/user_composed"), false);
   project->layoutManager()->addLayout(layout);
   return name;
+}
+
+bool LayoutService::ensureLayoutPage(QgsLayout* layout, double widthMm, double heightMm) {
+  if (!layout || !layout->pageCollection() || widthMm < 20.0 || heightMm < 20.0)
+    return false;
+  auto* pages = layout->pageCollection();
+  const QgsLayoutSize paper(widthMm, heightMm, Qgis::LayoutUnit::Millimeters);
+  if (pages->pageCount() <= 0) {
+    auto* page = new QgsLayoutItemPage(layout);
+    page->setPageSize(paper);
+    pages->addPage(page);
+  }
+  QgsLayoutItemPage* page = pages->page(0);
+  if (!page)
+    return false;
+  const QRectF scene = page->mapRectToScene(page->rect());
+  if (scene.width() < 8.0 || scene.height() < 8.0) {
+    page->setPageSize(paper);
+    layout->refresh();
+  }
+  const QRectF ready = page->mapRectToScene(page->rect());
+  return ready.width() >= 8.0 && ready.height() >= 8.0;
 }
 
 void LayoutService::markStudioSheetComposed(QgsLayout* layout) {

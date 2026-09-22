@@ -509,9 +509,8 @@ QList<QgsMapLayer*> LayerOps::sheetBasePaintLayers(QgsProject* project) {
   QSet<QgsMapLayer*> skip(above.begin(), above.end());
   for (QgsMapLayer* layer : visible) {
     if (!layer) continue;
-    // 주변유적은 본지도에 남겨 범례 히트테스트와 도형이 빠지지 않게 한다.
-    // 조사·지적은 덧지도에만 그린다.
-    if (skip.contains(layer) && !LayerLabelControls::isHeritage(layer)) continue;
+    // 덧그림에 올라간 조사·지적·유적은 본지도에서 한 번 더 그리지 않는다.
+    if (skip.contains(layer)) continue;
     out.append(layer);
   }
   return out;

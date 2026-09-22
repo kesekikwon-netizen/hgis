@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Sheet legend filter",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "ui", "label": "Sheet" },
+    { "id": "app", "label": "Legend" }
+  ],
+  "phases": [
+    { "id": "draw", "label": "Draw", "fromCol": 0, "toCol": 1 },
+    { "id": "filter", "label": "Filter", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "list", "label": "List", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["base", "overlay", "both", "names"],
+  "nodes": [
+    { "id": "base", "lane": "ui", "col": 0, "type": "frontend", "label": "Base map", "sublabel": "survey lines" },
+    { "id": "overlay", "lane": "ui", "col": 1, "type": "frontend", "label": "Overlay", "sublabel": "heritage only" },
+    { "id": "both", "lane": "app", "col": 2, "type": "backend", "label": "Both maps", "sublabel": "legend filter" },
+    { "id": "names", "lane": "app", "col": 5, "type": "backend", "label": "Names", "sublabel": "number and site" }
+  ],
+  "edges": [
+    { "from": "base", "to": "overlay" },
+    { "from": "overlay", "to": "both", "variant": "emphasis" },
+    { "from": "both", "to": "names", "label": "on page" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Was", "items": ["Filter saw the base map only"] },
+    { "dot": "emerald", "title": "Now", "items": ["Overlay sites stay in the legend"] },
+    { "dot": "cyan", "title": "Keep", "items": ["Off-page legend returns to the sheet"] }
+  ]
+}

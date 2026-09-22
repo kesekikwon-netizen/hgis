@@ -184,7 +184,13 @@ void MainWindow::removeLayersFromTree(QgsLayerTreeView* tree) {
     if (!layer) continue;
     if (m_editLayer == layer) stopCaptureTool();
     if (auto* vector = qobject_cast<QgsVectorLayer*>(layer)) vector->removeSelection();
+    const QString layerId = layer->id();
+    // takeMapLayer는 등록만 뺀다. 레이어 창 노드는 이름(글자)을 남긴 채 도형만 사라진다.
     entry.layer.reset(project->takeMapLayer(layer));
+    if (QgsLayerTreeLayer* live = root->findLayer(layerId)) {
+      if (auto* parent = qobject_cast<QgsLayerTreeGroup*>(live->parent()))
+        parent->removeChildNode(live);
+    }
   }
   if (removed->entries.empty()) return;
   bool removedCadastral = false;

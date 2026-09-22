@@ -9,6 +9,9 @@
 #include <QColor>
 #include <QCryptographicHash>
 #include <QEventLoopLocker>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -37,6 +40,7 @@
 #include <qgsproject.h>
 #include <qgsproviderregistry.h>
 #include <qgstaskmanager.h>
+#include <qgsvectorfilewriter.h>
 #include <qgsvectorlayer.h>
 #include <qgsfeature.h>
 #include <qgsfeatureiterator.h>
@@ -83,42 +87,58 @@ bool discardsWithoutOpen(const TopographicCatalog::Record& record) {
 QgsVectorLayer* mergeTopographicLayers(const QList<QgsVectorLayer*>& srcs, const QString& name) {
   if (srcs.isEmpty() || !srcs.first()) return nullptr;
   QgsVectorLayer* first = srcs.first();
-  const QString type = first->geometryType() == Qgis::GeometryType::Polygon ? QStringLiteral("Polygon")
-      : first->geometryType() == Qgis::GeometryType::Point ? QStringLiteral("Point")
-                                                           : QStringLiteral("LineString");
-  const QString crs = first->crs().isValid() ? first->crs().authid() : QStringLiteral("EPSG:5186");
-  auto* mem = new QgsVectorLayer(QStringLiteral("%1?crs=%2").arg(type, crs), name, QStringLiteral("memory"));
-  if (!mem->isValid()) {
-    delete mem;
-    return nullptr;
-  }
-  mem->dataProvider()->addAttributes(first->fields().toList());
-  mem->updateFields();
-  QgsFeatureList outs;
-  for (QgsVectorLayer* src : srcs) {
-    if (!src || !src->isValid()) continue;
-    QgsFeatureIterator it = src->getFeatures();
-    QgsFeature f;
-    while (it.nextFeature(f)) {
-      QgsFeature o(mem->fields());
-      o.setGeometry(f.geometry());
-      for (int i = 0; i < mem->fields().size(); ++i) {
-        const int srcIdx = src->fields().indexOf(mem->fields().at(i).name());
-        if (srcIdx >= 0) o.setAttribute(i, f.attribute(srcIdx));
+  QString dir = QFileInfo(first->source().section(QLatin1Char('|'), 0, 0)).absolutePath();
+  if (dir.isEmpty() || !QFileInfo(dir).isDir())
+    dir = QDir::tempPath();
+  const QString path = QDir(dir).filePath(
+      QStringLiteral("수치지형도-합침-%1.gpkg").arg(QDateTime::currentMSecsSinceEpoch()));
+  QgsVectorFileWriter::SaveVectorOptions options;
+  options.driverName = QStringLiteral("GPKG");
+  options.layerName = QStringLiteral("topo");
+  options.fileEncoding = QStringLiteral("UTF-8");
+  options.layerOptions << QStringLiteral("SPATIAL_INDEX=YES");
+  const QgsCoordinateReferenceSystem crs = first->crs().isValid()
+      ? first->crs()
+      : QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186"));
+  const QgsFields fields = first->fields();
+  std::unique_ptr<QgsVectorFileWriter> writer(QgsVectorFileWriter::create(
+      path, fields, Qgis::WkbType::MultiLineString, crs, QgsCoordinateTransformContext(), options));
+  bool wrote = writer && writer->hasError() == QgsVectorFileWriter::NoError;
+  if (wrote) {
+    for (QgsVectorLayer* src : srcs) {
+      if (!src || !src->isValid()) continue;
+      QgsFeatureIterator it = src->getFeatures();
+      QgsFeature feature;
+      while (it.nextFeature(feature)) {
+        if (!feature.hasGeometry()) continue;
+        QgsFeature out(fields);
+        out.setId(-1);
+        out.setGeometry(feature.geometry());
+        for (int i = 0; i < fields.size(); ++i) {
+          if (fields.at(i).name().compare(QLatin1String("fid"), Qt::CaseInsensitive) == 0) continue;
+          const int srcIdx = src->fields().indexOf(fields.at(i).name());
+          if (srcIdx >= 0) out.setAttribute(i, feature.attribute(srcIdx));
+        }
+        if (!writer->addFeature(out)) wrote = false;
       }
-      outs.append(o);
     }
   }
-  mem->dataProvider()->addFeatures(outs);
-  mem->updateExtents();
-  mem->dataProvider()->createSpatialIndex();
-  if (first->renderer()) mem->setRenderer(first->renderer()->clone());
-  mem->setLabeling(nullptr);
-  mem->setLabelsEnabled(false);
-  mem->setCrs(first->crs());
-  mem->setReadOnly(true);
-  LayerOps::markReferenceLayer(mem);
-  return mem;
+  writer.reset();
+  if (!wrote) {
+    QFile::remove(path);
+    return nullptr;
+  }
+  auto* layer = new QgsVectorLayer(path + QStringLiteral("|layername=topo"), name, QStringLiteral("ogr"));
+  if (!layer->isValid()) {
+    delete layer;
+    return nullptr;
+  }
+  if (first->renderer()) layer->setRenderer(first->renderer()->clone());
+  layer->setLabeling(nullptr);
+  layer->setLabelsEnabled(false);
+  layer->setReadOnly(true);
+  LayerOps::markReferenceLayer(layer);
+  return layer;
 }
 void styleTopographic(QgsVectorLayer* layer, const TopographicCatalog::Record&) {
   const QColor color(128, 128, 128);
@@ -858,11 +878,14 @@ void KaTopographicImportDialog::publishPrepared() {
       out = mergeTopographicLayers(srcs, name);
       if (!out) continue;
       if (existing) {
+        const QString oldFile = existing->source().section(QLatin1Char('|'), 0, 0);
         for (auto loaded = m_loaded.begin(); loaded != m_loaded.end();) {
           if (loaded.value() == existing->id()) loaded = m_loaded.erase(loaded);
           else ++loaded;
         }
         project->removeMapLayer(existing);
+        if (QFileInfo(oldFile).fileName().startsWith(QStringLiteral("수치지형도-합침-")))
+          QFile::remove(oldFile);
       }
     }
     out->setCustomProperty(QStringLiteral("ka_hgis/topographic_source"), keys.first());

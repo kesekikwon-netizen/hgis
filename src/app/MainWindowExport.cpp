@@ -378,6 +378,7 @@ void MainWindow::openLayoutDesigner() {
     hideSubTools();
     m_drawingStudio->applyFieldPageGrow();
     m_drawingStudio->applyFieldEdge();
+    m_drawingStudio->showSheetPage();
     m_drawingStudio->refreshMapFromProject();
     onCanvasScaleChanged(m_canvas->scale());
     return;
@@ -402,6 +403,7 @@ void MainWindow::openLayoutDesigner() {
                        QStringLiteral("레이아웃"));
   m_viewTabs->setCurrentWidget(m_drawingStudio);
   hideSubTools();
+  m_drawingStudio->showSheetPage();
   m_drawingStudio->refreshMapFromProject();
   m_drawingStudio->centerOnMapCanvas();
   statusBar()->showMessage(QStringLiteral("조판입니다. 좌표점은 용지 아래 아이콘으로 찍습니다."), 6000);

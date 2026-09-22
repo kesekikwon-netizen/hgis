@@ -8,6 +8,12 @@
 - 라벨·콜아웃: https://docs.qgis.org/3.44/en/docs/user_manual/style_library/label_settings.html
 - 조판 여백: https://docs.qgis.org/3.44/en/docs/user_manual/print_layout/create_output.html
 
+## 조판 페이지
+
+- 용지가 없거나 크기가 0이면 `LayoutService::ensureLayoutPage`가 페이지를 다시 만든다. 있는 용지는 바꾸지 않는다.
+- 조판 화면이 열릴 때 페이지가 화면 밖에 있으면 `KaDrawingStudio::showSheetPage`가 맞춘다. 창 크기가 잡히기 전에는 맞추지 않는다.
+- 테스트: `workflow_engine` `layoutRegainsPageWhenTheSheetHasNone`. https://docs.qgis.org/3.44/en/docs/user_manual/print_layout/overview_layout.html
+
 ## 정합·지적
 
 - 지적도는 `ka_hgis/cadastral` + 역할 `cadastral` + 범례 그룹 **지적도**. 참조 지도가 아니다.
@@ -75,9 +81,9 @@
 ## 번호·범례
 
 - 조판 번호는 `HeritageLayoutNumbers`가 이름마다 하나씩 계산한다. 원본 레이어·명칭 라벨은 그대로.
-- 번호 동그라미는 용지 위 점 레이어(`numberLayer`)에 직접 그린다. 유적 전체의 `CASE WHEN $id` 글자 배치는 쓰지 않는다. 범례는 그 번호와 유적명이다. 1mm 안 겹침만 2.4mm 옆으로 옮기고 짧은 선을 긋는다.
+- 번호 동그라미는 용지 위 점 레이어(`numberLayer`)에 직접 그린다. 유적 전체의 `CASE WHEN $id` 글자 배치는 쓰지 않는다. 범례는 그 번호와 유적명이다. 용지에서 4.6mm보다 가까운 번호는 동그라미가 겹치지 않게 링으로 벌리고, 움직인 번호만 가는 선을 긋는다.
 - 같은 이름은 번호 하나. 페이지에 가장 많이 걸린 도형 `$id`에만 찍는다.
-- 페이지 안 번호 원·글자는 2.99mm / 5.2pt(절반에서 30%만 키움). 얇은 검정 외곽선 0.15mm. 유적이 용지에서 1.0mm 넘게 떨어져 있으면 각자 유적 위. 같은 점(1.0mm 안)만 2.4mm 한두 칸 비키고 가는 선. 칸이 없으면 유적 위. 마을 전체를 배지 지름으로 밀지 않는다.
+- 페이지 안 번호 원·글자는 2.99mm / 5.2pt(절반에서 30%만 키움). 얇은 검정 외곽선 0.15mm. 세 자리 번호까지 겹치지 않도록 중심 간격은 4.6mm. 그보다 먼 유적은 각자 자리. 가까운 무리는 여섯 링 안에서 벌리고, 칸이 없으면 그 밖으로 한 칸 더 둔다.
 - 조판 번호는 `ka_map_numbers`에서 도형 위에 다시 그린다. 본 지도·덧지도(`ka_map_above`)는 `labelsEnabled=0`. PAL은 번호 지도에서만 한 번 돈다. zIndex 10000.
 - PDF·미리보기 번호 결과는 `ka_map_numbers` UUID. https://qgis.org/pyqgis/master/core/QgsLayoutExporter.html
 - 멤버십은 용지∩지도 발자국(`mapFootprintOnPaper`). `intersects`면 포함한다. 점의 빈 `intersection`은 버려지지 않는다.

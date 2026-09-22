@@ -2123,6 +2123,7 @@ private slots:
     QApplication::processEvents();
     QTest::keyClick(canvas, Qt::Key_Delete);
     QVERIFY2(!project->mapLayer(id), "지도에서 Delete 를 눌러도 참조 지도가 남아 있습니다.");
+    QVERIFY2(!project->layerTreeRoot()->findLayer(id), "삭제한 레이어 이름이 레이어 창에 남아 있습니다.");
     QTest::keyClick(&window, Qt::Key_Z, Qt::ControlModifier);
     QVERIFY(project->mapLayer(id));
     QVERIFY(project->layerTreeRoot()->findLayer(id));

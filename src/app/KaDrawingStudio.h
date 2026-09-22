@@ -75,6 +75,8 @@ public:
   void applyFieldEdge();
   void resetPaper(double widthMm, double heightMm, bool preserveExisting = true);
   void refreshMapFromProject();
+  // 용지가 없거나 화면 밖에 있으면 페이지를 만들고 보이게 맞춘다.
+  void showSheetPage();
   void updateLayerOpacityControl();
   void repaintMapLayers();
   double drawingScale() const;
@@ -141,6 +143,8 @@ private:
   void buildUi();
   void ensureBlankLayout();
   void attachLayoutToView();
+  void ensureSheetPage();
+  bool sheetPageInView() const;
   QgsPrintLayout* layout() const;
   QgsLayoutItemMap* mapItem() const;
   void applyLayersToMap(QgsLayoutItemMap* map, bool includeLiveBasemap, bool refitExtent);

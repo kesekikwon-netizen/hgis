@@ -654,6 +654,53 @@ private slots:
     QCOMPARE(legendNumberKeys(legend), numbers.legendKeys());
   }
 
+  void layoutLegendKeepsNamesWhenHeritageIsOnlyOnTheOverlay() {
+    QgsProject project;
+    auto* heritage = addHeritage(project, HeritageDataset::DesignatedHeritage,
+                                 {QStringLiteral("경주 가"), QStringLiteral("경주 나")});
+    auto* survey = new QgsVectorLayer(
+        QStringLiteral("Polygon?crs=EPSG:5186&field=nm:string(40)"),
+        QStringLiteral("조사구역"), QStringLiteral("memory"));
+    QVERIFY(survey->isValid());
+    QVERIFY(survey->startEditing());
+    QgsFeature area(survey->fields());
+    area.setGeometry(QgsGeometry::fromRect(QgsRectangle(190010., 550010., 190040., 550040.)));
+    area.setAttribute(QStringLiteral("nm"), QStringLiteral("조사"));
+    QVERIFY(survey->addFeature(area));
+    QVERIFY(survey->commitChanges());
+    project.addMapLayer(survey, false);
+    QgsPrintLayout layout(&project);
+    const QgsRectangle extent(189950., 549950., 190450., 550250.);
+    auto* base = makeLayoutMap(layout, {survey}, extent);
+    base->setId(QStringLiteral("ka_map"));
+    auto* above = new QgsLayoutItemMap(&layout);
+    above->setId(QStringLiteral("ka_map_above"));
+    layout.addLayoutItem(above);
+    above->attemptSetSceneRect(base->rect().translated(base->pos()));
+    above->setCrs(base->crs());
+    above->setKeepLayerSet(true);
+    above->setLayers({heritage});
+    above->setExtent(extent);
+    HeritageLayoutNumbers numbers;
+    QVERIFY(numbers.update(base, true));
+    QCOMPARE(numbers.entries().size(), 2);
+    auto* legend = new QgsLayoutItemLegend(&layout);
+    layout.addLayoutItem(legend);
+    legend->setLinkedMap(base);
+    legend->setLegendFilterByMapEnabled(true);
+    LayoutService::tuneSheetLegend(legend);
+    numbers.applyLegend(legend);
+    const QList<QgsLayoutItemMap*> filters = legend->filterByMapItems();
+    QVERIFY2(filters.contains(above), "legend filter must include the heritage overlay");
+    QStringList names;
+    for (auto* node : legend->model()->rootGroup()->findLayers()) {
+      for (auto* item : legend->model()->layerLegendNodes(node))
+        names << item->data(Qt::DisplayRole).toString();
+    }
+    QVERIFY2(names.contains(QStringLiteral("경주 가")), qPrintable(names.join(QLatin1Char(','))));
+    QVERIFY2(names.contains(QStringLiteral("경주 나")), qPrintable(names.join(QLatin1Char(','))));
+  }
+
   void layoutNumbersFollowPaperClipNotOffPageCentroid() {
     QgsProject project;
     auto* layer = new QgsVectorLayer(
@@ -909,14 +956,21 @@ private slots:
     auto* pinLayer = numbers.numberLayer();
     QVERIFY(pinLayer);
     const double scale = map->scale() > 0. ? map->scale() : 50000.;
-    const double maxSep = (2.4 / 1000.0) * scale * 2.0 + 1.;
+    const double minSep = (4.6 / 1000.0) * scale * 0.96 - 1.;
+    const double maxSep = (4.6 / 1000.0) * scale * 3.0 + 1.;
+    QVector<QgsPointXY> pins;
     int onSite = 0;
     QgsFeature feature;
     auto features = pinLayer->getFeatures();
     while (features.nextFeature(feature)) {
       const QgsPointXY pin = feature.geometry().asPoint();
-      QVERIFY2(pin.distance(stack) <= maxSep, "dense cluster must not grow long leaders");
+      pins.append(pin);
+      QVERIFY2(pin.distance(stack) <= maxSep, "dense cluster must stay on the near rings");
       if (pin.distance(stack) < 1.) ++onSite;
+    }
+    for (int i = 0; i < pins.size(); ++i) {
+      for (int j = i + 1; j < pins.size(); ++j)
+        QVERIFY2(pins.at(i).distance(pins.at(j)) >= minSep, "number circles must not cover each other");
     }
     QVERIFY2(onSite >= 1, "at least one badge stays on the site");
   }
@@ -948,8 +1002,8 @@ private slots:
         ->addGroup(HeritageStyle::layerName(HeritageDataset::HeritageDistributionMap))
         ->addLayer(layer);
     QgsPrintLayout layout(&project);
-    // 160 mm map over 4000 m → 1:25000. 40 m is 1.6 mm on paper; a
-    // village-wide 3.1 mm collision would pull leaders, cluster-local does not.
+    // 160 mm map over 4000 m → 1:25000. 40 m is 1.6 mm on paper, inside a
+    // 4.6 mm badge, so the circles move apart instead of stacking.
     auto* map = makeLayoutMap(layout, {layer}, QgsRectangle(188040., 548040., 192040., 552040.));
     HeritageLayoutNumbers numbers;
     numbers.update(map, true);
@@ -957,16 +1011,24 @@ private slots:
     QCOMPARE(numbers.entries().size(), 8);
     auto* pinLayer = numbers.numberLayer();
     QVERIFY(pinLayer);
-    int offset = 0;
+    const double scale = map->scale() > 0. ? map->scale() : 25000.;
+    const double minSep = (4.6 / 1000.0) * scale * 0.96 - 1.;
+    const double maxLeader = (4.6 / 1000.0) * scale * 6.0 + 1.;
+    QVector<QgsPointXY> pins;
     QgsFeature feature;
     auto features = pinLayer->getFeatures();
     while (features.nextFeature(feature)) {
       const QgsPointXY pin = feature.geometry().asPoint();
       const QgsPointXY site(feature.attribute(QStringLiteral("ox")).toDouble(),
                             feature.attribute(QStringLiteral("oy")).toDouble());
-      if (pin.distance(site) > 1.) ++offset;
+      QVERIFY2(pin.distance(site) <= maxLeader, "nearby badges stay on a short ring");
+      pins.append(pin);
     }
-    QCOMPARE(offset, 0);
+    QCOMPARE(pins.size(), 8);
+    for (int i = 0; i < pins.size(); ++i) {
+      for (int j = i + 1; j < pins.size(); ++j)
+        QVERIFY2(pins.at(i).distance(pins.at(j)) >= minSep, "nearby number circles must clear");
+    }
   }
 
   void layoutNumbersExcludeOutsideAndDisabledCategoriesAndRefreshExtent() {

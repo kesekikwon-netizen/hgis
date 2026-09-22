@@ -38,6 +38,8 @@
 #include "core/HeritageImport.h"
 #include "core/LayoutService.h"
 #include "core/LayerOps.h"
+#include <qgslayoutitempage.h>
+#include <qgslayoutpagecollection.h>
 #include "core/KaPortableRuntime.h"
 #include "core/WorkflowGuide.h"
 #include "core/VworldSettings.h"
@@ -255,6 +257,7 @@ private slots:
   void layoutEnter_matchesCanvasViewWithoutNiceSnap();
   void layoutStandardSheetChrome_sitsBelowMap();
   void layoutEqualFullSheetMapRect_matchesTopToSides();
+  void layoutRegainsPageWhenTheSheetHasNone();
   void layoutExtentForPaperScale_keepsTypedDenominator();
   void layoutNiceScaleDenominator_endsOnTen();
   void legendTitlesHideEpsgAndUseShortKorean();
@@ -5377,6 +5380,25 @@ void TestWorkflow::layoutStandardSheetChrome_sitsBelowMap() {
   QVERIFY2(c.north.bottom() <= page.bottom() - 7.5, "north stays above the page margin");
   QVERIFY2(c.scaleBar.height() >= 11.0, "scale bar slot fits QGIS Line Ticks Up minimum");
   QVERIFY2(c.scaleLabel.top() >= c.scaleBar.bottom() + 2.0, "scale text stays below the bar box");
+}
+
+void TestWorkflow::layoutRegainsPageWhenTheSheetHasNone() {
+  QgsProject project;
+  QString err;
+  const QString name = LayoutService::createBlankSheet(
+      &project, 297.0, 210.0, QStringLiteral("user_sheet"), &err);
+  QVERIFY2(!name.isEmpty(), qPrintable(err));
+  auto* layout = dynamic_cast<QgsPrintLayout*>(project.layoutManager()->layoutByName(name));
+  QVERIFY(layout && layout->pageCollection());
+  QCOMPARE(layout->pageCollection()->pageCount(), 1);
+  layout->pageCollection()->deletePage(0);
+  QCOMPARE(layout->pageCollection()->pageCount(), 0);
+  QVERIFY(LayoutService::ensureLayoutPage(layout, 320.0, 220.0));
+  QCOMPARE(layout->pageCollection()->pageCount(), 1);
+  QgsLayoutItemPage* page = layout->pageCollection()->page(0);
+  QVERIFY(page);
+  const QRectF paper = page->mapRectToScene(page->rect());
+  QVERIFY2(paper.width() >= 8.0 && paper.height() >= 8.0, qPrintable(QString::number(paper.width())));
 }
 
 void TestWorkflow::layoutEqualFullSheetMapRect_matchesTopToSides() {

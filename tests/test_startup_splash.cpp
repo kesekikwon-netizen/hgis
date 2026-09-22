@@ -61,8 +61,8 @@ private slots:
     QCOMPARE(ready.count(), 1);
   }
 
-  void defaultTenSecondsStayResponsiveAndKeepNoticesVisible() {
-    QCOMPARE(KaStartupSplash::ReadingDurationMs, 10000);
+  void defaultFiveSecondsStayResponsiveAndKeepNoticesVisible() {
+    QCOMPARE(KaStartupSplash::ReadingDurationMs, 5000);
     KaStartupSplash splash;
     QSignalSpy ready(&splash, &KaStartupSplash::readyToShow);
     splash.show();
@@ -94,13 +94,13 @@ private slots:
                                   QStringLiteral("GEOS"), QStringLiteral("SQLite"),
                                   QStringLiteral("Chromium")})
       QVERIFY(attribution.contains(library));
-    QTest::qWait(qMax(1, 9000 - int(elapsed.elapsed())));
+    QTest::qWait(qMax(1, 4000 - int(elapsed.elapsed())));
     QCOMPARE(ready.count(), 0);
     QVERIFY(splash.isVisible());
     QVERIFY(beats > 20);
-    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 3000);
-    QVERIFY(elapsed.elapsed() >= 10000);
-    QVERIFY(elapsed.elapsed() < 13000);
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 2500);
+    QVERIFY(elapsed.elapsed() >= 5000);
+    QVERIFY(elapsed.elapsed() < 8000);
   }
 
   void plateIsOpaqueAndMotionChangesTheFrame() {

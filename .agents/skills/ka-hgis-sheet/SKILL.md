@@ -36,6 +36,7 @@ description: 조판 여백, 정합 지적 자석, 주변유적 번호·범례·�
 | 다른 지도를 받으면 끈 지적도가 켜짐 | 정합·지적 | `workflow_engine` (`applySnapSettingsKeepsCadastralUnchecked`) |
 | 조판 위·좌·우 여백이 다름 | 조판 여백 | `workflow_engine` (`layoutEqualFullSheetMapRect_matchesTopToSides`), `save_open_drawing` |
 | 페이지가 작아 번호가 범례와 다름 | 조판 여백 | `save_open_drawing` (`drawingStudio_fieldPageGrowsA4LandscapeByOneCentimetre`) |
+| 조판 용지가 가끔 안 보임 | 조판 페이지 | `workflow_engine` (`layoutRegainsPageWhenTheSheetHasNone`) |
 | 받은 레이어가 펼쳐짐 | 레이어 접힘 | `heritage_import` |
 | 페이지 번호와 범례가 다름 | 번호·범례 | `heritage_style` |
 | 1:25000~1:50000에서 유적이 사라짐 | 페이지 표시 | `heritage_style` |

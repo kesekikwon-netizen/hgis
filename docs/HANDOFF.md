@@ -1,3 +1,24 @@
+## 2026-09-22 조판 페이지가 비는 경우
+
+- 용지가 없거나 화면 밖에 있으면 페이지를 만들고 창 크기가 잡힌 뒤 맞춘다. 있는 용지는 그대로 둔다.
+- `layoutRegainsPageWhenTheSheetHasNone` 통과. smoke 0. Graft `ensureLayoutPage` L1094. clangd L1094 col 21 → LayoutService.h L97. diagnostic 0.
+- 커밋·푸시 없음. 실행 중 앱은 다시 열어야 반영된다.
+
+## 2026-09-22 다른 PC용 포터블
+
+- 바탕화면 `HGIS-포터블-개인-20260922`. 약 1036 MB. 기존 `…-20260921` 폴더는 덮지 않음.
+- EXE SHA256 D1B5366F8D8329DB508C82596A94FB76DB594F743D764BED77566F7C7C50D761. 현재 Release와 같음.
+- 수치지형도·국가유산·지적 비밀번호는 폴더 `config`의 `password=` 이다. 이 Windows 계정 DPAPI는 넣지 않음. 값은 기록하지 않음.
+- verify 0. OSGeo4W PATH 없이 `--smoke-quit` 0. 미서명. 다른 실물 PC는 여기서 실행하지 않음. 커밋·푸시 없음.
+
+## 2026-09-22 시작 안내 5초·번호 간격
+
+- 시작 안내 왼쪽은 앱 창을 한 번 그린 뒤 멈춘다. 안내 시간은 5초. 클릭으로 넘기지 않는다.
+- 조판 번호는 용지에서 4.6mm보다 가까우면 링으로 벌린다. 같은 점에 다시 쌓지 않는다. 범례 이름은 그대로.
+- CTest `startup_splash` 11.09초, `heritage_style` 11.98초. smoke 0.
+- Graft `offsetHeritageNumber` L175. clangd L175 col 12, diagnostic 0. Archify startup-splash-window·layout-number-pins 9/9.
+- 커밋·푸시 없음.
+
 ## 2026-09-22 조판 번호는 점 레이어로 그린다
 
 - 이름마다 번호·범례 이름은 그대로 계산한다. 동그라미는 `numberLayer` 점에 직접 그린다. 유적 전체 `CASE WHEN $id` 글자 배치는 쓰지 않는다.

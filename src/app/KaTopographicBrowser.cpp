@@ -121,10 +121,6 @@ KaTopographicBrowser::KaTopographicBrowser(QWidget* parent, const QString& downl
   m_downloadDirectory = downloadDirectory.isEmpty()
       ? QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + QStringLiteral("/topographic-downloads")
       : QDir(downloadDirectory).absolutePath();
-  m_profile = new QWebEngineProfile(this); // Unnamed profiles are off-the-record.
-  m_profile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
-  m_profile->setHttpCacheType(QWebEngineProfile::MemoryHttpCache);
-  connect(m_profile, &QWebEngineProfile::downloadRequested, this, &KaTopographicBrowser::requestDownload);
   auto* layout = new QVBoxLayout(this);
   KaDownloadUi::configure(this, layout, QStringLiteral("수치지형도 다운로드"),
       QStringLiteral("국토정보플랫폼 · 조사 주변 도엽을 확인하고 지도 자료를 받습니다."));
@@ -242,13 +238,12 @@ KaTopographicBrowser::KaTopographicBrowser(QWidget* parent, const QString& downl
     QFile script(path);
     if(script.open(QIODevice::ReadOnly)){m_automationScript=QString::fromUtf8(script.readAll());break;}
   }
-  addPage();
   setCompactMode(true);
-  QTimer::singleShot(0, this, [this] { if (!m_explicitNavigation) navigate(kHome); });
 }
 
 void KaTopographicBrowser::setCompactMode(bool compact) {
   m_compactMode=compact;
+  if (!compact && m_tabs && m_tabs->count() == 0) addPage();
   m_details->setVisible(!compact);m_detailsScroll->setVisible(!compact);
   m_downloads->setVisible(!compact);
   // Keep the common status card visible while opening the official details.
@@ -272,6 +267,7 @@ void KaTopographicBrowser::setCredentials(const QString& username,const QString&
 }
 
 void KaTopographicBrowser::replaceSession() {
+  if (!m_profile) return;
   auto* retired=new RetiredBrowserSession(m_profile,this);
   disconnect(m_profile,nullptr,this,nullptr);
   for(auto* request:m_profile->findChildren<QWebEngineDownloadRequest*>()) {
@@ -325,6 +321,7 @@ void KaTopographicBrowser::cancelFromUser() {
   if(m_cancelNotified)return;
   m_cancelNotified=true;
   stopAutomatic();
+  if (m_profile)
   for(auto* request:m_profile->findChildren<QWebEngineDownloadRequest*>())
     if(!request->isFinished())request->cancel();
   emit cancelRequested();
@@ -454,6 +451,11 @@ void KaTopographicBrowser::setDownloadRoot(const QString& directory) {
 
 KaTopographicBrowser::~KaTopographicBrowser() {
   m_destroying=true; ++m_automationGeneration; m_automationTimer->stop();
+  if (!m_profile) {
+    delete m_tabs;
+    m_tabs = nullptr;
+    return;
+  }
   // WebEngine requires every page to die before its shared profile.
   for (auto* request : m_profile->findChildren<QWebEngineDownloadRequest*>()) {
     disconnect(request, nullptr, this, nullptr);
@@ -469,7 +471,16 @@ KaTopographicBrowser::~KaTopographicBrowser() {
   m_profile = nullptr;
 }
 
+void KaTopographicBrowser::ensureEngine() {
+  if (m_profile) return;
+  m_profile = new QWebEngineProfile(this);
+  m_profile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
+  m_profile->setHttpCacheType(QWebEngineProfile::MemoryHttpCache);
+  connect(m_profile, &QWebEngineProfile::downloadRequested, this, &KaTopographicBrowser::requestDownload);
+}
+
 QWebEnginePage* KaTopographicBrowser::addPage(QWebEnginePage* opener) {
+  ensureEngine();
   auto* view = new QWebEngineView(m_tabs);
   auto* page = new TopographicPage(m_profile, view, [this](QWebEnginePage* source) { return addPage(source); },
       [this](const QUrl& url) { offerExternalProgram(url); },[this]{
@@ -559,6 +570,7 @@ void KaTopographicBrowser::closeTab(int index) {
 
 void KaTopographicBrowser::navigate(const QUrl& url) {
   m_explicitNavigation = true;
+  if (!m_tabs || m_tabs->count() == 0) addPage();
   if (auto* view = qobject_cast<QWebEngineView*>(m_tabs->currentWidget())) view->load(url);
 }
 
@@ -612,6 +624,7 @@ void KaTopographicBrowser::stopAutomatic() {
   for(int i=0;i<m_tabs->count();++i)if(auto* view=qobject_cast<QWebEngineView*>(m_tabs->widget(i)))
     if(trustedPage(view->url()))view->page()->runJavaScript(QStringLiteral(
       "window.__kaTopographicSelection=null;window.__kaTopographicOrder=null;window.__kaTopographicSubmission=null;"));
+  if (m_profile)
   for(auto* request:m_profile->findChildren<QWebEngineDownloadRequest*>())
     if(request->property("kaTopographicAutomatic").toBool() && !request->isFinished())request->cancel();
   m_status->setText(QStringLiteral("자동 진행을 중지했습니다. 이미 신청한 자료는 공식 신청 내역에서 확인할 수 있습니다."));

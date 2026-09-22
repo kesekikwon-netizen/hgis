@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Startup notice window",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "ui", "label": "Notice" },
+    { "id": "app", "label": "App" }
+  ],
+  "phases": [
+    { "id": "open", "label": "Open", "fromCol": 0, "toCol": 1 },
+    { "id": "hold", "label": "Hold", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "home", "label": "Home", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["boot", "window", "five", "ready"],
+  "nodes": [
+    { "id": "boot", "lane": "app", "col": 0, "type": "backend", "label": "Start", "sublabel": "splash only" },
+    { "id": "window", "lane": "ui", "col": 1, "type": "frontend", "label": "App window", "sublabel": "settles once" },
+    { "id": "five", "lane": "ui", "col": 2, "type": "frontend", "label": "Five seconds", "sublabel": "then still" },
+    { "id": "ready", "lane": "app", "col": 5, "type": "backend", "label": "Home", "sublabel": "readyToShow" }
+  ],
+  "edges": [
+    { "from": "boot", "to": "window" },
+    { "from": "window", "to": "five", "variant": "emphasis" },
+    { "from": "five", "to": "ready", "label": "5s" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Was", "items": ["Ten seconds of glow, ridges and sheen"] },
+    { "dot": "emerald", "title": "Now", "items": ["A still window for five seconds"] },
+    { "dot": "cyan", "title": "Keep", "items": ["Credits stay; click does not skip"] }
+  ]
+}

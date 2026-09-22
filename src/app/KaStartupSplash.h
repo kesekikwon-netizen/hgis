@@ -12,13 +12,13 @@ class QShowEvent;
 class QTimer;
 
 // Startup notice shown before the main window. A white rounded mat sits outside
-// a glossy blue card. The left slot is a painted field-drawing motion graphic,
-// not a video file. Names, copyright and data sources stay on a drawing title
-// block for the whole reading interval. Clicking never closes the notice early.
+// a glossy blue card. The left slot paints the app window once, then stays
+// still. Names, copyright and data sources stay on a drawing title block for
+// the whole reading interval. Clicking never closes the notice early.
 class KaStartupSplash final : public QWidget {
   Q_OBJECT
 public:
-  static constexpr int ReadingDurationMs = 10000;
+  static constexpr int ReadingDurationMs = 5000;
   explicit KaStartupSplash(QWidget* parent = nullptr,
                            int readingDurationMs = ReadingDurationMs);
   ~KaStartupSplash() override;

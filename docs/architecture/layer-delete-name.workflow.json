@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Layer delete clears the name",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "ui", "label": "Layer list" },
+    { "id": "app", "label": "Project" }
+  ],
+  "phases": [
+    { "id": "pick", "label": "Pick", "fromCol": 0, "toCol": 1 },
+    { "id": "drop", "label": "Drop", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "map", "label": "Map", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["name", "node", "registry", "gone"],
+  "nodes": [
+    { "id": "name", "lane": "ui", "col": 0, "type": "frontend", "label": "Layer row", "sublabel": "name text" },
+    { "id": "node", "lane": "ui", "col": 1, "type": "frontend", "label": "Remove row", "sublabel": "tree node" },
+    { "id": "registry", "lane": "app", "col": 2, "type": "backend", "label": "Take layer", "sublabel": "keep for undo" },
+    { "id": "gone", "lane": "app", "col": 5, "type": "backend", "label": "Shape gone", "sublabel": "name gone too" }
+  ],
+  "edges": [
+    { "from": "name", "to": "node" },
+    { "from": "node", "to": "registry", "variant": "emphasis" },
+    { "from": "registry", "to": "gone", "label": "Ctrl+Z" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Was", "items": ["Shape left; the name stayed in the list"] },
+    { "dot": "emerald", "title": "Now", "items": ["The row is removed with the layer"] },
+    { "dot": "cyan", "title": "Keep", "items": ["Ctrl+Z puts the layer back"] }
+  ]
+}

@@ -1,3 +1,18 @@
+## 2026-09-22 조판 페이지가 비는 경우
+
+- `ensureLayoutPage`가 없는 용지를 다시 만든다. 화면 밖이면 맞춘다. `layoutRegainsPageWhenTheSheetHasNone` 통과. smoke 0.
+
+## 2026-09-22 다른 PC용 포터블
+
+- 바탕화면 `HGIS-포터블-개인-20260922`. EXE D1B5366F8D8329DB508C82596A94FB76DB594F743D764BED77566F7C7C50D761. 약 1036 MB.
+- 계정은 폴더 config의 password=. DPAPI 아님. verify 0. SDK PATH 없이 smoke 0. 미서명. 커밋·푸시 없음.
+
+## 2026-09-22 시작 안내 5초·번호 간격
+
+- 시작 왼쪽 그림은 창을 한 번 그리고 멈춘다. 5초. `ReadingDurationMs` 5000.
+- 조판 번호 중심 간격 4.6mm, 여섯 링. 겹치면 유적 위로 되돌리지 않는다.
+- CTest startup_splash 11.09초, heritage_style 11.98초. smoke 0. 커밋·푸시 없음.
+
 ## 2026-09-22 My Machines worker ka-hgis-pc
 
 - `scripts/start-cursor-worker.ps1`. 시스템 Node 22로 `A:\qgis`에 연결. https://cursor.com/docs/cloud-agent/self-hosted/my-machines

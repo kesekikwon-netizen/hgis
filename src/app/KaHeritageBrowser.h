@@ -101,6 +101,7 @@ private:
   void handleDownload(QWebEngineDownloadRequest* request);
   HeritageStage nextStage(HeritageStage stage) const;
   // 팝업까지 포함해 새 창을 탭으로 받는다. 이것이 없으면 서약서·다운로드 팝업이 통째로 버려진다.
+  void ensureProfile();
   QWebEngineView* addPage(QWebEnginePage* opener = nullptr);
   // 지금 스크립트를 돌릴 페이지. 인트라넷 페이지 중 가장 최근에 뜬 것.
   QWebEnginePage* activePage() const;

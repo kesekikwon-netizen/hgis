@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Sheet page restore",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "ui", "label": "Studio" },
+    { "id": "app", "label": "Layout" }
+  ],
+  "phases": [
+    { "id": "open", "label": "Open", "fromCol": 0, "toCol": 1 },
+    { "id": "page", "label": "Page", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "fit", "label": "Fit", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["draw", "missing", "make", "show"],
+  "nodes": [
+    { "id": "draw", "lane": "ui", "col": 0, "type": "frontend", "label": "Open sheet", "sublabel": "drawing tab" },
+    { "id": "missing", "lane": "app", "col": 1, "type": "backend", "label": "No page", "sublabel": "or off screen" },
+    { "id": "make", "lane": "app", "col": 2, "type": "backend", "label": "Make page", "sublabel": "paper size" },
+    { "id": "show", "lane": "ui", "col": 5, "type": "frontend", "label": "Fit view", "sublabel": "when sized" }
+  ],
+  "edges": [
+    { "from": "draw", "to": "missing" },
+    { "from": "missing", "to": "make", "variant": "emphasis" },
+    { "from": "make", "to": "show", "label": "visible" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Was", "items": ["A sheet with no page stayed blank"] },
+    { "dot": "emerald", "title": "Now", "items": ["The page is created and fitted"] },
+    { "dot": "cyan", "title": "Keep", "items": ["Existing paper is left in place"] }
+  ]
+}

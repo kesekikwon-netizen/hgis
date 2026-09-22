@@ -147,14 +147,19 @@ QVariant classAttributeValue(QgsVectorLayer* layer, const QString& attribute, co
   return expression.evaluate(&context);
 }
 
-// Sit on the site unless another number's origin is almost the same paper
-// point. Global badge-diameter collision at 1:25000 treated a village as
-// one stack and drew tens-of-metre leaders. Official callouts are only
-// for labels displaced from their feature.
+// A one-digit badge is about 3 mm and a three-digit badge about 4.2 mm.
+// A 2.4 mm step left those circles on top of each other, and anything past
+// two rings fell back onto the same point. Move a badge when another is
+// close enough to cover it, and keep going until the circles clear.
 // https://docs.qgis.org/3.44/en/docs/user_manual/style_library/label_settings.html
-constexpr double kNumberStackMm = 1.0;
-constexpr double kNumberStepMm = 2.4;
-constexpr int kNumberOffsetRings = 2;
+constexpr double kNumberClearMm = 4.6;
+constexpr int kNumberOffsetRings = 6;
+
+int slotsOnRing(int ring) {
+  const double half = std::min(0.999, 1.0 / (2.0 * double(ring)));
+  const double count = 3.14159265358979323846 / std::asin(half);
+  return std::max(4, static_cast<int>(std::floor(count + 1e-6)));
+}
 
 QVector<QgsPointXY> stackedPins(const QgsPointXY& origin, const QVector<QgsPointXY>& origins,
                                 const QVector<QgsPointXY>& placed, double stackSep) {
@@ -171,21 +176,23 @@ QgsPointXY offsetHeritageNumber(const QgsPointXY& origin, const QVector<QgsPoint
                                 double stepSep) {
   auto free = [&](const QgsPointXY& candidate) {
     for (const auto& other : clusterPins) {
-      if (candidate.distance(other) < stepSep) return false;
+      if (candidate.distance(other) < stepSep * 0.96) return false;
     }
     return true;
   };
   if (free(origin)) return origin;
   constexpr double kPi = 3.14159265358979323846;
   for (int ring = 1; ring <= kNumberOffsetRings; ++ring) {
-    for (int slot = 0; slot < 8; ++slot) {
-      const double angle = slot * kPi / 4.0 + (ring - 1) * 0.15;
-      const QgsPointXY candidate(origin.x() + std::cos(angle) * stepSep * ring,
-                                 origin.y() + std::sin(angle) * stepSep * ring);
+    const int count = slotsOnRing(ring);
+    const double radius = stepSep * ring;
+    for (int slot = 0; slot < count; ++slot) {
+      const double angle = slot * (2.0 * kPi / double(count));
+      const QgsPointXY candidate(origin.x() + std::cos(angle) * radius,
+                                 origin.y() + std::sin(angle) * radius);
       if (free(candidate)) return candidate;
     }
   }
-  return origin;
+  return QgsPointXY(origin.x(), origin.y() + stepSep * (kNumberOffsetRings + 1));
 }
 
 void applyHeritageNumberCallout(QgsPalLayerSettings& labels) {
@@ -286,6 +293,24 @@ QList<QgsMapLayer*> numberedSourceLayers(QgsLayoutItemMap* map) {
     for (auto* layer : overlay->layers()) add(layer);
   }
   return layers;
+}
+
+void bindLegendFilterMaps(QgsLayoutItemLegend* legend) {
+  if (!legend || !legend->layout()) return;
+  QList<QgsLayoutItemMap*> maps;
+  if (QgsLayoutItemMap* linked = legend->linkedMap())
+    maps.append(linked);
+  for (const QString& id : {QStringLiteral("ka_map_above"), QStringLiteral("ka_map_numbers")}) {
+    if (QgsLayoutItemMap* map = layoutMapById(legend->layout(), id)) {
+      if (!maps.contains(map)) maps.append(map);
+    }
+  }
+  if (maps.size() <= 1 || legend->filterByMapItems() == maps) return;
+  // 본지도에서 뺀 유적 도형은 덧그림에만 있다. 범례 필터가 본지도만 보면
+  // 번호·유적명이 빠진다. 여기서 검사를 다시 돌리면 hitTestCompleted가
+  // applyLegend를 반복해 조판이 멈춘다.
+  // https://qgis.org/pyqgis/master/core/QgsLayoutItemLegend.html
+  legend->setFilterByMapItems(maps);
 }
 
 QMap<QString, QString> geometryOnlyOverrides(const QMap<QString, QString>& overrides) {
@@ -883,8 +908,8 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
       QgsCoordinateTransform toMap(layer->crs(), map->crs(), project->transformContext());
       QgsCoordinateTransform toLayer(map->crs(), layer->crs(), project->transformContext());
       const double scale = map->scale() > 0. ? map->scale() : 5000.;
-      const double stackSep = (kNumberStackMm / 1000.0) * scale;
-      const double stepSep = (kNumberStepMm / 1000.0) * scale;
+      const double stackSep = (kNumberClearMm / 1000.0) * scale;
+      const double stepSep = (kNumberClearMm / 1000.0) * scale;
       for (auto it = sites.begin(); it != sites.end(); ++it) {
         if (it->labelId.isEmpty()) continue;
         try {
@@ -1106,7 +1131,9 @@ void HeritageLayoutNumbers::raiseAboveGeometries(QgsLayoutItemMap* base) {
 }
 
 void HeritageLayoutNumbers::applyLegend(QgsLayoutItemLegend* legend) const {
-  if (!legend || !legend->model() || !legend->model()->rootGroup()) return;
+  if (!legend || !legend->model() || !legend->model()->rootGroup() || m_applying) return;
+  const QScopedValueRollback<bool> applying(m_applying, true);
+  bindLegendFilterMaps(legend);
   auto* model = legend->model();
   const QString stamp = QString::number(reinterpret_cast<quintptr>(this)) + QLatin1Char(':') + QString::number(m_revision)
       + QLatin1Char(':') + QString::number(m_placementRevision);
@@ -1124,7 +1151,6 @@ void HeritageLayoutNumbers::applyLegend(QgsLayoutItemLegend* legend) const {
   // (e.g. geology/soil) still need QGIS symbol hit testing.
   legend->setLegendFilterByMapEnabled(needsMapFilter);
   if (current) return;
-  const QScopedValueRollback<bool> applying(m_applying, true);
   // Numbered rows already passed the paper-footprint intersection test.
   if (!m_entries.isEmpty()) {
     // This service applies the complete override snapshot below. Letting the

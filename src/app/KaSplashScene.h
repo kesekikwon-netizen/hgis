@@ -6,9 +6,8 @@ class QPainter;
 class QPixmap;
 class QPointF;
 
-// Painted field-drawing motion on the startup notice. No video file. A survey
-// sheet is assembled over the reading interval: terrain, grid, boundary,
-// site numbers, north arrow and a moving sheen.
+// Quiet app-window drawing on the startup notice. No video file. The window
+// settles once, then stays still for the rest of the reading interval.
 class KaSplashScene {
 public:
   void setRect(const QRectF& plan, qreal devicePixelRatio);

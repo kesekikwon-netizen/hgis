@@ -61,6 +61,7 @@ private:
   void setPhase(const QString& phase);
   QString visiblePhase() const;
   void failAutomation(const QString& message);
+  void ensureEngine();
   void replaceSession();
   QWebEnginePage* addPage(QWebEnginePage* opener = nullptr);
   void requestDownload(QWebEngineDownloadRequest* request);

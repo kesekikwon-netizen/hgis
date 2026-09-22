@@ -93,6 +93,8 @@ public:
   static QString createBlankSheet(QgsProject* project, double widthMm, double heightMm,
                                   const QString& name = QStringLiteral("user_sheet"),
                                   QString* errorOut = nullptr);
+  // 저장된 조판에 용지가 없거나 크기가 0이면 페이지를 다시 만든다.
+  static bool ensureLayoutPage(QgsLayout* layout, double widthMm, double heightMm);
 
   // 도면의 래스터(위성·지적·지질 배경)를 조각내지 않고 한 번에 그리게 한다.
   // QGIS 기본값은 래스터를 여러 조각으로 나눠 그리는데, 타일 배경에서는 조각 하나가

@@ -219,17 +219,6 @@ KaHeritageBrowser::KaHeritageBrowser(QWidget* parent) : QDialog(parent) {
   statusLayout->addWidget(m_progress);
   root->addWidget(statusCard);
 
-  m_profile = new QWebEngineProfile(QStringLiteral("ka-heritage"), this);
-  m_requestLog = new HeritageRequestLog(this);
-  m_profile->setUrlRequestInterceptor(m_requestLog);
-
-  // 로그인 세션 쿠키를 모은다. 이걸로 검색·다운로드를 HTTP 로 직접 한다.
-  connect(m_profile->cookieStore(), &QWebEngineCookieStore::cookieAdded, this,
-          [this](const QNetworkCookie& cookie) {
-            m_cookies.removeIf([&cookie](const QNetworkCookie& c) { return c.name() == cookie.name(); });
-            m_cookies.append(cookie);
-          });
-
   m_http = new HeritageHttpClient(this);
   connect(m_http, &HeritageHttpClient::failed, this, [this](const QString& why) {
     fail(QStringLiteral("HTTP 경로: %1").arg(why));
@@ -273,6 +262,7 @@ KaHeritageBrowser::KaHeritageBrowser(QWidget* parent) : QDialog(parent) {
   detailsButton->setCheckable(true);
   detailsButton->setToolTip(QStringLiteral("공식 사이트 화면을 펼쳐 봅니다. 막혔을 때만 쓰면 됩니다."));
   connect(detailsButton, &QPushButton::toggled, this, [this](bool on) {
+    if (on) ensureProfile();
     if (m_tabs) m_tabs->setVisible(on);
     if (m_outline) m_outline->setVisible(on);
     if (on) {
@@ -292,7 +282,18 @@ KaHeritageBrowser::KaHeritageBrowser(QWidget* parent) : QDialog(parent) {
   m_poll = new QTimer(this);
   m_poll->setInterval(kPollMs);
   connect(m_poll, &QTimer::timeout, this, &KaHeritageBrowser::runStage);
+}
 
+void KaHeritageBrowser::ensureProfile() {
+  if (m_profile) return;
+  m_profile = new QWebEngineProfile(QStringLiteral("ka-heritage"), this);
+  m_requestLog = new HeritageRequestLog(this);
+  m_profile->setUrlRequestInterceptor(m_requestLog);
+  connect(m_profile->cookieStore(), &QWebEngineCookieStore::cookieAdded, this,
+          [this](const QNetworkCookie& cookie) {
+            m_cookies.removeIf([&cookie](const QNetworkCookie& c) { return c.name() == cookie.name(); });
+            m_cookies.append(cookie);
+          });
   connect(m_profile, &QWebEngineProfile::downloadRequested, this,
           &KaHeritageBrowser::handleDownload);
 }
@@ -1332,6 +1333,7 @@ void KaHeritageBrowser::handleDownload(QWebEngineDownloadRequest* request) {
 
 QWebEngineView* KaHeritageBrowser::addPage(QWebEnginePage* opener) {
   Q_UNUSED(opener);
+  ensureProfile();
   const quint64 generation = m_generation;
   auto* view = new QWebEngineView(m_tabs);
   view->setProperty("heritageDownloadPopup", m_running && m_stage == HeritageStage::Download);

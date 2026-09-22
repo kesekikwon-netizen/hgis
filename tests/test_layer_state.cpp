@@ -149,7 +149,7 @@ private slots:
     root->addLayer(heritage);
     const QList<QgsMapLayer*> above = LayerOps::layersDrawnAboveLabels(&project);
     QVERIFY2(above.contains(heritage), "아래 글자가 없어도 지정유산은 덧그림에 모은다");
-    QVERIFY(LayerOps::sheetBasePaintLayers(&project).contains(heritage));
+    QVERIFY(!LayerOps::sheetBasePaintLayers(&project).contains(heritage));
   }
 
   void newSurveyPolygonShowsAreaByDefault() {
@@ -494,7 +494,7 @@ private slots:
     QVERIFY(base.contains(topo));
     QVERIFY(base.contains(labels));
     QVERIFY(!base.contains(survey));
-    QVERIFY2(base.contains(heritage), "주변유적은 본지도에 남아 범례와 도형이 빠지지 않는다");
+    QVERIFY2(!base.contains(heritage), "주변유적은 덧그림에서만 그린다");
   }
 
   void officialCadastralCountsSoAutoVworldIsNotNeeded() {
