@@ -19,6 +19,8 @@ struct PreparedReferenceMap {
   Status status = Status::Failed;
   // A completed atomic file replacement cannot be undone by a late Cancel click.
   bool outputCommitted = false;
+  // The site rejected the saved login; the GUI offers to re-enter it and retry.
+  bool accountRejected = false;
   QString gpkgPath;
   QString tableName;
   QString rasterUri;

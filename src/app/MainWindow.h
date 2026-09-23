@@ -206,7 +206,7 @@ private slots:
   void addDaedongyeojidoMap();
   void addHistoryGisMap1919();
   void downloadCadastral();
-  void configureCadastralAccount();
+  bool configureCadastralAccount();  // true when a new account was saved
   void configureCadastralStyle();
   void addBasemapOsm();
   void addBasemapGoogle();

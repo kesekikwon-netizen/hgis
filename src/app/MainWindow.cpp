@@ -808,6 +808,7 @@ void MainWindow::buildMenus() {
     }
   });
   moreMenu->addAction(QStringLiteral("API 키 입력"), this, &MainWindow::configureVworldKey);
+  moreMenu->addAction(QStringLiteral("VWorld 지적도 아이디·비밀번호"), this, &MainWindow::configureCadastralAccount);
   moreMenu->addAction(QStringLiteral("수치지형도 아이디·비밀번호"), this, &MainWindow::configureTopographicAccount);
   moreMenu->addAction(QStringLiteral("국가유산 인트라넷 아이디·비밀번호"), this, &MainWindow::configureHeritageAccount);
   moreMenu->addAction(QStringLiteral("정보"), this, &MainWindow::showAbout);

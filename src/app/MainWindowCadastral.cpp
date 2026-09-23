@@ -29,7 +29,7 @@
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
 
-void MainWindow::configureCadastralAccount() {
+bool MainWindow::configureCadastralAccount() {
   const auto previous = CadastralPortal::credentials();
   QDialog dialog(this); dialog.setWindowTitle(QStringLiteral("VWorld 지적도 계정"));
   auto* form = new QFormLayout(&dialog);
@@ -41,10 +41,13 @@ void MainWindow::configureCadastralAccount() {
   form->addRow(buttons);
   connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
   connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-  if (dialog.exec() != QDialog::Accepted) return;
+  if (dialog.exec() != QDialog::Accepted) return false;
   QString error;
-  if (!CadastralPortal::saveCredentials({id->text(), password->text()}, &error))
+  if (!CadastralPortal::saveCredentials({id->text(), password->text()}, &error)) {
     QMessageBox::warning(this, dialog.windowTitle(), error);
+    return false;
+  }
+  return true;
 }
 
 void MainWindow::configureCadastralStyle() {
@@ -127,6 +130,15 @@ void MainWindow::downloadCadastral() {
     if (result.status == PreparedReferenceMap::Status::Cancelled) { window->statusBar()->showMessage(QStringLiteral("지적도 받기를 취소했습니다."), 5000); return; }
     QString error = result.error;
     auto* layer = result.isReady() ? CadastralImport::addPrepared(QgsProject::instance(), window->m_canvas, result, &error) : nullptr;
+    if (!layer && result.accountRejected) {
+      // The account entry lives in a gallery sub-menu, so offer it right where the login failed.
+      QMessageBox box(QMessageBox::Warning, QStringLiteral("지적도 받기"), error, QMessageBox::NoButton, window);
+      auto* reenter = box.addButton(QStringLiteral("아이디·비밀번호 다시 입력"), QMessageBox::AcceptRole);
+      box.addButton(QStringLiteral("닫기"), QMessageBox::RejectRole);
+      box.exec();
+      if (box.clickedButton() == reenter && window && window->configureCadastralAccount()) window->downloadCadastral();
+      return;
+    }
     if (!layer) { QMessageBox::warning(window, QStringLiteral("지적도 받기"), error.isEmpty() ? QStringLiteral("지적도를 준비하지 못했습니다.") : error); return; }
     if (window->m_layerTree) window->m_layerTree->setCurrentLayer(layer);
     QgsProject::instance()->setDirty(true);

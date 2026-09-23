@@ -250,8 +250,24 @@ PreparedReferenceMap CadastralPortal::prepare(const Request& request, const Cada
   login.addQueryItem(QStringLiteral("nextUrl"), dataset);
   const auto authenticated = session.request(QUrl(base + QStringLiteral("/v4po_usrlogin_a004.do")), login.query(QUrl::FullyEncoded).toUtf8().replace("+", "%2B"));
   if (stopped()) return result;
-  if (QJsonDocument::fromJson(authenticated).object().value("resultMap").toObject().value("result").toString() != QLatin1String("success")) {
-    result.error = QStringLiteral("VWorld 로그인에 실패했습니다. 지적도 메뉴의 계정을 확인하세요. 추가 인증이 필요한 계정은 사이트에서 확인 후 다시 시도하세요."); return result;
+  // The site answers {"resultMap":{"result","msg","url"}}: "error" means a wrong ID or password; any
+  // other result asks for a step on the site first (password change, government integrated login).
+  const auto loginMap = QJsonDocument::fromJson(authenticated).object().value("resultMap").toObject();
+  const QString loginResult = loginMap.value("result").toString();
+  if (loginResult != QLatin1String("success")) {
+    QString reason = loginMap.value("msg").toString();
+    reason.replace(QRegularExpression(QStringLiteral("<br\\s*/?>"), QRegularExpression::CaseInsensitiveOption), QStringLiteral(" "));
+    reason.remove(QRegularExpression(QStringLiteral("<[^>]*>")));
+    reason = reason.simplified();
+    result.accountRejected = !loginResult.isEmpty();
+    if (loginResult.isEmpty())
+      result.error = QStringLiteral("VWorld 로그인 응답을 읽지 못했습니다. 누리집의 로그인 방식이 바뀌었을 수 있습니다. 잠시 뒤 다시 시도하고, 계속되면 개발자에게 알려 주세요.");
+    else if (loginResult == QLatin1String("error"))
+      result.error = QStringLiteral("VWorld 로그인에 실패했습니다. 아이디·비밀번호는 VWorld 누리집(vworld.kr) 로그인 계정입니다(API 키가 아님).");
+    else
+      result.error = QStringLiteral("VWorld 누리집이 로그인 전에 추가 절차를 요구합니다. 인터넷 브라우저로 vworld.kr 에 로그인해 안내를 마친 뒤 다시 시도하세요.");
+    if (!reason.isEmpty()) result.error += QStringLiteral("\n\nVWorld 안내: ") + reason;
+    return result;
   }
   stage(12, QStringLiteral("해당 시·군·구의 지적도 파일을 찾고 있습니다…"));
   QList<Resource> resources; bool catalogComplete = false;
