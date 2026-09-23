@@ -77,6 +77,8 @@ void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sou
 
   LayerOps::repairPersistedFileSources(QgsProject::instance());
   LayerOps::restoreMissingLayerTreeNodes(QgsProject::instance());
+  // Workspaces saved before layer removal pruned its group still carry empty 지적도/주변유적 titles.
+  LayerOps::pruneEmptyLegendGroups(QgsProject::instance());
   auto* project = QgsProject::instance();
   for (auto* layer : project->mapLayers()) {
     auto* dem = qobject_cast<QgsRasterLayer*>(layer);

@@ -2263,6 +2263,12 @@ private slots:
     QApplication::processEvents();
     QTest::keyClick(tree, Qt::Key_Delete);
     QVERIFY2(!project->mapLayer(id), "지적도 묶음에서 Delete 를 눌러도 레이어가 남아 있습니다.");
+    QVERIFY2(!project->layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral)),
+             "지적도를 지운 뒤에도 빈 지적도 묶음 제목이 레이어 목록에 남아 있습니다.");
+    QTest::keyClick(tree, Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY2(project->mapLayer(id), "Ctrl+Z 로 지운 지적도를 되살리지 못했습니다.");
+    auto* restored = project->layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral));
+    QVERIFY2(restored && restored->findLayer(id), "Ctrl+Z 로 되살린 지적도가 원래 지적도 묶음 안에 있지 않습니다.");
   }
 
   void cadastralGroupContextMenuCanRemove() {

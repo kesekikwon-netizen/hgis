@@ -33,7 +33,14 @@ struct KaRemovedLayers {
     QPointer<QgsLayerTreeGroup> parent;
     int index = 0;
   };
+  // Groups the removal left empty, detached but alive so Entry::parent stays valid for Ctrl+Z.
+  struct Group {
+    std::unique_ptr<QgsLayerTreeNode> node;
+    QPointer<QgsLayerTreeGroup> parent;
+    int index = 0;
+  };
   std::vector<Entry> entries;
+  std::vector<Group> groups;  // detach order: inner groups first
 };
 
 namespace {
@@ -192,6 +199,21 @@ void MainWindow::removeLayersFromTree(QgsLayerTreeView* tree) {
         parent->removeChildNode(live);
     }
   }
+  // A group emptied here (지적도, 주변유적) would otherwise stay behind as a bare title row.
+  for (const auto& entry : removed->entries) {
+    QgsLayerTreeGroup* group = entry.parent.data();
+    while (group && group != root && group->children().isEmpty()) {
+      auto* above = qobject_cast<QgsLayerTreeGroup*>(group->parent());
+      if (!above) break;
+      KaRemovedLayers::Group detached;
+      detached.parent = above;
+      detached.index = above->children().indexOf(group);
+      if (!above->takeChild(group)) break;
+      detached.node.reset(group);
+      removed->groups.push_back(std::move(detached));
+      group = above;
+    }
+  }
   if (removed->entries.empty()) return;
   bool removedCadastral = false;
   for (const auto& entry : removed->entries) {
@@ -281,6 +303,13 @@ void MainWindow::undoMapAction() {
   bool applied = false;
   if (action.type == KaUndoAction::LayersRemoved && action.removedLayers) {
     QScopedValueRollback<bool> restoring(m_isOpeningSurvey, true);
+    // Outer groups first, so every layer below returns into the group it was removed from.
+    auto& groups = action.removedLayers->groups;
+    for (auto it = groups.rbegin(); it != groups.rend(); ++it) {
+      if (!it->node) continue;
+      auto* parent = it->parent ? it->parent.data() : project->layerTreeRoot();
+      parent->insertChildNode(std::clamp(it->index, 0, int(parent->children().size())), it->node.release());
+    }
     for (auto& entry : action.removedLayers->entries) {
       if (!entry.layer) continue;
       const QPointer<QgsMapLayer> layer(entry.layer.release());
