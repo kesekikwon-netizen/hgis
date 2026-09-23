@@ -38,10 +38,10 @@ private slots:
   void domainIcons_useDistinctColors();
   void iconStates_preserveMeaningAndDisableColor();
   void explicitIconTint_remainsMonochrome();
-  void glossyIcons_keepTransparentCornersAndHighDpi();
+  void flatIcons_keepTransparentCornersAndHighDpi();
   void appIcon_usesGoldTrowelResource();
-  void chromeSurfaces_renderGlossAndReadableText();
-  void softenedPalette_matchesPreviousIntensity();
+  void chromeSurfaces_renderFlatAndReadableText();
+  void strataPalette_matchesSpec();
   void regionChip_remainsCompactAndTextOnly();
   void tokensMatchSpec();
   void embeddedNotEmpty();
@@ -451,7 +451,7 @@ void TestTheme::domainIcons_useDistinctColors() {
   }) >= 20, "soil needs a dark outline as well as the earth fill");
 }
 
-void TestTheme::glossyIcons_keepTransparentCornersAndHighDpi() {
+void TestTheme::flatIcons_keepTransparentCornersAndHighDpi() {
   for (const char* id : {"new", "map", "layer", "gps", "georef", "pdf"}) {
     const auto icon = KaIcons::icon(QString::fromLatin1(id));
     const auto normal = icon.pixmap(QSize(64, 64), 1.0).toImage();
@@ -459,7 +459,8 @@ void TestTheme::glossyIcons_keepTransparentCornersAndHighDpi() {
     QCOMPARE(normal.pixelColor(63, 63).alpha(), 0);
     QVERIFY(normal.pixelColor(8, 18).alpha() > 240);
     QVERIFY(normal.pixelColor(8, 46).alpha() > 240);
-    QVERIFY(normal.pixelColor(8, 18).lightness() > normal.pixelColor(8, 46).lightness());
+    // Flat tile: no reflection band, the fill is the same from top to bottom.
+    QVERIFY(qAbs(normal.pixelColor(8, 18).lightness() - normal.pixelColor(8, 46).lightness()) <= 3);
     const auto hi = icon.pixmap(QSize(40, 40), 2.0);
     QCOMPARE(hi.size(), QSize(80, 80));
     QCOMPARE(hi.devicePixelRatio(), 2.0);
@@ -598,7 +599,7 @@ void TestTheme::explicitIconTint_remainsMonochrome() {
   }
 }
 
-void TestTheme::chromeSurfaces_renderGlossAndReadableText() {
+void TestTheme::chromeSurfaces_renderFlatAndReadableText() {
   const auto& tokens = KaTheme::tokens();
   const QColor backgrounds[] = {
       tokens.surface, tokens.glossMiddle, tokens.glossBottom, tokens.hoverTop, tokens.hoverBottom,
@@ -606,8 +607,8 @@ void TestTheme::chromeSurfaces_renderGlossAndReadableText() {
       tokens.glossReflection, tokens.glossShoulder,
   };
   for (const QColor& background : backgrounds) {
-    QVERIFY2(contrastRatio(tokens.ink, background) >= 4.5, "body text against every gradient stop");
-    QVERIFY2(contrastRatio(tokens.inkMuted, background) >= 4.5, "secondary text against every gradient stop");
+    QVERIFY2(contrastRatio(tokens.ink, background) >= 4.5, "body text against every surface");
+    QVERIFY2(contrastRatio(tokens.inkMuted, background) >= 4.5, "secondary text against every surface");
   }
   QVERIFY(contrastRatio(tokens.inkDisabled, tokens.disabledSurface) >= 4.5);
   for (const QColor& background : {tokens.accentReflection, tokens.sky1, tokens.sky2})
@@ -688,25 +689,15 @@ void TestTheme::chromeSurfaces_renderGlossAndReadableText() {
   window.show();
   QCoreApplication::processEvents();
 
-  const QColor high[] = {tokens.glossReflection, tokens.glossReflection, tokens.pressedTop, tokens.disabledSurface};
-  const QColor low[] = {tokens.glossBottom, tokens.selectedBottom, tokens.pressedBottom, tokens.disabledSurface};
+  // Flat faces: every state is one colour from top to bottom.
+  const QColor face[] = {tokens.surface, tokens.selectedTop, tokens.pressedTop, tokens.disabledSurface};
   for (int index = 0; index < states.size(); ++index) {
     QPushButton* button = states[index];
     const QImage rendered = button->grab().toImage();
     const QColor top = logicalPixel(rendered, button->width() / 2, 8);
     const QColor bottom = logicalPixel(rendered, button->width() / 2, button->height() - 9);
-    if (index < 3)
-      QVERIFY2(top != bottom, qPrintable(names[index] + QStringLiteral(": actual gradient pixels")));
-    else
-      QCOMPARE(top, bottom);
-    for (const QColor& sample : {top, bottom}) {
-      QVERIFY(sample.red() >= qMin(high[index].red(), low[index].red()) - 2);
-      QVERIFY(sample.red() <= qMax(high[index].red(), low[index].red()) + 2);
-      QVERIFY(sample.green() >= qMin(high[index].green(), low[index].green()) - 2);
-      QVERIFY(sample.green() <= qMax(high[index].green(), low[index].green()) + 2);
-      QVERIFY(sample.blue() >= qMin(high[index].blue(), low[index].blue()) - 2);
-      QVERIFY(sample.blue() <= qMax(high[index].blue(), low[index].blue()) + 2);
-    }
+    QVERIFY2(closeColor(top, bottom), qPrintable(names[index] + QStringLiteral(": flat face ") + top.name() + QLatin1Char('/') + bottom.name()));
+    QVERIFY2(closeColor(top, face[index]), qPrintable(names[index] + QStringLiteral(": ") + top.name()));
     const QPalette::ColorGroup group = button->isEnabled() ? QPalette::Active : QPalette::Disabled;
     const QColor foreground = button->palette().color(group, QPalette::ButtonText);
     const double ratio = worstVerticalContrast(rendered, button->width() / 2, 8,
@@ -715,18 +706,6 @@ void TestTheme::chromeSurfaces_renderGlossAndReadableText() {
     qInfo().noquote() << "button-state" << index << "top" << top.name() << "bottom" << bottom.name()
                      << "worst rendered contrast" << ratio;
   }
-  const QImage gloss = states.front()->grab().toImage();
-  const int centerX = states.front()->width() / 2;
-  const QColor reflection = logicalPixel(gloss, centerX, 6);
-  const QColor shoulder = logicalPixel(gloss, centerX, 18);
-  const QColor middle = logicalPixel(gloss, centerX, 29);
-  const QColor shadow = logicalPixel(gloss, centerX, 50);
-  QVERIFY(closeColor(reflection, tokens.glossReflection));
-  QVERIFY(relativeLuminance(reflection) > relativeLuminance(shoulder));
-  QVERIFY(relativeLuminance(shoulder) > relativeLuminance(middle));
-  QVERIFY(relativeLuminance(middle) > relativeLuminance(shadow));
-  qInfo().noquote() << "rendered gloss reflection/shoulder/middle/shadow"
-                   << reflection.name() << shoulder.name() << middle.name() << shadow.name();
   const QImage panelImage = panel->grab().toImage();
   for (QLabel* text : {caption, body}) {
     const QColor foreground = text->palette().color(text->foregroundRole());
@@ -744,33 +723,34 @@ void TestTheme::chromeSurfaces_renderGlossAndReadableText() {
   }
 }
 
-void TestTheme::softenedPalette_matchesPreviousIntensity() {
-  // Snapshot of pre-soften Bloom/Fluent bases (2026-09-10). The test stores
-  // those bases so it cannot be satisfied by copying tokens() back into itself.
+void TestTheme::strataPalette_matchesSpec() {
+  // Strata chrome (2026-09-23): navy frame, one blue accent, flat surfaces.
   const auto& tokens = KaTheme::tokens();
+  QCOMPARE(tokens.sky1, QColor(0x1F, 0x6F, 0xB2));
+  QCOMPARE(tokens.sky3, QColor(0x12, 0x55, 0x8D));
+  QCOMPARE(tokens.rail, QColor(0x0B, 0x3A, 0x63));
+  QCOMPARE(tokens.desk, QColor(0xF4, 0xF6, 0xF8));
+  QCOMPARE(tokens.ink, QColor(0x1D, 0x27, 0x33));
+  QCOMPARE(tokens.inkMuted, QColor(0x5B, 0x68, 0x75));
+  QCOMPARE(tokens.inkDisabled, QColor(0x59, 0x68, 0x74));
+  QCOMPARE(tokens.border, QColor(0xDC, 0xE3, 0xEA));
+  // The gloss stops remain as flat aliases so older selectors paint plainly.
+  QCOMPARE(tokens.glossReflection, tokens.surface);
+  QCOMPARE(tokens.glossShoulder, tokens.surface);
+  QCOMPARE(tokens.glossBottom, tokens.surface);
+  QCOMPARE(tokens.hoverTop, tokens.hoverBottom);
+  QCOMPARE(tokens.pressedTop, tokens.pressedBottom);
+  QCOMPARE(tokens.selectedTop, tokens.selectedBottom);
+  QVERIFY(contrastRatio(tokens.railText, tokens.rail) >= 4.5);
+  QVERIFY(contrastRatio(tokens.railMuted, tokens.rail) >= 4.5);
+  QVERIFY(contrastRatio(tokens.railMuted, tokens.sky3) >= 4.5);
+  // Icon fills keep their softened pre-2026-09-10 intensity.
   const auto& icons = KaTheme::iconPalette();
-  const struct { QColor before; QColor after; } surfaces[] = {
-      {QColor(0xE8, 0xF1, 0xF8), tokens.desk},
-      {QColor(0xF0, 0xF7, 0xFB), tokens.glossMiddle},
-      {QColor(0xD7, 0xE8, 0xF4), tokens.glossBottom},
-      {QColor(0xCD, 0xE6, 0xF5), tokens.hoverBottom},
-      {QColor(0xB9, 0xD9, 0xEE), tokens.pressedTop},
-      {QColor(0xD4, 0xE8, 0xF4), tokens.pressedBottom},
-      {QColor(0xE7, 0xF5, 0xFC), tokens.selectedTop},
-      {QColor(0xC5, 0xE7, 0xF6), tokens.selectedBottom},
-      {QColor(0xE8, 0xEE, 0xF2), tokens.disabledSurface},
-  };
-  for (const auto& surface : surfaces) {
-    QCOMPARE(surface.after.red(), qRound(surface.before.red() * 0.8 + 255 * 0.2));
-    QCOMPARE(surface.after.green(), qRound(surface.before.green() * 0.8 + 255 * 0.2));
-    QCOMPARE(surface.after.blue(), qRound(surface.before.blue() * 0.8 + 255 * 0.2));
-  }
   const struct { QColor before; QColor after; } fills[] = {
-      {QColor(0x00, 0x78, 0xD4), tokens.sky1}, {QColor(0xA3, 0x3A, 0x2E), tokens.danger},
-      {QColor(0x32, 0x6B, 0x4A), tokens.ok}, {QColor(0x32, 0x6B, 0x9B), icons.file},
-      {QColor(0x95, 0x60, 0x29), icons.record}, {QColor(0x39, 0x73, 0x68), icons.map},
-      {QColor(0x6B, 0x59, 0x96), icons.align}, {QColor(0x24, 0x78, 0x6C), icons.output},
-      {QColor(0x1D, 0x6E, 0xB8), icons.water}, {QColor(0x93, 0x60, 0x39), icons.earth},
+      {QColor(0x32, 0x6B, 0x9B), icons.file}, {QColor(0x95, 0x60, 0x29), icons.record},
+      {QColor(0x39, 0x73, 0x68), icons.map}, {QColor(0x6B, 0x59, 0x96), icons.align},
+      {QColor(0x24, 0x78, 0x6C), icons.output}, {QColor(0x1D, 0x6E, 0xB8), icons.water},
+      {QColor(0x93, 0x60, 0x39), icons.earth},
   };
   for (const auto& fill : fills) {
     QVERIFY(qAbs(fill.after.hslSaturationF() / fill.before.hslSaturationF() - 0.8) < 0.02);
@@ -778,10 +758,6 @@ void TestTheme::softenedPalette_matchesPreviousIntensity() {
     QVERIFY(qAbs(fill.after.lightnessF() - fill.before.lightnessF()) < 0.005);
     QCOMPARE(fill.after.alpha(), fill.before.alpha());
   }
-  QCOMPARE(tokens.ink, QColor(0x20, 0x28, 0x31));
-  QCOMPARE(tokens.inkMuted, QColor(0x52, 0x60, 0x6D));
-  QCOMPARE(tokens.inkDisabled, QColor(0x59, 0x68, 0x74));
-  QCOMPARE(tokens.border, QColor(0xCB, 0xD3, 0xDB));
   QCOMPARE(icons.ink, QColor(0x23, 0x29, 0x30));
 }
 
@@ -816,7 +792,10 @@ void TestTheme::tokensMatchSpec() {
   QCOMPARE(tokens.sky1, tokens.sky5);
   QVERIFY(tokens.desk.blue() >= tokens.desk.red());
   QVERIFY(tokens.desk.blue() - tokens.desk.red() <= 16);
-  QVERIFY(tokens.surface != tokens.glossBottom);
+  // Flat chrome still shows hover and selection as their own tints.
+  QVERIFY(tokens.hoverBottom != tokens.surface);
+  QVERIFY(tokens.selectedTop != tokens.surface);
+  QVERIFY(tokens.pressedTop != tokens.selectedTop);
 }
 
 static QString normalize(QString s) { return s.replace(QLatin1String("\r\n"), QLatin1String("\n")); }

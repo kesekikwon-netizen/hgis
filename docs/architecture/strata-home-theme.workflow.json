@@ -1,0 +1,39 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Strata notice, flat theme and home",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "boot", "label": "Start" },
+    { "id": "theme", "label": "Theme" },
+    { "id": "home", "label": "Home" }
+  ],
+  "phases": [
+    { "id": "notice", "label": "Notice", "fromCol": 0, "toCol": 1 },
+    { "id": "style", "label": "Style", "fromCol": 2, "toCol": 3 },
+    { "id": "page", "label": "Home", "fromCol": 4, "toCol": 5, "variant": "emphasis" }
+  ],
+  "mainPath": ["splash", "contour", "hero", "recent"],
+  "nodes": [
+    { "id": "splash", "lane": "boot", "col": 0, "type": "frontend", "label": "Notice", "sublabel": "KaStartupSplash" },
+    { "id": "contour", "lane": "boot", "col": 1, "type": "backend", "label": "Contours", "sublabel": "KaSplashArt::contours" },
+    { "id": "tokens", "lane": "theme", "col": 2, "type": "backend", "label": "Tokens", "sublabel": "KaTheme::tokens" },
+    { "id": "qss", "lane": "theme", "col": 3, "type": "backend", "label": "Flat QSS", "sublabel": "resolvedStyleSheet" },
+    { "id": "hero", "lane": "home", "col": 4, "type": "frontend", "label": "Navy band", "sublabel": "KaStartHero" },
+    { "id": "recent", "lane": "home", "col": 5, "type": "frontend", "label": "Recent list", "sublabel": "RecentSurveys::load" }
+  ],
+  "edges": [
+    { "from": "splash", "to": "contour" },
+    { "from": "contour", "to": "hero", "label": "same mound", "variant": "emphasis" },
+    { "from": "tokens", "to": "qss", "label": "@token@" },
+    { "from": "qss", "to": "hero" },
+    { "from": "hero", "to": "recent", "label": "click opens" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Was", "items": ["Glossy chrome; a blue rail over a plain table"] },
+    { "dot": "emerald", "title": "Now", "items": ["Flat tokens; the home continues the notice"] },
+    { "dot": "cyan", "title": "Keep", "items": ["A survey opens only from a click"] }
+  ]
+}

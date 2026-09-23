@@ -226,7 +226,7 @@ static void applyWidgetShadow(QWidget* w, int blur = 14, int yOffset = 3, int al
 }
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-  setWindowTitle(QStringLiteral("필드고고학GIS"));
+  setWindowTitle(QStringLiteral("Strata"));
   setWindowIcon(KaIcons::appIcon());
   resize(1280, 900);
   m_status = new KaStatusBar(this);
@@ -1732,6 +1732,7 @@ void MainWindow::buildUi() {
     if (m_actMapGeoTiff) m_actMapGeoTiff->setEnabled(page == m_mapPage);
     if (m_startPage && page == m_startPage)
       m_startPage->reload();
+    if (m_status) m_status->setMapInstrumentsVisible(page != m_startPage);
     if (m_mapPage && page == m_mapPage) {
       QTimer::singleShot(0, this, [this]() { ensureStartupViewReady(); });
     } else {
@@ -1749,6 +1750,7 @@ void MainWindow::buildUi() {
     if (m_canvas) onCanvasScaleChanged(m_canvas->scale());
   });
   m_viewTabs->setCurrentWidget(m_startPage);
+  if (m_status) m_status->setMapInstrumentsVisible(false);
   setCentralWidget(m_viewTabs);
   // 자동 저장 없음. 저장은 사용자가 「저장」(Ctrl+S)을 누를 때만 일어난다.
   // 저장 안 한 작업은 창 제목의 * 로 보이고, 닫을 때 한 번 물어본다.
@@ -5396,7 +5398,7 @@ bool MainWindow::addVectorFromPath(const QString& path) {
 
 void MainWindow::showAbout() {
   QMessageBox::about(this, QStringLiteral("정보"),
-      QStringLiteral("필드고고학GIS  v") + QLatin1String(KA_HGIS_VERSION) +
+      QStringLiteral("Strata · 필드고고학 GIS  v") + QLatin1String(KA_HGIS_VERSION) +
       QStringLiteral("\n동국문화재연구원 · 만든이: 권영인 · 조유량 · 박종환\n\n"
                      "QGIS를 포크하지 않고 qgis_core / qgis_gui를 링크합니다.\n"
                      "작업 CRS: EPSG:5186/5187 · 업로드: EPSG:5179\n\n"

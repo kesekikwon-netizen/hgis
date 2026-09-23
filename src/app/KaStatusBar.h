@@ -23,6 +23,9 @@ public:
   void setUploadCrs(const QString& authId);
   void setRenderingEnabled(bool on);
   bool isRenderingEnabled() const;
+  // Cursor position, scale and the render switch only mean something on a map;
+  // the home page hides them and keeps the work/upload CRS.
+  void setMapInstrumentsVisible(bool visible);
 
 signals:
   void crsClicked();
@@ -37,6 +40,7 @@ private:
   QToolButton* m_crsButton = nullptr;
   QLabel* m_uploadChip = nullptr;
   QToolButton* m_renderButton = nullptr;
+  QList<QWidget*> m_mapOnly;
   QString m_workCrs;
   QString m_uploadCrs;
 };

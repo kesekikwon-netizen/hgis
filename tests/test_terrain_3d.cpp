@@ -354,8 +354,8 @@ void TestTerrain3d::terrainSheet_usesOwnSheetNotUserSheet() {
                body.contains(QLatin1String("openTerrain3dLayout")),
            "입체지형 도면출력이 전용 조판을 연다");
 
-  QVERIFY2(src.contains(QString::fromUtf8("입체지형_조판.png")),
-           "조판 그림은 조사 폴더에 둠");
+  QVERIFY2(src.contains(QString::fromUtf8("입체지형_도면.png")),
+           "도면 그림은 조사 폴더에 둠");
 }
 
 void TestTerrain3d::studio_hidesManualChrome() {
@@ -480,7 +480,7 @@ void TestTerrain3d::layoutStudio_has2dChromeCards() {
   QFile f(QStringLiteral("src/app/KaTerrain3dLayoutStudio.cpp"));
   QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "KaTerrain3dLayoutStudio.cpp");
   const QString body = QString::fromUtf8(f.readAll());
-  QVERIFY2(body.contains(QString::fromUtf8("조판 항목")), "2D와 같은 조판 항목 카드");
+  QVERIFY2(body.contains(QString::fromUtf8("도면 항목")), "2D와 같은 도면 항목 카드");
   QVERIFY2(body.contains(QString::fromUtf8("방위")), "2D와 같은 방위 카드");
   QVERIFY2(body.contains(QString::fromUtf8("도면 정보")), "2D와 같은 도명 카드");
   QVERIFY2(body.contains(QString::fromUtf8("범례")), "범례는 버튼으로만");

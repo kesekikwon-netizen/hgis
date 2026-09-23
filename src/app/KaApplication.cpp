@@ -661,7 +661,7 @@ int KaApplication::run(int argc, char** argv) {
 #endif
 
   app.setApplicationName(QStringLiteral("ka-hgis"));
-  app.setApplicationDisplayName(QStringLiteral("필드고고학GIS"));
+  app.setApplicationDisplayName(QStringLiteral("Strata"));
   app.setOrganizationName(QStringLiteral("ka-hgis"));
   app.setApplicationVersion(QStringLiteral(KA_HGIS_VERSION));
   app.setStyle(QStringLiteral("Fusion"));

@@ -400,13 +400,13 @@ void MainWindow::openLayoutDesigner() {
   m_drawingStudio->setParent(m_viewTabs, Qt::Widget);
   if (m_viewTabs->indexOf(m_drawingStudio) < 0)
     m_viewTabs->addTab(m_drawingStudio, KaIcons::icon(QStringLiteral("pdf")),
-                       QStringLiteral("레이아웃"));
+                       QStringLiteral("도면"));
   m_viewTabs->setCurrentWidget(m_drawingStudio);
   hideSubTools();
   m_drawingStudio->showSheetPage();
   m_drawingStudio->refreshMapFromProject();
   m_drawingStudio->centerOnMapCanvas();
-  statusBar()->showMessage(QStringLiteral("조판입니다. 좌표점은 용지 아래 아이콘으로 찍습니다."), 6000);
+  statusBar()->showMessage(QStringLiteral("도면 화면입니다. 좌표점은 용지 아래 아이콘으로 찍습니다."), 6000);
 #endif
 }
 
@@ -443,11 +443,11 @@ void MainWindow::placeTerrain3dOnSheet() {
   QString err;
   if (Terrain3dLayoutService::buildSheet(QgsProject::instance(), spec, &err).isEmpty()) {
     QMessageBox::warning(this, QStringLiteral("입체지형 도면출력"),
-                         err.isEmpty() ? QStringLiteral("입체지형 조판을 만들지 못했습니다.") : err);
+                         err.isEmpty() ? QStringLiteral("입체지형 도면을 만들지 못했습니다.") : err);
     return;
   }
   openTerrain3dLayout();
-  statusBar()->showMessage(QStringLiteral("입체지형 조판입니다. 범례·방위·축척이 있습니다."), 6000);
+  statusBar()->showMessage(QStringLiteral("입체지형 도면입니다. 범례·방위·축척이 있습니다."), 6000);
 #endif
 }
 
@@ -466,7 +466,7 @@ void MainWindow::openTerrain3dLayout() {
   m_terrain3dLayoutStudio->setParent(m_viewTabs, Qt::Widget);
   if (m_viewTabs->indexOf(m_terrain3dLayoutStudio) < 0)
     m_viewTabs->addTab(m_terrain3dLayoutStudio, KaIcons::icon(QStringLiteral("terrain_3d")),
-                       QStringLiteral("입체지형 조판"));
+                       QStringLiteral("입체지형 도면"));
   m_viewTabs->setCurrentWidget(m_terrain3dLayoutStudio);
   hideSubTools();
   m_terrain3dLayoutStudio->attachSheet();
@@ -481,7 +481,7 @@ QString MainWindow::terrain3dSheetPngPath() const {
 #endif
   if (dir.isEmpty())
     dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-  return QDir(dir).filePath(QStringLiteral("입체지형_조판.png"));
+  return QDir(dir).filePath(QStringLiteral("입체지형_도면.png"));
 }
 
 void MainWindow::applyTerrain3dSheetScale(int denominator) {

@@ -23,6 +23,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QLabel>
+#include <QTableWidget>
 #include <QMenu>
 #include <QPushButton>
 #include <QToolButton>
@@ -771,6 +772,48 @@ private slots:
         QStringLiteral("screen %1x%2, window %3x%4")
             .arg(available.width()).arg(available.height())
             .arg(window.frameGeometry().width()).arg(window.frameGeometry().height())));
+    QgsProject::instance()->setDirty(false);
+  }
+  void homePageShowsStrataHeroWithoutOpeningASurvey() {
+    // Two remembered surveys give the continue card and the list something to show.
+    const QString first = m_files.filePath(QStringLiteral("home-first/광령리.gpkg"));
+    const QString second = m_files.filePath(QStringLiteral("home-second/병산동.gpkg"));
+    for (const QString& path : {first, second}) {
+      QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
+      QFile file(path);
+      QVERIFY(file.open(QIODevice::WriteOnly));
+    }
+    {
+      QSettings st = RecentSurveys::userSettings();
+      RecentSurveys::remember(st, second, QStringLiteral("병산동"));
+      RecentSurveys::remember(st, first, QStringLiteral("광령리"));
+    }
+    MainWindow window;
+    disableRendering(window);
+    window.resize(1600, 900);
+    window.show();
+    QCoreApplication::processEvents();
+    auto* home = window.findChild<QWidget*>(QStringLiteral("startPage"));
+    QVERIFY(home && home->isVisible());
+    auto* hero = home->findChild<QWidget*>(QStringLiteral("startHero"));
+    QVERIFY(hero && hero->isVisible());
+    auto* card = home->findChild<QWidget*>(QStringLiteral("startContinueCard"));
+    QVERIFY(card && card->isVisible());
+    auto* name = home->findChild<QLabel*>(QStringLiteral("startContinueName"));
+    QVERIFY(name);
+    QCOMPARE(name->text(), QStringLiteral("광령리"));
+    auto* list = home->findChild<QTableWidget*>(QStringLiteral("recentSurveyList"));
+    QVERIFY(list && list->rowCount() >= 2);
+    // The home screen only offers surveys; nothing opens without a click.
+    QCOMPARE(window.windowTitle(), QStringLiteral("Strata"));
+    const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if (!output.isEmpty()) {
+      QVERIFY(QDir().mkpath(output));
+      QVERIFY(window.grab().save(QDir(output).filePath(QStringLiteral("home-page.png"))));
+    }
+    QSettings st = RecentSurveys::userSettings();
+    RecentSurveys::forget(st, first);
+    RecentSurveys::forget(st, second);
     QgsProject::instance()->setDirty(false);
   }
   void topographicActualWindowRemainsStableAfterCompletion() {

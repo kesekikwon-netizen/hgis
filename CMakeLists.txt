@@ -269,6 +269,7 @@ add_executable(ka-hgis
   src/app/KaAlignMapTool.cpp
   src/app/KaImageView.cpp
   src/app/KaStartPage.cpp
+  src/app/KaStartHero.cpp
   src/app/KaCoordPointMapTool.cpp
   src/app/KaMeasureMapTool.cpp
   src/app/KaAboveLabelsOverlay.cpp
@@ -309,6 +310,7 @@ add_executable(ka-hgis
   src/app/KaAlignMapTool.h
   src/app/KaImageView.h
   src/app/KaStartPage.h
+  src/app/KaStartHero.h
   src/app/KaCoordPointMapTool.h
   src/app/KaMeasureMapTool.h
   src/app/KaAboveLabelsOverlay.h

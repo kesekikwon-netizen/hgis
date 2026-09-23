@@ -925,7 +925,7 @@ QString SectionLayoutService::exportSectionPdf(
     auto* master = project->layoutManager()->layoutByName(kName);
     auto* layout = dynamic_cast<QgsPrintLayout*>(master);
     if (!layout) {
-        if (errorOut) *errorOut = QStringLiteral("section_sheet 조판이 없습니다.");
+        if (errorOut) *errorOut = QStringLiteral("section_sheet 도면이 없습니다.");
         return {};
     }
 

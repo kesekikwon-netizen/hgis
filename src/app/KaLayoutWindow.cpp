@@ -37,7 +37,7 @@ void KaLayoutWindow::ensureLayoutGuiRegistered(QgsMapCanvas* mapCanvas) {
 KaLayoutWindow::KaLayoutWindow(QgsProject* project, QgsMapCanvas* mapCanvas, QWidget* parent)
     : QMainWindow(parent), m_project(project), m_mapCanvas(mapCanvas) {
   setAttribute(Qt::WA_DeleteOnClose, false);
-  setWindowTitle(QStringLiteral("조판 편집 — ka-hgis"));
+  setWindowTitle(QStringLiteral("도면 편집"));
   resize(1280, 900);
   ensureLayoutGuiRegistered(mapCanvas);
   buildUi();
@@ -45,22 +45,22 @@ KaLayoutWindow::KaLayoutWindow(QgsProject* project, QgsMapCanvas* mapCanvas, QWi
 }
 
 void KaLayoutWindow::buildUi() {
-  auto* tb = addToolBar(QStringLiteral("조판"));
+  auto* tb = addToolBar(QStringLiteral("도면"));
   tb->setMovable(false);
   tb->setIconSize(QSize(24, 24));
 
   m_layoutCombo = new QComboBox(this);
   m_layoutCombo->setMinimumWidth(220);
-  m_layoutCombo->setToolTip(QStringLiteral("편집할 조판 선택"));
+  m_layoutCombo->setToolTip(QStringLiteral("편집할 도면 선택"));
   connect(m_layoutCombo, QOverload<int>::of(&QComboBox::activated), this, &KaLayoutWindow::onLayoutPicked);
-  tb->addWidget(new QLabel(QStringLiteral(" 조판 "), this));
+  tb->addWidget(new QLabel(QStringLiteral(" 도면 "), this));
   tb->addWidget(m_layoutCombo);
   tb->addSeparator();
 
   auto* actSelect = tb->addAction(QStringLiteral("선택"), this, &KaLayoutWindow::useSelectTool);
-  actSelect->setToolTip(QStringLiteral("항목 선택·이동 (QGIS 조판 선택 도구)"));
+  actSelect->setToolTip(QStringLiteral("항목 선택·이동 (QGIS 선택 도구)"));
   auto* actPan = tb->addAction(QStringLiteral("이동"), this, &KaLayoutWindow::usePanTool);
-  actPan->setToolTip(QStringLiteral("조판 화면 이동"));
+  actPan->setToolTip(QStringLiteral("도면 화면 이동"));
   auto* actZoom = tb->addAction(QStringLiteral("확대"), this, &KaLayoutWindow::useZoomTool);
   actZoom->setToolTip(QStringLiteral("드래그 확대"));
   tb->addAction(QStringLiteral("전체보기"), this, &KaLayoutWindow::zoomFull);
@@ -84,7 +84,7 @@ void KaLayoutWindow::buildUi() {
   m_status = new QLabel(this);
   statusBar()->addWidget(m_status, 1);
   m_status->setText(QStringLiteral(
-      "조판 편집: 항목 선택 후 드래그·크기 조절 · PDF보내기로 출력 · 메인 창 레이어/지도가 조판 지도에 반영됩니다"));
+      "도면 편집: 항목 선택 후 드래그·크기 조절 · PDF보내기로 출력 · 메인 창 레이어/지도가 도면 지도에 반영됩니다"));
 }
 
 void KaLayoutWindow::refreshLayoutList() {
@@ -100,7 +100,7 @@ void KaLayoutWindow::refreshLayoutList() {
     m_layoutCombo->addItem(label, name);
   }
   if (m_layoutCombo->count() == 0) {
-    m_status->setText(QStringLiteral("조판이 없습니다. 메인 창에서 「도면 조판 다시 만들기」를 실행하세요."));
+    m_status->setText(QStringLiteral("도면이 없습니다. 메인 창에서 「도면 만들기」(Ctrl+L)를 실행하세요."));
     return;
   }
   int idx = 0;
@@ -132,12 +132,12 @@ void KaLayoutWindow::onLayoutPicked(int index) {
   QgsMasterLayoutInterface* master = m_project->layoutManager()->layoutByName(name);
   auto* printLayout = dynamic_cast<QgsPrintLayout*>(master);
   if (!printLayout) {
-    m_status->setText(QStringLiteral("조판을 열 수 없습니다: %1").arg(name));
+    m_status->setText(QStringLiteral("도면을 열 수 없습니다: %1").arg(name));
     return;
   }
   setActiveLayout(printLayout);
   m_status->setText(QStringLiteral("편집 중: %1").arg(LayoutService::koreanTitle(name)));
-  setWindowTitle(QStringLiteral("조판 편집 — %1").arg(LayoutService::koreanTitle(name)));
+  setWindowTitle(QStringLiteral("도면 편집 — %1").arg(LayoutService::koreanTitle(name)));
 }
 
 void KaLayoutWindow::setActiveLayout(QgsLayout* layout) {
@@ -169,7 +169,7 @@ void KaLayoutWindow::refreshFromProject() {
 
 void KaLayoutWindow::exportPdf() {
   if (!m_view || !m_view->currentLayout()) {
-    QMessageBox::information(this, QStringLiteral("PDF"), QStringLiteral("열린 조판이 없습니다."));
+    QMessageBox::information(this, QStringLiteral("PDF"), QStringLiteral("열린 도면이 없습니다."));
     return;
   }
   auto* layout = m_view->currentLayout();
@@ -180,7 +180,7 @@ void KaLayoutWindow::exportPdf() {
   }
   if (name.isEmpty()) name = QStringLiteral("layout");
   const QString path = QFileDialog::getSaveFileName(
-      this, QStringLiteral("조판 PDF 저장"),
+      this, QStringLiteral("도면 PDF 저장"),
       LayoutService::koreanTitle(name) + QStringLiteral(".pdf"),
       QStringLiteral("PDF (*.pdf)"));
   if (path.isEmpty()) return;

@@ -107,7 +107,7 @@ void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sou
   ensureDefaultBasemaps();
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   rememberSurvey(gpkgPath, QFileInfo(gpkgPath).completeBaseName());
-  setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(gpkgPath).completeBaseName()));
+  setWindowTitle(QFileInfo(gpkgPath).completeBaseName());
   showMapWorkspace();
   updateNextActionStatus();
   KaCrashGuard::logLine(
@@ -479,7 +479,7 @@ void MainWindow::openRecentSurvey(const QString& path) {
   if (ext == QLatin1String("gpkg")) {
     if (openSurveyGpkg(path)) {
       rememberSurvey(path, QFileInfo(path).completeBaseName());
-      setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
+      setWindowTitle(QFileInfo(path).completeBaseName());
       showMapWorkspace();
     }
     return;
@@ -489,7 +489,7 @@ void MainWindow::openRecentSurvey(const QString& path) {
   if (QFile::exists(companionGpkg)) {
     if (openSurveyGpkg(companionGpkg)) {
       rememberSurvey(path, QFileInfo(path).completeBaseName());
-      setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
+      setWindowTitle(QFileInfo(path).completeBaseName());
       showMapWorkspace();
     }
     return;
@@ -543,7 +543,7 @@ void MainWindow::openRecentSurvey(const QString& path) {
   if (m_canvas) m_canvas->refresh();
   ensureDefaultBasemaps();
   rememberSurvey(path, QFileInfo(path).completeBaseName());
-  setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
+  setWindowTitle(QFileInfo(path).completeBaseName());
   showMapWorkspace();
   updateNextActionStatus();
 #endif
@@ -677,7 +677,7 @@ void MainWindow::newSurvey() {
     b86->setChecked(!m_workCrs.contains(QLatin1String("5187")));
   if (auto* b87 = findChild<QToolButton*>(QStringLiteral("btnCrs5187")))
     b87->setChecked(m_workCrs.contains(QLatin1String("5187")));
-  setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(name));
+  setWindowTitle(name);
   m_surveySessionReady = true;
   rememberSurvey(path, name);
   rememberSurveyDir(path);
@@ -1411,7 +1411,7 @@ void MainWindow::saveProjectAs() {
                .arg(absorbed.skippedRaster.join(QStringLiteral(", "))));
 
   // 3. 윈도우 타이틀 및 최근 조사 갱신
-  setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(newFi.completeBaseName()));
+  setWindowTitle(newFi.completeBaseName());
   rememberSurvey(targetGpkg, newFi.completeBaseName());
   rememberSurveyDir(targetGpkg);
   markSurveySaved();
@@ -1442,14 +1442,14 @@ void MainWindow::openProject() {
   if (path.isEmpty()) return;
   if (QFileInfo(path).suffix().compare(QLatin1String("gpkg"), Qt::CaseInsensitive) == 0) {
     if (openSurveyGpkg(path))
-      setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
+      setWindowTitle(QFileInfo(path).completeBaseName());
     return;
   }
   const QString companionGpkg =
       QFileInfo(path).dir().filePath(QFileInfo(path).completeBaseName() + QStringLiteral(".gpkg"));
   if (QFile::exists(companionGpkg)) {
     if (openSurveyGpkg(companionGpkg)) {
-      setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
+      setWindowTitle(QFileInfo(path).completeBaseName());
     }
     return;
   }
@@ -1526,7 +1526,7 @@ void MainWindow::openProject() {
   m_startupViewApplied = true;
   if (m_canvas) m_canvas->refresh();
   ensureDefaultBasemaps();
-  setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
+  setWindowTitle(QFileInfo(path).completeBaseName());
   rememberSurvey(path, QFileInfo(path).completeBaseName());
   showMapWorkspace();
   updateNextActionStatus();

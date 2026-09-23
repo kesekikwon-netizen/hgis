@@ -148,7 +148,8 @@ void paintCard(QPainter& painter, const QRectF& card, double radius, const QImag
   painter.restore();
 }
 
-QImage contours(const QSizeF& size, qreal devicePixelRatio, const QPointF& summit) {
+QImage contours(const QSizeF& size, qreal devicePixelRatio, const QPointF& summit, double unit,
+                double clearRadius) {
   const qreal dpr = devicePixelRatio > 0 ? devicePixelRatio : 1.0;
   QImage image((size * dpr).toSize(), QImage::Format_ARGB32_Premultiplied);
   image.setDevicePixelRatio(dpr);
@@ -158,12 +159,13 @@ QImage contours(const QSizeF& size, qreal devicePixelRatio, const QPointF& summi
 
   const double step = 4.0;
   const int nx = int(std::ceil(w / step)) + 1, ny = int(std::ceil(h / step)) + 1;
-  const QPointF top(summit.x() / w, summit.y() / w);
+  const double ref = unit > 0.0 ? unit : w;
+  const QPointF top(summit.x() / ref, summit.y() / ref);
   std::vector<double> field(size_t(nx) * size_t(ny));
   double peak = 0.0;
   for (int j = 0; j < ny; ++j)
     for (int i = 0; i < nx; ++i) {
-      const double v = terrain(i * step / w, j * step / w, top);
+      const double v = terrain(i * step / ref, j * step / ref, top);
       field[size_t(j) * size_t(nx) + size_t(i)] = v;
       peak = std::max(peak, v);
     }
@@ -179,11 +181,14 @@ QImage contours(const QSizeF& size, qreal devicePixelRatio, const QPointF& summi
   }
 
   painter.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-  QRadialGradient clear(summit, 0.11 * w);
-  clear.setColorAt(0.0, QColor(0, 0, 0, 0));
-  clear.setColorAt(0.55, QColor(0, 0, 0, 0));
-  clear.setColorAt(1.0, QColor(0, 0, 0, 255));
-  painter.fillRect(QRectF(0, 0, w, h), clear);
+  const double clearing = clearRadius < 0.0 ? 0.11 * w : clearRadius;
+  if (clearing > 0.0) {
+    QRadialGradient clear(summit, clearing);
+    clear.setColorAt(0.0, QColor(0, 0, 0, 0));
+    clear.setColorAt(0.55, QColor(0, 0, 0, 0));
+    clear.setColorAt(1.0, QColor(0, 0, 0, 255));
+    painter.fillRect(QRectF(0, 0, w, h), clear);
+  }
   QLinearGradient away(QPointF(0.06 * w, 0.98 * h), QPointF(0.50 * w, 0.38 * h));
   away.setColorAt(0.0, QColor(0, 0, 0, 0));
   away.setColorAt(1.0, QColor(0, 0, 0, 255));

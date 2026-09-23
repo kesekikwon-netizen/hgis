@@ -150,7 +150,7 @@ KaTerrain3dLayoutStudio::KaTerrain3dLayoutStudio(QgsProject* project, QWidget* p
     m_view->viewport()->installEventFilter(this);
   midLay->addWidget(m_view, 1);
 
-  m_status = new QLabel(QStringLiteral("입체지형 조판 — 범례는 「범례」로"), mid);
+  m_status = new QLabel(QStringLiteral("입체지형 도면 — 범례는 「범례」로"), mid);
   m_status->setContentsMargins(8, 4, 8, 4);
   midLay->addWidget(m_status);
 
@@ -178,7 +178,7 @@ KaTerrain3dLayoutStudio::KaTerrain3dLayoutStudio(QgsProject* project, QWidget* p
   auto* legendLay = new QVBoxLayout(cardLegend);
   legendLay->setContentsMargins(10, 10, 10, 10);
   legendLay->setSpacing(6);
-  auto* legendCap = new QLabel(QStringLiteral("조판 항목"), cardLegend);
+  auto* legendCap = new QLabel(QStringLiteral("도면 항목"), cardLegend);
   legendCap->setObjectName(QStringLiteral("cardCaption"));
   legendLay->addWidget(legendCap);
   auto* legendRow = new QHBoxLayout;
@@ -381,7 +381,7 @@ void KaTerrain3dLayoutStudio::warn(const QString& err) {
   if (m_status)
     m_status->setText(err);
   if (!err.isEmpty())
-    QMessageBox::information(this, QStringLiteral("입체지형 조판"), err);
+    QMessageBox::information(this, QStringLiteral("입체지형 도면"), err);
 }
 
 void KaTerrain3dLayoutStudio::addLegend() {
@@ -474,12 +474,12 @@ void KaTerrain3dLayoutStudio::addCrsLabel() {
 void KaTerrain3dLayoutStudio::exportPdf() {
   auto* ly = currentLayout();
   if (!ly || !m_project) {
-    QMessageBox::information(this, QStringLiteral("입체지형 조판"),
+    QMessageBox::information(this, QStringLiteral("입체지형 도면"),
                              QStringLiteral("먼저 입체지형 도면출력을 하세요."));
     return;
   }
   const QString path = QFileDialog::getSaveFileName(
-      this, QStringLiteral("입체지형 PDF"), QStringLiteral("입체지형_조판.pdf"),
+      this, QStringLiteral("입체지형 PDF"), QStringLiteral("입체지형_도면.pdf"),
       QStringLiteral("PDF (*.pdf)"));
   if (path.isEmpty())
     return;
@@ -487,7 +487,7 @@ void KaTerrain3dLayoutStudio::exportPdf() {
   const QString saved = LayoutService::exportLayoutPdf(
       m_project, QString::fromUtf8(Terrain3dLayoutService::kSheetName), path, &err);
   if (saved.isEmpty()) {
-    QMessageBox::warning(this, QStringLiteral("입체지형 조판"),
+    QMessageBox::warning(this, QStringLiteral("입체지형 도면"),
                          err.isEmpty() ? QStringLiteral("PDF를 쓰지 못했습니다.") : err);
     return;
   }

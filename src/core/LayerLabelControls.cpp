@@ -88,7 +88,7 @@ LayerLabelControls::Info LayerLabelControls::describe(const QgsMapLayer* layer, 
   if (!layer) return info;
   const auto* vector = qobject_cast<const QgsVectorLayer*>(layer);
   if (!vector) {
-    info.reason = QStringLiteral("이미지에 포함된 글자는 따로 숨길 수 없습니다. 색상 범례는 조판에서 설정합니다.");
+    info.reason = QStringLiteral("이미지에 포함된 글자는 따로 숨길 수 없습니다. 색상 범례는 도면에서 설정합니다.");
     return info;
   }
   if (!vector->isValid()) {

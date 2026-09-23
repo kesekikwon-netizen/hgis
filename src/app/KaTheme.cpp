@@ -24,77 +24,48 @@ QColor softenFillSaturation(const QColor& color) {
                           color.lightnessF(), color.alphaF()).toRgb();
 }
 
-QColor blendSurface(const QColor& color, const QColor& surface, double fraction) {
-  // Channel-wise sRGB interpolation, with explicit integer rounding.
-  return QColor(qRound(color.red() * (1.0 - fraction) + surface.red() * fraction),
-                qRound(color.green() * (1.0 - fraction) + surface.green() * fraction),
-                qRound(color.blue() * (1.0 - fraction) + surface.blue() * fraction),
-                color.alpha());
-}
-
-// Shared chrome colors. Map symbols, page contents and IconPalette are separate.
+// Strata chrome: flat surfaces, a navy frame and one blue accent. Map symbols,
+// page contents and IconPalette are separate. The gloss* stops stay as flat
+// aliases of the surface so any selector that still names them paints plainly.
 const Tokens kTokens = [] {
   Tokens colors = {
-    QColor(0xD6, 0xF0, 0xFC),  // sky0 Bloom selection wash
-    QColor(0x00, 0x78, 0xD4),  // sky1 Windows accent https://fluent2.microsoft.design/color
-    QColor(0x00, 0x67, 0xC0),  // sky2 accent hover (darker so white text stays >= 4.5)
-    QColor(0x00, 0x5A, 0x9E),  // sky3 deep accent
-    QColor(0xF3, 0xF3, 0xF3),  // sky4 Mica light fallback
-    QColor(0x00, 0x78, 0xD4),  // sky5 selection highlight (= sky1)
-    QColor(0x20, 0x28, 0x31),  // sky6 ink
-    QColor(0x20, 0x28, 0x31),  // ink
-    QColor(0x52, 0x60, 0x6D),  // inkMuted
+    QColor(0xE3, 0xEE, 0xF8),  // sky0 selection wash
+    QColor(0x1F, 0x6F, 0xB2),  // sky1 accent, white text 5.3:1
+    QColor(0x18, 0x5E, 0x99),  // sky2 accent hover
+    QColor(0x12, 0x55, 0x8D),  // sky3 deep accent, the startup-notice blue
+    QColor(0xF4, 0xF6, 0xF8),  // sky4 window face
+    QColor(0x1F, 0x6F, 0xB2),  // sky5 selection highlight (= sky1)
+    QColor(0x1D, 0x27, 0x33),  // sky6 ink
+    QColor(0x1D, 0x27, 0x33),  // ink
+    QColor(0x5B, 0x68, 0x75),  // inkMuted, >= 4.5 on every tint below
     QColor(0x59, 0x68, 0x74),  // inkDisabled, readable on disabledSurface
-    QColor(0xCB, 0xD3, 0xDB),  // border
+    QColor(0xDC, 0xE3, 0xEA),  // border
     QColor(0xFF, 0xFF, 0xFF),  // bevelLight
-    QColor(0x9B, 0xB4, 0xC6),  // bevelDark
+    QColor(0xB8, 0xC4, 0xCF),  // bevelDark
     QColor(0xFF, 0xFF, 0xFF),  // canvasNeutral
-    QColor(0xE8, 0xF1, 0xF8),  // desk Bloom mica tint
-    QColor(0xA3, 0x3A, 0x2E),  // danger
-    QColor(0x32, 0x6B, 0x4A),  // ok
+    QColor(0xF4, 0xF6, 0xF8),  // desk: page background under white cards
+    QColor(0xB4, 0x23, 0x18),  // danger
+    QColor(0x2E, 0x7D, 0x4F),  // ok
     QColor(0xFF, 0xFF, 0xFF),  // surface
-    QColor(0xF0, 0xF7, 0xFB),  // glossMiddle
-    QColor(0xD7, 0xE8, 0xF4),  // glossBottom
-    QColor(0xFF, 0xFF, 0xFF),  // hoverTop
-    QColor(0xCD, 0xE6, 0xF5),  // hoverBottom
-    QColor(0xB9, 0xD9, 0xEE),  // pressedTop
-    QColor(0xD4, 0xE8, 0xF4),  // pressedBottom
-    QColor(0xE7, 0xF5, 0xFC),  // selectedTop
-    QColor(0xC5, 0xE7, 0xF6),  // selectedBottom
-    QColor(0xE8, 0xEE, 0xF2),  // disabledSurface
-    QColor(0x00, 0x67, 0xC0),  // rail Bloom blue (not softened)
+    QColor(0xF7, 0xF9, 0xFB),  // glossMiddle: alternate rows
+    QColor(0xFF, 0xFF, 0xFF),  // glossBottom, flat
+    QColor(0xEE, 0xF4, 0xFA),  // hoverTop
+    QColor(0xEE, 0xF4, 0xFA),  // hoverBottom
+    QColor(0xE1, 0xEC, 0xF7),  // pressedTop
+    QColor(0xE1, 0xEC, 0xF7),  // pressedBottom
+    QColor(0xE6, 0xF0, 0xFA),  // selectedTop
+    QColor(0xE6, 0xF0, 0xFA),  // selectedBottom
+    QColor(0xEE, 0xF1, 0xF4),  // disabledSurface
+    QColor(0x0B, 0x3A, 0x63),  // rail: Strata navy
     QColor(0xFF, 0xFF, 0xFF),  // railText
-    QColor(0xF3, 0xFB, 0xFF),  // railMuted, >= 4.5 on accent and rail
-    QColor(0xEA, 0xF2, 0xEC),  // successSurface
-    QColor(0xF9, 0xE9, 0xE5),  // dangerSurface
+    QColor(0xD5, 0xE6, 0xF5),  // railMuted, >= 4.5 on rail and deep accent
+    QColor(0xEA, 0xF4, 0xEE),  // successSurface
+    QColor(0xFB, 0xED, 0xEA),  // dangerSurface
   };
   // Explicit assignments avoid an MSVC /O2 ICE on initializer-list pointers
   // to QColor members of this lambda-local aggregate.
-  colors.sky1 = softenFillSaturation(colors.sky1);
-  colors.sky2 = softenFillSaturation(colors.sky2);
-  colors.sky3 = softenFillSaturation(colors.sky3);
-  colors.sky5 = softenFillSaturation(colors.sky5);
-  colors.danger = softenFillSaturation(colors.danger);
-  colors.ok = softenFillSaturation(colors.ok);
-  colors.sky0 = blendSurface(colors.sky0, colors.surface, 0.2);
-  colors.sky4 = blendSurface(colors.sky4, colors.surface, 0.2);
-  colors.desk = blendSurface(colors.desk, colors.surface, 0.2);
-  colors.glossMiddle = blendSurface(colors.glossMiddle, colors.surface, 0.2);
-  colors.glossBottom = blendSurface(colors.glossBottom, colors.surface, 0.2);
-  colors.hoverTop = blendSurface(colors.hoverTop, colors.surface, 0.2);
-  colors.hoverBottom = blendSurface(colors.hoverBottom, colors.surface, 0.2);
-  colors.pressedTop = blendSurface(colors.pressedTop, colors.surface, 0.2);
-  colors.pressedBottom = blendSurface(colors.pressedBottom, colors.surface, 0.2);
-  colors.selectedTop = blendSurface(colors.selectedTop, colors.surface, 0.2);
-  colors.selectedBottom = blendSurface(colors.selectedBottom, colors.surface, 0.2);
-  colors.disabledSurface = blendSurface(colors.disabledSurface, colors.surface, 0.2);
-  colors.successSurface = blendSurface(colors.successSurface, colors.surface, 0.2);
-  colors.dangerSurface = blendSurface(colors.dangerSurface, colors.surface, 0.2);
-  // Text, outlines, disabled ink and the map-neutral surface stay unchanged.
   colors.glossReflection = colors.surface;
-  colors.glossShoulder = blendSurface(colors.glossMiddle, colors.surface, 0.5);
-  // Do not lift the accent toward white: #0078D4 + 8% white drops below 4.5:1
-  // on surface text. Keep the reflection stop equal to the softened accent.
+  colors.glossShoulder = colors.surface;
   colors.accentReflection = colors.sky1;
   return colors;
 }();

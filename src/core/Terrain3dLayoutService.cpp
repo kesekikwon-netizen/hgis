@@ -222,7 +222,7 @@ QString buildSheet(QgsProject* project, const SheetSpec& spec, QString* errorOut
   }
   QgsPrintLayout* ly = replaceSheet(project);
   if (!ly) {
-    if (errorOut) *errorOut = QStringLiteral("입체지형 조판을 만들지 못했습니다.");
+    if (errorOut) *errorOut = QStringLiteral("입체지형 도면을 만들지 못했습니다.");
     return {};
   }
 

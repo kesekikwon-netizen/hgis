@@ -7,7 +7,6 @@
 #include <QPainterPath>
 #include <QPixmap>
 #include <QScopedValueRollback>
-#include <QLinearGradient>
 
 namespace {
 
@@ -82,27 +81,13 @@ QIcon bakeIcon(void (*fn)(QPainter&), const QColor& accent) {
     p.scale(size / 64.0, size / 64.0);
     p.setRenderHint(QPainter::Antialiasing, true);
     if (tGlossyTile) {
+      // Flat tile: one fill and a hairline edge, no reflection band.
       const QRectF tile(2, 2, 60, 60);
       QPainterPath outline;
       outline.addRoundedRect(tile, 14, 14);
-      QLinearGradient body(0, 2, 0, 62);
-      body.setColorAt(0, tAccent.lighter(220));
-      body.setColorAt(0.43, tAccent.lighter(135));
-      body.setColorAt(0.46, tAccent.lighter(115));
-      body.setColorAt(1, tAccent.darker(118));
-      p.fillPath(outline, body);
-      p.save();
-      p.setClipPath(outline);
-      QPainterPath sheen;
-      sheen.moveTo(2, 2); sheen.lineTo(62, 2); sheen.lineTo(62, 26);
-      sheen.quadTo(32, 38, 2, 26); sheen.closeSubpath();
-      QLinearGradient reflection(0, 2, 0, 34);
-      reflection.setColorAt(0, QColor(255, 255, 255, 95));
-      reflection.setColorAt(1, QColor(255, 255, 255, 20));
-      p.fillPath(sheen, reflection);
-      p.restore();
+      p.fillPath(outline, tAccent);
       p.setBrush(Qt::NoBrush);
-      p.setPen(QPen(QColor(255, 255, 255, 100), 0.8));
+      p.setPen(QPen(tAccent.darker(112), 0.8));
       p.drawPath(outline);
     }
     p.save();

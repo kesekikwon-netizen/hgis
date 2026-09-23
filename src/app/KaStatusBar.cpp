@@ -38,7 +38,8 @@ KaStatusBar::KaStatusBar(QWidget* parent) : QStatusBar(parent) {
   clearCoordinate();
   addPermanentWidget(m_xy);
 
-  addPermanentWidget(makeSeparator(this));
+  QFrame* afterXy = makeSeparator(this);
+  addPermanentWidget(afterXy);
 
   auto* scaleLabel = new QLabel(QStringLiteral("축척 1:"), this);
   scaleLabel->setObjectName(QStringLiteral("scaleLabel"));
@@ -71,7 +72,8 @@ KaStatusBar::KaStatusBar(QWidget* parent) : QStatusBar(parent) {
   }
   addPermanentWidget(m_scaleCombo);
 
-  addPermanentWidget(makeSeparator(this));
+  QFrame* afterScale = makeSeparator(this);
+  addPermanentWidget(afterScale);
 
   m_crsButton = new QToolButton(this);
   m_crsButton->setObjectName(QStringLiteral("crsButton"));
@@ -84,7 +86,8 @@ KaStatusBar::KaStatusBar(QWidget* parent) : QStatusBar(parent) {
   m_uploadChip->setObjectName(QStringLiteral("uploadCrsChip"));
   addPermanentWidget(m_uploadChip);
 
-  addPermanentWidget(makeSeparator(this));
+  QFrame* afterCrs = makeSeparator(this);
+  addPermanentWidget(afterCrs);
 
   m_renderButton = new QToolButton(this);
   m_renderButton->setObjectName(QStringLiteral("renderToggle"));
@@ -100,6 +103,7 @@ KaStatusBar::KaStatusBar(QWidget* parent) : QStatusBar(parent) {
     emit renderingToggled(on);
   });
   addPermanentWidget(m_renderButton);
+  m_mapOnly = {m_xy, afterXy, scaleLabel, m_scaleCombo, afterScale, afterCrs, m_renderButton};
 
   setWorkCrs(QStringLiteral("EPSG:5186"));
   setUploadCrs(QStringLiteral("EPSG:5179"));
@@ -144,4 +148,9 @@ void KaStatusBar::setRenderingEnabled(bool on) {
 
 bool KaStatusBar::isRenderingEnabled() const {
   return m_renderButton->isChecked();
+}
+
+void KaStatusBar::setMapInstrumentsVisible(bool visible) {
+  for (QWidget* widget : std::as_const(m_mapOnly))
+    widget->setVisible(visible);
 }

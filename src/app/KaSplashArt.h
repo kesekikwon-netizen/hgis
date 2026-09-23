@@ -20,7 +20,10 @@ void paintCard(QPainter& painter, const QRectF& card, double radius, const QImag
 // summit itself stays clear for the app icon, and the lines fade out toward the
 // text in the lower left. Every fifth line is an index contour, drawn a little
 // stronger as on a survey map.
-QImage contours(const QSizeF& size, qreal devicePixelRatio, const QPointF& summit);
+// unit is the length the hills are sized against (the width when 0); clearRadius
+// is the empty disc around the summit (11% of the width when negative, none at 0).
+QImage contours(const QSizeF& size, qreal devicePixelRatio, const QPointF& summit,
+                double unit = 0.0, double clearRadius = -1.0);
 // The app icon centred in box. The icon file has uneven transparent margins, so
 // the visible tile is cropped out first; a soft shadow falls below the tile.
 void paintIcon(QPainter& painter, const QRectF& box, const QPixmap& icon);
