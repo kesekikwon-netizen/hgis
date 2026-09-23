@@ -85,6 +85,60 @@ QLineEdit#startRecentFilter {
 QTableWidget#recentSurveyList { border: none; background: @surface@; }
 QTableWidget#recentSurveyList::item { padding: 0 8px; border-bottom: 1px solid @desk@; }
 QTableWidget#recentSurveyList::item:selected { background: @selectedTop@; color: @ink@; }
+/* ---- App bar: navy strip above the ribbon ---- */
+QToolBar#appBarToolbar { background: @rail@; border: none; padding: 0; margin: 0; spacing: 0; }
+QWidget#appBar QLabel { background: transparent; }
+QLabel#appBarName {
+  color: @railText@;
+  font-family: "Segoe UI", "Malgun Gothic";
+  font-size: 18px;
+  font-weight: 600;
+}
+QLabel#appBarProduct { color: @railMuted@; font-size: 12px; }
+QFrame#appBarDivider { background: @railMuted@; border: none; }
+QLabel#appBarSurvey { color: @railText@; font-size: 13px; font-weight: 700; }
+QLabel#appBarState { color: @railMuted@; font-size: 12px; }
+QLabel#appBarState[unsaved="true"] { color: #F1D48A; font-weight: 700; }
+QToolButton#appBarRegion, QToolButton#appBarAbout {
+  color: @railText@;
+  background: transparent;
+  border: 1px solid @railMuted@;
+  border-radius: 7px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+QToolButton#appBarAbout { border-color: transparent; }
+QToolButton#appBarRegion:enabled:hover, QToolButton#appBarAbout:enabled:hover { background: @accentDeep@; }
+QToolButton#appBarRegion::menu-indicator { image: none; width: 0px; }
+QLineEdit#appBarSearch {
+  background: @surface@;
+  color: @ink@;
+  border: 1px solid @surface@;
+  border-radius: 8px;
+  padding: 0 12px;
+  min-height: 30px;
+  font-size: 13px;
+}
+QLineEdit#appBarSearch:focus { border-color: @accent@; }
+/* ---- Basemap gallery: one ribbon button, previews in a panel ---- */
+QWidget#basemapGallery { background: @surface@; }
+QLabel#basemapGalleryCaption { color: @inkMuted@; font-size: 12px; }
+QWidget#basemapGallery QToolButton {
+  background: @surface@;
+  color: @ink@;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 4px;
+  font-size: 12px;
+}
+QWidget#basemapGallery QToolButton:enabled:hover { background: @hoverBottom@; border-color: @border@; }
+QWidget#basemapGallery QToolButton:enabled:checked {
+  background: @selectedTop@;
+  color: @accentDeep@;
+  border-color: @accent@;
+  font-weight: 700;
+}
 QDialogButtonBox QPushButton {
   font-size: 13px;
   min-height: 34px;
@@ -647,25 +701,39 @@ QSplitter#studioMainSplit::handle:hover {
 QFrame#layerOpacityRail {
   background: @surface@;
   border: 1px solid @border@;
-  border-radius: 8px;
+  border-radius: 10px;
 }
 QFrame#layerOpacityRail QLabel {
   color: @inkMuted@;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
 }
-QFrame#layerOpacityRail QSlider::groove:vertical {
-  background: @glossBottom@;
-  width: 6px;
-  border-radius: 3px;
+QFrame#layerOpacityRail QSlider::groove:horizontal {
+  background: @border@;
+  height: 4px;
+  border-radius: 2px;
 }
-QFrame#layerOpacityRail QSlider::handle:vertical {
-  background: @accent@;
-  border: 1px solid @accentHover@;
-  height: 14px;
-  margin: 0 -5px;
-  border-radius: 7px;
+QFrame#layerOpacityRail QSlider::sub-page:horizontal { background: @accent@; border-radius: 2px; }
+QFrame#layerOpacityRail QSlider::sub-page:horizontal:disabled { background: @border@; }
+QFrame#layerOpacityRail QSlider::handle:horizontal {
+  background: @surface@;
+  border: 2px solid @accent@;
+  width: 12px;
+  margin: -6px 0;
+  border-radius: 8px;
 }
+QFrame#layerOpacityRail QSlider::handle:horizontal:disabled { border-color: @inkDisabled@; }
+/* ---- Map controls: zoom buttons floating on the map ---- */
+QFrame#mapControls { background: @surface@; border: 1px solid @border@; border-radius: 9px; }
+QFrame#mapControls QToolButton {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid @desk@;
+  border-radius: 0;
+  padding: 0;
+}
+QFrame#mapControls QToolButton:enabled:hover { background: @hoverBottom@; }
+QFrame#mapControls QToolButton:enabled:pressed { background: @pressedTop@; }
 QFrame#layersCard,
 QFrame#filesCard,
 QFrame#studioFilesPanel {
@@ -741,23 +809,15 @@ QLabel { color: @ink@; background: transparent; }
 QLabel#cardCaption { color: @inkMuted@; font-weight: 700; font-size: 12px; padding: 2px 2px 0 2px; }
 QCheckBox { color: @ink@; spacing: 8px; font-weight: 600; background: transparent; }
 QCheckBox:disabled { color: @inkDisabled@; }
-QCheckBox::indicator, QTreeView::indicator, QgsLayerTreeView::indicator {
-  width: 16px;
-  height: 16px;
-  margin: 2px;
+/* Check boxes are drawn by KaTheme::ChromeStyle, which paints the tick; a QSS
+   indicator fill has no tick, and image files are not allowed here. */
+/* Only the empty state is styled here, so an unchecked box stays visible on
+   white rows; a checked box keeps the style's tick. */
+QTreeView::indicator:unchecked, QgsLayerTreeView::indicator:unchecked {
   border: 1.2px solid @inkDisabled@;
-  border-radius: 4px;
+  border-radius: 3px;
   background: @surface@;
 }
-QCheckBox::indicator:checked, QTreeView::indicator:checked, QgsLayerTreeView::indicator:checked {
-  background: @accent@;
-  border: 1.2px solid @accent@;
-}
-QCheckBox::indicator:unchecked, QTreeView::indicator:unchecked, QgsLayerTreeView::indicator:unchecked {
-  background: @surface@;
-  border: 1.2px solid @inkDisabled@;
-}
-
 QTreeView[kaLayerInformation="true"]::indicator {
   width: 14px;
   height: 14px;

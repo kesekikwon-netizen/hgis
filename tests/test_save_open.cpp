@@ -92,6 +92,7 @@
 #include <qgslayoutmousehandles.h>
 #include <qgslayoutviewtoolselect.h>
 #include <qgsmapcanvas.h>
+#include <qgsrectangle.h>
 #include <qgsmaplayerstyle.h>
 #include <qgsmaptopixel.h>
 #include <qgsmessagebar.h>
@@ -814,6 +815,38 @@ private slots:
     QSettings st = RecentSurveys::userSettings();
     RecentSurveys::forget(st, first);
     RecentSurveys::forget(st, second);
+    QgsProject::instance()->setDirty(false);
+  }
+  void mapControlsZoomTheCanvasAndShowAScaleBar() {
+    MainWindow window;
+    disableRendering(window);
+    window.resize(1400, 900);
+    window.show();
+    QCoreApplication::processEvents();
+    auto* canvas = window.findChild<QgsMapCanvas*>(QStringLiteral("mapCanvas"));
+    auto* zoomIn = window.findChild<QToolButton*>(QStringLiteral("mapZoomIn"));
+    auto* zoomOut = window.findChild<QToolButton*>(QStringLiteral("mapZoomOut"));
+    QVERIFY(canvas && zoomIn && zoomOut);
+    QVERIFY(window.findChild<QToolButton*>(QStringLiteral("mapZoomFit")));
+    QVERIFY(window.findChild<QWidget*>(QStringLiteral("mapScaleBar")));
+    // The province chips moved to the app bar, and the maps into one gallery.
+    QVERIFY(window.findChild<QWidget*>(QStringLiteral("appBar")));
+    QVERIFY(window.findChild<QToolButton*>(QStringLiteral("btnBasemapGallery")));
+    // The canvas has no size while the home tab is showing: open the map tab.
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("viewTabs"));
+    QVERIFY(tabs);
+    for (int i = 0; i < tabs->count(); ++i)
+      if (tabs->widget(i)->findChild<QgsMapCanvas*>(QStringLiteral("mapCanvas")) == canvas)
+        tabs->setCurrentIndex(i);
+    QTRY_VERIFY(canvas->isVisible() && canvas->width() > 100);
+    canvas->setExtent(QgsRectangle(200000, 400000, 202000, 401500));
+    QTRY_VERIFY(canvas->scale() > 0);
+    const double before = canvas->scale();
+    zoomIn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(canvas->scale() < before, 3000);
+    const double closer = canvas->scale();
+    zoomOut->click();
+    QTRY_VERIFY_WITH_TIMEOUT(canvas->scale() > closer, 3000);
     QgsProject::instance()->setDirty(false);
   }
   void topographicActualWindowRemainsStableAfterCompletion() {

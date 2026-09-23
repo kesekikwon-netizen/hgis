@@ -14,15 +14,20 @@
 #include <QImage>
 #include <QLabel>
 #include <QLayout>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMainWindow>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QSet>
+#include <QSignalSpy>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include "app/KaAppBar.h"
+#include "app/KaBasemapGallery.h"
 #include "app/KaBeginnerRibbon.h"
 #include "app/KaIcons.h"
 #include "app/KaTheme.h"
@@ -39,7 +44,7 @@ private slots:
   void iconStates_preserveMeaningAndDisableColor();
   void explicitIconTint_remainsMonochrome();
   void flatIcons_keepTransparentCornersAndHighDpi();
-  void appIcon_usesGoldTrowelResource();
+  void appIcon_usesNavyTileWithGoldTrowel();
   void chromeSurfaces_renderFlatAndReadableText();
   void strataPalette_matchesSpec();
   void regionChip_remainsCompactAndTextOnly();
@@ -56,6 +61,8 @@ private slots:
   void noCatchAllWidgetRules();
   void chromeFontIsFieldKorean();
   void beginnerChrome_questionLabels();
+  void appBar_routesLotSearchesAndShowsSurveyState();
+  void basemapGallery_holdsMapButtonsBehindOneButton();
 };
 
 void TestTheme::initTestCase() {
@@ -467,7 +474,7 @@ void TestTheme::flatIcons_keepTransparentCornersAndHighDpi() {
   }
 }
 
-void TestTheme::appIcon_usesGoldTrowelResource() {
+void TestTheme::appIcon_usesNavyTileWithGoldTrowel() {
   QFile bundled(QStringLiteral(":/ka-hgis/app-icon.png"));
   QFile source(QStringLiteral("data/theme/ka-hgis-app.png"));
   QVERIFY(bundled.open(QIODevice::ReadOnly));
@@ -486,9 +493,13 @@ void TestTheme::appIcon_usesGoldTrowelResource() {
     QCOMPARE(image.pixelColor(0, 0).alpha(), 0);
     QCOMPARE(image.pixelColor(size - 1, size - 1).alpha(), 0);
     QVERIFY(image.pixelColor(size / 2, size / 2).alpha() > 240);
+    // Strata icon: a navy tile with a gold trowel on a contour mound.
     QVERIFY(opaquePixelsMatching(image, [](const QColor& c) {
       return c.hsvHue() >= 20 && c.hsvHue() <= 55 && c.hsvSaturation() > 60;
-    }) > size * size / 8);
+    }) > size * size / 25);
+    QVERIFY(opaquePixelsMatching(image, [](const QColor& c) {
+      return c.hsvHue() >= 180 && c.hsvHue() <= 230 && c.hsvSaturation() > 60;
+    }) > size * size / 2);
   }
   const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
   if (!output.isEmpty() && QDir(output).exists())
@@ -1010,6 +1021,66 @@ void TestTheme::beginnerChrome_questionLabels() {
            "투명도는 레이어 카드가 아니라 맵 안");
   QVERIFY2(!studio.contains(QLatin1String("addStudio(QStringLiteral(\"out\")")),
            "위 리본 PDF는 범례창과 중복이라 뺌");
+}
+
+void TestTheme::appBar_routesLotSearchesAndShowsSurveyState() {
+  QVERIFY(KaAppBar::looksLikeLot(QStringLiteral("제주시 애월읍 광령리 1615")));
+  QVERIFY(KaAppBar::looksLikeLot(QStringLiteral("광령리 1615-3")));
+  QVERIFY(KaAppBar::looksLikeLot(QStringLiteral("광령리 산12")));
+  QVERIFY(!KaAppBar::looksLikeLot(QStringLiteral("제주시 애월읍 광령리")));
+  QVERIFY(!KaAppBar::looksLikeLot(QStringLiteral("1615")));
+  KaAppBar bar;
+  bar.setAttribute(Qt::WA_DontShowOnScreen);
+  bar.resize(1200, bar.height());
+  bar.show();
+  QCoreApplication::processEvents();
+  QSignalSpy spy(&bar, &KaAppBar::searchRequested);
+  bar.searchField()->setText(QStringLiteral("  광령리   1615 "));
+  QTest::keyClick(bar.searchField(), Qt::Key_Return);
+  QCOMPARE(spy.count(), 1);
+  QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("광령리 1615"));
+  QCOMPARE(spy.at(0).at(1).toBool(), true);
+  auto* survey = bar.findChild<QLabel*>(QStringLiteral("appBarSurvey"));
+  auto* state = bar.findChild<QLabel*>(QStringLiteral("appBarState"));
+  QVERIFY(survey && state);
+  QVERIFY(!survey->isVisible());  // the home screen has no survey
+  bar.setSurvey(QStringLiteral("광령리"), true);
+  QVERIFY(survey->isVisible());
+  QCOMPARE(survey->text(), QStringLiteral("광령리"));
+  QVERIFY(state->text().contains(QStringLiteral("저장 안 됨")));
+  bar.setSurvey(QStringLiteral("광령리"), false);
+  QCOMPARE(state->text(), QStringLiteral("저장됨"));
+  const QImage image = bar.grab().toImage();
+  const QColor edge = image.pixelColor(2, image.height() / 2);
+  QVERIFY2(edge.blue() > edge.red() + 40, qPrintable(edge.name()));  // the navy rail
+}
+
+void TestTheme::basemapGallery_holdsMapButtonsBehindOneButton() {
+  QWidget host;
+  auto* gallery = new KaBasemapGallery(&host);
+  auto* terrain = new QToolButton(&host);
+  terrain->setObjectName(QStringLiteral("btnTerrain"));
+  terrain->setText(QStringLiteral("지형"));
+  terrain->setCheckable(true);
+  gallery->addButton(terrain, QStringLiteral("terrain"));
+  auto* action = new QAction(QStringLiteral("지질"), &host);
+  QToolButton* geology = gallery->addAction(action, QStringLiteral("geology"));
+  QVERIFY(geology);
+  QCOMPARE(terrain->parentWidget(), gallery->panel());
+  QCOMPARE(geology->parentWidget(), gallery->panel());
+  // Buttons keep their names, so existing lookups and clicks still find them.
+  QCOMPARE(host.findChild<QToolButton*>(QStringLiteral("btnTerrain")), terrain);
+  QCOMPARE(gallery->popupMode(), QToolButton::InstantPopup);
+  QVERIFY(gallery->menu());
+  for (const char* id : {"terrain", "contour", "dem", "soil", "paleo", "cadastral", "daedong",
+                         "map1919", "geology", "river"}) {
+    const QImage preview = KaBasemapGallery::preview(QString::fromLatin1(id)).pixmap(QSize(88, 52)).toImage();
+    QVERIFY2(!preview.isNull(), id);
+    QSet<QRgb> colours;
+    for (int y = 6; y < preview.height() - 6; y += 5)
+      for (int x = 6; x < preview.width() - 6; x += 5) colours.insert(preview.pixel(x, y));
+    QVERIFY2(colours.size() > 3, id);  // a picture, not a flat tile
+  }
 }
 
 QTEST_MAIN(TestTheme)

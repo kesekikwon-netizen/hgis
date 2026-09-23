@@ -270,6 +270,9 @@ add_executable(ka-hgis
   src/app/KaImageView.cpp
   src/app/KaStartPage.cpp
   src/app/KaStartHero.cpp
+  src/app/KaAppBar.cpp
+  src/app/KaBasemapGallery.cpp
+  src/app/KaMapControls.cpp
   src/app/KaCoordPointMapTool.cpp
   src/app/KaMeasureMapTool.cpp
   src/app/KaAboveLabelsOverlay.cpp
@@ -311,6 +314,9 @@ add_executable(ka-hgis
   src/app/KaImageView.h
   src/app/KaStartPage.h
   src/app/KaStartHero.h
+  src/app/KaAppBar.h
+  src/app/KaBasemapGallery.h
+  src/app/KaMapControls.h
   src/app/KaCoordPointMapTool.h
   src/app/KaMeasureMapTool.h
   src/app/KaAboveLabelsOverlay.h
@@ -490,6 +496,9 @@ if(KA_HGIS_BUILD_TESTS)
     src/app/KaTheme.cpp
     src/app/KaBeginnerRibbon.cpp
     src/app/KaIcons.cpp
+    src/app/KaAppBar.cpp
+    src/app/KaBasemapGallery.cpp
+    src/app/KaSplashArt.cpp
   )
   set_target_properties(ka_theme_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   target_link_libraries(ka_theme_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
@@ -738,6 +747,8 @@ if(KA_HGIS_BUILD_TESTS)
     geoTiffButtonOnlyEnabledOnMapTab
     windowGeometryFitsLogicalMonitors
     mainWindowFitsAvailableScreenOnShow
+    homePageShowsStrataHeroWithoutOpeningASurvey
+    mapControlsZoomTheCanvasAndShowAScaleBar
     provinceChipMovesMapWithoutLoadingLayers)
   ka_add_qtest_filter(save_open_topo ka_save_open_tests
     topographicActualWindowRemainsStableAfterCompletion

@@ -1,0 +1,41 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "App bar, map gallery and map controls",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "bar", "label": "App bar" },
+    { "id": "ribbon", "label": "Ribbon" },
+    { "id": "map", "label": "Map" }
+  ],
+  "phases": [
+    { "id": "find", "label": "Find", "fromCol": 0, "toCol": 1 },
+    { "id": "maps", "label": "Maps", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "view", "label": "View", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["search", "locate", "gallery", "toggle", "fit"],
+  "nodes": [
+    { "id": "search", "lane": "bar", "col": 0, "type": "frontend", "label": "Search", "sublabel": "KaAppBar" },
+    { "id": "chips", "lane": "bar", "col": 1, "type": "frontend", "label": "Region", "sublabel": "KaRegionLocator" },
+    { "id": "locate", "lane": "map", "col": 1, "type": "backend", "label": "Locate", "sublabel": "searchLocation" },
+    { "id": "gallery", "lane": "ribbon", "col": 2, "type": "frontend", "label": "Gallery", "sublabel": "KaBasemapGallery" },
+    { "id": "toggle", "lane": "ribbon", "col": 3, "type": "backend", "label": "Map toggles", "sublabel": "same buttons" },
+    { "id": "fit", "lane": "map", "col": 4, "type": "frontend", "label": "Controls", "sublabel": "KaMapControls" },
+    { "id": "survey", "lane": "map", "col": 5, "type": "backend", "label": "Survey fit", "sublabel": "zoomToLayerMax" }
+  ],
+  "edges": [
+    { "from": "search", "to": "locate", "label": "lot or address", "variant": "emphasis" },
+    { "from": "chips", "to": "locate" },
+    { "from": "locate", "to": "gallery" },
+    { "from": "gallery", "to": "toggle", "label": "opens panel" },
+    { "from": "toggle", "to": "fit" },
+    { "from": "fit", "to": "survey", "label": "맞춤" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Was", "items": ["17 chips and 10 map buttons filled the ribbon"] },
+    { "dot": "emerald", "title": "Now", "items": ["One search bar and one gallery button"] },
+    { "dot": "cyan", "title": "Keep", "items": ["Every step stays on one ribbon row"] }
+  ]
+}

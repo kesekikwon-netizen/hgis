@@ -64,6 +64,7 @@ class KaSectionDrawingStudio;
 class KaTerrain3dStudio;
 class KaTerrain3dLayoutStudio;
 class KaStartPage;
+class KaAppBar;
 class KaCoordPointMapTool;
 class KaMeasureMapTool;
 class KaFeatureSelectTool;
@@ -524,6 +525,7 @@ private:
   QAction* m_actMapGeoTiff = nullptr;
   QTabWidget* m_viewTabs = nullptr;
   KaStartPage* m_startPage = nullptr;
+  KaAppBar* m_appBar = nullptr;
   QWidget* m_mapPage = nullptr;
   KaBeginnerRibbon* m_ribbon = nullptr;
   struct KaUndoAction {

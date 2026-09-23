@@ -177,7 +177,7 @@ private slots:
   void workflowGuideTracksSevenRealMilestones();
   void vworldSettingsAndNoKeyTests();
   void koreaRegionCatalog_gyeonggiGangwonAddressQuery();
-  void regionLocator_sitsInToolbarGapBeforeSearch();
+  void regionLocator_sitsInAppBarRegionMenu();
   void adminBoundary_buildsEmdUrlWithoutHardcodedKey();
   void adminBoundary_parsesOkFeatureAndRejectsError();
   void layerOps_isolateSurfaceSurvey_satelliteAndUserSiteOnly();
@@ -2634,7 +2634,7 @@ void TestWorkflow::koreaRegionCatalog_gyeonggiGangwonAddressQuery() {
            "제주시 읍면동");
 }
 
-void TestWorkflow::regionLocator_sitsInToolbarGapBeforeSearch() {
+void TestWorkflow::regionLocator_sitsInAppBarRegionMenu() {
   QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
   const QString src = QString::fromUtf8(mw.readAll());
@@ -2642,9 +2642,11 @@ void TestWorkflow::regionLocator_sitsInToolbarGapBeforeSearch() {
   const int menusEnd = src.indexOf(QLatin1String("\nvoid MainWindow::"), menusStart + 1);
   QVERIFY(menusStart >= 0 && menusEnd > menusStart);
   const QString menus = src.mid(menusStart, menusEnd - menusStart);
-  QVERIFY2(menus.contains(QLatin1String("new KaRegionLocator(ribbon)")) &&
-               menus.contains(QLatin1String("ribbon->addWidget(QStringLiteral(\"find\"), region)")),
-           "toolbar find group must host KaRegionLocator");
+  QVERIFY2(menus.contains(QLatin1String("new KaRegionLocator(m_appBar)")) &&
+               menus.contains(QLatin1String("m_appBar->setRegionWidget(region)")),
+           "the app bar's 지역 drop-down must host KaRegionLocator");
+  QVERIFY2(menus.contains(QLatin1String("connect(m_appBar, &KaAppBar::searchRequested")),
+           "the app bar search must reach LocationSearch too");
   QVERIFY2(menus.contains(QLatin1String("connect(region, &KaRegionLocator::searchRequested")) &&
                menus.contains(QLatin1String("[this](const QString& q) { searchLocation(q); }")),
            "시·동·번지 찾기는 LocationSearch로 넘어가야 한다");

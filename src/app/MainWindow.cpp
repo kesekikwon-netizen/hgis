@@ -69,6 +69,9 @@
 #include "core/KoreaRegionCatalog.h"
 #include "core/AdminBoundaryService.h"
 #include "KaRegionLocator.h"
+#include "KaAppBar.h"
+#include "KaBasemapGallery.h"
+#include "KaMapControls.h"
 #include "core/WorkflowGuide.h"
 
 #include <algorithm>
@@ -366,6 +369,29 @@ void MainWindow::buildMenus() {
   menuBar()->setNativeMenuBar(false);
   menuBar()->hide();
 
+  // Navy bar above the ribbon: the name, the open survey and place search.
+  auto* appTb = addToolBar(QStringLiteral("Strata"));
+  appTb->setObjectName(QStringLiteral("appBarToolbar"));
+  appTb->setMovable(false);
+  appTb->setFloatable(false);
+  m_appBar = new KaAppBar(appTb);
+  appTb->addWidget(m_appBar);
+  connect(m_appBar, &KaAppBar::searchRequested, this,
+          [this](const QString& q, bool lot) { searchLocation(q, lot); });
+  connect(m_appBar, &KaAppBar::aboutRequested, this, &MainWindow::showAbout);
+  connect(this, &QWidget::windowTitleChanged, m_appBar, [this](const QString& title) {
+    QString name = title;
+    if (name.endsWith(QLatin1String(" *"))) name.chop(2);
+    if (name == QLatin1String("Strata")) name.clear();
+    m_appBar->setSurvey(name, surveyHasUnsavedChanges());
+  });
+  auto* actFind = new QAction(QStringLiteral("주소·지번 찾기"), this);
+  actFind->setShortcut(QKeySequence::Find);
+  actFind->setShortcutContext(Qt::WindowShortcut);
+  connect(actFind, &QAction::triggered, m_appBar, &KaAppBar::focusSearch);
+  addAction(actFind);
+  addToolBarBreak();
+
   auto* mainTb = addToolBar(QStringLiteral("주요"));
   mainTb->setObjectName(QStringLiteral("mainToolbar"));
   mainTb->setIconSize(QSize(20, 20));
@@ -381,7 +407,7 @@ void MainWindow::buildMenus() {
   ribbon->addGroup(QStringLiteral("basemap"), QStringLiteral("배경 지도"));
   ribbon->addGroup(QStringLiteral("align"), QStringLiteral("좌표 정합"));
   ribbon->addGroup(QStringLiteral("out"), QStringLiteral("내보내기"));
-  ribbon->addGroup(QStringLiteral("find"), QStringLiteral("찾기"));
+  ribbon->addGroup(QStringLiteral("more"), QStringLiteral("기타"));
 
   auto addIcon = [this, ribbon](const QString& group, const QString& iconId, const QString& text,
                                 const QString& tip, auto slot) -> QPair<QAction*, QToolButton*> {
@@ -495,6 +521,17 @@ void MainWindow::buildMenus() {
           QStringLiteral("조사구역이 있으면 바로 깔고, 없으면 맵을 찍어 놓습니다. 깐 뒤에는 끌어 옮깁니다"),
           &MainWindow::startTrenchGrid);
 
+  // Every reference map sits in one gallery button, so the ribbon keeps one row.
+  auto* gallery = new KaBasemapGallery(ribbon);
+  ribbon->addWidget(QStringLiteral("basemap"), gallery);
+  auto addGalleryIcon = [this, gallery](const QString& previewId, const QString& text,
+                                        const QString& tip, auto slot) -> QPair<QAction*, QToolButton*> {
+    auto* a = new QAction(text, this);
+    a->setToolTip(tip);
+    connect(a, &QAction::triggered, this, slot);
+    addAction(a);
+    return {a, gallery->addAction(a, previewId)};
+  };
   m_btnTerrain = new QToolButton(ribbon);
   m_btnTerrain->setObjectName(QStringLiteral("btnTerrain"));
   m_btnTerrain->setIcon(KaIcons::icon(QStringLiteral("contour")));
@@ -507,7 +544,7 @@ void MainWindow::buildMenus() {
   connect(m_btnTerrain, &QToolButton::clicked, this, [this]() {
     QTimer::singleShot(0, this, [this]() { syncThematicButtons(); });
   });
-  ribbon->addWidget(QStringLiteral("basemap"), m_btnTerrain);
+  gallery->addButton(m_btnTerrain, QStringLiteral("terrain"));
   auto* topographic = new QToolButton(ribbon);
   topographic->setObjectName(QStringLiteral("btnTopographic"));
   topographic->setIcon(KaIcons::icon(QStringLiteral("contour")));
@@ -520,7 +557,7 @@ void MainWindow::buildMenus() {
   topographicMenu->addAction(QStringLiteral("받아 둔 수치지형도 폴더…"), this, &MainWindow::importTopographicFolder);
   topographic->setMenu(topographicMenu);
   connect(topographic, &QToolButton::clicked, this, &MainWindow::openTopographicDownload);
-  ribbon->addWidget(QStringLiteral("basemap"), topographic);
+  gallery->addButton(topographic, QStringLiteral("contour"));
   m_btnDem = new QToolButton(ribbon);
   m_btnDem->setObjectName(QStringLiteral("btnDem"));
   m_btnDem->setIcon(KaIcons::icon(QStringLiteral("dem")));
@@ -545,7 +582,7 @@ void MainWindow::buildMenus() {
   connect(m_btnDem, &QToolButton::clicked, this, [this]() {
     QTimer::singleShot(0, this, [this]() { syncThematicButtons(); });
   });
-  ribbon->addWidget(QStringLiteral("basemap"), m_btnDem);
+  gallery->addButton(m_btnDem, QStringLiteral("dem"));
   m_btnSoil = new QToolButton(ribbon);
   m_btnSoil->setObjectName(QStringLiteral("btnSoil"));
   m_btnSoil->setIcon(KaIcons::icon(QStringLiteral("soil")));
@@ -570,7 +607,7 @@ void MainWindow::buildMenus() {
   connect(m_btnSoil, &QToolButton::clicked, this, [this]() {
     QTimer::singleShot(0, this, [this]() { syncThematicButtons(); });
   });
-  ribbon->addWidget(QStringLiteral("basemap"), m_btnSoil);
+  gallery->addButton(m_btnSoil, QStringLiteral("soil"));
   m_btnPaleo = new QToolButton(ribbon);
   m_btnPaleo->setObjectName(QStringLiteral("btnPaleo"));
   m_btnPaleo->setIcon(KaIcons::icon(QStringLiteral("paleo")));
@@ -579,9 +616,9 @@ void MainWindow::buildMenus() {
   m_btnPaleo->setToolTip(
       QStringLiteral("흙토람 입지 후보를 강조하고 구하도·자연제방 등 가설을 그립니다. 확정이 아닙니다"));
   connect(m_btnPaleo, &QToolButton::clicked, this, &MainWindow::startPaleoLandform);
-  ribbon->addWidget(QStringLiteral("basemap"), m_btnPaleo);
-  auto [actCadastral, btnCadastral] = addIcon(
-      QStringLiteral("basemap"), QStringLiteral("cadastral"), QStringLiteral("지적"),
+  gallery->addButton(m_btnPaleo, QStringLiteral("paleo"));
+  auto [actCadastral, btnCadastral] = addGalleryIcon(
+      QStringLiteral("cadastral"), QStringLiteral("지적"),
       QStringLiteral("조사구역 주변 5km 지적도를 받아 경계선과 지번을 표시합니다"),
       &MainWindow::downloadCadastral);
   actCadastral->setObjectName(QStringLiteral("actionCadastralDownload"));
@@ -598,23 +635,23 @@ void MainWindow::buildMenus() {
   m_btnDaedong->setToolTip(
       QStringLiteral("대동여지도를 참조 지도로 올립니다. API 키가 필요 없습니다"));
   connect(m_btnDaedong, &QToolButton::clicked, this, &MainWindow::addDaedongyeojidoMap);
-  ribbon->addWidget(QStringLiteral("basemap"), m_btnDaedong);
+  gallery->addButton(m_btnDaedong, QStringLiteral("daedong"));
   m_btnMap1919 = new QToolButton(ribbon);
   m_btnMap1919->setObjectName(QStringLiteral("btnMap1919"));
   m_btnMap1919->setIcon(KaIcons::icon(QStringLiteral("contour")));
   m_btnMap1919->setText(QStringLiteral("1919지형"));
   m_btnMap1919->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   connect(m_btnMap1919, &QToolButton::clicked, this, &MainWindow::addHistoryGisMap1919);
-  ribbon->addWidget(QStringLiteral("basemap"), m_btnMap1919);
-  auto [actGeology, btnGeology] = addIcon(
-      QStringLiteral("basemap"), QStringLiteral("geology"), QStringLiteral("지질"),
+  gallery->addButton(m_btnMap1919, QStringLiteral("map1919"));
+  auto [actGeology, btnGeology] = addGalleryIcon(
+      QStringLiteral("geology"), QStringLiteral("지질"),
       QStringLiteral("KIGAM 1:5만 지질 색 위에 지형 음영을 겹칩니다. 다시 누르면 숨깁니다"),
       &MainWindow::downloadGeologyMap);
   m_actGeology = actGeology;
   Q_UNUSED(btnGeology);
   if (m_actGeology) m_actGeology->setCheckable(true);
-  auto [actRiver, btnRiver] = addIcon(
-      QStringLiteral("basemap"), QStringLiteral("river"), QStringLiteral("수계"),
+  auto [actRiver, btnRiver] = addGalleryIcon(
+      QStringLiteral("river"), QStringLiteral("수계"),
       QStringLiteral("하천망을 겹칩니다. 다시 누르면 숨깁니다"),
       &MainWindow::downloadRiverMap);
   m_actRiver = actRiver;
@@ -673,14 +710,14 @@ void MainWindow::buildMenus() {
   m_actMapGeoTiff->setEnabled(false);
   btnMapGeoTiff->setObjectName(QStringLiteral("btnMapGeoTiff"));
   auto [actExport, btnExport] = addIcon(
-      QStringLiteral("out"), QStringLiteral("transform"), QStringLiteral("5179"),
+      QStringLiteral("out"), QStringLiteral("transform"), QStringLiteral("제출 변환"),
       QStringLiteral("인트라넷 제출. 선택한 레이어를 EPSG:5179 SHP 파일로만 저장합니다 (Ctrl+E)."),
       &MainWindow::convertSelectedTo5179);
   actExport->setShortcut(QKeySequence(QStringLiteral("Ctrl+E")));
   Q_UNUSED(btnExport);
   ribbon->applyTabOrder();
 
-  auto* region = new KaRegionLocator(ribbon);
+  auto* region = new KaRegionLocator(m_appBar);
   region->setObjectName(QStringLiteral("regionLocator"));
   connect(region, &KaRegionLocator::searchRequested, this,
           [this](const QString& q) { searchLocation(q); });
@@ -707,7 +744,7 @@ void MainWindow::buildMenus() {
     hit.hasBbox = true;
     zoomToLocation(hit);
   });
-  ribbon->addWidget(QStringLiteral("find"), region);
+  m_appBar->setRegionWidget(region);
 
   auto* webBtn = new QToolButton(ribbon);
   webBtn->setObjectName(QStringLiteral("btnWeb"));
@@ -776,8 +813,8 @@ void MainWindow::buildMenus() {
   moreMenu->addAction(QStringLiteral("정보"), this, &MainWindow::showAbout);
   more->setMenu(moreMenu);
   more->setPopupMode(QToolButton::InstantPopup);
-  ribbon->addWidget(QStringLiteral("find"), webBtn);
-  ribbon->addWidget(QStringLiteral("find"), more);
+  ribbon->addWidget(QStringLiteral("more"), webBtn);
+  ribbon->addWidget(QStringLiteral("more"), more);
   mainTb->addWidget(ribbon);
   updateHistoricalMapButtons();
 
@@ -1546,6 +1583,16 @@ void MainWindow::buildUi() {
   {
     QWidget* railHost = m_canvas->viewport() ? m_canvas->viewport() : static_cast<QWidget*>(m_canvas);
     m_layerOpacityRail = new KaLayerOpacityRail(railHost);
+    // Zoom buttons and a scale bar float on the map like the opacity card.
+    auto* controls = new KaMapControls(m_canvas, railHost);
+    controls->setFitHandler([this]() {
+      for (QgsVectorLayer* area : LayerOps::findAllByLayerKey(QgsProject::instance(), QStringLiteral("survey_area")))
+        if (area && area->isValid() && area->featureCount() > 0 && LayerOps::zoomToLayerMax(m_canvas, area))
+          return;
+      if (m_layerTree && m_layerTree->currentLayer())
+        LayerOps::zoomToLayerMax(m_canvas, m_layerTree->currentLayer());
+    });
+    new KaMapScaleBar(m_canvas, railHost);
   }
   connect(m_layerOpacityRail, &KaLayerOpacityRail::brightnessChanged, this, [this](int value) {
     if (!m_layerTree) return;
