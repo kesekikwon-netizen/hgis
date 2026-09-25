@@ -630,7 +630,7 @@ int KaApplication::run(int argc, char** argv) {
   // 중복 실행 차단: 이미 떠 있으면 그 창을 앞으로 올리고 이 프로세스는 끝낸다.
   // 같은 조사 GPKG를 두 프로세스가 잡아 잠금 충돌·중복 다운로드가 나는 것을 막는다.
   // 자동 QA(--smoke-quit/--qa-phase1/--stress-ui-loop)는 항상 자기 프로세스로 끝까지 돌아야 하므로 제외.
-  if (!autoQa && kaActivateExistingInstance()) {
+  if (!smokeQuit && !qaPhase1 && stressUiLoop <= 0 && kaActivateExistingInstance()) {
     KaCrashGuard::logLine(
         QStringLiteral("[boot] 이미 실행 중인 ka-hgis 창을 앞으로 올리고 종료합니다."));
     return 0;
