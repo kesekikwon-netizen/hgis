@@ -26,6 +26,7 @@
 #include <QTableWidget>
 #include <QMenu>
 #include <QPushButton>
+#include <QToolBar>
 #include <QToolButton>
 #include <QUrlQuery>
 #include <QCryptographicHash>
@@ -45,6 +46,7 @@
 #include "app/KaLayerInformation.h"
 #include "app/KaTheme.h"
 #include "app/KaRegionLocator.h"
+#include "app/KaSurveyAreaDialog.h"
 #include "app/KaTopographicBrowser.h"
 #include "app/KaTopographicImportDialog.h"
 #include "app/KaTopographicScopePanel.h"
@@ -817,6 +819,37 @@ private slots:
     RecentSurveys::forget(st, second);
     QgsProject::instance()->setDirty(false);
   }
+  void drawingToolsGetTheirOwnRowBelowTheRibbon() {
+    {
+      MainWindow window;
+      disableRendering(window);
+      window.resize(1600, 900);
+      window.show();
+      QCoreApplication::processEvents();
+      auto* mainTb = window.findChild<QToolBar*>(QStringLiteral("mainToolbar"));
+      auto* sub = window.findChild<QToolBar*>(QStringLiteral("subToolbar"));
+      auto* appBar = window.findChild<QWidget*>(QStringLiteral("appBar"));
+      auto* draw = window.findChild<QToolButton*>(QStringLiteral("btnDraw"));
+      QVERIFY(mainTb && sub && appBar && draw);
+      QCOMPARE(draw->text(), QStringLiteral("그리기"));
+      draw->click();
+      QTRY_VERIFY(sub->isVisible());
+      // 그리기 도구는 리본 아래 한 줄을 쓰고, 주소 찾기는 리본 줄에 남아 서로 밀어내지 않는다.
+      QTRY_VERIFY(sub->geometry().top() >= mainTb->geometry().bottom());
+      QVERIFY(appBar->mapTo(&window, QPoint(0, 0)).y() < sub->geometry().top());
+      // Closing the window now saves the tools row as showing.
+      RecentSurveys::userSettings().setValue(QStringLiteral("MainWindow/state"), window.saveState());
+    }
+    MainWindow reopened;
+    disableRendering(reopened);
+    reopened.show();
+    QCoreApplication::processEvents();
+    RecentSurveys::userSettings().remove(QStringLiteral("MainWindow/state"));
+    auto* sub = reopened.findChild<QToolBar*>(QStringLiteral("subToolbar"));
+    QVERIFY(sub);
+    QVERIFY2(!sub->isVisible(), "복원한 창 배치가 빈 그리기 도구 줄을 다시 띄웠습니다.");
+  }
+
   void mapControlsZoomTheCanvasAndShowAScaleBar() {
     MainWindow window;
     disableRendering(window);
@@ -829,9 +862,11 @@ private slots:
     QVERIFY(canvas && zoomIn && zoomOut);
     QVERIFY(window.findChild<QToolButton*>(QStringLiteral("mapZoomFit")));
     QVERIFY(window.findChild<QWidget*>(QStringLiteral("mapScaleBar")));
-    // The province chips moved to the app bar, and the maps into one gallery.
-    QVERIFY(window.findChild<QWidget*>(QStringLiteral("appBar")));
-    QVERIFY(window.findChild<QToolButton*>(QStringLiteral("btnBasemapGallery")));
+    // Place search sits at the right end of the ribbon row, and the maps are ribbon buttons.
+    auto* appBar = window.findChild<QWidget*>(QStringLiteral("appBar"));
+    QVERIFY(appBar && appBar->parentWidget() == window.findChild<QToolBar*>(QStringLiteral("mainToolbar")));
+    QVERIFY(!window.findChild<QToolBar*>(QStringLiteral("appBarToolbar")));
+    QVERIFY(window.findChild<QToolButton*>(QStringLiteral("btnTerrain")));
     // The canvas has no size while the home tab is showing: open the map tab.
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("viewTabs"));
     QVERIFY(tabs);
@@ -2269,6 +2304,24 @@ private slots:
     QVERIFY2(project->mapLayer(id), "Ctrl+Z 로 지운 지적도를 되살리지 못했습니다.");
     auto* restored = project->layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral));
     QVERIFY2(restored && restored->findLayer(id), "Ctrl+Z 로 되살린 지적도가 원래 지적도 묶음 안에 있지 않습니다.");
+  }
+
+  void surveyAreaDialogContinuesTheExistingArea() {
+    {
+      // No area yet: a new layer, named without a number.
+      KaSurveyAreaDialog first(nullptr, nullptr, QString());
+      QVERIFY(first.isNewLayer());
+      QCOMPARE(first.layerName(), QStringLiteral("조사구역"));
+    }
+    const QString path = makeSurvey(QStringLiteral("survey_area_default"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    QVERIFY(!LayerOps::surveyAreaLayers(QgsProject::instance()).isEmpty());
+    KaSurveyAreaDialog again(&window, QgsProject::instance(), path);
+    QVERIFY2(!again.isNewLayer(), "조사구역이 있으면 기존 구역에 이어 그리는 것이 기본이어야 합니다.");
+    QVERIFY(again.selectedExistingLayer());
   }
 
   void cadastralGroupContextMenuCanRemove() {

@@ -271,7 +271,6 @@ add_executable(ka-hgis
   src/app/KaStartPage.cpp
   src/app/KaStartHero.cpp
   src/app/KaAppBar.cpp
-  src/app/KaBasemapGallery.cpp
   src/app/KaMapControls.cpp
   src/app/KaCoordPointMapTool.cpp
   src/app/KaMeasureMapTool.cpp
@@ -315,7 +314,6 @@ add_executable(ka-hgis
   src/app/KaStartPage.h
   src/app/KaStartHero.h
   src/app/KaAppBar.h
-  src/app/KaBasemapGallery.h
   src/app/KaMapControls.h
   src/app/KaCoordPointMapTool.h
   src/app/KaMeasureMapTool.h
@@ -497,7 +495,6 @@ if(KA_HGIS_BUILD_TESTS)
     src/app/KaBeginnerRibbon.cpp
     src/app/KaIcons.cpp
     src/app/KaAppBar.cpp
-    src/app/KaBasemapGallery.cpp
     src/app/KaSplashArt.cpp
   )
   set_target_properties(ka_theme_tests PROPERTIES WIN32_EXECUTABLE FALSE)
@@ -749,6 +746,7 @@ if(KA_HGIS_BUILD_TESTS)
     mainWindowFitsAvailableScreenOnShow
     homePageShowsStrataHeroWithoutOpeningASurvey
     mapControlsZoomTheCanvasAndShowAScaleBar
+    drawingToolsGetTheirOwnRowBelowTheRibbon
     provinceChipMovesMapWithoutLoadingLayers)
   ka_add_qtest_filter(save_open_topo ka_save_open_tests
     topographicActualWindowRemainsStableAfterCompletion
@@ -771,6 +769,7 @@ if(KA_HGIS_BUILD_TESTS)
     layerDeleteKeyRemovesReferenceFromMap
     layerDeleteKeyRemovesCadastralAndKeepsItGone
     cadastralGroupDeleteKeyRemovesChildren
+    surveyAreaDialogContinuesTheExistingArea
     cadastralGroupContextMenuCanRemove
     ctrlZRestoresVertexEditsAndGroupedFeatureDeletion
     layerContextMenu_usesClickedRowAndLeavesSourceIntact

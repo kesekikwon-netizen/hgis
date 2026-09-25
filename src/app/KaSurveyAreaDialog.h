@@ -8,6 +8,7 @@
 class QComboBox;
 class QDoubleSpinBox;
 class QFrame;
+class QGroupBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -49,6 +50,9 @@ private:
   QLineEdit* m_nameEdit{nullptr};
   QComboBox* m_existingCombo{nullptr};
 
+  // Colour and width style a new layer only; an existing area keeps its own style.
+  QGroupBox* m_colorGroup{nullptr};
+  QGroupBox* m_widthGroup{nullptr};
   QList<QPushButton*> m_colorButtons;
   QList<QColor> m_paletteColors;
   int m_selectedColorIndex{0};

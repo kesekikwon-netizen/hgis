@@ -85,60 +85,29 @@ QLineEdit#startRecentFilter {
 QTableWidget#recentSurveyList { border: none; background: @surface@; }
 QTableWidget#recentSurveyList::item { padding: 0 8px; border-bottom: 1px solid @desk@; }
 QTableWidget#recentSurveyList::item:selected { background: @selectedTop@; color: @ink@; }
-/* ---- App bar: navy strip above the ribbon ---- */
-QToolBar#appBarToolbar { background: @rail@; border: none; padding: 0; margin: 0; spacing: 0; }
-QWidget#appBar QLabel { background: transparent; }
-QLabel#appBarName {
-  color: @railText@;
-  font-family: "Segoe UI", "Malgun Gothic";
-  font-size: 18px;
-  font-weight: 600;
-}
-QLabel#appBarProduct { color: @railMuted@; font-size: 12px; }
-QFrame#appBarDivider { background: @railMuted@; border: none; }
-QLabel#appBarSurvey { color: @railText@; font-size: 13px; font-weight: 700; }
-QLabel#appBarState { color: @railMuted@; font-size: 12px; }
-QLabel#appBarState[unsaved="true"] { color: #F1D48A; font-weight: 700; }
-QToolButton#appBarRegion, QToolButton#appBarAbout {
-  color: @railText@;
-  background: transparent;
-  border: 1px solid @railMuted@;
-  border-radius: 7px;
-  padding: 4px 12px;
+/* ---- Place search: 「지역」 and the address field at the right end of the ribbon row ---- */
+QWidget#appBar { background: transparent; }
+QToolBar#mainToolbar QToolButton#appBarRegion {
+  color: @ink@;
+  background: @surface@;
+  border: 1px solid @border@;
+  border-radius: 8px;
+  padding: 4px 14px;
+  min-height: 30px;
   font-size: 12px;
   font-weight: 600;
 }
-QToolButton#appBarAbout { border-color: transparent; }
-QToolButton#appBarRegion:enabled:hover, QToolButton#appBarAbout:enabled:hover { background: @accentDeep@; }
-QToolButton#appBarRegion::menu-indicator { image: none; width: 0px; }
-QLineEdit#appBarSearch {
+QToolBar#mainToolbar QToolButton#appBarRegion:enabled:hover { background: @hoverBottom@; border-color: @accent@; }
+QToolBar#mainToolbar QLineEdit#appBarSearch {
   background: @surface@;
   color: @ink@;
-  border: 1px solid @surface@;
+  border: 1px solid @border@;
   border-radius: 8px;
   padding: 0 12px;
   min-height: 30px;
   font-size: 13px;
 }
-QLineEdit#appBarSearch:focus { border-color: @accent@; }
-/* ---- Basemap gallery: one ribbon button, previews in a panel ---- */
-QWidget#basemapGallery { background: @surface@; }
-QLabel#basemapGalleryCaption { color: @inkMuted@; font-size: 12px; }
-QWidget#basemapGallery QToolButton {
-  background: @surface@;
-  color: @ink@;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 4px;
-  font-size: 12px;
-}
-QWidget#basemapGallery QToolButton:enabled:hover { background: @hoverBottom@; border-color: @border@; }
-QWidget#basemapGallery QToolButton:enabled:checked {
-  background: @selectedTop@;
-  color: @accentDeep@;
-  border-color: @accent@;
-  font-weight: 700;
-}
+QToolBar#mainToolbar QLineEdit#appBarSearch:focus { border-color: @accent@; }
 QDialogButtonBox QPushButton {
   font-size: 13px;
   min-height: 34px;

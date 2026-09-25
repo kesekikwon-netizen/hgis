@@ -131,7 +131,7 @@ void MainWindow::downloadCadastral() {
     QString error = result.error;
     auto* layer = result.isReady() ? CadastralImport::addPrepared(QgsProject::instance(), window->m_canvas, result, &error) : nullptr;
     if (!layer && result.accountRejected) {
-      // The account entry lives in a gallery sub-menu, so offer it right where the login failed.
+      // Offer the account right where the login failed, not only in 더보기 or the 지적 right-click menu.
       QMessageBox box(QMessageBox::Warning, QStringLiteral("지적도 받기"), error, QMessageBox::NoButton, window);
       auto* reenter = box.addButton(QStringLiteral("아이디·비밀번호 다시 입력"), QMessageBox::AcceptRole);
       box.addButton(QStringLiteral("닫기"), QMessageBox::RejectRole);

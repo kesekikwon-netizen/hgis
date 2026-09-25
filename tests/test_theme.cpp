@@ -27,7 +27,6 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 #include "app/KaAppBar.h"
-#include "app/KaBasemapGallery.h"
 #include "app/KaBeginnerRibbon.h"
 #include "app/KaIcons.h"
 #include "app/KaTheme.h"
@@ -61,8 +60,7 @@ private slots:
   void noCatchAllWidgetRules();
   void chromeFontIsFieldKorean();
   void beginnerChrome_questionLabels();
-  void appBar_routesLotSearchesAndShowsSurveyState();
-  void basemapGallery_holdsMapButtonsBehindOneButton();
+  void appBar_routesLotSearches();
 };
 
 void TestTheme::initTestCase() {
@@ -166,7 +164,7 @@ void TestTheme::ribbon_tabEnterNewSurveyToSave() {
       {"survey", "열기", QKeySequence::Open},
       {"survey", "저장", QKeySequence::Save},
       {"survey", "다른이름", QKeySequence::SaveAs},
-      {"record", "도화", QKeySequence(QStringLiteral("Ctrl+D"))},
+      {"record", "그리기", QKeySequence(QStringLiteral("Ctrl+D"))},
       {"record", "선택", QKeySequence(QStringLiteral("Ctrl+1"))},
       {"out", "도면", QKeySequence(QStringLiteral("Ctrl+L"))},
       {"out", "5179", QKeySequence(QStringLiteral("Ctrl+E"))},
@@ -259,7 +257,7 @@ void TestTheme::ribbonOverflow_keepsAlignAtFieldWidth() {
   ribbon.addGroup(QStringLiteral("find"), QStringLiteral("찾기"));
   const struct { const char* group; const char* text; } chips[] = {
       {"survey", "신규"}, {"survey", "열기"}, {"survey", "저장"}, {"survey", "다른이름"},
-      {"record", "선택"}, {"record", "측거"}, {"record", "도화"}, {"record", "시굴격자"},
+      {"record", "선택"}, {"record", "측거"}, {"record", "그리기"}, {"record", "시굴격자"},
       {"basemap", "지형"}, {"basemap", "수치"}, {"basemap", "DEM"}, {"basemap", "토양"},
       {"basemap", "고지형"}, {"basemap", "지적"}, {"basemap", "대동여지"}, {"basemap", "1919지형"},
       {"basemap", "지질"}, {"basemap", "수계"},
@@ -326,7 +324,7 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
       {"survey", "new", "신규", false}, {"survey", "open", "열기", false},
       {"survey", "save", "저장", false}, {"survey", "save_as", "다른이름", false},
       {"record", "select", "선택", false},
-      {"record", "measure", "측거", false}, {"record", "draw_poly", "도화", true},
+      {"record", "measure", "측거", false}, {"record", "draw_poly", "그리기", true},
       {"record", "trench_grid", "시굴격자", false},
       {"basemap", "contour", "지형", true}, {"basemap", "dem", "DEM", true},
       {"basemap", "soil", "토양", true}, {"basemap", "paleo", "고지형", true},
@@ -1023,7 +1021,7 @@ void TestTheme::beginnerChrome_questionLabels() {
            "위 리본 PDF는 범례창과 중복이라 뺌");
 }
 
-void TestTheme::appBar_routesLotSearchesAndShowsSurveyState() {
+void TestTheme::appBar_routesLotSearches() {
   QVERIFY(KaAppBar::looksLikeLot(QStringLiteral("제주시 애월읍 광령리 1615")));
   QVERIFY(KaAppBar::looksLikeLot(QStringLiteral("광령리 1615-3")));
   QVERIFY(KaAppBar::looksLikeLot(QStringLiteral("광령리 산12")));
@@ -1031,7 +1029,7 @@ void TestTheme::appBar_routesLotSearchesAndShowsSurveyState() {
   QVERIFY(!KaAppBar::looksLikeLot(QStringLiteral("1615")));
   KaAppBar bar;
   bar.setAttribute(Qt::WA_DontShowOnScreen);
-  bar.resize(1200, bar.height());
+  bar.resize(600, bar.sizeHint().height());
   bar.show();
   QCoreApplication::processEvents();
   QSignalSpy spy(&bar, &KaAppBar::searchRequested);
@@ -1040,47 +1038,11 @@ void TestTheme::appBar_routesLotSearchesAndShowsSurveyState() {
   QCOMPARE(spy.count(), 1);
   QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("광령리 1615"));
   QCOMPARE(spy.at(0).at(1).toBool(), true);
-  auto* survey = bar.findChild<QLabel*>(QStringLiteral("appBarSurvey"));
-  auto* state = bar.findChild<QLabel*>(QStringLiteral("appBarState"));
-  QVERIFY(survey && state);
-  QVERIFY(!survey->isVisible());  // the home screen has no survey
-  bar.setSurvey(QStringLiteral("광령리"), true);
-  QVERIFY(survey->isVisible());
-  QCOMPARE(survey->text(), QStringLiteral("광령리"));
-  QVERIFY(state->text().contains(QStringLiteral("저장 안 됨")));
-  bar.setSurvey(QStringLiteral("광령리"), false);
-  QCOMPARE(state->text(), QStringLiteral("저장됨"));
-  const QImage image = bar.grab().toImage();
-  const QColor edge = image.pixelColor(2, image.height() / 2);
-  QVERIFY2(edge.blue() > edge.red() + 40, qPrintable(edge.name()));  // the navy rail
-}
-
-void TestTheme::basemapGallery_holdsMapButtonsBehindOneButton() {
-  QWidget host;
-  auto* gallery = new KaBasemapGallery(&host);
-  auto* terrain = new QToolButton(&host);
-  terrain->setObjectName(QStringLiteral("btnTerrain"));
-  terrain->setText(QStringLiteral("지형"));
-  terrain->setCheckable(true);
-  gallery->addButton(terrain, QStringLiteral("terrain"));
-  auto* action = new QAction(QStringLiteral("지질"), &host);
-  QToolButton* geology = gallery->addAction(action, QStringLiteral("geology"));
-  QVERIFY(geology);
-  QCOMPARE(terrain->parentWidget(), gallery->panel());
-  QCOMPARE(geology->parentWidget(), gallery->panel());
-  // Buttons keep their names, so existing lookups and clicks still find them.
-  QCOMPARE(host.findChild<QToolButton*>(QStringLiteral("btnTerrain")), terrain);
-  QCOMPARE(gallery->popupMode(), QToolButton::InstantPopup);
-  QVERIFY(gallery->menu());
-  for (const char* id : {"terrain", "contour", "dem", "soil", "paleo", "cadastral", "daedong",
-                         "map1919", "geology", "river"}) {
-    const QImage preview = KaBasemapGallery::preview(QString::fromLatin1(id)).pixmap(QSize(88, 52)).toImage();
-    QVERIFY2(!preview.isNull(), id);
-    QSet<QRgb> colours;
-    for (int y = 6; y < preview.height() - 6; y += 5)
-      for (int x = 6; x < preview.width() - 6; x += 5) colours.insert(preview.pixel(x, y));
-    QVERIFY2(colours.size() > 3, id);  // a picture, not a flat tile
-  }
+  // 「지역」 appears only once the province chips are handed over.
+  auto* region = bar.findChild<QToolButton*>(QStringLiteral("appBarRegion"));
+  QVERIFY(region && !region->isVisible());
+  bar.setRegionWidget(new QWidget);
+  QVERIFY(region->isVisible() && region->menu());
 }
 
 QTEST_MAIN(TestTheme)

@@ -70,7 +70,6 @@
 #include "core/AdminBoundaryService.h"
 #include "KaRegionLocator.h"
 #include "KaAppBar.h"
-#include "KaBasemapGallery.h"
 #include "KaMapControls.h"
 #include "core/WorkflowGuide.h"
 
@@ -282,6 +281,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     const QByteArray dockState = st.value(QStringLiteral("MainWindow/state")).toByteArray();
     if (!dockState.isEmpty())
       restoreState(dockState);
+    // restoreState brings back whether the drawing-tools row was showing when the window was
+    // last closed. That row belongs to an active tool, so it must not reappear as an empty strip.
+    if (m_subToolbar) m_subToolbar->hide();
     const QByteArray split = st.value(QStringLiteral("MainWindow/mainSplit")).toByteArray();
     if (m_mainSplit && !split.isEmpty()) {
       m_mainSplit->restoreState(split);
@@ -369,29 +371,6 @@ void MainWindow::buildMenus() {
   menuBar()->setNativeMenuBar(false);
   menuBar()->hide();
 
-  // Navy bar above the ribbon: the name, the open survey and place search.
-  auto* appTb = addToolBar(QStringLiteral("Strata"));
-  appTb->setObjectName(QStringLiteral("appBarToolbar"));
-  appTb->setMovable(false);
-  appTb->setFloatable(false);
-  m_appBar = new KaAppBar(appTb);
-  appTb->addWidget(m_appBar);
-  connect(m_appBar, &KaAppBar::searchRequested, this,
-          [this](const QString& q, bool lot) { searchLocation(q, lot); });
-  connect(m_appBar, &KaAppBar::aboutRequested, this, &MainWindow::showAbout);
-  connect(this, &QWidget::windowTitleChanged, m_appBar, [this](const QString& title) {
-    QString name = title;
-    if (name.endsWith(QLatin1String(" *"))) name.chop(2);
-    if (name == QLatin1String("Strata")) name.clear();
-    m_appBar->setSurvey(name, surveyHasUnsavedChanges());
-  });
-  auto* actFind = new QAction(QStringLiteral("주소·지번 찾기"), this);
-  actFind->setShortcut(QKeySequence::Find);
-  actFind->setShortcutContext(Qt::WindowShortcut);
-  connect(actFind, &QAction::triggered, m_appBar, &KaAppBar::focusSearch);
-  addAction(actFind);
-  addToolBarBreak();
-
   auto* mainTb = addToolBar(QStringLiteral("주요"));
   mainTb->setObjectName(QStringLiteral("mainToolbar"));
   mainTb->setIconSize(QSize(20, 20));
@@ -399,6 +378,17 @@ void MainWindow::buildMenus() {
   mainTb->setMovable(false);
   mainTb->setFloatable(false);
   mainTb->setAttribute(Qt::WA_InputMethodEnabled, true);
+
+  // Place search joins the ribbon row at its right end (added after the ribbon below).
+  // As a bar of its own it cost a whole row and ended up sharing the drawing tools' row.
+  m_appBar = new KaAppBar(mainTb);
+  connect(m_appBar, &KaAppBar::searchRequested, this,
+          [this](const QString& q, bool lot) { searchLocation(q, lot); });
+  auto* actFind = new QAction(QStringLiteral("주소·지번 찾기"), this);
+  actFind->setShortcut(QKeySequence::Find);
+  actFind->setShortcutContext(Qt::WindowShortcut);
+  connect(actFind, &QAction::triggered, m_appBar, &KaAppBar::focusSearch);
+  addAction(actFind);
 
   auto* ribbon = new KaBeginnerRibbon(mainTb);
   m_ribbon = ribbon;
@@ -496,7 +486,7 @@ void MainWindow::buildMenus() {
   m_btnDraw = new QToolButton(ribbon);
   m_btnDraw->setObjectName(QStringLiteral("btnDraw"));
   m_btnDraw->setIcon(KaIcons::icon(QStringLiteral("draw_poly")));
-  m_btnDraw->setText(QStringLiteral("도화"));
+  m_btnDraw->setText(QStringLiteral("그리기"));
   m_btnDraw->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   m_btnDraw->setCheckable(true);
   m_btnDraw->setToolTip(QStringLiteral("조사구역·유구 면과 선을 그립니다. 다시 누르면 도구를 닫고 이동합니다"));
@@ -521,17 +511,8 @@ void MainWindow::buildMenus() {
           QStringLiteral("조사구역이 있으면 바로 깔고, 없으면 맵을 찍어 놓습니다. 깐 뒤에는 끌어 옮깁니다"),
           &MainWindow::startTrenchGrid);
 
-  // Every reference map sits in one gallery button, so the ribbon keeps one row.
-  auto* gallery = new KaBasemapGallery(ribbon);
-  ribbon->addWidget(QStringLiteral("basemap"), gallery);
-  auto addGalleryIcon = [this, gallery](const QString& previewId, const QString& text,
-                                        const QString& tip, auto slot) -> QPair<QAction*, QToolButton*> {
-    auto* a = new QAction(text, this);
-    a->setToolTip(tip);
-    connect(a, &QAction::triggered, this, slot);
-    addAction(a);
-    return {a, gallery->addAction(a, previewId)};
-  };
+  // Reference maps stay one click away on the ribbon. A narrow window folds the whole
+  // group into 「더 많은 작업」 (KaBeginnerRibbon::updateOverflow) instead of hiding it.
   m_btnTerrain = new QToolButton(ribbon);
   m_btnTerrain->setObjectName(QStringLiteral("btnTerrain"));
   m_btnTerrain->setIcon(KaIcons::icon(QStringLiteral("contour")));
@@ -544,20 +525,25 @@ void MainWindow::buildMenus() {
   connect(m_btnTerrain, &QToolButton::clicked, this, [this]() {
     QTimer::singleShot(0, this, [this]() { syncThematicButtons(); });
   });
-  gallery->addButton(m_btnTerrain, QStringLiteral("terrain"));
+  ribbon->addWidget(QStringLiteral("basemap"), m_btnTerrain);
   auto* topographic = new QToolButton(ribbon);
   topographic->setObjectName(QStringLiteral("btnTopographic"));
   topographic->setIcon(KaIcons::icon(QStringLiteral("contour")));
   topographic->setText(QStringLiteral("수치"));
   topographic->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-  topographic->setToolTip(QStringLiteral("HGIS 안에서 국토지리정보원에 로그인하고 수치지형도를 받습니다"));
+  topographic->setToolTip(QStringLiteral(
+      "HGIS 안에서 국토지리정보원에 로그인하고 수치지형도를 받습니다. 우클릭: 받아 둔 폴더 불러오기"));
   topographic->setPopupMode(QToolButton::MenuButtonPopup);
   auto* topographicMenu = new QMenu(topographic);
   topographicMenu->addAction(QStringLiteral("국토지리정보원에서 내려받기…"), this, &MainWindow::openTopographicDownload);
   topographicMenu->addAction(QStringLiteral("받아 둔 수치지형도 폴더…"), this, &MainWindow::importTopographicFolder);
   topographic->setMenu(topographicMenu);
+  // The ribbon theme hides menu arrows, so the sub-menu opens on right-click like DEM and 토양.
+  topographic->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(topographic, &QToolButton::customContextMenuRequested, this,
+          [topographic, topographicMenu](const QPoint& pos) { topographicMenu->exec(topographic->mapToGlobal(pos)); });
   connect(topographic, &QToolButton::clicked, this, &MainWindow::openTopographicDownload);
-  gallery->addButton(topographic, QStringLiteral("contour"));
+  ribbon->addWidget(QStringLiteral("basemap"), topographic);
   m_btnDem = new QToolButton(ribbon);
   m_btnDem->setObjectName(QStringLiteral("btnDem"));
   m_btnDem->setIcon(KaIcons::icon(QStringLiteral("dem")));
@@ -582,7 +568,7 @@ void MainWindow::buildMenus() {
   connect(m_btnDem, &QToolButton::clicked, this, [this]() {
     QTimer::singleShot(0, this, [this]() { syncThematicButtons(); });
   });
-  gallery->addButton(m_btnDem, QStringLiteral("dem"));
+  ribbon->addWidget(QStringLiteral("basemap"), m_btnDem);
   m_btnSoil = new QToolButton(ribbon);
   m_btnSoil->setObjectName(QStringLiteral("btnSoil"));
   m_btnSoil->setIcon(KaIcons::icon(QStringLiteral("soil")));
@@ -607,7 +593,7 @@ void MainWindow::buildMenus() {
   connect(m_btnSoil, &QToolButton::clicked, this, [this]() {
     QTimer::singleShot(0, this, [this]() { syncThematicButtons(); });
   });
-  gallery->addButton(m_btnSoil, QStringLiteral("soil"));
+  ribbon->addWidget(QStringLiteral("basemap"), m_btnSoil);
   m_btnPaleo = new QToolButton(ribbon);
   m_btnPaleo->setObjectName(QStringLiteral("btnPaleo"));
   m_btnPaleo->setIcon(KaIcons::icon(QStringLiteral("paleo")));
@@ -616,10 +602,10 @@ void MainWindow::buildMenus() {
   m_btnPaleo->setToolTip(
       QStringLiteral("흙토람 입지 후보를 강조하고 구하도·자연제방 등 가설을 그립니다. 확정이 아닙니다"));
   connect(m_btnPaleo, &QToolButton::clicked, this, &MainWindow::startPaleoLandform);
-  gallery->addButton(m_btnPaleo, QStringLiteral("paleo"));
-  auto [actCadastral, btnCadastral] = addGalleryIcon(
-      QStringLiteral("cadastral"), QStringLiteral("지적"),
-      QStringLiteral("조사구역 주변 5km 지적도를 받아 경계선과 지번을 표시합니다"),
+  ribbon->addWidget(QStringLiteral("basemap"), m_btnPaleo);
+  auto [actCadastral, btnCadastral] = addIcon(
+      QStringLiteral("basemap"), QStringLiteral("cadastral"), QStringLiteral("지적"),
+      QStringLiteral("조사구역 주변 5km 지적도를 받아 경계선과 지번을 표시합니다. 우클릭: 계정·선 색 설정"),
       &MainWindow::downloadCadastral);
   actCadastral->setObjectName(QStringLiteral("actionCadastralDownload"));
   auto* cadastralMenu = new QMenu(btnCadastral);
@@ -627,6 +613,9 @@ void MainWindow::buildMenus() {
   cadastralMenu->addAction(QStringLiteral("선 색·지번 표시"), this, &MainWindow::configureCadastralStyle);
   btnCadastral->setMenu(cadastralMenu);
   btnCadastral->setPopupMode(QToolButton::MenuButtonPopup);
+  btnCadastral->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(btnCadastral, &QToolButton::customContextMenuRequested, this,
+          [btnCadastral, cadastralMenu](const QPoint& pos) { cadastralMenu->exec(btnCadastral->mapToGlobal(pos)); });
   m_btnDaedong = new QToolButton(ribbon);
   m_btnDaedong->setObjectName(QStringLiteral("btnDaedongyeojido"));
   m_btnDaedong->setIcon(KaIcons::icon(QStringLiteral("map")));
@@ -635,23 +624,23 @@ void MainWindow::buildMenus() {
   m_btnDaedong->setToolTip(
       QStringLiteral("대동여지도를 참조 지도로 올립니다. API 키가 필요 없습니다"));
   connect(m_btnDaedong, &QToolButton::clicked, this, &MainWindow::addDaedongyeojidoMap);
-  gallery->addButton(m_btnDaedong, QStringLiteral("daedong"));
+  ribbon->addWidget(QStringLiteral("basemap"), m_btnDaedong);
   m_btnMap1919 = new QToolButton(ribbon);
   m_btnMap1919->setObjectName(QStringLiteral("btnMap1919"));
   m_btnMap1919->setIcon(KaIcons::icon(QStringLiteral("contour")));
   m_btnMap1919->setText(QStringLiteral("1919지형"));
   m_btnMap1919->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   connect(m_btnMap1919, &QToolButton::clicked, this, &MainWindow::addHistoryGisMap1919);
-  gallery->addButton(m_btnMap1919, QStringLiteral("map1919"));
-  auto [actGeology, btnGeology] = addGalleryIcon(
-      QStringLiteral("geology"), QStringLiteral("지질"),
+  ribbon->addWidget(QStringLiteral("basemap"), m_btnMap1919);
+  auto [actGeology, btnGeology] = addIcon(
+      QStringLiteral("basemap"), QStringLiteral("geology"), QStringLiteral("지질"),
       QStringLiteral("KIGAM 1:5만 지질 색 위에 지형 음영을 겹칩니다. 다시 누르면 숨깁니다"),
       &MainWindow::downloadGeologyMap);
   m_actGeology = actGeology;
   Q_UNUSED(btnGeology);
   if (m_actGeology) m_actGeology->setCheckable(true);
-  auto [actRiver, btnRiver] = addGalleryIcon(
-      QStringLiteral("river"), QStringLiteral("수계"),
+  auto [actRiver, btnRiver] = addIcon(
+      QStringLiteral("basemap"), QStringLiteral("river"), QStringLiteral("수계"),
       QStringLiteral("하천망을 겹칩니다. 다시 누르면 숨깁니다"),
       &MainWindow::downloadRiverMap);
   m_actRiver = actRiver;
@@ -817,6 +806,8 @@ void MainWindow::buildMenus() {
   ribbon->addWidget(QStringLiteral("more"), webBtn);
   ribbon->addWidget(QStringLiteral("more"), more);
   mainTb->addWidget(ribbon);
+  // The ribbon expands and keeps its buttons packed left, so place search ends up on the right.
+  mainTb->addWidget(m_appBar);
   updateHistoricalMapButtons();
 
   m_subToolbar = addToolBar(QStringLiteral("세부도구"));

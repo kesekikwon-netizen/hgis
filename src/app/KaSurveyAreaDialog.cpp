@@ -64,8 +64,13 @@ void KaSurveyAreaDialog::setupUi() {
   titleLabel->setStyleSheet(QStringLiteral("font-size: 14px; color: #1E293B;"));
   mainLayout->addWidget(titleLabel);
 
+  // One survey-area layer holds every area polygon, as in any GIS; a new layer is only
+  // for an area that must be switched on and off on its own.
   auto* descLabel = new QLabel(
-      QStringLiteral("새로운 구역명을 입력하면 독립된 레이어로 생성되어 레이어창에서 개별 On/Off가 가능합니다."), this);
+      m_existingLayers.isEmpty()
+          ? QStringLiteral("조사구역 레이어를 만들고 바로 그리기를 시작합니다.")
+          : QStringLiteral("이미 그린 조사구역에 이어서 그립니다. 구역을 따로 켜고 꺼야 할 때만 새 레이어를 만드세요."),
+      this);
   descLabel->setStyleSheet(QStringLiteral("font-size: 11px; color: #64748B;"));
   descLabel->setWordWrap(true);
   mainLayout->addWidget(descLabel);
@@ -75,9 +80,10 @@ void KaSurveyAreaDialog::setupUi() {
   auto* layerLayout = new QVBoxLayout(layerGroup);
   layerLayout->setSpacing(8);
 
-  // 자동 제안 레이어 이름 계산 (조사구역 1, 조사구역 2, ...)
-  int nextNum = m_existingLayers.size() + 1;
-  QString suggestedName = QStringLiteral("조사구역 %1").arg(nextNum);
+  // 첫 레이어는 번호 없이 「조사구역」, 따로 나누는 레이어부터 「조사구역 2」, 「조사구역 3」...
+  const QString suggestedName = m_existingLayers.isEmpty()
+                                    ? QStringLiteral("조사구역")
+                                    : QStringLiteral("조사구역 %1").arg(m_existingLayers.size() + 1);
 
   m_radioNew = new QRadioButton(QStringLiteral("새 조사구역 레이어 만들기:"), layerGroup);
   m_radioNew->setChecked(true);
@@ -105,11 +111,14 @@ void KaSurveyAreaDialog::setupUi() {
 
     connect(m_radioNew, &QRadioButton::toggled, this, &KaSurveyAreaDialog::onModeChanged);
     connect(m_radioExisting, &QRadioButton::toggled, this, &KaSurveyAreaDialog::onModeChanged);
+    // Drawing again continues the area already there; a separate layer is a deliberate choice.
+    m_radioExisting->setChecked(true);
   }
   mainLayout->addWidget(layerGroup);
 
   // 3. 직관적인 색상 팔레트 그룹 (빨, 주, 노, 초, 파, 남, 보, 갈)
   auto* colorGroup = new QGroupBox(QStringLiteral("구역 외곽선 색상"), this);
+  m_colorGroup = colorGroup;
   auto* colorLayout = new QGridLayout(colorGroup);
   colorLayout->setSpacing(8);
 
@@ -135,6 +144,7 @@ void KaSurveyAreaDialog::setupUi() {
 
   // 4. 선 굵기(외곽선) 그룹
   auto* widthGroup = new QGroupBox(QStringLiteral("선 굵기 (외곽선 두께)"), this);
+  m_widthGroup = widthGroup;
   auto* widthLayout = new QHBoxLayout(widthGroup);
   widthLayout->setSpacing(8);
 
@@ -208,6 +218,7 @@ void KaSurveyAreaDialog::setupUi() {
   btnLayout->addWidget(btnStart);
 
   mainLayout->addLayout(btnLayout);
+  onModeChanged();
 }
 
 void KaSurveyAreaDialog::onModeChanged() {
@@ -216,6 +227,8 @@ void KaSurveyAreaDialog::onModeChanged() {
   if (m_existingCombo) {
     m_existingCombo->setEnabled(!isNew);
   }
+  if (m_colorGroup) m_colorGroup->setEnabled(isNew);
+  if (m_widthGroup) m_widthGroup->setEnabled(isNew);
 }
 
 void KaSurveyAreaDialog::onColorButtonClicked(int index) {
