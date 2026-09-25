@@ -22,4 +22,7 @@ QList<Resource> parseResources(const QByteArray& html);
 QList<Resource> selectResources(const QList<Resource>& resources, const QList<District>& districts, QString* error);
 PreparedReferenceMap prepare(const Request& request, const CadastralImport::Cancel& cancel = {},
                              const CadastralImport::Progress& progress = {});
+// Localhost probe for the absolute HTTP deadline (idle timer still resets on bytes).
+QByteArray downloadBytesForTest(const QUrl& url, int absoluteTimeoutMs, QString* error = nullptr,
+                                const CadastralImport::Cancel& cancel = {});
 }

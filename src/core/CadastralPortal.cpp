@@ -33,30 +33,42 @@ public:
   CadastralImport::Cancel canceled;
   CadastralImport::Progress progress;
   QString error;
+  // 0 = production defaults (API 40s, ZIP 120s). Tests set a short absolute deadline.
+  int absoluteTimeoutMs = 0;
   QNetworkAccessManager network;
   QByteArray request(const QUrl& url, const QByteArray& post = {}, QSaveFile* file = nullptr,
                      int offset = 0, int span = 0) {
     error.clear(); QByteArray bytes;
     if (canceled && canceled()) return {};
+    const int idleMs = absoluteTimeoutMs > 0 ? absoluteTimeoutMs : (file ? 120000 : 40000);
+    const int deadlineMs = absoluteTimeoutMs > 0 ? absoluteTimeoutMs : idleMs;
     QNetworkRequest req(url);
     req.setRawHeader("User-Agent", "Mozilla/5.0 ka-hgis");
     req.setRawHeader("Referer", url.host() == QLatin1String("api.vworld.kr") ? QByteArray("https://localhost") : (base + dataset).toUtf8());
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::SameOriginRedirectPolicy);
+    req.setTransferTimeout(idleMs);
     if (!post.isEmpty()) {
       req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
       req.setRawHeader("X-Requested-With", "XMLHttpRequest");
     }
     QNetworkReply* reply = post.isEmpty() ? network.get(req) : network.post(req, post);
     QEventLoop loop;
-    QTimer timeout, poll;
-    timeout.setSingleShot(true); timeout.start(file ? 120000 : 40000);
+    QTimer idle, absolute, poll;
+    idle.setSingleShot(true); idle.start(idleMs);
+    absolute.setSingleShot(true); absolute.start(deadlineMs);
     poll.start(50);
     bool failed = false;
     qint64 received = 0;
     QByteArray prefix;
+    const auto failTimeout = [&] {
+      failed = true;
+      error = QStringLiteral("지적도 서버 응답 시간이 초과되었습니다. 다시 시도하세요.");
+      reply->abort();
+    };
     auto read = [&]() {
       const auto chunk = reply->readAll(); received += chunk.size();
-      if (!chunk.isEmpty()) timeout.start(file ? 120000 : 40000);
+      // Idle resets on activity; absolute does not (trickle cannot hang forever).
+      if (!chunk.isEmpty()) idle.start(idleMs);
       if (prefix.size() < 4) prefix += chunk.left(4 - prefix.size());
       if (received > (file ? 512LL * 1024 * 1024 : 32LL * 1024 * 1024)) {
         failed = true; error = QStringLiteral("지적도 서버 응답이 허용 크기를 넘었습니다."); reply->abort(); return;
@@ -72,14 +84,15 @@ public:
     QObject::connect(reply, &QNetworkReply::downloadProgress, &loop, [&](qint64 done, qint64 total) {
       if (file && progress && total > 0) progress(offset + int(span * double(done) / double(total)), QStringLiteral("지적도 원본을 받고 있습니다…"));
     });
-    QObject::connect(&timeout, &QTimer::timeout, &loop, [&] {
-      failed = true; error = QStringLiteral("지적도 서버 응답 시간이 초과되었습니다. 다시 시도하세요."); reply->abort();
-    });
+    QObject::connect(&idle, &QTimer::timeout, &loop, failTimeout);
+    QObject::connect(&absolute, &QTimer::timeout, &loop, failTimeout);
     QObject::connect(&poll, &QTimer::timeout, &loop, [&] { if (canceled && canceled()) reply->abort(); });
     loop.exec(); read();
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if (!failed && (reply->error() != QNetworkReply::NoError || status != 200)) {
-      failed = true; error = QStringLiteral("VWorld 통신에 실패했습니다. 인터넷 연결과 계정 설정을 확인하세요.");
+      failed = true;
+      if (error.isEmpty())
+        error = QStringLiteral("VWorld 통신에 실패했습니다. 인터넷 연결과 계정 설정을 확인하세요.");
     }
     if (!failed && file && !prefix.startsWith("PK\003\004")) {
       failed = true; error = QStringLiteral("VWorld에서 ZIP 대신 로그인·오류 화면을 받았습니다. 계정을 확인하세요.");
@@ -318,4 +331,14 @@ PreparedReferenceMap CadastralPortal::prepare(const Request& request, const Cada
   return CadastralImport::prepare(sources, scope, request.workCrs, request.context,
       QDir(request.directory).filePath(QStringLiteral("표시")), cancel,
       [&](int value, const QString& message) { stage(65 + value * 35 / 100, message); });
+}
+
+QByteArray CadastralPortal::downloadBytesForTest(const QUrl& url, int absoluteTimeoutMs, QString* error,
+                                                 const CadastralImport::Cancel& cancel) {
+  Session session;
+  session.canceled = cancel;
+  session.absoluteTimeoutMs = absoluteTimeoutMs > 0 ? absoluteTimeoutMs : 40000;
+  const QByteArray body = session.request(url);
+  if (error) *error = session.error;
+  return body;
 }

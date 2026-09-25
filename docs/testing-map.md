@@ -21,7 +21,8 @@ ctest --test-dir build -C Release -R '<아래 이름>' --output-on-failure
 | C | `save_open_edit` | 정점 Undo·메뉴 (ctrlZ 슬롯 실패 이력) |
 | D 성능·안정 | `perf_engine` | 15만 필지·열기·조판 상한 |
 | D | `parallel_render` | 병렬 렌더 재현, 제품은 꺼 둠 |
-| D | `cadastral` | 지적 준비 cheap key |
+| D | `cadastral` | 지적 준비 cheap key · P3-4 절대 HTTP 마감 |
+| D | [network-download-timeout-checklist.md](network-download-timeout-checklist.md) | 내려받기 취소·시간 제한·재시도·오프라인 문구 |
 | E UX | `layer_information` | 작은 창 목록 ≥5행 |
 | E | `theme_qss` | Tab/Enter 새 조사→저장 |
 | E | `above_labels_200` | 200% 라벨 |

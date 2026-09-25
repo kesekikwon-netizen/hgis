@@ -727,7 +727,7 @@ if(KA_HGIS_BUILD_TESTS)
   set_tests_properties(reference_download PROPERTIES TIMEOUT 60)
 
   add_executable(ka_cadastral_tests tests/test_cadastral.cpp)
-  target_link_libraries(ka_cadastral_tests PRIVATE ka_core Qt6::Test)
+  target_link_libraries(ka_cadastral_tests PRIVATE ka_core Qt6::Test Qt6::Network)
   ka_add_qtest(cadastral ka_cadastral_tests)
   set_tests_properties(cadastral PROPERTIES TIMEOUT 90)
 

@@ -11,6 +11,7 @@
 | [HANDOFF.md](HANDOFF.md) | 제품 현황 정본 (루트 HANDOFF.md는 안내만) |
 | [developer-tools.md](developer-tools.md) | 여섯 도구 루프 |
 | [testing-map.md](testing-map.md) | 축 A–J 자동 시험 |
+| [network-download-timeout-checklist.md](network-download-timeout-checklist.md) | 내려받기 취소·시간 제한·재시도·오프라인 문구 |
 | [clangd-navigation.md](clangd-navigation.md) | 선언·정의 조회 |
 | [archify-setup.md](archify-setup.md) | 구조도 설치·실행 |
 

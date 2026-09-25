@@ -5,8 +5,12 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QTimeZone>
+#include <QUrl>
 #include <qgsapplication.h>
 #include <qgscoordinatetransform.h>
 #include <qgsfeature.h>
@@ -110,6 +114,29 @@ private slots:
     QFETCH(QString, message);
     QFETCH(bool, benign);
     QCOMPARE(LayerOps::mapServerMessageIsBenign(message), benign);
+  }
+
+  // P3-4: idle timer resets on bytes, but absolute deadline must still cut trickle.
+  void trickleResponseHasAbsoluteDeadline() {
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    QObject::connect(&server, &QTcpServer::newConnection, &server, [&] {
+      auto* socket = server.nextPendingConnection();
+      socket->write("HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n");
+      auto* trickle = new QTimer(socket);
+      QObject::connect(trickle, &QTimer::timeout, socket, [socket] {
+        if (socket->state() == QAbstractSocket::ConnectedState) socket->write("x");
+      });
+      trickle->start(20);
+    });
+    QString error;
+    QElapsedTimer timer;
+    timer.start();
+    const QByteArray body = CadastralPortal::downloadBytesForTest(
+        QUrl(QStringLiteral("http://127.0.0.1:%1/trickle").arg(server.serverPort())), 200, &error);
+    QVERIFY(body.isEmpty());
+    QVERIFY2(timer.elapsed() < 2500, qPrintable(QString::number(timer.elapsed())));
+    QVERIFY2(error.contains(QStringLiteral("응답 시간이 초과")), qPrintable(error));
   }
 
   void historyGis1919_emptyKeyDisablesAddAndLeavesNoLayer() {
@@ -438,7 +465,9 @@ private slots:
     QCOMPARE(project.mapLayers().size(), 2);
     QCOMPARE(project.mapLayer(surveyId), survey);
     QCOMPARE(project.crs().authid(), QStringLiteral("EPSG:5187"));
-    QVERIFY(LayerOps::isReferenceLayer(layer));
+    // c4f21f4: downloaded cadastral is not a generic reference (snap/edit), but stays under 참조 지도.
+    QVERIFY(LayerOps::isCadastralLayer(layer));
+    QVERIFY(!LayerOps::isReferenceLayer(layer));
     auto* references = project.layerTreeRoot()->findGroup(QStringLiteral("참조 지도"));
     QVERIFY(references && references->findLayer(layer->id()));
     auto* renderer = dynamic_cast<QgsSingleSymbolRenderer*>(layer->renderer());
@@ -466,7 +495,8 @@ private slots:
     QVERIFY(reopened.read(projectPath));
     auto* restored = qobject_cast<QgsVectorLayer*>(reopened.mapLayer(savedLayerId));
     QVERIFY(restored && restored->isValid());
-    QVERIFY(LayerOps::isReferenceLayer(restored));
+    QVERIFY(LayerOps::isCadastralLayer(restored));
+    QVERIFY(!LayerOps::isReferenceLayer(restored));
     QVERIFY(!restored->labelsEnabled());
     QVERIFY(restored->labeling());
     QCOMPARE(restored->labeling()->settings().fieldName, QStringLiteral("JIBUN"));
