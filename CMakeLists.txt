@@ -764,6 +764,7 @@ if(KA_HGIS_BUILD_TESTS)
     homePageShowsStrataHeroWithoutOpeningASurvey
     mapControlsZoomTheCanvasAndShowAScaleBar
     drawingToolsGetTheirOwnRowBelowTheRibbon
+    narrowWindowKeepsSearchOnTheRibbonRow
     provinceChipMovesMapWithoutLoadingLayers)
   ka_add_qtest_filter(save_open_topo ka_save_open_tests
     topographicActualWindowRemainsStableAfterCompletion

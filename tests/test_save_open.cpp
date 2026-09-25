@@ -849,6 +849,31 @@ private slots:
     QVERIFY(sub);
     QVERIFY2(!sub->isVisible(), "복원한 창 배치가 빈 그리기 도구 줄을 다시 띄웠습니다.");
   }
+  void narrowWindowKeepsSearchOnTheRibbonRow() {
+    for (const QSize size : {QSize(1024, 768), QSize(1280, 720)}) {
+      MainWindow window;
+      disableRendering(window);
+      window.resize(size);
+      window.show();
+      QCoreApplication::processEvents();
+      auto* mainTb = window.findChild<QToolBar*>(QStringLiteral("mainToolbar"));
+      auto* appBar = window.findChild<QWidget*>(QStringLiteral("appBar"));
+      auto* overflow = window.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
+      QVERIFY(mainTb && appBar && overflow);
+      auto* ribbon = overflow->parentWidget();
+      QVERIFY(ribbon && ribbon->parentWidget() == mainTb);
+      QCOMPARE(appBar->parentWidget(), mainTb);
+      const QRect ribbonBox = ribbon->geometry();
+      const QRect searchBox = appBar->geometry();
+      QVERIFY2(!ribbonBox.intersects(searchBox),
+               qPrintable(QStringLiteral("%1 폭에서 찾기 칸이 리본과 겹친다").arg(size.width())));
+      QVERIFY(qAbs(ribbonBox.center().y() - searchBox.center().y()) < ribbonBox.height());
+      if (ribbon->sizeHint().width() > ribbon->width())
+        QVERIFY2(overflow->isVisible(),
+                 qPrintable(QStringLiteral("%1 폭에서 더 많은 작업으로 접히지 않았다").arg(size.width())));
+      QgsProject::instance()->setDirty(false);
+    }
+  }
 
   void mapControlsZoomTheCanvasAndShowAScaleBar() {
     MainWindow window;
