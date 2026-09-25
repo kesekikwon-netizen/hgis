@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "KaCrashGuard.h"
 #include "KaIcons.h"
 #include "core/ChecklistEngine.h"
 #include "core/ExportService.h"
@@ -8,6 +9,7 @@
 #include "core/ProjectStateBuilder.h"
 
 #include <QAction>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QFileDialog>
@@ -38,6 +40,7 @@
 #include <qgscoordinatereferencesystem.h>
 #include <qgsfeatureid.h>
 #include <qgsgeometry.h>
+#include <qgslayertree.h>
 #include <qgslayertreeview.h>
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
@@ -407,6 +410,66 @@ void MainWindow::openLayoutDesigner() {
   m_drawingStudio->refreshMapFromProject();
   m_drawingStudio->centerOnMapCanvas();
   statusBar()->showMessage(QStringLiteral("도면 화면입니다. 좌표점은 용지 아래 아이콘으로 찍습니다."), 6000);
+#endif
+}
+
+int MainWindow::runUiStressLoop(int iterations) {
+#if KA_HGIS_HAS_QGIS
+  if (iterations <= 0 || !m_canvas || !m_viewTabs || !m_mapPage)
+    return 1;
+  loadBootBasemaps();
+  QCoreApplication::processEvents();
+
+  // 종이 선택 창 없이 A4로 조판 탭만 연다(자동 반복용).
+  if (!m_drawingStudio) {
+    m_drawingStudio =
+        new KaDrawingStudio(QgsProject::instance(), m_canvas, KaDrawingStudio::kA4PortraitWidthMm,
+                            KaDrawingStudio::kA4PortraitHeightMm, this);
+    m_drawingStudio->setAttribute(Qt::WA_DeleteOnClose, false);
+  }
+  m_drawingStudio->setParent(m_viewTabs, Qt::Widget);
+  if (m_viewTabs->indexOf(m_drawingStudio) < 0)
+    m_viewTabs->addTab(m_drawingStudio, KaIcons::icon(QStringLiteral("pdf")),
+                       QStringLiteral("도면"));
+
+  auto toggleBasemaps = []() {
+    QgsProject* proj = QgsProject::instance();
+    QgsLayerTree* root = proj ? proj->layerTreeRoot() : nullptr;
+    if (!root) return;
+    for (QgsLayerTreeLayer* node : root->findLayers()) {
+      if (!node || !node->layer() || !LayerOps::isBasemapLayer(node->layer())) continue;
+      node->setItemVisibilityChecked(!node->itemVisibilityChecked());
+    }
+  };
+
+  for (int i = 0; i < iterations; ++i) {
+    toggleBasemaps();
+    QCoreApplication::processEvents();
+
+    m_viewTabs->setCurrentWidget(m_drawingStudio);
+    hideSubTools();
+    m_drawingStudio->showSheetPage();
+    m_drawingStudio->refreshMapFromProject();
+    QCoreApplication::processEvents();
+
+    m_viewTabs->setCurrentWidget(m_mapPage);
+    QCoreApplication::processEvents();
+
+    persistSurveyWork();
+    QCoreApplication::processEvents();
+
+    m_canvas->zoomByFactor(1.25);
+    QCoreApplication::processEvents();
+    m_canvas->zoomByFactor(0.8);
+    QCoreApplication::processEvents();
+
+    KaCrashGuard::logLine(
+        QStringLiteral("[stress-ui] %1/%2").arg(i + 1).arg(iterations));
+  }
+  return 0;
+#else
+  Q_UNUSED(iterations);
+  return 1;
 #endif
 }
 

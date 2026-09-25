@@ -100,6 +100,8 @@ public:
   int lastChecklistErrorCount() const;
   // 부팅 때 미뤄 둔 배경지도 로딩을 지금 끝낸다(자동 QA·스모크가 결정적으로 돌게).
   void loadBootBasemaps();
+  // P3-1: 배경 켜/끄기·조판 들락날락·저장·줌을 반복한다. 0이면 성공.
+  int runUiStressLoop(int iterations);
   void setRestoreLastSurveyEnabled(bool enabled) { m_restoreLastSurveyEnabled = enabled; }
   bool addVectorFromPath(const QString& path);
   bool addRasterFromPath(const QString& path);

@@ -5,7 +5,8 @@ $repo = Split-Path -Parent $here
 # Automated flags must stay in-process (ctest / smoke).
 $wait = $false
 foreach ($a in $args) {
-  if ($a -eq "--smoke-quit" -or $a -eq "--qa-phase1" -or $a.StartsWith("--open-gpkg")) { $wait = $true }
+  if ($a -eq "--smoke-quit" -or $a -eq "--qa-phase1" -or $a.StartsWith("--open-gpkg") -or
+      $a -eq "--stress-ui-loop" -or $a.StartsWith("--stress-ui-loop=")) { $wait = $true }
 }
 
 if (-not $wait) {

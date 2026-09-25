@@ -603,6 +603,7 @@ int KaApplication::run(int argc, char** argv) {
   bool qaPhase1 = false;
   bool demoSurvey = false;
   bool demoSeed = false;
+  int stressUiLoop = 0;
   QString openGpkg;
   for (int i = 1; i < argc; ++i) {
     const QString a = QString::fromLocal8Bit(argv[i]);
@@ -610,17 +611,25 @@ int KaApplication::run(int argc, char** argv) {
     if (a == QLatin1String("--qa-phase1")) qaPhase1 = true;
     if (a == QLatin1String("--demo-survey")) demoSurvey = true;
     if (a == QLatin1String("--demo-seed")) demoSeed = true;
+    if (a.startsWith(QLatin1String("--stress-ui-loop="))) {
+      bool ok = false;
+      stressUiLoop = a.mid(QStringLiteral("--stress-ui-loop=").size()).toInt(&ok);
+      if (!ok || stressUiLoop <= 0) stressUiLoop = 200;
+    } else if (a == QLatin1String("--stress-ui-loop")) {
+      stressUiLoop = 200;
+    }
     if (a.startsWith(QLatin1String("--open-gpkg=")))
       openGpkg = a.mid(QStringLiteral("--open-gpkg=").size());
     else if (a == QLatin1String("--open-gpkg") && i + 1 < argc)
       openGpkg = QString::fromLocal8Bit(argv[++i]);
   }
+  const bool autoQa = smokeQuit || qaPhase1 || stressUiLoop > 0;
 
 #ifdef Q_OS_WIN
   // 중복 실행 차단: 이미 떠 있으면 그 창을 앞으로 올리고 이 프로세스는 끝낸다.
   // 같은 조사 GPKG를 두 프로세스가 잡아 잠금 충돌·중복 다운로드가 나는 것을 막는다.
-  // 자동 QA(--smoke-quit/--qa-phase1)는 항상 자기 프로세스로 끝까지 돌아야 하므로 제외.
-  if (!smokeQuit && !qaPhase1 && kaActivateExistingInstance()) {
+  // 자동 QA(--smoke-quit/--qa-phase1/--stress-ui-loop)는 항상 자기 프로세스로 끝까지 돌아야 하므로 제외.
+  if (!autoQa && kaActivateExistingInstance()) {
     KaCrashGuard::logLine(
         QStringLiteral("[boot] 이미 실행 중인 ka-hgis 창을 앞으로 올리고 종료합니다."));
     return 0;
@@ -669,7 +678,7 @@ int KaApplication::run(int argc, char** argv) {
   KaTheme::apply(&app);
 
   std::unique_ptr<KaStartupSplash> splash;
-  if (!smokeQuit && !qaPhase1) {
+  if (!autoQa) {
     splash = std::make_unique<KaStartupSplash>();
     splash->show();
     // Present the notice before the synchronous SDK initialization. The reading
@@ -697,7 +706,7 @@ int KaApplication::run(int argc, char** argv) {
       KaCrashGuard::logLine(QStringLiteral("[boot] PROJ %1 · 5186/5187/3857 %2")
                                 .arg(bundled.projData, crsOk ? QStringLiteral("ok")
                                                              : QStringLiteral("fail")));
-      if (!crsOk && !smokeQuit && !qaPhase1) {
+      if (!crsOk && !autoQa) {
         QMessageBox::warning(
             nullptr, QStringLiteral("좌표계 자료를 읽지 못했습니다"),
             QStringLiteral(
@@ -783,16 +792,19 @@ int KaApplication::run(int argc, char** argv) {
   }
 
   int qaCode = 0;
+  int stressCode = 0;
   int code = 0;
   {
     MainWindow w;
-    if (smokeQuit || qaPhase1 || !openGpkg.isEmpty())
+    if (autoQa || !openGpkg.isEmpty())
       w.setRestoreLastSurveyEnabled(false);
     KaCrashGuard::logLine(QStringLiteral("[boot] 메인창 구성 %1 ms").arg(bootTimer.elapsed()));
     if (!splash)
       w.show();  // Preserve visible-window checks in the explicit QA fast path.
-    if (demoSurvey && openGpkg.isEmpty()) {
-      const QString dir = QDir::temp().filePath(QStringLiteral("ka-hgis-survey-verify"));
+    if ((demoSurvey || stressUiLoop > 0) && openGpkg.isEmpty()) {
+      const QString dir = QDir::temp().filePath(
+          stressUiLoop > 0 ? QStringLiteral("ka-hgis-stress-ui")
+                           : QStringLiteral("ka-hgis-survey-verify"));
       QDir().mkpath(dir);
       QString err;
       openGpkg = SurveyProjectFactory::createNewSurvey(dir, QStringLiteral("verify1"), &err,
@@ -812,8 +824,8 @@ int KaApplication::run(int argc, char** argv) {
       }
     }
 
-    if (qaPhase1 || smokeQuit) {
-      // 자동 QA·스모크에서는 최근 작업 복원을 건너뛰고 기본 부팅 상태를 검사한다.
+    if (autoQa) {
+      // 자동 QA·스모크·스트레스에서는 최근 작업 복원을 건너뛴다.
       w.setRestoreLastSurveyEnabled(false);
     }
     if (qaPhase1) {
@@ -826,6 +838,10 @@ int KaApplication::run(int argc, char** argv) {
       qaCode = writePhase1Qa(&w, out2);
       if (qaCode != 0)
         writePhase1Qa(&w, out);
+      QMetaObject::invokeMethod(&app, &QCoreApplication::quit, Qt::QueuedConnection);
+    } else if (stressUiLoop > 0) {
+      stressCode = w.runUiStressLoop(stressUiLoop);
+      KaCrashGuard::logLine(QStringLiteral("[stress-ui] finished code=%1").arg(stressCode));
       QMetaObject::invokeMethod(&app, &QCoreApplication::quit, Qt::QueuedConnection);
     } else if (smokeQuit) {
       QMetaObject::invokeMethod(&app, &QCoreApplication::quit, Qt::QueuedConnection);
@@ -850,6 +866,7 @@ int KaApplication::run(int argc, char** argv) {
   QgsApplication::exitQgis();
 #endif
   if (qaPhase1) return qaCode;
+  if (stressUiLoop > 0) return stressCode != 0 ? stressCode : code;
   return code;
 }
 

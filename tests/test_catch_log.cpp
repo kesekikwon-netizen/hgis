@@ -116,6 +116,112 @@ QStringList silentCatchSites(const QString& srcRoot) {
   return silent;
 }
 
+// Strip // and /* */ so comment mentions of QEventLoop / waitForFinished do not count.
+QString stripCommentsAndStrings(QString text) {
+  QString out;
+  out.reserve(text.size());
+  bool escape = false;
+  QChar inStr;
+  bool lineComment = false;
+  bool blockComment = false;
+  const int n = text.size();
+  for (int i = 0; i < n; ++i) {
+    const QChar ch = text.at(i);
+    if (lineComment) {
+      if (ch == QLatin1Char('\n')) {
+        lineComment = false;
+        out.append(ch);
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (ch == QLatin1Char('*') && i + 1 < n && text.at(i + 1) == QLatin1Char('/')) {
+        blockComment = false;
+        ++i;
+      }
+      continue;
+    }
+    if (!inStr.isNull()) {
+      if (escape) escape = false;
+      else if (ch == QLatin1Char('\\')) escape = true;
+      else if (ch == inStr) inStr = QChar();
+      continue;
+    }
+    if (ch == QLatin1Char('"') || ch == QLatin1Char('\'')) {
+      inStr = ch;
+      continue;
+    }
+    if (ch == QLatin1Char('/') && i + 1 < n && text.at(i + 1) == QLatin1Char('/')) {
+      lineComment = true;
+      ++i;
+      continue;
+    }
+    if (ch == QLatin1Char('/') && i + 1 < n && text.at(i + 1) == QLatin1Char('*')) {
+      blockComment = true;
+      ++i;
+      continue;
+    }
+    out.append(ch);
+  }
+  return out;
+}
+
+bool pathEndsWith(const QString& path, const QString& suffix) {
+  const QString norm = QDir::fromNativeSeparators(path);
+  return norm.endsWith(suffix, Qt::CaseInsensitive);
+}
+
+bool isAllowlistedNestedEventLoop(const QString& path, const QString& kind) {
+  // P3-1 allowlist — only these src/app sites may mention nested-loop APIs.
+  if (kind == QLatin1String("waitForFinishedWithEventLoop") &&
+      pathEndsWith(path, QStringLiteral("src/app/KaTerrain3dStudio.cpp")))
+    return true;
+  if (kind == QLatin1String("QEventLoop") &&
+      (pathEndsWith(path, QStringLiteral("src/app/KaApplication.cpp")) ||
+       pathEndsWith(path, QStringLiteral("src/app/MainWindow.cpp"))))
+    return true;
+  return false;
+}
+
+QStringList disallowedNestedEventLoopSites(const QString& appRoot) {
+  QStringList bad;
+  QDirIterator it(appRoot, QStringList() << QStringLiteral("*.cpp") << QStringLiteral("*.h"),
+                  QDir::Files, QDirIterator::Subdirectories);
+  // QEventLoop but not QEventLoopLocker; waitForFinished call/API but keep
+  // waitForFinishedWithEventLoop as its own kind.
+  const QRegularExpression qEventLoopRe(QStringLiteral(R"(\bQEventLoop\b(?!Locker))"));
+  const QRegularExpression waitWithLoopRe(QStringLiteral(R"(\bwaitForFinishedWithEventLoop\b)"));
+  const QRegularExpression waitFinishedRe(
+      QStringLiteral(R"((->|\.)\s*waitForFinished\s*\()"));
+  while (it.hasNext()) {
+    const QString path = it.next();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+      bad << path + QStringLiteral(":open-fail");
+      continue;
+    }
+    const QString raw = QString::fromUtf8(f.readAll());
+    const QString text = stripCommentsAndStrings(raw);
+    auto collect = [&](const QRegularExpression& re, const QString& kind) {
+      int from = 0;
+      while (true) {
+        const QRegularExpressionMatch m = re.match(text, from);
+        if (!m.hasMatch()) break;
+        from = m.capturedEnd();
+        if (isAllowlistedNestedEventLoop(path, kind)) continue;
+        // Map match offset back onto raw is hard after stripping; report path+kind.
+        bad << QStringLiteral("%1:%2").arg(QDir::fromNativeSeparators(path), kind);
+        break;  // one report per file+kind is enough
+      }
+    };
+    collect(waitWithLoopRe, QStringLiteral("waitForFinishedWithEventLoop"));
+    collect(qEventLoopRe, QStringLiteral("QEventLoop"));
+    collect(waitFinishedRe, QStringLiteral("waitForFinished"));
+  }
+  bad.removeDuplicates();
+  return bad;
+}
+
 }  // namespace
 
 class TestCatchLog : public QObject {
@@ -125,6 +231,7 @@ private slots:
   void sessionLog_writesLine();
   void sessionLog_rotatesWhenOverMax();
   void srcCatchHandlers_allLog();
+  void srcAppNestedEventLoops_onlyAllowlisted();
 };
 
 void TestCatchLog::defaultMaxBytes_is10MiB() {
@@ -171,6 +278,13 @@ void TestCatchLog::srcCatchHandlers_allLog() {
   QVERIFY2(QDir(root).exists(), "CTest WORKING_DIRECTORY must be the repo root");
   const QStringList silent = silentCatchSites(root);
   QVERIFY2(silent.isEmpty(), qPrintable(silent.join(QLatin1Char('\n'))));
+}
+
+void TestCatchLog::srcAppNestedEventLoops_onlyAllowlisted() {
+  const QString appRoot = QStringLiteral("src/app");
+  QVERIFY2(QDir(appRoot).exists(), "CTest WORKING_DIRECTORY must be the repo root");
+  const QStringList bad = disallowedNestedEventLoopSites(appRoot);
+  QVERIFY2(bad.isEmpty(), qPrintable(bad.join(QLatin1Char('\n'))));
 }
 
 #include "test_catch_log.moc"
