@@ -409,10 +409,9 @@ void MainWindow::buildMenus() {
     QToolButton* b = ribbon->addAction(group, a);
     return {a, b};
   };
-  auto paintPrimary = [](QToolButton* b, const QString& iconId) {
-    if (!b) return;
-    b->setObjectName(QStringLiteral("btnPrimary"));
-    b->setIcon(KaIcons::icon(iconId));
+  // 자주 누르는 단추(저장·도면·인쇄)만 진한 타일로 두드러지게 한다. 나머지는 옅은 타일이다.
+  auto paintPrimary = [](QAction* a, const QString& iconId) {
+    if (a) a->setIcon(KaIcons::strongIcon(iconId));
   };
   auto [actNew, btnNew] = addIcon(QStringLiteral("survey"), QStringLiteral("new"),
                                   QStringLiteral("신규"),
@@ -438,10 +437,7 @@ void MainWindow::buildMenus() {
   Q_UNUSED(actOpen);
   Q_UNUSED(actSave);
   Q_UNUSED(actSaveAs);
-  paintPrimary(btnNew, QStringLiteral("new"));
-  paintPrimary(btnOpen, QStringLiteral("open"));
-  paintPrimary(btnSave, QStringLiteral("save"));
-  paintPrimary(btnSaveAs, QStringLiteral("save_as"));
+  paintPrimary(actSave, QStringLiteral("save"));
   btnNew->setObjectName(QStringLiteral("ribbonNew"));
   btnOpen->setObjectName(QStringLiteral("ribbonOpen"));
   btnSave->setObjectName(QStringLiteral("ribbonSave"));
@@ -529,7 +525,7 @@ void MainWindow::buildMenus() {
   ribbon->addWidget(QStringLiteral("basemap"), m_btnTerrain);
   auto* topographic = new QToolButton(ribbon);
   topographic->setObjectName(QStringLiteral("btnTopographic"));
-  topographic->setIcon(KaIcons::icon(QStringLiteral("contour")));
+  topographic->setIcon(KaIcons::icon(QStringLiteral("topo_download")));
   topographic->setText(QStringLiteral("수치"));
   topographic->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   topographic->setToolTip(QStringLiteral(
@@ -619,7 +615,7 @@ void MainWindow::buildMenus() {
           [btnCadastral, cadastralMenu](const QPoint& pos) { cadastralMenu->exec(btnCadastral->mapToGlobal(pos)); });
   m_btnDaedong = new QToolButton(ribbon);
   m_btnDaedong->setObjectName(QStringLiteral("btnDaedongyeojido"));
-  m_btnDaedong->setIcon(KaIcons::icon(QStringLiteral("map")));
+  m_btnDaedong->setIcon(KaIcons::icon(QStringLiteral("old_map")));
   m_btnDaedong->setText(QStringLiteral("대동여지"));
   m_btnDaedong->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   m_btnDaedong->setToolTip(
@@ -628,7 +624,7 @@ void MainWindow::buildMenus() {
   ribbon->addWidget(QStringLiteral("basemap"), m_btnDaedong);
   m_btnMap1919 = new QToolButton(ribbon);
   m_btnMap1919->setObjectName(QStringLiteral("btnMap1919"));
-  m_btnMap1919->setIcon(KaIcons::icon(QStringLiteral("contour")));
+  m_btnMap1919->setIcon(KaIcons::icon(QStringLiteral("old_topo")));
   m_btnMap1919->setText(QStringLiteral("1919지형"));
   m_btnMap1919->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   connect(m_btnMap1919, &QToolButton::clicked, this, &MainWindow::addHistoryGisMap1919);
@@ -674,7 +670,7 @@ void MainWindow::buildMenus() {
   // 위 버튼은 이미 올라온 레이어에 버퍼를 그린다. 이 버튼은 자료를 받아 온다. 역할이 다르다.
   auto* btnHeritage = new QToolButton(ribbon);
   btnHeritage->setObjectName(QStringLiteral("btnHeritageFetch"));
-  btnHeritage->setIcon(KaIcons::icon(QStringLiteral("buffer")));
+  btnHeritage->setIcon(KaIcons::icon(QStringLiteral("heritage")));
   btnHeritage->setText(QStringLiteral("유산"));
   btnHeritage->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   btnHeritage->setToolTip(QStringLiteral(
@@ -688,6 +684,7 @@ void MainWindow::buildMenus() {
       QStringLiteral("도면 만들기 — 종이에 지도를 올려 도면을 만듭니다 (Ctrl+L)"), &MainWindow::openLayoutDesigner);
   actLayout->setShortcut(QKeySequence(QStringLiteral("Ctrl+L")));
   Q_UNUSED(btnLayout);
+  paintPrimary(actLayout, QStringLiteral("pdf"));
   // 인쇄는 사람들이 먼저 찾는 곳(첫 화면 리본)에도 둔다. 도면 화면 안의 「인쇄」와 같은 창을 연다.
   auto [actPrint, btnPrint] = addIcon(
       QStringLiteral("out"), QStringLiteral("print"), QStringLiteral("인쇄"),
@@ -695,11 +692,12 @@ void MainWindow::buildMenus() {
       &MainWindow::printDrawing);
   actPrint->setShortcut(QKeySequence::Print);
   btnPrint->setObjectName(QStringLiteral("btnRibbonPrint"));
+  paintPrimary(actPrint, QStringLiteral("print"));
   addIcon(QStringLiteral("out"), QStringLiteral("section"), QStringLiteral("단면"),
           QStringLiteral("단면 GeoTIFF로 표고·거리 눈금 도면을 만듭니다"),
           &MainWindow::openSectionDesigner);
   auto [actMapGeoTiff, btnMapGeoTiff] = addIcon(
-      QStringLiteral("out"), QStringLiteral("map"), QStringLiteral("GeoTIFF"),
+      QStringLiteral("out"), QStringLiteral("geotiff"), QStringLiteral("GeoTIFF"),
       QStringLiteral("현재 지도에 보이는 범위와 레이어를 지도 좌표계 그대로 GeoTIFF로 저장합니다"),
       &MainWindow::exportMapGeoTiff);
   m_actMapGeoTiff = actMapGeoTiff;
@@ -707,7 +705,7 @@ void MainWindow::buildMenus() {
   m_actMapGeoTiff->setEnabled(false);
   btnMapGeoTiff->setObjectName(QStringLiteral("btnMapGeoTiff"));
   auto [actExport, btnExport] = addIcon(
-      QStringLiteral("out"), QStringLiteral("transform"), QStringLiteral("제출 변환"),
+      QStringLiteral("out"), QStringLiteral("export_convert"), QStringLiteral("제출 변환"),
       QStringLiteral("인트라넷 제출. 선택한 레이어를 EPSG:5179 SHP 파일로만 저장합니다 (Ctrl+E)."),
       &MainWindow::convertSelectedTo5179);
   actExport->setShortcut(QKeySequence(QStringLiteral("Ctrl+E")));
@@ -745,7 +743,7 @@ void MainWindow::buildMenus() {
 
   auto* webBtn = new QToolButton(ribbon);
   webBtn->setObjectName(QStringLiteral("btnWeb"));
-  webBtn->setIcon(KaIcons::icon(QStringLiteral("map")));
+  webBtn->setIcon(KaIcons::icon(QStringLiteral("web")));
   webBtn->setText(QStringLiteral("웹"));
   webBtn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   webBtn->setToolTip(QStringLiteral("인트라넷·토양도·지적도·지형도 웹 자료를 엽니다"));

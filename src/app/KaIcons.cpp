@@ -15,6 +15,16 @@ thread_local QColor tAccent;
 thread_local QIcon::Mode tMode = QIcon::Normal;
 thread_local QIcon::State tState = QIcon::Off;
 thread_local bool tGlossyTile = true;
+// 저장·도면·인쇄처럼 자주 누르는 단추만 진한 색 타일. 나머지는 옅은 타일이라 지도가 먼저 보인다.
+thread_local bool tStrongTile = false;
+
+// t 만큼 b 쪽으로 섞는다.
+QColor blend(const QColor& a, const QColor& b, qreal t) {
+  return QColor::fromRgbF(float(a.redF() * (1.0 - t) + b.redF() * t), float(a.greenF() * (1.0 - t) + b.greenF() * t),
+                          float(a.blueF() * (1.0 - t) + b.blueF() * t));
+}
+
+bool lightTile() { return tGlossyTile && !tStrongTile; }
 
 QColor stateColor(const QColor& color) {
   if (tMode == QIcon::Disabled) {
@@ -32,12 +42,14 @@ QColor groupColor(const QString& id) {
       id == QLatin1String("import") || id == QLatin1String("save") ||
       id == QLatin1String("save_as")) return palette.file;
   if (id.startsWith(QLatin1String("layout_")) || id == QLatin1String("pdf") ||
-      id == QLatin1String("print") ||
+      id == QLatin1String("print") || id == QLatin1String("geotiff") ||
+      id == QLatin1String("export_convert") ||
       id == QLatin1String("export") || id == QLatin1String("upload") ||
       id == QLatin1String("check") || id == QLatin1String("section") ||
       id == QLatin1String("section_layout")) return palette.output;
   if (id == QLatin1String("georef") || id == QLatin1String("transform") ||
-      id == QLatin1String("crs") || id == QLatin1String("buffer")) return palette.align;
+      id == QLatin1String("crs") || id == QLatin1String("buffer") ||
+      id == QLatin1String("heritage")) return palette.align;
   if (id == QLatin1String("river") || id == QLatin1String("hydro")) return palette.water;
   if (id == QLatin1String("soil")) return palette.earth;
   if (id == QLatin1String("geology")) return palette.rock;
@@ -64,9 +76,9 @@ QPixmap base(int s = 64) {
 void prep(QPainter& p, qreal width = 3.0) {
   p.setRenderHint(QPainter::Antialiasing, true);
   p.setPen(QPen(tInk, qMax(3.0, width), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-  p.setBrush(tGlossyTile ? (tMode == QIcon::Disabled ? QColor(240, 240, 240)
-                                                   : QColor(0xF1, 0xF5, 0xF7))
-                        : tAccent.lighter(150));
+  if (!tGlossyTile) p.setBrush(tAccent.lighter(150));
+  else if (tMode == QIcon::Disabled) p.setBrush(QColor(240, 240, 240));
+  else p.setBrush(tStrongTile ? QColor(0xF1, 0xF5, 0xF7) : QColor(Qt::white));
 }
 
 void fillInk(QPainter& p) { p.setBrush(tGlossyTile ? tInk : tAccent); }
@@ -75,8 +87,10 @@ QIcon bakeIcon(void (*fn)(QPainter&), const QColor& accent) {
   auto pmAt = [&](int size, QIcon::Mode mode, QIcon::State state) {
     QScopedValueRollback<QIcon::Mode> modeGuard(tMode, mode);
     QScopedValueRollback<QIcon::State> stateGuard(tState, state);
-    QScopedValueRollback<QColor> inkGuard(tInk, stateColor(KaTheme::iconPalette().ink));
     QScopedValueRollback<QColor> accentGuard(tAccent, stateColor(accent));
+    // 옅은 타일에서는 그림 선을 묶음 색의 짙은 톤으로 그려 색으로 묶음을 알아보게 한다.
+    const QColor charcoal = stateColor(KaTheme::iconPalette().ink);
+    QScopedValueRollback<QColor> inkGuard(tInk, lightTile() ? blend(tAccent, charcoal, 0.45) : charcoal);
     auto pm = base(size);
     QPainter p(&pm);
     p.scale(size / 64.0, size / 64.0);
@@ -86,9 +100,9 @@ QIcon bakeIcon(void (*fn)(QPainter&), const QColor& accent) {
       const QRectF tile(2, 2, 60, 60);
       QPainterPath outline;
       outline.addRoundedRect(tile, 14, 14);
-      p.fillPath(outline, tAccent);
+      p.fillPath(outline, tStrongTile ? tAccent : blend(Qt::white, tAccent, 0.17));
       p.setBrush(Qt::NoBrush);
-      p.setPen(QPen(tAccent.darker(112), 0.8));
+      p.setPen(tStrongTile ? QPen(tAccent.darker(112), 0.8) : QPen(blend(Qt::white, tAccent, 0.45), 1.2));
       p.drawPath(outline);
     }
     p.save();
@@ -151,6 +165,22 @@ void dSave(QPainter& p) {
   p.drawRoundedRect(QRectF(16, 14, 32, 36), 3, 3);
   p.drawRect(QRectF(22, 14, 20, 12));
   p.drawRect(QRectF(24, 34, 16, 12));
+}
+
+// 다른 이름으로 저장: 저장 그림에 연필을 얹어 「저장」과 구별한다.
+void dSaveAs(QPainter& p) {
+  dSave(p);
+  p.save();
+  p.translate(44, 42);
+  p.rotate(-45);
+  p.setPen(QPen(tInk, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.setBrush(tAccent);
+  p.drawRect(QRectF(-9, -4.5, 20, 9));
+  QPolygonF tip;
+  tip << QPointF(-9, -4.5) << QPointF(-16, 0) << QPointF(-9, 4.5);
+  p.setBrush(Qt::white);
+  p.drawPolygon(tip);
+  p.restore();
 }
 
 void dLayer(QPainter& p) {
@@ -382,13 +412,122 @@ void dSelect(QPainter& p) {
   p.drawPolygon(a);
 }
 
+// 지적: 반듯한 격자가 아니라 크기가 제각각인 필지. 한 필지를 칠해 「지번 찾기」 느낌을 준다.
 void dCadastral(QPainter& p) {
   prep(p, 2.4);
-  p.drawRect(QRectF(16, 16, 32, 32));
-  p.drawLine(16, 26.7, 48, 26.7);
-  p.drawLine(16, 37.3, 48, 37.3);
-  p.drawLine(26.7, 16, 26.7, 48);
-  p.drawLine(37.3, 16, 37.3, 48);
+  QPolygonF block;
+  block << QPointF(12, 16) << QPointF(52, 13) << QPointF(50, 51) << QPointF(14, 49);
+  p.drawPolygon(block);
+  QPolygonF picked;
+  picked << QPointF(40, 30.6) << QPointF(51.2, 29) << QPointF(50, 51) << QPointF(35, 50.2);
+  p.setBrush(tAccent);
+  p.drawPolygon(picked);
+  p.drawLine(QPointF(31, 14.6), QPointF(30, 32));
+  p.drawLine(QPointF(13, 32), QPointF(30, 32));
+  p.drawLine(QPointF(30, 32), QPointF(40, 30.6));
+}
+
+// 대동여지도: 병풍처럼 접는 분첩 지도와 산줄기.
+void dFoldedMap(QPainter& p) {
+  prep(p, 2.4);
+  const QColor paper = stateColor(KaTheme::iconPalette().earthLight).lighter(125);
+  QPolygonF left, middle, right;
+  left << QPointF(8, 17) << QPointF(24, 21) << QPointF(24, 51) << QPointF(8, 47);
+  middle << QPointF(24, 21) << QPointF(40, 17) << QPointF(40, 47) << QPointF(24, 51);
+  right << QPointF(40, 17) << QPointF(56, 21) << QPointF(56, 51) << QPointF(40, 47);
+  p.setBrush(paper);
+  p.drawPolygon(left);
+  p.drawPolygon(right);
+  p.setBrush(paper.darker(112));
+  p.drawPolygon(middle);
+  QPolygonF ridge;
+  ridge << QPointF(11, 39) << QPointF(16, 31) << QPointF(20, 37) << QPointF(26, 28) << QPointF(31, 36)
+        << QPointF(36, 30) << QPointF(42, 37) << QPointF(47, 29) << QPointF(53, 36);
+  p.setBrush(Qt::NoBrush);
+  p.setPen(QPen(tInk, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.drawPolyline(ridge);
+}
+
+// 1919 조선지형도: 모서리가 접힌 누런 옛 도엽과 등고선.
+void dOldSheet(QPainter& p) {
+  prep(p, 2.4);
+  QPainterPath sheet;
+  sheet.moveTo(12, 12);
+  sheet.lineTo(42, 12);
+  sheet.lineTo(52, 22);
+  sheet.lineTo(52, 52);
+  sheet.lineTo(12, 52);
+  sheet.closeSubpath();
+  p.setBrush(stateColor(KaTheme::iconPalette().earthLight).lighter(125));
+  p.drawPath(sheet);
+  p.setBrush(Qt::NoBrush);
+  p.drawLine(QPointF(42, 12), QPointF(42, 22));
+  p.drawLine(QPointF(42, 22), QPointF(52, 22));
+  p.drawArc(QRectF(16, 28, 32, 26), 20 * 16, 140 * 16);
+  p.drawArc(QRectF(23, 35, 18, 16), 20 * 16, 140 * 16);
+}
+
+// 수치지형도 받기: 등고선이 닫힌 도엽과 내려받기 화살표.
+void dTopoDownload(QPainter& p) {
+  prep(p, 2.4);
+  p.drawRoundedRect(QRectF(9, 12, 32, 40), 3, 3);
+  p.setBrush(Qt::NoBrush);
+  p.drawEllipse(QPointF(25, 32), 10, 8.5);
+  p.drawEllipse(QPointF(25, 32), 4, 3.5);
+  p.setPen(QPen(tInk, 3.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.drawLine(QPointF(50, 20), QPointF(50, 46));
+  p.drawLine(QPointF(43, 39), QPointF(50, 47));
+  p.drawLine(QPointF(57, 39), QPointF(50, 47));
+}
+
+// GeoTIFF: 좌표 눈금이 붙은 지도 그림.
+void dGeoImage(QPainter& p) {
+  prep(p, 2.4);
+  const QRectF frame(13, 12, 40, 34);
+  p.drawRoundedRect(frame, 3, 3);
+  p.save();
+  p.setClipRect(frame.adjusted(1.5, 1.5, -1.5, -1.5));
+  QPolygonF hills;
+  hills << QPointF(12, 47) << QPointF(25, 29) << QPointF(33, 39) << QPointF(41, 31) << QPointF(55, 47);
+  p.setBrush(tAccent);
+  p.drawPolygon(hills);
+  p.restore();
+  fillInk(p);
+  p.drawEllipse(QPointF(43, 21), 3.5, 3.5);
+  p.setBrush(Qt::NoBrush);
+  for (qreal x : {23.0, 33.0, 43.0}) p.drawLine(QPointF(x, 50), QPointF(x, 55));
+  for (qreal y : {22.0, 34.0}) p.drawLine(QPointF(4, y), QPointF(9, y));
+}
+
+// 웹: 누리집 창과 지구.
+void dBrowser(QPainter& p) {
+  prep(p, 2.4);
+  p.drawRoundedRect(QRectF(8, 12, 48, 40), 4, 4);
+  p.drawLine(QPointF(8, 21), QPointF(56, 21));
+  p.setBrush(Qt::NoBrush);
+  p.drawEllipse(QPointF(32, 37), 10.5, 10.5);
+  p.drawEllipse(QPointF(32, 37), 4.5, 10.5);
+  p.drawLine(QPointF(22, 37), QPointF(42, 37));
+  fillInk(p);
+  p.setPen(Qt::NoPen);
+  for (qreal x : {14.0, 20.0, 26.0}) p.drawEllipse(QPointF(x, 16.5), 1.9, 1.9);
+}
+
+// 국가유산: 처마가 들린 기와지붕 건물.
+void dPavilion(QPainter& p) {
+  prep(p, 2.6);
+  p.drawRect(QRectF(13, 46, 38, 6));
+  p.drawLine(QPointF(21, 28), QPointF(21, 46));
+  p.drawLine(QPointF(43, 28), QPointF(43, 46));
+  p.drawLine(QPointF(18, 35), QPointF(46, 35));
+  QPainterPath roof;
+  roof.moveTo(6, 25);
+  roof.quadTo(16, 27, 22, 15);
+  roof.lineTo(42, 15);
+  roof.quadTo(48, 27, 58, 25);
+  roof.quadTo(32, 34, 6, 25);
+  p.setBrush(tAccent);
+  p.drawPath(roof);
 }
 
 void dContour(QPainter& p) {
@@ -704,11 +843,16 @@ void dCenter(QPainter& p) {
   p.drawEllipse(QPointF(32, 32), 3, 3);
 }
 
+// 버퍼: 유적을 가운데 두고 500 m·1000 m 거리 고리.
 void dBuffer(QPainter& p) {
   prep(p, 2.4);
-  p.drawRoundedRect(QRectF(24, 24, 16, 16), 2, 2);
-  p.setPen(QPen(tInk, 2.2, Qt::DashLine, Qt::RoundCap));
-  p.drawRoundedRect(QRectF(14, 14, 36, 36), 4, 4);
+  p.setBrush(Qt::NoBrush);
+  p.setPen(QPen(tInk, 2.6, Qt::DashLine, Qt::RoundCap));
+  p.drawEllipse(QPointF(32, 32), 22, 22);
+  p.drawEllipse(QPointF(32, 32), 13.5, 13.5);
+  p.setPen(QPen(tInk, 2.6));
+  p.setBrush(tAccent);
+  p.drawEllipse(QPointF(32, 32), 5.5, 5.5);
 }
 
 void dUndo(QPainter& p) {
@@ -758,7 +902,9 @@ QIcon appIcon() {
 
 QIcon icon(const QString& id) {
   static QHash<QString, QIcon> cache;
-  const QString cacheKey = id + (tGlossyTile ? QStringLiteral("/glossy") : QStringLiteral("/flat"));
+  const QString cacheKey = id + (!tGlossyTile ? QStringLiteral("/flat")
+                                 : tStrongTile ? QStringLiteral("/strong")
+                                               : QStringLiteral("/glossy"));
   if (cache.contains(cacheKey)) return cache.value(cacheKey);
 
   const QColor accent = groupColor(id);
@@ -766,7 +912,15 @@ QIcon icon(const QString& id) {
   QIcon ic;
   if (id == QLatin1String("new")) ic = bake(dDocPlus);
   else if (id == QLatin1String("open") || id == QLatin1String("import")) ic = bake(dFolder);
-  else if (id == QLatin1String("save") || id == QLatin1String("save_as")) ic = bake(dSave);
+  else if (id == QLatin1String("save")) ic = bake(dSave);
+  else if (id == QLatin1String("save_as")) ic = bake(dSaveAs);
+  else if (id == QLatin1String("old_map")) ic = bake(dFoldedMap);
+  else if (id == QLatin1String("old_topo")) ic = bake(dOldSheet);
+  else if (id == QLatin1String("topo_download")) ic = bake(dTopoDownload);
+  else if (id == QLatin1String("geotiff")) ic = bake(dGeoImage);
+  else if (id == QLatin1String("web")) ic = bake(dBrowser);
+  else if (id == QLatin1String("heritage")) ic = bake(dPavilion);
+  else if (id == QLatin1String("export_convert")) ic = bake(dTransform);
   else if (id == QLatin1String("layer")) ic = bake(dLayer);
   else if (id == QLatin1String("map") || id == QLatin1String("vworld_base") ||
            id == QLatin1String("vworld_hybrid") || id == QLatin1String("hybrid"))
@@ -829,6 +983,12 @@ QIcon icon(const QString& id) {
 
   cache.insert(cacheKey, ic);
   return ic;
+}
+
+QIcon strongIcon(const QString& id) {
+  QScopedValueRollback<bool> tileGuard(tGlossyTile, true);
+  QScopedValueRollback<bool> strongGuard(tStrongTile, true);
+  return icon(id);
 }
 
 QIcon icon(const QString& id, const QColor& ink) {

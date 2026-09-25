@@ -777,6 +777,7 @@ if(KA_HGIS_BUILD_TESTS)
     mapControlsZoomTheCanvasAndShowAScaleBar
     drawingToolsGetTheirOwnRowBelowTheRibbon
     narrowWindowKeepsSearchOnTheRibbonRow
+    ribbonButtonsAllHaveDifferentIcons
     provinceChipMovesMapWithoutLoadingLayers)
   ka_add_qtest_filter(save_open_topo ka_save_open_tests
     topographicActualWindowRemainsStableAfterCompletion

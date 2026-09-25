@@ -43,6 +43,7 @@ private slots:
   void iconStates_preserveMeaningAndDisableColor();
   void explicitIconTint_remainsMonochrome();
   void flatIcons_keepTransparentCornersAndHighDpi();
+  void primaryIcons_standOutFromLightTiles();
   void appIcon_usesNavyTileWithGoldTrowel();
   void chromeSurfaces_renderFlatAndReadableText();
   void strataPalette_matchesSpec();
@@ -145,7 +146,8 @@ double worstVerticalContrast(const QImage& image, int x, int fromY, int toY, con
 const char* const themedIconIds[] = {
     "new", "open", "save", "save_as", "select", "measure", "draw_poly", "trench_grid",
     "contour", "dem", "soil", "paleo", "geology", "river", "georef", "buffer",
-    "check", "pdf", "export", "more",
+    "check", "pdf", "export", "more", "old_map", "old_topo", "topo_download", "geotiff",
+    "web", "heritage", "export_convert",
 };
 }
 
@@ -469,6 +471,19 @@ void TestTheme::flatIcons_keepTransparentCornersAndHighDpi() {
     const auto hi = icon.pixmap(QSize(40, 40), 2.0);
     QCOMPARE(hi.size(), QSize(80, 80));
     QCOMPARE(hi.devicePixelRatio(), 2.0);
+  }
+}
+
+// Everyday buttons sit on a pale tint so the map stays loudest; 저장·도면·인쇄 keep a solid tile.
+void TestTheme::primaryIcons_standOutFromLightTiles() {
+  for (const char* id : {"save", "pdf", "print"}) {
+    const QImage light = KaIcons::icon(QString::fromLatin1(id)).pixmap(QSize(64, 64), 1.0).toImage();
+    const QImage strong = KaIcons::strongIcon(QString::fromLatin1(id)).pixmap(QSize(64, 64), 1.0).toImage();
+    const QColor lightFace = light.pixelColor(8, 32);
+    const QColor strongFace = strong.pixelColor(8, 32);
+    QVERIFY2(lightFace.alpha() > 240 && strongFace.alpha() > 240, id);
+    QVERIFY2(lightFace.lightness() >= 215, id);
+    QVERIFY2(lightFace.lightness() - strongFace.lightness() >= 60, id);
   }
 }
 

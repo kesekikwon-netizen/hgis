@@ -1381,7 +1381,7 @@ void KaDrawingStudio::buildUi() {
     beginPlaceLegend();
     if (m_cardLegend) m_cardLegend->setFocus();
   });
-  auto* pdfBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("pdf")),
+  auto* pdfBtn = makeRailTile(m_cardLegend, KaIcons::strongIcon(QStringLiteral("pdf")),
                               QStringLiteral("PDF 내보내기"), QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
   pdfBtn->setObjectName(QStringLiteral("btnPrimary"));
   pdfBtn->setToolTip(QStringLiteral("지금 용지를 PDF 파일로 저장합니다"));
@@ -1390,7 +1390,7 @@ void KaDrawingStudio::buildUi() {
                                 QStringLiteral("용지/방향"), QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
   paperBtn->setToolTip(QStringLiteral("A4/A3 용지 크기 및 가로/세로 방향을 전환합니다"));
   connect(paperBtn, &QToolButton::clicked, this, &KaDrawingStudio::openPaperSettingsDialog);
-  auto* printBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("print")),
+  auto* printBtn = makeRailTile(m_cardLegend, KaIcons::strongIcon(QStringLiteral("print")),
                                 QStringLiteral("인쇄"), QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
   printBtn->setObjectName(QStringLiteral("btnPrint"));
   printBtn->setToolTip(QStringLiteral("프린터로 찍거나, 큰 도면을 작은 용지 여러 장으로 나눠 찍습니다 (Ctrl+P)"));

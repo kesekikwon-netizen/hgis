@@ -877,6 +877,42 @@ private slots:
     }
   }
 
+  // 리본 단추는 그림만 보고도 찾을 수 있게 모두 다른 그림이어야 한다.
+  // 예전에는 대동여지·웹, 버퍼·유산, 지형·수치·1919지형, 저장·다른이름 그림이 같았다.
+  void ribbonButtonsAllHaveDifferentIcons() {
+    MainWindow window;
+    disableRendering(window);
+    auto* overflow = window.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
+    QVERIFY(overflow && overflow->parentWidget());
+    QHash<QByteArray, QString> seen;
+    int compared = 0;
+    const auto buttons = overflow->parentWidget()->findChildren<QToolButton*>();
+    for (QToolButton* button : buttons) {
+      if (button == overflow || button->toolButtonStyle() != Qt::ToolButtonTextUnderIcon || button->icon().isNull())
+        continue;
+      const QImage image =
+          button->icon().pixmap(QSize(64, 64), 1.0).toImage().convertToFormat(QImage::Format_ARGB32);
+      const QByteArray key = QCryptographicHash::hash(
+          QByteArray(reinterpret_cast<const char*>(image.constBits()), int(image.sizeInBytes())),
+          QCryptographicHash::Sha1);
+      QVERIFY2(!seen.contains(key),
+               qPrintable(QStringLiteral("「%1」과 「%2」 그림이 같습니다").arg(seen.value(key), button->text())));
+      seen.insert(key, button->text());
+      ++compared;
+    }
+    QVERIFY2(compared >= 25, qPrintable(QStringLiteral("리본 단추 %1개만 보았습니다").arg(compared)));
+    const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if (!output.isEmpty() && QDir(output).exists()) {
+      window.setAttribute(Qt::WA_DontShowOnScreen);
+      window.resize(2400, 900);
+      window.show();
+      QCoreApplication::processEvents();
+      auto* toolbar = window.findChild<QToolBar*>(QStringLiteral("mainToolbar"));
+      QVERIFY(toolbar);
+      QVERIFY(toolbar->grab().save(QDir(output).filePath(QStringLiteral("main-ribbon-render.png"))));
+    }
+  }
+
   void mapControlsZoomTheCanvasAndShowAScaleBar() {
     MainWindow window;
     disableRendering(window);
