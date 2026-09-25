@@ -8,7 +8,7 @@
 | --- | --- |
 | [AGENTS.md](../AGENTS.md) | Cursor 작업 규칙·제품 불변식 |
 | [.codex/NOW.md](../.codex/NOW.md) | 최근 세션 상태 |
-| [HANDOFF.md](../HANDOFF.md) · [HANDOFF.md](HANDOFF.md) | 제품 진실 (둘을 같이 고친다) |
+| [HANDOFF.md](HANDOFF.md) | 제품 현황 정본 (루트 HANDOFF.md는 안내만) |
 | [developer-tools.md](developer-tools.md) | 여섯 도구 루프 |
 | [testing-map.md](testing-map.md) | 축 A–J 자동 시험 |
 | [clangd-navigation.md](clangd-navigation.md) | 선언·정의 조회 |

@@ -41,7 +41,7 @@ Reply in the user's language, usually Korean. Code, paths, and identifiers may r
 Read these before non-trivial product or GIS work:
 
 1. `.codex/NOW.md` - current session state / most recent field constraints (historically Codex-maintained; still the live state file).
-2. `HANDOFF.md` and `docs/HANDOFF.md` - product truth; edit both together when the handoff changes.
+2. `docs/HANDOFF.md` - product truth (canonical). Root `HANDOFF.md` is a short pointer only.
 3. `docs/adr/0001-standalone-cpp-qgis-libs.md` - Architecture B, no QGIS fork.
 4. `docs/domain/data-model.md` - GPKG layers and fields.
 5. `docs/architecture/data-flow.md` - critical path.
