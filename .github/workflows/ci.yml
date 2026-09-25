@@ -61,6 +61,11 @@ jobs:
           grep -q 'KA_HGIS_BUILD_TESTS' CMakeLists.txt
           echo "CMakeLists shape OK"
 
+      - name: Secret scan (tracked files)
+        run: |
+          set -euo pipefail
+          python3 scripts/secret-scan.py
+
   # Full Windows build — needs a self-hosted runner with OSGeo4W + VS2022
   # Register runner: https://github.com/kwonyoungin11/hgis/settings/actions/runners
   # Labels must include: self-hosted, Windows, ka-hgis
