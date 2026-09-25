@@ -3281,7 +3281,9 @@ private slots:
     QVERIFY(out.isValid());
     const QString tiles = out.filePath(QStringLiteral("tiles.pdf"));
     bool opened = false;
-    int planned = 0;
+    int sheets = 0;
+    int pages = 0;
+    QString drawingLabel;
     QString error;
     QTimer handle;
     handle.setInterval(20);
@@ -3290,21 +3292,69 @@ private slots:
       if (!dialog) return;
       handle.stop();
       opened = true;
+      drawingLabel = dialog->outputLabels().value(0);
       dialog->setTiled(true);
       dialog->setSheet(KaPrintDialog::SheetA4);
       dialog->setOutput(KaPrintDialog::OutputA2);
-      if (dialog->plan().ok && dialog->saveTilesPdf(tiles, &error))
-        planned = int(dialog->plan().sheets.size());
+      if (dialog->plan().ok && dialog->saveTilesPdf(tiles, &error)) {
+        sheets = int(dialog->plan().sheets.size());
+        pages = dialog->pageCount();
+      }
       dialog->reject();
     });
     handle.start();
     printButton->click();
     handle.stop();
     QVERIFY2(opened, "인쇄 창이 열리지 않았습니다.");
-    QVERIFY2(planned > 1, qPrintable(error));
+    QVERIFY2(sheets > 1, qPrintable(error));
+    // 도면 지도의 축척이 인쇄 창까지 넘어와 「도면 크기 그대로 · 1:…」로 보인다.
+    QVERIFY2(drawingLabel.contains(QStringLiteral("1:")), qPrintable(drawingLabel));
+    QVERIFY(pages >= sheets);
     QPdfDocument doc;
     QCOMPARE(doc.load(tiles), QPdfDocument::Error::None);
-    QCOMPARE(doc.pageCount(), planned);
+    QCOMPARE(doc.pageCount(), pages);
+  }
+  // 리본의 「인쇄」(Ctrl+P)는 도면 만들기를 열고 곧바로 인쇄 창을 띄운다.
+  void ribbonPrintOpensTheDrawingThenThePrintWindow() {
+    MainWindow window;
+    disableRendering(window);
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.show();
+    auto* canvas = window.findChild<QgsMapCanvas*>(QStringLiteral("mapCanvas"));
+    QVERIFY(canvas);
+    canvas->setDestinationCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+    canvas->setExtent(QgsRectangle(190000., 560000., 191000., 561000.));
+    auto* ribbonPrint = window.findChild<QToolButton*>(QStringLiteral("btnRibbonPrint"));
+    QVERIFY2(ribbonPrint, "리본에 인쇄 단추가 없습니다.");
+    QVERIFY(ribbonPrint->defaultAction());
+    QCOMPARE(ribbonPrint->defaultAction()->shortcut(), QKeySequence(QKeySequence::Print));
+
+    bool paperAsked = false;
+    bool opened = false;
+    QTimer handle;
+    handle.setInterval(10);
+    connect(&handle, &QTimer::timeout, &window, [&] {
+      auto* modal = QApplication::activeModalWidget();
+      if (auto* print = qobject_cast<KaPrintDialog*>(modal)) {
+        handle.stop();
+        opened = true;
+        print->reject();
+        return;
+      }
+      auto* dialog = qobject_cast<QDialog*>(modal);
+      if (dialog && dialog->windowTitle() == QStringLiteral("용지 설정")) {
+        paperAsked = true;
+        dialog->accept();
+      }
+    });
+    handle.start();
+    ribbonPrint->click();
+    handle.stop();
+    QVERIFY2(paperAsked, "도면 만들기의 용지 설정을 거치지 않았습니다.");
+    QVERIFY2(opened, "리본 인쇄로 인쇄 창이 열리지 않았습니다.");
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("viewTabs"));
+    QVERIFY(tabs);
+    QVERIFY2(qobject_cast<KaDrawingStudio*>(tabs->currentWidget()), "인쇄 뒤 도면 만들기 탭이 보이지 않습니다.");
   }
   // 축척 칸은 하나뿐이어야 한다. 예전에는 자유 입력 QLineEdit 과 프리셋 QComboBox 가
   // 따로 있어서 같은 축척인데도 어느 쪽으로 넣었느냐에 따라 화면이 달랐다.

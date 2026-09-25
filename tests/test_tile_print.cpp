@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QApplication>
+#include <QDir>
 #include <QPageSize>
 #include <QPainter>
 #include <QPdfDocument>
@@ -123,9 +124,9 @@ private slots:
       QPdfWriter writer(tiles);
       writer.setResolution(100);
       QString error;
-      TilePrint::Marks marks;
-      marks.cutLines = false;
-      QVERIFY2(TilePrint::renderTiles(source, plan, &writer, 100.0, marks, &error), qPrintable(error));
+      TilePrint::Options options;
+      options.cutLines = false;
+      QVERIFY2(TilePrint::renderTiles(source, plan, &writer, 100.0, options, &error), qPrintable(error));
     }
     QPdfDocument out;
     QCOMPARE(out.load(tiles), QPdfDocument::Error::None);
@@ -175,20 +176,191 @@ private slots:
     QVERIFY2(dialog.plan().ok, qPrintable(dialog.plan().error));
     const int count = int(dialog.plan().sheets.size());
     QVERIFY(count > 1);
-    QVERIFY2(dialog.summary().contains(QStringLiteral("= %1장").arg(count)), qPrintable(dialog.summary()));
+    QVERIFY2(dialog.summary().contains(QStringLiteral("용지 %1장").arg(count)), qPrintable(dialog.summary()));
     QVERIFY2(dialog.warning().contains(QStringLiteral("283%")), qPrintable(dialog.warning()));
+    // 안내 장 한 장이 맨 앞에 붙는다.
+    dialog.setOverview(true);
+    QCOMPARE(dialog.pageCount(), count + 1);
+    QCOMPARE(dialog.printButtonText(), QStringLiteral("인쇄 · %1장 + 안내 1장").arg(count));
     const QString tiles = dir.filePath(QStringLiteral("dialog-tiles.pdf"));
     QString error;
     QVERIFY2(dialog.saveTilesPdf(tiles, &error), qPrintable(error));
     QPdfDocument doc;
     QCOMPARE(doc.load(tiles), QPdfDocument::Error::None);
-    QCOMPARE(doc.pageCount(), count);
+    QCOMPARE(doc.pageCount(), count + 1);
 
     dialog.setOutput(KaPrintDialog::OutputDrawing);
     QVERIFY2(dialog.warning().isEmpty(), "도면 크기 그대로인데 축척 경고가 나옵니다.");
-    QVERIFY(dialog.summary().contains(QStringLiteral("도면 축척 그대로")));
+    QVERIFY(dialog.summary().contains(QStringLiteral("도면 크기 그대로")));
     dialog.setTiled(false);
-    QVERIFY(dialog.summary().contains(QStringLiteral("한 장에 맞춰")));
+    QVERIFY(dialog.summary().contains(QStringLiteral("한 장에")));
+  }
+
+  void oneSheetKeepsActualSizeWhenTheDrawingFits() {
+    const QMarginsF edge(5, 5, 5, 5);
+    // A4 도면을 A4 에: 실제 크기. 가장자리 5 mm 는 프린터가 못 찍을 수 있다고 알린다.
+    const TileFit same = TilePrint::fit(QSizeF(210, 297), QPageSize(QPageSize::A4), edge);
+    QVERIFY(same.actualSize);
+    QCOMPARE(same.ratio, 1.0);
+    QVERIFY(same.edgeMayClip);
+    // A4 도면을 A3 에: 키우지 않고 실제 크기로 가운데.
+    const TileFit smaller = TilePrint::fit(QSizeF(210, 297), QPageSize(QPageSize::A3), edge);
+    QVERIFY(smaller.actualSize);
+    QVERIFY(!smaller.edgeMayClip);
+    // A3 도면을 A4 에: 넘치므로 인쇄 가능 영역에 맞춰 줄인다.
+    const TileFit bigger = TilePrint::fit(QSizeF(297, 420), QPageSize(QPageSize::A4), edge);
+    QVERIFY(!bigger.actualSize);
+    QVERIFY(qAbs(bigger.ratio - 200.0 / 297.0) < 1e-9);
+    // 가로 도면은 가로 용지.
+    QVERIFY(TilePrint::fit(QSizeF(297, 210), QPageSize(QPageSize::A4), edge).landscape);
+  }
+
+  void oneSheetActualSizeIsCentredOnThePaper() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = makeQuadrantPdf(dir.filePath(QStringLiteral("a4.pdf")), QSizeF(210, 297));
+    const QString out = dir.filePath(QStringLiteral("on-a3.pdf"));
+    {
+      QPdfWriter writer(out);
+      writer.setResolution(100);
+      QString error;
+      QVERIFY2(TilePrint::renderFit(source, QPageSize(QPageSize::A3), QMarginsF(5, 5, 5, 5), &writer, 100.0, &error),
+               qPrintable(error));
+    }
+    QPdfDocument doc;
+    QCOMPARE(doc.load(out), QPdfDocument::Error::None);
+    // A3(297×420) 한가운데에 A4(210×297)를 그대로: 왼쪽 43.5 mm, 위 61.5 mm 부터.
+    const QPointF origin(43.5, 61.5);
+    QVERIFY2(near(colorAtMm(doc, 0, origin + QPointF(50, 50)), 220, 20, 20), "실제 크기 도면의 왼쪽 위(빨강)가 제자리가 아닙니다.");
+    QVERIFY2(near(colorAtMm(doc, 0, origin + QPointF(160, 250)), 240, 210, 20), "실제 크기 도면의 오른쪽 아래(노랑)가 제자리가 아닙니다.");
+    QVERIFY2(paper(colorAtMm(doc, 0, origin + QPointF(-10, 50))), "도면 왼쪽 바깥에 그림이 찍혔습니다.");
+    QVERIFY2(paper(colorAtMm(doc, 0, origin + QPointF(215, 50))), "도면 오른쪽 바깥에 그림이 찍혔습니다(키워 찍었습니다).");
+  }
+
+  void enlargedScalesAreRoundAndStayWithinA0() {
+    const double a0 = TilePrint::fitScale(QSizeF(297, 420), QPageSize(QPageSize::A0));
+    QCOMPARE(TilePrint::enlargedScales(5000, a0), (QList<double>{2500, 2000}));
+    QCOMPARE(TilePrint::enlargedScales(1000, 2.0), (QList<double>{600, 500}));
+    QVERIFY(TilePrint::enlargedScales(0, a0).isEmpty());
+    QCOMPARE(TilePrint::scaleLabel(2500), QStringLiteral("1:2,500"));
+    QCOMPARE(TilePrint::scaleLabel(1766.2), QStringLiteral("1:1,766"));
+    QCOMPARE(TilePrint::isoName(QSizeF(420, 297)), QStringLiteral("A3"));
+    QCOMPARE(TilePrint::isoName(QSizeF(594, 841)), QStringLiteral("A1"));
+    QVERIFY(TilePrint::isoName(QSizeF(400, 300)).isEmpty());
+  }
+
+  void overviewAndChosenSheetsDecideThePages() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = makeQuadrantPdf(dir.filePath(QStringLiteral("drawing.pdf")), QSizeF(400, 300));
+    const TilePlan plan = TilePrint::bestPlan(request(QSizeF(400, 300), QPageSize::A4, 6.0));
+    QVERIFY2(plan.ok && plan.sheets.size() == 4, qPrintable(plan.error));
+    const QString out = dir.filePath(QStringLiteral("chosen.pdf"));
+    int lastDone = 0;
+    int lastTotal = 0;
+    {
+      QPdfWriter writer(out);
+      writer.setResolution(100);
+      TilePrint::Options options;
+      options.overview = true;
+      options.title = QStringLiteral("시험 도면");
+      options.scaleText = QStringLiteral("1:2,500");
+      options.sheets = {3, 0, 3};  // 순서가 섞이고 겹쳐도 번호 순서로 한 번씩
+      options.progress = [&](int done, int total) {
+        lastDone = done;
+        lastTotal = total;
+        return true;
+      };
+      QString error;
+      QVERIFY2(TilePrint::renderTiles(source, plan, &writer, 100.0, options, &error), qPrintable(error));
+    }
+    QCOMPARE(lastTotal, 3);
+    QCOMPARE(lastDone, 3);
+    QPdfDocument doc;
+    QCOMPARE(doc.load(out), QPdfDocument::Error::None);
+    QCOMPARE(doc.pageCount(), 3);  // 안내 1 + 1번 장 + 4번 장
+    QVERIFY2(near(colorAtMm(doc, 1, QPointF(5 + 20, 5 + 20)), 220, 20, 20), "둘째 쪽이 1번 장(빨강)이 아닙니다.");
+    QVERIFY2(near(colorAtMm(doc, 2, QPointF(5 + 113, 5 + 100)), 240, 210, 20), "셋째 쪽이 4번 장(노랑)이 아닙니다.");
+  }
+
+  void stoppingMidwayEndsTheRun() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = makeQuadrantPdf(dir.filePath(QStringLiteral("drawing.pdf")), QSizeF(400, 300));
+    const TilePlan plan = TilePrint::bestPlan(request(QSizeF(400, 300), QPageSize::A4, 0.0));
+    QVERIFY(plan.ok);
+    TilePrint::Options options;
+    options.progress = [](int done, int) { return done < 1; };
+    QPdfWriter writer(dir.filePath(QStringLiteral("stopped.pdf")));
+    QString error;
+    bool cancelled = false;
+    QVERIFY(!TilePrint::renderTiles(source, plan, &writer, 100.0, options, &error, &cancelled));
+    QVERIFY(cancelled);
+    QVERIFY(!error.isEmpty());
+  }
+
+  void dialogShowsPaperScaleAndReprintsChosenSheets() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = makeQuadrantPdf(dir.filePath(QStringLiteral("drawing.pdf")), QSizeF(297, 420));
+    KaPrintDialog dialog(source, QStringLiteral("시험 도면"), 5000.0);
+    QVERIFY2(dialog.outputLabels().first().contains(QStringLiteral("1:5,000")), qPrintable(dialog.outputLabels().join('\n')));
+    QVERIFY(dialog.outputLabels().contains(QStringLiteral("1:2,500으로 키우기 · 2배 · 약 A1")));
+    dialog.setTiled(true);
+    dialog.setSheet(KaPrintDialog::SheetA4);
+    dialog.setOverview(true);
+    QVERIFY(dialog.setOutputScale(2500));
+    QVERIFY2(dialog.plan().ok, qPrintable(dialog.plan().error));
+    QCOMPARE(dialog.paperScale(), 2500.0);
+    QVERIFY2(dialog.summary().contains(QStringLiteral("종이 위 축척 1:2,500")), qPrintable(dialog.summary()));
+    QVERIFY2(dialog.warning().contains(QStringLiteral("1:5,000")) && dialog.warning().contains(QStringLiteral("1:2,500")),
+             qPrintable(dialog.warning()));
+    const int count = int(dialog.plan().sheets.size());
+    QVERIFY(count > 2);
+    // 눈으로 볼 견본: KA_PRINT_SAMPLE_DIR 를 주면 인쇄 창과 안내 장·첫 장 그림을 남긴다.
+    const QString sampleDir = qEnvironmentVariable("KA_PRINT_SAMPLE_DIR");
+    if (!sampleDir.isEmpty()) {
+      dialog.resize(760, 820);
+      QVERIFY(dialog.grab().save(QDir(sampleDir).filePath(QStringLiteral("dialog-tiles.png"))));
+      const QString sample = QDir(sampleDir).filePath(QStringLiteral("sample-tiles.pdf"));
+      QString sampleError;
+      QVERIFY2(dialog.saveTilesPdf(sample, &sampleError), qPrintable(sampleError));
+      QPdfDocument pages;
+      QCOMPARE(pages.load(sample), QPdfDocument::Error::None);
+      for (int page = 0; page < 2; ++page) {
+        const QSizeF points = pages.pagePointSize(page);
+        const QImage image = pages.render(page, (points * 1.6).toSize());
+        QVERIFY(image.save(QDir(sampleDir).filePath(QStringLiteral("sample-page%1.png").arg(page + 1))));
+      }
+    }
+    // 잘못 나온 장만 다시: 미리보기에서 두 장을 빼면 그 두 장과 안내 장이 빠진다.
+    dialog.toggleSheet(0);
+    dialog.toggleSheet(1);
+    QCOMPARE(dialog.chosenSheets().size(), count - 2);
+    QCOMPARE(dialog.pageCount(), count - 2);
+    QCOMPARE(dialog.printButtonText(), QStringLiteral("인쇄 · %1장").arg(count - 2));
+    QVERIFY(dialog.summary().contains(QStringLiteral("이번에는 %1장만").arg(count - 2)));
+    QVERIFY2(dialog.summary().contains(QStringLiteral("안내 장은 다시 찍지 않습니다")), qPrintable(dialog.summary()));
+    const QString tiles = dir.filePath(QStringLiteral("again.pdf"));
+    QString error;
+    QVERIFY2(dialog.saveTilesPdf(tiles, &error), qPrintable(error));
+    QPdfDocument doc;
+    QCOMPARE(doc.load(tiles), QPdfDocument::Error::None);
+    QCOMPARE(doc.pageCount(), count - 2);
+    if (!sampleDir.isEmpty())
+      QVERIFY(dialog.grab().save(QDir(sampleDir).filePath(QStringLiteral("dialog-skipped.png"))));
+    dialog.toggleSheet(1);
+    QCOMPARE(dialog.chosenSheets().size(), count - 1);
+
+    // 한 장: 넘치면 줄이고 종이 위 축척을 알려 준다. 들어가면 실제 크기.
+    dialog.setTiled(false);
+    QVERIFY2(dialog.warning().contains(QStringLiteral("종이 위 축척은 약 1:")), qPrintable(dialog.warning()));
+    if (!sampleDir.isEmpty())
+      QVERIFY(dialog.grab().save(QDir(sampleDir).filePath(QStringLiteral("dialog-fit-shrink.png"))));
+    dialog.setSheet(KaPrintDialog::SheetA3);
+    QVERIFY2(dialog.summary().contains(QStringLiteral("실제 크기(100%)")) &&
+                 dialog.summary().contains(QStringLiteral("1:5,000")),
+             qPrintable(dialog.summary()));
   }
 };
 

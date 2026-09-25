@@ -368,6 +368,16 @@ void MainWindow::exportReportLayout() {
   QMessageBox::warning(this, QStringLiteral("도면"), QStringLiteral("QGIS 빌드 필요"));
 #endif
 }
+void MainWindow::printDrawing() {
+#if KA_HGIS_HAS_QGIS
+  // 도면 화면이 이미 앞에 있으면 그대로 찍는다. 다시 열면 사용자가 옮겨 둔 용지 보기가 바뀐다.
+  const bool studioShown = m_drawingStudio && m_viewTabs && m_viewTabs->currentWidget() == m_drawingStudio;
+  if (!studioShown) openLayoutDesigner();
+  if (m_drawingStudio && m_viewTabs && m_viewTabs->currentWidget() == m_drawingStudio)
+    m_drawingStudio->printDrawing();
+#endif
+}
+
 void MainWindow::openLayoutDesigner() {
 #if KA_HGIS_HAS_QGIS
   if (!m_viewTabs)

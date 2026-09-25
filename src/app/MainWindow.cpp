@@ -688,6 +688,13 @@ void MainWindow::buildMenus() {
       QStringLiteral("도면 만들기 — 종이에 지도를 올려 도면을 만듭니다 (Ctrl+L)"), &MainWindow::openLayoutDesigner);
   actLayout->setShortcut(QKeySequence(QStringLiteral("Ctrl+L")));
   Q_UNUSED(btnLayout);
+  // 인쇄는 사람들이 먼저 찾는 곳(첫 화면 리본)에도 둔다. 도면 화면 안의 「인쇄」와 같은 창을 연다.
+  auto [actPrint, btnPrint] = addIcon(
+      QStringLiteral("out"), QStringLiteral("print"), QStringLiteral("인쇄"),
+      QStringLiteral("도면을 프린터로 찍거나, 큰 도면을 A3·A4 여러 장으로 나눠 찍습니다 (Ctrl+P)"),
+      &MainWindow::printDrawing);
+  actPrint->setShortcut(QKeySequence::Print);
+  btnPrint->setObjectName(QStringLiteral("btnRibbonPrint"));
   addIcon(QStringLiteral("out"), QStringLiteral("section"), QStringLiteral("단면"),
           QStringLiteral("단면 GeoTIFF로 표고·거리 눈금 도면을 만듭니다"),
           &MainWindow::openSectionDesigner);

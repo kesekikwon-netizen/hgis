@@ -14,7 +14,6 @@
 #include "KaPrintDialog.h"
 #include "MainWindow.h"
 
-#include <QShortcut>
 #include <QTemporaryDir>
 #include <algorithm>
 #include <cmath>
@@ -1395,10 +1394,8 @@ void KaDrawingStudio::buildUi() {
                                 QStringLiteral("인쇄"), QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
   printBtn->setObjectName(QStringLiteral("btnPrint"));
   printBtn->setToolTip(QStringLiteral("프린터로 찍거나, 큰 도면을 작은 용지 여러 장으로 나눠 찍습니다 (Ctrl+P)"));
+  // Ctrl+P 는 창 전체의 「인쇄」 동작이 받는다. 여기에 또 두면 같은 키가 둘이라 둘 다 안 먹는다.
   connect(printBtn, &QToolButton::clicked, this, &KaDrawingStudio::printDrawing);
-  auto* printKey = new QShortcut(QKeySequence::Print, this);
-  printKey->setContext(Qt::WidgetWithChildrenShortcut);
-  connect(printKey, &QShortcut::activated, this, &KaDrawingStudio::printDrawing);
   legendRow->addWidget(legendBtn, 1);
   legendRow->addWidget(paperBtn, 1);
   legendLay->addLayout(legendRow);
@@ -4190,16 +4187,25 @@ void KaDrawingStudio::printDrawing() {
     return;
   }
   const QString pdf = temporary.filePath(QStringLiteral("drawing-print.pdf"));
+  // PDF를 만드는 몇 초 동안 멈춘 것처럼 보이지 않게 먼저 알린다. 이벤트 루프는 돌리지 않는다.
+  const QString previousStatus = m_status ? m_status->text() : QString();
+  if (m_status) {
+    m_status->setText(QStringLiteral("인쇄할 도면을 만드는 중…"));
+    m_status->repaint();
+  }
   QString error;
   QApplication::setOverrideCursor(Qt::WaitCursor);
   const bool ok = exportDrawingPdf(pdf, &error);
   QApplication::restoreOverrideCursor();
+  if (m_status) m_status->setText(previousStatus);
   if (!ok) {
     QMessageBox::warning(this, QStringLiteral("인쇄"), error);
     return;
   }
   const QString name = ly->project() ? ly->project()->baseName() : QString();
-  KaPrintDialog dialog(pdf, name.isEmpty() ? QStringLiteral("도면") : name, this);
+  // 종이 위 축척을 알려 주려면 도면 지도의 축척이 필요하다.
+  const double scale = mapItem() ? mapItem()->scale() : 0.0;
+  KaPrintDialog dialog(pdf, name.isEmpty() ? QStringLiteral("도면") : name, scale, this);
   dialog.exec();
 }
 

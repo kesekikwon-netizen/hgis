@@ -257,6 +257,8 @@ private slots:
   void runSiteBuffer1000();
   void applySnapConfig();
   void openLayoutDesigner();
+  // 어느 화면에서든 인쇄(Ctrl+P). 도면이 없으면 도면 화면부터 연다.
+  void printDrawing();
   void placeTerrain3dOnSheet();
   void openSectionDesigner();
   void openTerrain3dStudio();

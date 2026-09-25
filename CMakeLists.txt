@@ -790,6 +790,7 @@ if(KA_HGIS_BUILD_TESTS)
     drawingStudio_largeScaleChipsApplyToMapAndInput
     drawingInspectorUsesHeightWithoutOverlapping
     drawingStudioPrintSplitsTheDrawingIntoSheets
+    ribbonPrintOpensTheDrawingThenThePrintWindow
     scaleControlFollowsActiveDrawingWithoutChangingMapCanvas
     scaleControl_isSingleWidgetAcceptingBothForms)
   ka_add_qtest_filter(save_open_edit ka_save_open_tests

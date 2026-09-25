@@ -5,29 +5,37 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineF>
+#include <QLocale>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QPageLayout>
 #include <QPainter>
 #include <QPdfDocument>
 #include <QPdfWriter>
-#include <QPixmap>
 #include <QPrinter>
 #include <QPrinterInfo>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QSettings>
 #include <QVBoxLayout>
+#include <QVariantMap>
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 namespace {
-constexpr double kPrintDpi = 300.0;      // 그림 해상도 상한. 「PDF 내보내기」와 같다
+constexpr double kPrintDpi = 300.0;       // 그림 해상도 상한. 「PDF 내보내기」와 같다
 constexpr double kDefaultMarginMm = 5.0;  // 프린터를 모를 때의 가장자리
-constexpr double kLabelBandMm = 6.0;      // 장 번호·안내 띠
+constexpr double kLabelBandMm = 6.0;      // 장 번호·5 cm 확인선 띠
+const QString kSettingsGroup = QStringLiteral("print");
 
 QPageSize outputPage(KaPrintDialog::Output output) {
   switch (output) {
@@ -44,17 +52,166 @@ QString percent(double ratio) {
   return QString::number(int(std::lround(ratio * 100.0)));
 }
 
-// 배율 때문에 숫자 축척이 틀어지는지. 막대 축척은 도면과 같이 커지고 작아지므로 맞다.
-QString scaleWarning(double ratio) {
-  if (std::abs(ratio - 1.0) < 0.005) return {};
-  return QStringLiteral("도면을 %1%로 %2 찍습니다. 숫자로 적은 축척(예: 1:5,000)은 실제와 달라지고, "
-                        "막대 축척은 그대로 맞습니다.")
-      .arg(percent(ratio), ratio > 1.0 ? QStringLiteral("키워") : QStringLiteral("줄여"));
+QString decimal(double value) {
+  QString text = QLocale(QLocale::Korean).toString(value, 'f', 1);
+  if (text.endsWith(QLatin1String(".0"))) text.chop(2);
+  return text;
+}
+
+// A1 처럼 표준 용지면 그 이름, 아니면 59.4×84.1 cm.
+QString sizeText(const QSizeF& mm) {
+  const QString iso = TilePrint::isoName(mm);
+  if (!iso.isEmpty()) return iso;
+  return QStringLiteral("%1×%2 cm").arg(decimal(mm.width() / 10.0), decimal(mm.height() / 10.0));
+}
+
+QSizeF portraitMm(const QPageSize& size) {
+  const QSizeF s = size.size(QPageSize::Millimeter);
+  return s.width() <= s.height() ? s : s.transposed();
 }
 }  // namespace
 
-KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, QWidget* parent)
-    : QDialog(parent), m_pdfPath(pdfPath), m_title(title) {
+// 나눈 칸을 그리고, 누르면 그 장을 이번 인쇄에서 빼거나 다시 넣는 미리보기.
+class KaTilePreview : public QWidget {
+public:
+  explicit KaTilePreview(QWidget* parent) : QWidget(parent) {
+    setObjectName(QStringLiteral("printPreview"));
+    setMinimumSize(360, 300);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+  }
+
+  std::function<void(int)> onToggle;
+
+  void setContent(const QImage& thumb, const TilePlan& plan, const QSet<int>& skipped, bool tiled,
+                  const QSizeF& drawingMm, const QPageSize& sheet, const TileFit& fit) {
+    m_thumb = thumb;
+    m_plan = plan;
+    m_skipped = skipped;
+    m_tiled = tiled && plan.ok;
+    m_drawingMm = drawingMm;
+    m_sheet = sheet;
+    m_fit = fit;
+    setCursor(m_tiled && plan.sheets.size() > 1 ? Qt::PointingHandCursor : Qt::ArrowCursor);
+    update();
+  }
+
+  // 좌표에 있는 장. 겹침 칸에서는 가운데가 더 가까운 장을 고른다.
+  int sheetAt(const QPointF& pos) const {
+    if (!m_tiled) return -1;
+    double k = 1.0;
+    QPointF origin;
+    layoutTiles(&k, &origin);
+    int best = -1;
+    double bestDistance = 1e18;
+    for (int i = 0; i < m_plan.sheets.size(); ++i) {
+      const QRectF r = mapped(m_plan.sheets.at(i).areaMm, k, origin);
+      if (!r.contains(pos)) continue;
+      const double distance = QLineF(r.center(), pos).length();
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+protected:
+  void paintEvent(QPaintEvent*) override {
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setRenderHint(QPainter::SmoothPixmapTransform);
+    p.fillRect(rect(), QColor(244, 244, 245));
+    if (m_thumb.isNull() || m_drawingMm.isEmpty()) {
+      p.drawText(rect(), Qt::AlignCenter, QStringLiteral("미리보기를 만들지 못했습니다."));
+      return;
+    }
+    if (m_tiled) paintTiles(p);
+    else paintSheet(p);
+  }
+
+  void mousePressEvent(QMouseEvent* event) override {
+    if (!m_tiled || m_plan.sheets.size() < 2 || event->button() != Qt::LeftButton) return;
+    const int index = sheetAt(event->position());
+    if (index >= 0 && onToggle) onToggle(index);
+  }
+
+private:
+  QRectF box() const { return QRectF(rect()).adjusted(10, 10, -10, -10); }
+
+  void layoutTiles(double* k, QPointF* origin) const {
+    QRectF extent(QPointF(0, 0), m_plan.outputMm);
+    for (const TileSheet& tile : m_plan.sheets) extent = extent.united(tile.areaMm);
+    const QRectF b = box();
+    *k = std::min(b.width() / extent.width(), b.height() / extent.height());
+    *origin = QPointF(b.center().x() - (extent.x() + extent.width() / 2.0) * *k,
+                      b.center().y() - (extent.y() + extent.height() / 2.0) * *k);
+  }
+
+  static QRectF mapped(const QRectF& mm, double k, const QPointF& origin) {
+    return QRectF(origin.x() + mm.x() * k, origin.y() + mm.y() * k, mm.width() * k, mm.height() * k);
+  }
+
+  void paintTiles(QPainter& p) const {
+    double k = 1.0;
+    QPointF origin;
+    layoutTiles(&k, &origin);
+    const QRectF drawing = mapped(QRectF(QPointF(0, 0), m_plan.outputMm), k, origin);
+    p.fillRect(drawing, Qt::white);
+    p.drawImage(drawing, m_thumb);
+    QFont font = p.font();
+    font.setBold(true);
+    font.setPixelSize(13);
+    p.setFont(font);
+    for (int i = 0; i < m_plan.sheets.size(); ++i) {
+      const QRectF r = mapped(m_plan.sheets.at(i).areaMm, k, origin);
+      const bool skipped = m_skipped.contains(i);
+      if (skipped) {
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(110, 110, 110, 150));
+        p.drawRect(r);
+      }
+      p.setPen(QPen(skipped ? QColor(110, 110, 110) : QColor(37, 99, 235), 1.5));
+      p.setBrush(skipped ? QBrush(Qt::NoBrush) : QBrush(QColor(37, 99, 235, 14)));
+      p.drawRect(r);
+      const QString label = skipped ? QStringLiteral("%1 뺌").arg(i + 1) : QString::number(i + 1);
+      const QSizeF size = QFontMetricsF(font).size(Qt::TextSingleLine, label) + QSizeF(10, 4);
+      const QRectF chip(r.center().x() - size.width() / 2.0, r.center().y() - size.height() / 2.0,
+                        size.width(), size.height());
+      p.setPen(Qt::NoPen);
+      p.setBrush(QColor(255, 255, 255, 225));
+      p.drawRoundedRect(chip, 4, 4);
+      p.setPen(skipped ? QColor(90, 90, 90) : QColor(30, 64, 175));
+      p.drawText(chip, Qt::AlignCenter, label);
+    }
+  }
+
+  void paintSheet(QPainter& p) const {
+    QSizeF paper = portraitMm(m_sheet);
+    if (m_fit.landscape) paper.transpose();
+    const QRectF b = box();
+    const double k = std::min(b.width() / paper.width(), b.height() / paper.height());
+    const QRectF page(b.center().x() - paper.width() * k / 2.0, b.center().y() - paper.height() * k / 2.0,
+                      paper.width() * k, paper.height() * k);
+    p.fillRect(page, Qt::white);
+    p.setPen(QPen(QColor(120, 120, 120), 1));
+    p.drawRect(page);
+    const QSizeF drawn = m_drawingMm * m_fit.ratio * k;
+    p.drawImage(QRectF(page.center().x() - drawn.width() / 2.0, page.center().y() - drawn.height() / 2.0,
+                       drawn.width(), drawn.height()),
+                m_thumb);
+  }
+
+  QImage m_thumb;
+  TilePlan m_plan;
+  QSet<int> m_skipped;
+  bool m_tiled = false;
+  QSizeF m_drawingMm;
+  QPageSize m_sheet;
+  TileFit m_fit;
+};
+
+KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, double drawingScale, QWidget* parent)
+    : QDialog(parent), m_pdfPath(pdfPath), m_title(title), m_drawingScale(drawingScale > 0.0 ? drawingScale : 0.0) {
   setObjectName(QStringLiteral("printDialog"));
   setWindowTitle(QStringLiteral("도면 인쇄"));
   QString readError;
@@ -62,7 +219,7 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, QWidg
   {
     QPdfDocument doc;
     if (doc.load(pdfPath) == QPdfDocument::Error::None && doc.pageCount() > 0 && !m_drawingMm.isEmpty()) {
-      const double k = 420.0 / std::max(m_drawingMm.width(), m_drawingMm.height());
+      const double k = 560.0 / std::max(m_drawingMm.width(), m_drawingMm.height());
       m_thumb = doc.render(0, QSize(int(m_drawingMm.width() * k), int(m_drawingMm.height() * k)));
     }
   }
@@ -82,8 +239,8 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, QWidg
   }
   form->addRow(QStringLiteral("프린터"), m_printer);
 
-  m_modeTiles = new QRadioButton(QStringLiteral("여러 장으로 나눠 크게 인쇄 (붙여서 큰 도면 만들기)"), this);
-  m_modeFit = new QRadioButton(QStringLiteral("용지 한 장에 맞춰 인쇄"), this);
+  m_modeTiles = new QRadioButton(QStringLiteral("여러 장으로 나눠 크게 인쇄 (붙여서 큰 도면)"), this);
+  m_modeFit = new QRadioButton(QStringLiteral("한 장에 인쇄 (용지에 들어가면 실제 크기로)"), this);
   m_modeTiles->setObjectName(QStringLiteral("printModeTiles"));
   m_modeFit->setObjectName(QStringLiteral("printModeFit"));
   auto* modes = new QButtonGroup(this);
@@ -96,25 +253,14 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, QWidg
 
   m_output = new QComboBox(this);
   m_output->setObjectName(QStringLiteral("printOutput"));
-  m_output->addItem(QStringLiteral("도면 크기 그대로 (%1×%2 mm)")
-                        .arg(qRound(m_drawingMm.width()))
-                        .arg(qRound(m_drawingMm.height())));
-  for (const QString& name : {QStringLiteral("A0"), QStringLiteral("A1"), QStringLiteral("A2"), QStringLiteral("A3")})
-    m_output->addItem(QStringLiteral("%1 크기로 맞춤").arg(name));
-  form->addRow(QStringLiteral("완성 크기"), m_output);
+  m_outputLabel = new QLabel(QStringLiteral("붙였을 때 크기"), this);
+  form->addRow(m_outputLabel, m_output);
 
   m_sheet = new QComboBox(this);
   m_sheet->setObjectName(QStringLiteral("printSheet"));
   m_sheet->addItem(QStringLiteral("A4"));
   m_sheet->addItem(QStringLiteral("A3"));
-  bool a3 = false;
-  if (!printers.isEmpty()) {
-    for (const QPageSize& size : QPrinterInfo::printerInfo(printerName()).supportedPageSizes())
-      a3 |= size.id() == QPageSize::A3;
-  }
-  m_sheet->setCurrentIndex(a3 ? SheetA3 : SheetA4);
-  form->addRow(QStringLiteral("용지"), m_sheet);
-
+  m_sheet->setCurrentIndex(printerSupports(QPageSize::A3) && !printers.isEmpty() ? SheetA3 : SheetA4);
   m_overlap = new QDoubleSpinBox(this);
   m_overlap->setObjectName(QStringLiteral("printOverlap"));
   m_overlap->setRange(0.0, 30.0);
@@ -122,40 +268,59 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, QWidg
   m_overlap->setValue(10.0);
   m_overlap->setSuffix(QStringLiteral(" mm"));
   m_overlap->setToolTip(QStringLiteral("이웃 장과 같은 그림이 겹치는 폭입니다. 붙일 때 맞추기 쉽습니다."));
-  form->addRow(QStringLiteral("겹침"), m_overlap);
+  auto* paperRow = new QHBoxLayout;
+  paperRow->addWidget(m_sheet);
+  paperRow->addSpacing(12);
+  paperRow->addWidget(new QLabel(QStringLiteral("겹침"), this));
+  paperRow->addWidget(m_overlap);
+  paperRow->addStretch(1);
+  form->addRow(QStringLiteral("용지"), paperRow);
 
-  m_marks = new QCheckBox(QStringLiteral("자르는 점선과 장 번호 넣기"), this);
+  m_marks = new QCheckBox(QStringLiteral("자르는 점선·장 번호·5 cm 확인선 넣기"), this);
   m_marks->setObjectName(QStringLiteral("printMarks"));
   m_marks->setChecked(true);
-  form->addRow(QString(), m_marks);
+  m_overview = new QCheckBox(QStringLiteral("맨 앞에 붙이는 순서 안내 한 장 넣기"), this);
+  m_overview->setObjectName(QStringLiteral("printOverview"));
+  m_overview->setChecked(true);
+  auto* checks = new QVBoxLayout;
+  checks->addWidget(m_marks);
+  checks->addWidget(m_overview);
+  form->addRow(QString(), checks);
   root->addLayout(form);
 
   m_summary = new QLabel(this);
   m_summary->setObjectName(QStringLiteral("printSummary"));
   m_summary->setWordWrap(true);
+  QFont strong = m_summary->font();
+  strong.setBold(true);
+  m_summary->setFont(strong);
   root->addWidget(m_summary);
   m_warning = new QLabel(this);
   m_warning->setObjectName(QStringLiteral("printWarning"));
   m_warning->setWordWrap(true);
   m_warning->setStyleSheet(QStringLiteral("color: #b45309;"));
   root->addWidget(m_warning);
-  m_preview = new QLabel(this);
-  m_preview->setObjectName(QStringLiteral("printPreview"));
-  m_preview->setAlignment(Qt::AlignCenter);
-  m_preview->setMinimumSize(320, 320);
+  m_preview = new KaTilePreview(this);
+  m_preview->onToggle = [this](int index) { toggleSheet(index); };
   root->addWidget(m_preview, 1);
-  auto* help = new QLabel(QStringLiteral("여러 장으로 찍었다면 오른쪽·아래 점선을 따라 자르고, 옆 장 그림의 "
-                                         "시작선(모서리 표시)에 맞춰 겹쳐 붙이세요."),
+  auto* pickRow = new QHBoxLayout;
+  m_pickHint = new QLabel(QStringLiteral("미리보기에서 장을 누르면 이번 인쇄에서 빼거나 다시 넣습니다. "
+                                         "잘못 나온 장만 다시 찍을 때 쓰세요."),
                           this);
-  help->setWordWrap(true);
-  root->addWidget(help);
+  m_pickHint->setWordWrap(true);
+  m_pickAll = new QPushButton(QStringLiteral("모두 다시 넣기"), this);
+  m_pickAll->setObjectName(QStringLiteral("printPickAll"));
+  pickRow->addWidget(m_pickHint, 1);
+  pickRow->addWidget(m_pickAll);
+  root->addLayout(pickRow);
 
   auto* buttons = new QHBoxLayout;
   m_savePdf = new QPushButton(QStringLiteral("나눈 장을 PDF로 저장…"), this);
   m_savePdf->setObjectName(QStringLiteral("printSaveTiles"));
-  m_savePdf->setToolTip(QStringLiteral("프린터가 없는 PC나 출력소에서 찍을 수 있게 한 장씩 PDF로 저장합니다."));
-  m_print = new QPushButton(QStringLiteral("인쇄"), this);
+  m_savePdf->setToolTip(QStringLiteral("프린터가 없는 PC나 출력소에서 찍을 수 있게 한 장이 한 쪽인 PDF로 저장합니다."));
+  m_print = new QPushButton(this);
   m_print->setObjectName(QStringLiteral("printStart"));
+  m_print->setDefault(true);
   auto* close = new QPushButton(QStringLiteral("닫기"), this);
   buttons->addWidget(m_savePdf);
   buttons->addStretch(1);
@@ -163,13 +328,12 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, QWidg
   buttons->addWidget(close);
   root->addLayout(buttons);
 
-  // 도면이 고른 용지 한 장보다 크면 나눠 찍기로 연다.
-  const QSizeF sheet = sheetSize().size(QPageSize::Millimeter);
-  const double longSheet = std::max(sheet.width(), sheet.height()) - 2 * kDefaultMarginMm;
-  const double shortSheet = std::min(sheet.width(), sheet.height()) - 2 * kDefaultMarginMm;
-  const bool bigger = std::max(m_drawingMm.width(), m_drawingMm.height()) > longSheet + 0.5 ||
-                      std::min(m_drawingMm.width(), m_drawingMm.height()) > shortSheet + 0.5;
-  (bigger ? m_modeTiles : m_modeFit)->setChecked(true);
+  buildOutputs();
+  loadSettings();
+  // 용지 한 장에 실제 크기로 들어가면 한 장 인쇄, 넘치면 나눠 찍기로 연다.
+  const TileFit probe = TilePrint::fit(m_drawingMm, sheetSize(), QMarginsF(kDefaultMarginMm, kDefaultMarginMm,
+                                                                          kDefaultMarginMm, kDefaultMarginMm));
+  (probe.actualSize ? m_modeFit : m_modeTiles)->setChecked(true);
 
   connect(m_modeTiles, &QRadioButton::toggled, this, [this]() { rebuild(); });
   connect(m_printer, &QComboBox::currentIndexChanged, this, [this]() { rebuild(); });
@@ -177,12 +341,18 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, QWidg
   connect(m_sheet, &QComboBox::currentIndexChanged, this, [this]() { rebuild(); });
   connect(m_overlap, &QDoubleSpinBox::valueChanged, this, [this]() { rebuild(); });
   connect(m_marks, &QCheckBox::toggled, this, [this]() { rebuild(); });
+  connect(m_overview, &QCheckBox::toggled, this, [this]() { rebuild(); });
+  connect(m_pickAll, &QPushButton::clicked, this, [this]() {
+    m_skipped.clear();
+    rebuild();
+  });
   connect(m_print, &QPushButton::clicked, this, &KaPrintDialog::printNow);
   connect(m_savePdf, &QPushButton::clicked, this, &KaPrintDialog::saveTilesAs);
   connect(close, &QPushButton::clicked, this, &QDialog::reject);
 
   if (m_drawingMm.isEmpty()) {
     m_summary->setText(readError.isEmpty() ? QStringLiteral("도면을 읽지 못했습니다.") : readError);
+    m_print->setText(QStringLiteral("인쇄"));
     m_print->setEnabled(false);
     m_savePdf->setEnabled(false);
     return;
@@ -190,17 +360,102 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, QWidg
   rebuild();
 }
 
+void KaPrintDialog::buildOutputs() {
+  m_output->clear();
+  auto add = [this](const QString& label, const QString& kind, double factor, int paper, double denominator) {
+    const QVariantMap item{{QStringLiteral("kind"), kind},
+                           {QStringLiteral("factor"), factor},
+                           {QStringLiteral("paper"), paper},
+                           {QStringLiteral("denominator"), denominator}};
+    m_output->addItem(label, item);
+  };
+  QString drawing = QStringLiteral("도면 크기 그대로");
+  if (m_drawingScale > 0.0) drawing += QStringLiteral(" · ") + TilePrint::scaleLabel(m_drawingScale);
+  drawing += QStringLiteral(" · ") + sizeText(m_drawingMm);
+  add(drawing, QStringLiteral("drawing"), 1.0, OutputDrawing, m_drawingScale);
+  // 발굴 도면은 딱 떨어지는 축척이 쓸모 있다. A0 보다 커지지 않는 범위에서만 보인다.
+  const double a0 = TilePrint::fitScale(m_drawingMm, QPageSize(QPageSize::A0));
+  for (double denominator : TilePrint::enlargedScales(m_drawingScale, a0)) {
+    const double factor = m_drawingScale / denominator;
+    add(QStringLiteral("%1으로 키우기 · %2배 · 약 %3")
+            .arg(TilePrint::scaleLabel(denominator), decimal(factor), sizeText(m_drawingMm * factor)),
+        QStringLiteral("scale"), factor, -1, denominator);
+  }
+  for (Output output : {OutputA0, OutputA1, OutputA2, OutputA3}) {
+    const double factor = TilePrint::fitScale(m_drawingMm, outputPage(output));
+    if (std::abs(factor - 1.0) < 0.01) continue;  // 도면과 같은 크기
+    QString label = QStringLiteral("A%1에 맞춤 · ").arg(int(output) - 1);
+    label += m_drawingScale > 0.0
+        ? QStringLiteral("종이 위 약 %1").arg(TilePrint::scaleLabel(m_drawingScale / factor))
+        : QStringLiteral("도면의 %1%").arg(percent(factor));
+    add(label, QStringLiteral("paper"), factor, int(output), m_drawingScale > 0.0 ? m_drawingScale / factor : 0.0);
+  }
+}
+
 void KaPrintDialog::setTiled(bool tiled) { (tiled ? m_modeTiles : m_modeFit)->setChecked(true); }
-void KaPrintDialog::setOutput(Output output) { m_output->setCurrentIndex(int(output)); }
+
+void KaPrintDialog::setOutput(Output output) {
+  for (int i = 0; i < m_output->count(); ++i) {
+    if (m_output->itemData(i).toMap().value(QStringLiteral("paper")).toInt() == int(output)) {
+      m_output->setCurrentIndex(i);
+      return;
+    }
+  }
+  m_output->setCurrentIndex(0);  // 도면과 같은 크기라 따로 없다
+}
+
+bool KaPrintDialog::setOutputScale(double denominator) {
+  for (int i = 0; i < m_output->count(); ++i) {
+    const QVariantMap item = m_output->itemData(i).toMap();
+    if (item.value(QStringLiteral("kind")).toString() == QLatin1String("scale") &&
+        std::abs(item.value(QStringLiteral("denominator")).toDouble() - denominator) < 0.5) {
+      m_output->setCurrentIndex(i);
+      return true;
+    }
+  }
+  return false;
+}
+
 void KaPrintDialog::setSheet(Sheet sheet) { m_sheet->setCurrentIndex(int(sheet)); }
 void KaPrintDialog::setOverlapMm(double mm) { m_overlap->setValue(mm); }
 void KaPrintDialog::setMarks(bool on) { m_marks->setChecked(on); }
+void KaPrintDialog::setOverview(bool on) { m_overview->setChecked(on); }
 bool KaPrintDialog::isTiled() const { return m_modeTiles->isChecked(); }
+
+void KaPrintDialog::toggleSheet(int index) {
+  if (!isTiled() || !m_plan.ok || index < 0 || index >= m_plan.sheets.size()) return;
+  if (!m_skipped.remove(index)) m_skipped.insert(index);
+  // 하나도 안 남기면 찍을 것이 없다. 마지막 한 장은 빼지 않는다.
+  if (m_skipped.size() >= m_plan.sheets.size()) m_skipped.remove(index);
+  rebuild();
+}
+
+QList<int> KaPrintDialog::chosenSheets() const {
+  QList<int> chosen;
+  if (!m_plan.ok) return chosen;
+  for (int i = 0; i < m_plan.sheets.size(); ++i)
+    if (!m_skipped.contains(i)) chosen.append(i);
+  return chosen;
+}
+
+int KaPrintDialog::pageCount() const {
+  if (!isTiled()) return 1;
+  const int sheets = int(chosenSheets().size());
+  return sheets + (tileOptions().overview && sheets > 0 ? 1 : 0);
+}
 
 QString KaPrintDialog::printerName() const { return m_printer->currentData().toString(); }
 
 QPageSize KaPrintDialog::sheetSize() const {
   return QPageSize(m_sheet->currentIndex() == SheetA3 ? QPageSize::A3 : QPageSize::A4);
+}
+
+bool KaPrintDialog::printerSupports(QPageSize::PageSizeId id) const {
+  const QString name = printerName();
+  if (name.isEmpty()) return true;
+  const QList<QPageSize> sizes = QPrinterInfo::printerInfo(name).supportedPageSizes();
+  return sizes.isEmpty() ||
+         std::any_of(sizes.cbegin(), sizes.cend(), [id](const QPageSize& size) { return size.id() == id; });
 }
 
 QMarginsF KaPrintDialog::marginsFor(const QPageSize& sheet) const {
@@ -221,21 +476,44 @@ QMarginsF KaPrintDialog::marginsFor(const QPageSize& sheet) const {
   return margins;
 }
 
-double KaPrintDialog::fitRatio() const {
-  if (m_drawingMm.isEmpty()) return 1.0;
-  QSizeF sheet = sheetSize().size(QPageSize::Millimeter);
-  if ((m_drawingMm.width() > m_drawingMm.height()) != (sheet.width() > sheet.height())) sheet.transpose();
-  const QMarginsF& m = m_margins;
-  return std::min((sheet.width() - m.left() - m.right()) / m_drawingMm.width(),
-                  (sheet.height() - m.top() - m.bottom()) / m_drawingMm.height());
+double KaPrintDialog::outputFactor() const {
+  return m_output->currentData().toMap().value(QStringLiteral("factor"), 1.0).toDouble();
+}
+
+double KaPrintDialog::paperScale() const {
+  if (m_drawingScale <= 0.0) return 0.0;
+  if (isTiled()) return m_plan.ok ? m_drawingScale / m_plan.scale : 0.0;
+  return m_drawingScale / m_fit.ratio;
+}
+
+QString KaPrintDialog::paperScaleText() const {
+  const double denominator = paperScale();
+  if (denominator <= 0.0) return {};
+  const QString kind = m_output->currentData().toMap().value(QStringLiteral("kind")).toString();
+  const bool exact = isTiled() ? kind != QLatin1String("paper") : m_fit.actualSize;
+  return (exact ? QString() : QStringLiteral("약 ")) + TilePrint::scaleLabel(denominator);
+}
+
+TilePrint::Options KaPrintDialog::tileOptions() const {
+  TilePrint::Options options;
+  options.cutLines = m_marks->isChecked();
+  // 빠진 장만 다시 찍을 때는 안내 장을 또 뽑지 않는다.
+  options.overview = m_overview->isChecked() && m_skipped.isEmpty();
+  options.title = m_title;
+  options.scaleText = paperScaleText();
+  if (!m_skipped.isEmpty()) options.sheets = chosenSheets();
+  return options;
 }
 
 void KaPrintDialog::rebuild() {
   const bool tiled = isTiled();
+  m_outputLabel->setEnabled(tiled);
   m_output->setEnabled(tiled);
   m_overlap->setEnabled(tiled);
   m_marks->setEnabled(tiled);
+  m_overview->setEnabled(tiled);
   m_margins = marginsFor(sheetSize());
+  m_fit = TilePrint::fit(m_drawingMm, sheetSize(), m_margins);
   m_plan = TilePlan();
   if (tiled) {
     TilePlanRequest request;
@@ -244,101 +522,130 @@ void KaPrintDialog::rebuild() {
     request.printerMarginMm = m_margins;
     request.overlapMm = m_overlap->value();
     request.labelBandMm = m_marks->isChecked() ? kLabelBandMm : 0.0;
-    const auto output = Output(m_output->currentIndex());
-    request.scale = output == OutputDrawing ? 1.0 : TilePrint::fitScale(m_drawingMm, outputPage(output));
+    request.scale = outputFactor();
     m_plan = TilePrint::bestPlan(request);
+  }
+  // 칸 모양이 바뀌면 뺀 장 번호가 다른 곳을 가리킨다. 처음부터 다시 고르게 한다.
+  if (!m_plan.ok || m_plan.rows != m_gridRows || m_plan.cols != m_gridCols) {
+    m_skipped.clear();
+    m_gridRows = m_plan.rows;
+    m_gridCols = m_plan.cols;
   }
   m_summary->setText(summary());
   const QString warn = warning();
   m_warning->setText(warn);
   m_warning->setVisible(!warn.isEmpty());
-  const bool canDraw = !m_drawingMm.isEmpty() && (!tiled || m_plan.ok);
+  m_preview->setContent(m_thumb, m_plan, m_skipped, tiled, m_drawingMm, sheetSize(), m_fit);
+  const bool several = tiled && m_plan.ok && m_plan.sheets.size() > 1;
+  m_pickHint->setVisible(several);
+  m_pickAll->setVisible(several && !m_skipped.isEmpty());
+  const bool canDraw = !m_drawingMm.isEmpty() && (!tiled || (m_plan.ok && pageCount() > 0));
+  m_print->setText(printButtonText());
   m_print->setEnabled(canDraw && !printerName().isEmpty());
   m_print->setToolTip(printerName().isEmpty() ? QStringLiteral("설치된 프린터가 없습니다. 나눈 장을 PDF로 저장해 "
                                                                "다른 PC나 출력소에서 찍으세요.")
                                               : QString());
   m_savePdf->setEnabled(tiled && canDraw);
-  updatePreview();
 }
 
 QString KaPrintDialog::summary() const {
   const QString sheetName = m_sheet->currentText();
+  const QString scale = paperScaleText();
   if (!isTiled()) {
-    return QStringLiteral("%1 한 장에 맞춰 찍습니다 · 도면의 %2%").arg(sheetName, percent(fitRatio()));
+    QString text = m_fit.actualSize ? QStringLiteral("%1 한 장에 실제 크기(100%)로 찍습니다").arg(sheetName)
+                                    : QStringLiteral("%1 한 장에 %2%로 줄여 찍습니다").arg(sheetName, percent(m_fit.ratio));
+    if (!scale.isEmpty()) text += QStringLiteral(" · 종이 위 축척 ") + scale;
+    return text;
   }
   if (!m_plan.ok) return m_plan.error;
-  QString text = QStringLiteral("%1 %2 가로 %3장 × 세로 %4장 = %5장 · 붙이면 %6×%7 mm")
-                     .arg(sheetName, m_plan.landscape ? QStringLiteral("가로") : QStringLiteral("세로"))
+  QString text = QStringLiteral("%1 용지 %2장 · %3로 놓고 가로 %4장 × 세로 %5장 · 붙이면 %6 × %7 cm")
+                     .arg(sheetName)
+                     .arg(m_plan.sheets.size())
+                     .arg(m_plan.landscape ? QStringLiteral("가로") : QStringLiteral("세로"))
                      .arg(m_plan.cols)
                      .arg(m_plan.rows)
-                     .arg(m_plan.sheets.size())
-                     .arg(qRound(m_plan.outputMm.width()))
-                     .arg(qRound(m_plan.outputMm.height()));
-  text += std::abs(m_plan.scale - 1.0) < 0.005 ? QStringLiteral(" (도면 축척 그대로)")
-                                               : QStringLiteral(" (도면의 %1%)").arg(percent(m_plan.scale));
+                     .arg(decimal(m_plan.outputMm.width() / 10.0), decimal(m_plan.outputMm.height() / 10.0));
+  text += std::abs(m_plan.scale - 1.0) < 0.005 ? QStringLiteral(" · 도면 크기 그대로")
+                                               : QStringLiteral(" · 도면의 %1%").arg(percent(m_plan.scale));
+  if (!scale.isEmpty()) text += QStringLiteral("\n종이 위 축척 ") + scale;
+  if (!m_skipped.isEmpty()) {
+    text += QStringLiteral("\n이번에는 %1장만 찍습니다 (미리보기에서 뺀 장 %2장)")
+                .arg(chosenSheets().size())
+                .arg(m_skipped.size());
+    if (m_overview->isChecked()) text += QStringLiteral(" · 안내 장은 다시 찍지 않습니다");
+  }
   return text;
 }
 
 QString KaPrintDialog::warning() const {
   if (m_drawingMm.isEmpty()) return {};
-  if (!isTiled()) return scaleWarning(fitRatio());
-  return m_plan.ok ? scaleWarning(m_plan.scale) : QString();
-}
-
-void KaPrintDialog::updatePreview() {
-  QPixmap pix(m_preview->minimumSize());
-  pix.fill(Qt::white);
-  QPainter p(&pix);
-  p.setRenderHint(QPainter::Antialiasing);
-  p.setRenderHint(QPainter::SmoothPixmapTransform);
-  const QRectF box = QRectF(pix.rect()).adjusted(10, 10, -10, -10);
-  if (m_thumb.isNull()) {
-    p.drawText(box, Qt::AlignCenter, QStringLiteral("미리보기를 만들지 못했습니다."));
-    m_preview->setPixmap(pix);
-    return;
-  }
-  if (isTiled() && m_plan.ok) {
-    // 끝 장은 도면 밖으로 나가므로 나눈 칸 전체가 보이게 맞춘다.
-    QRectF extent(QPointF(0, 0), m_plan.outputMm);
-    for (const TileSheet& tile : m_plan.sheets) extent = extent.united(tile.areaMm);
-    const double k = std::min(box.width() / extent.width(), box.height() / extent.height());
-    const QPointF origin(box.center().x() - extent.width() * k / 2.0, box.center().y() - extent.height() * k / 2.0);
-    auto map = [&](const QRectF& mm) {
-      return QRectF(origin.x() + mm.x() * k, origin.y() + mm.y() * k, mm.width() * k, mm.height() * k);
-    };
-    p.drawImage(map(QRectF(QPointF(0, 0), m_plan.outputMm)), m_thumb);
-    QFont font = p.font();
-    font.setBold(true);
-    font.setPixelSize(13);
-    p.setFont(font);
-    int number = 0;
-    for (const TileSheet& tile : m_plan.sheets) {
-      const QRectF r = map(tile.areaMm);
-      p.setPen(QPen(QColor(37, 99, 235), 1.5));
-      p.setBrush(QColor(37, 99, 235, 18));
-      p.drawRect(r);
-      p.setPen(QColor(30, 64, 175));
-      p.drawText(r, Qt::AlignCenter, QString::number(++number));
+  const QString drawnScale = m_drawingScale > 0.0 ? TilePrint::scaleLabel(m_drawingScale) : QString();
+  if (!isTiled()) {
+    if (m_fit.actualSize) {
+      if (!m_fit.edgeMayClip) return {};
+      const double edge = std::max({m_margins.left(), m_margins.top(), m_margins.right(), m_margins.bottom()});
+      return QStringLiteral("종이 가장자리 %1 mm 안쪽은 프린터가 찍지 못해 비어 나올 수 있습니다. "
+                            "도면 테두리가 그보다 안쪽이면 괜찮습니다.")
+          .arg(decimal(edge));
     }
-  } else {
-    QSizeF sheet = sheetSize().size(QPageSize::Millimeter);
-    if ((m_drawingMm.width() > m_drawingMm.height()) != (sheet.width() > sheet.height())) sheet.transpose();
-    const double k = std::min(box.width() / sheet.width(), box.height() / sheet.height());
-    const QRectF paper(box.center().x() - sheet.width() * k / 2.0, box.center().y() - sheet.height() * k / 2.0,
-                       sheet.width() * k, sheet.height() * k);
-    p.setPen(QPen(QColor(120, 120, 120), 1.0));
-    p.setBrush(Qt::NoBrush);
-    p.drawRect(paper);
-    const QSizeF drawn = m_drawingMm * fitRatio() * k;
-    p.drawImage(QRectF(paper.center().x() - drawn.width() / 2.0, paper.center().y() - drawn.height() / 2.0,
-                       drawn.width(), drawn.height()),
-                m_thumb);
+    const QString tail = QStringLiteral(" 실제 크기로 찍으려면 「여러 장으로 나눠 크게 인쇄」를 고르세요.");
+    if (!drawnScale.isEmpty())
+      return QStringLiteral("용지에 맞추느라 %1%로 줄입니다. 도면에 적힌 %2 대신 종이 위 축척은 %3입니다.")
+                 .arg(percent(m_fit.ratio), drawnScale, paperScaleText()) + tail;
+    return QStringLiteral("용지에 맞추느라 %1%로 줄입니다. 숫자로 적은 축척은 실제와 달라집니다.").arg(percent(m_fit.ratio)) +
+           tail;
   }
-  p.end();
-  m_preview->setPixmap(pix);
+  if (!m_plan.ok || std::abs(m_plan.scale - 1.0) < 0.005) return {};
+  if (!drawnScale.isEmpty())
+    return QStringLiteral("도면에 적힌 축척 글씨(%1)는 그대로 찍히지만 종이 위 실제 축척은 %2입니다. "
+                          "각 장의 번호 띠에 실제 축척을 함께 찍습니다. 막대 축척은 그대로 맞습니다.")
+        .arg(drawnScale, paperScaleText());
+  return QStringLiteral("도면을 %1%로 %2 찍습니다. 숫자로 적은 축척(예: 1:5,000)은 실제와 달라지고, "
+                        "막대 축척은 그대로 맞습니다.")
+      .arg(percent(m_plan.scale), m_plan.scale > 1.0 ? QStringLiteral("키워") : QStringLiteral("줄여"));
 }
 
-bool KaPrintDialog::saveTilesPdf(const QString& path, QString* error) {
+QString KaPrintDialog::printButtonText() const {
+  if (!isTiled()) return QStringLiteral("인쇄 · 1장");
+  const int sheets = int(chosenSheets().size());
+  return tileOptions().overview ? QStringLiteral("인쇄 · %1장 + 안내 1장").arg(sheets)
+                                : QStringLiteral("인쇄 · %1장").arg(sheets);
+}
+
+QStringList KaPrintDialog::outputLabels() const {
+  QStringList labels;
+  for (int i = 0; i < m_output->count(); ++i) labels.append(m_output->itemText(i));
+  return labels;
+}
+
+void KaPrintDialog::loadSettings() {
+  QSettings settings;
+  settings.beginGroup(kSettingsGroup);
+  const QString printer = settings.value(QStringLiteral("printer")).toString();
+  if (!printer.isEmpty()) {
+    const int index = m_printer->findData(printer);
+    if (index >= 0) m_printer->setCurrentIndex(index);
+  }
+  if (settings.contains(QStringLiteral("sheet"))) {
+    const int sheet = settings.value(QStringLiteral("sheet")).toInt();
+    if (sheet == SheetA4 || (sheet == SheetA3 && printerSupports(QPageSize::A3))) m_sheet->setCurrentIndex(sheet);
+  }
+  m_overlap->setValue(settings.value(QStringLiteral("overlap"), m_overlap->value()).toDouble());
+  m_marks->setChecked(settings.value(QStringLiteral("marks"), true).toBool());
+  m_overview->setChecked(settings.value(QStringLiteral("overview"), true).toBool());
+}
+
+void KaPrintDialog::saveSettings() const {
+  QSettings settings;
+  settings.beginGroup(kSettingsGroup);
+  if (!printerName().isEmpty()) settings.setValue(QStringLiteral("printer"), printerName());
+  settings.setValue(QStringLiteral("sheet"), m_sheet->currentIndex());
+  settings.setValue(QStringLiteral("overlap"), m_overlap->value());
+  settings.setValue(QStringLiteral("marks"), m_marks->isChecked());
+  settings.setValue(QStringLiteral("overview"), m_overview->isChecked());
+}
+
+bool KaPrintDialog::saveTilesPdf(const QString& path, QString* error, bool* cancelled) {
   if (!m_plan.ok) {
     if (error) *error = m_plan.error;
     return false;
@@ -347,63 +654,92 @@ bool KaPrintDialog::saveTilesPdf(const QString& path, QString* error) {
   writer.setResolution(int(kPrintDpi));
   writer.setTitle(m_title);
   writer.setCreator(QStringLiteral("ka-hgis"));
-  TilePrint::Marks marks;
-  marks.cutLines = m_marks->isChecked();
-  marks.title = m_title;
-  return TilePrint::renderTiles(m_pdfPath, m_plan, &writer, kPrintDpi, marks, error);
+  return TilePrint::renderTiles(m_pdfPath, m_plan, &writer, kPrintDpi, tileOptions(), error, cancelled);
+}
+
+bool KaPrintDialog::renderWithProgress(QPagedPaintDevice* device, const QString& verb, QString* error,
+                                       bool* cancelled) {
+  QProgressDialog progress(verb + QStringLiteral("…"), QStringLiteral("멈추기"), 0, pageCount(), this);
+  progress.setWindowTitle(windowTitle());
+  progress.setWindowModality(Qt::WindowModal);
+  progress.setMinimumDuration(0);
+  progress.setValue(0);
+  TilePrint::Options options = tileOptions();
+  options.progress = [&progress, verb](int done, int total) {
+    progress.setMaximum(total);
+    progress.setLabelText(QStringLiteral("%1… %2 / %3쪽").arg(verb).arg(done).arg(total));
+    progress.setValue(done);
+    return !progress.wasCanceled();
+  };
+  return TilePrint::renderTiles(m_pdfPath, m_plan, device, kPrintDpi, options, error, cancelled);
 }
 
 void KaPrintDialog::saveTilesAs() {
+  const QString base = m_title.trimmed().isEmpty() ? QStringLiteral("도면") : m_title.trimmed();
   const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("나눈 장 PDF 저장"),
-                                                    QStringLiteral("도면-나눠찍기.pdf"),
+                                                    base + QStringLiteral("-나눠찍기.pdf"),
                                                     QStringLiteral("PDF (*.pdf)"));
   if (path.isEmpty()) return;
   QString error;
-  QApplication::setOverrideCursor(Qt::WaitCursor);
-  const bool ok = saveTilesPdf(path, &error);
-  QApplication::restoreOverrideCursor();
-  if (!ok) {
-    QMessageBox::warning(this, QStringLiteral("나눈 장 PDF"), error);
+  bool cancelled = false;
+  bool ok = false;
+  {
+    QPdfWriter writer(path);
+    writer.setResolution(int(kPrintDpi));
+    writer.setTitle(m_title);
+    writer.setCreator(QStringLiteral("ka-hgis"));
+    ok = renderWithProgress(&writer, QStringLiteral("나눈 장을 PDF로 저장하는 중"), &error, &cancelled);
+  }
+  if (cancelled || !ok) {
+    QFile::remove(path);  // 반쯤 쓴 파일은 남기지 않는다
+    if (!cancelled) QMessageBox::warning(this, QStringLiteral("나눈 장 PDF"), error);
     return;
   }
-  QMessageBox::information(this, QStringLiteral("나눈 장 PDF"),
-                           QStringLiteral("%1장을 저장했습니다.\n%2").arg(m_plan.sheets.size()).arg(path));
+  saveSettings();
+  QMessageBox::information(
+      this, QStringLiteral("나눈 장 PDF"),
+      QStringLiteral("%1쪽을 저장했습니다.\n%2\n\n다른 PC나 출력소에서 찍을 때는 꼭 「실제 크기(100%)」로 찍으세요. "
+                     "「용지에 맞춤」으로 찍으면 축척이 틀어집니다. 각 장 아래 5 cm 확인선을 자로 재어 확인할 수 있습니다.")
+          .arg(pageCount())
+          .arg(path));
 }
 
 void KaPrintDialog::printNow() {
   const QString name = printerName();
   if (name.isEmpty()) return;
-  const QPrinterInfo info = QPrinterInfo::printerInfo(name);
-  const QList<QPageSize> sizes = info.supportedPageSizes();
-  const bool supported = sizes.isEmpty() || std::any_of(sizes.cbegin(), sizes.cend(), [this](const QPageSize& size) {
-    return size.id() == sheetSize().id();
-  });
-  if (!supported) {
+  if (!printerSupports(sheetSize().id())) {
     QMessageBox::warning(this, QStringLiteral("인쇄"),
                          QStringLiteral("이 프린터는 %1 용지를 지원하지 않습니다. 다른 용지를 고르세요.")
                              .arg(m_sheet->currentText()));
     return;
   }
-  QPrinter printer(info, QPrinter::HighResolution);
+  QPrinter printer(QPrinterInfo::printerInfo(name), QPrinter::HighResolution);
   printer.setDocName(m_title);
   printer.setFullPage(false);
   QString error;
-  QApplication::setOverrideCursor(Qt::WaitCursor);
+  bool cancelled = false;
   bool ok = false;
   if (isTiled()) {
-    TilePrint::Marks marks;
-    marks.cutLines = m_marks->isChecked();
-    marks.title = m_title;
-    ok = TilePrint::renderTiles(m_pdfPath, m_plan, &printer, kPrintDpi, marks, &error);
+    ok = renderWithProgress(&printer, QStringLiteral("프린터로 보내는 중"), &error, &cancelled);
   } else {
+    QApplication::setOverrideCursor(Qt::WaitCursor);
     ok = TilePrint::renderFit(m_pdfPath, sheetSize(), m_margins, &printer, kPrintDpi, &error);
+    QApplication::restoreOverrideCursor();
   }
-  QApplication::restoreOverrideCursor();
+  if (cancelled) {
+    QMessageBox::information(this, QStringLiteral("인쇄"),
+                             QStringLiteral("인쇄를 멈췄습니다. 이미 넘어간 쪽은 프린터에 따라 나올 수 있습니다."));
+    return;
+  }
   if (!ok) {
     QMessageBox::warning(this, QStringLiteral("인쇄"), error);
     return;
   }
-  QMessageBox::information(this, QStringLiteral("인쇄"),
-                           QStringLiteral("프린터로 %1장을 보냈습니다.").arg(isTiled() ? m_plan.sheets.size() : 1));
+  saveSettings();
+  QString done = QStringLiteral("프린터로 %1쪽을 보냈습니다.").arg(pageCount());
+  if (isTiled() && m_plan.sheets.size() > 1)
+    done += tileOptions().overview ? QStringLiteral("\n다 나오면 첫 장(붙이는 순서)을 보며 붙이세요.")
+                                   : QStringLiteral("\n다 나오면 장 번호 순서대로 붙이세요.");
+  QMessageBox::information(this, QStringLiteral("인쇄"), done);
   accept();
 }

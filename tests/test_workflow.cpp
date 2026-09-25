@@ -6306,7 +6306,7 @@ void TestWorkflow::drawingStudio_sheetOmitsCrossesAndBorderRuler() {
     return at >= 0 ? src.mid(at, length) : QString();
   };
   const QString saveFn = body(QStringLiteral("void KaDrawingStudio::savePdf()"), 700);
-  const QString printFn = body(QStringLiteral("void KaDrawingStudio::printDrawing()"), 900);
+  const QString printFn = body(QStringLiteral("void KaDrawingStudio::printDrawing()"), 1600);
   QVERIFY2(saveFn.contains(QLatin1String("exportDrawingPdf(")), "PDF 저장이 공통 도면 PDF를 거쳐야 한다");
   QVERIFY2(printFn.contains(QLatin1String("exportDrawingPdf(")), "인쇄가 PDF 저장과 같은 도면 PDF를 거쳐야 한다");
   const QString pdfFn = body(QStringLiteral("bool KaDrawingStudio::exportDrawingPdf("), 1600);
