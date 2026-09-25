@@ -115,6 +115,32 @@ jobs:
           . .\scripts\dev-env.ps1
           ctest --test-dir build -C Release --output-on-failure
 
+      # Reference runners use ASCII TEMP; Korean-path PCs do not.
+      # CTest ENVIRONMENT pins TEMP to the configure-time path, so run the
+      # workflow exe directly under a Hangul TEMP (same class as P0-2).
+      - name: Workflow tests under Korean TEMP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . .\scripts\dev-env.ps1
+          # Hangul path via codepoints so the YAML stays ASCII-safe in editors.
+          $hangul = ([string][char]0xD55C) + ([string][char]0xAE00) + ([string][char]0xC784) + ([string][char]0xC2DC)
+          $koreanTemp = Join-Path $env:RUNNER_TEMP ("ka-hgis-" + $hangul)
+          New-Item -ItemType Directory -Force -Path $koreanTemp | Out-Null
+          $env:TEMP = $koreanTemp
+          $env:TMP = $koreanTemp
+          Write-Host "TEMP=$env:TEMP"
+          $exe = Join-Path (Resolve-Path .\build\Release).Path 'ka_workflow_tests.exe'
+          if (-not (Test-Path -LiteralPath $exe)) { throw "missing $exe" }
+          $log = Join-Path $koreanTemp 'workflow_korean_temp.txt'
+          & $exe -o "$log,txt"
+          $code = $LASTEXITCODE
+          Write-Output "korean_temp_exe_exit=$code"
+          if ($code -ne 0) {
+            if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log }
+            exit $code
+          }
+
       - name: Smoke quit
         shell: pwsh
         run: |
