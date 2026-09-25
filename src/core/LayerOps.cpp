@@ -1273,11 +1273,16 @@ void LayerOps::placeCadastralLayer(QgsProject* project, QgsMapLayer* layer) {
   // 바탕 지적 그림과 받은 지적도, 조사구역·옛 지도는 한 묶음이 아니다.
   // 예전 "지적도" 그룹에 들어가 있던 줄은 각각 최상위 한 줄로 올린다.
   if (QgsLayerTreeGroup* bundled = root->findGroup(QString::fromUtf8(kGroupCadastral))) {
-    const int at = root->children().indexOf(bundled);
+    const int at = qMax(0, root->children().indexOf(bundled));
+    int moved = 0;
     while (!bundled->children().isEmpty()) {
       QgsLayerTreeNode* child = bundled->children().constFirst();
-      if (!bundled->takeChild(child)) break;
-      root->insertChildNode(qMax(0, at), child);
+      // takeChild 로 빼면 그 순간 레이어가 트리에 없어 QgsLayerTreeRegistryBridge 가 레이어를
+      // 프로젝트에서 지운다. 예전 판 조사를 열면 지적도·지적 배경이 이렇게 사라졌다.
+      // 복제를 먼저 올리고 원래 줄을 뺀다. 순서도 그대로 둔다.
+      root->insertChildNode(at + moved, child->clone());
+      ++moved;
+      bundled->removeChildNode(child);
     }
     if (auto* parent = qobject_cast<QgsLayerTreeGroup*>(bundled->parent()))
       parent->removeChildNode(bundled);
