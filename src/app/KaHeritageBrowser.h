@@ -107,6 +107,7 @@ private:
   QWebEnginePage* activePage() const;
 
   QWebEngineProfile* m_profile = nullptr;
+  bool m_profileWired = false;
   class HeritageRequestLog* m_requestLog = nullptr;  // 사이트가 보낸 요청 기록
   // 로그인만 브라우저로 하고, 검색·다운로드는 HTTP 로 직접 한다.
   // 화면을 흉내 내지 않으므로 프레임·ajax 변화에 흔들리지 않는다.

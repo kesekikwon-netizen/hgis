@@ -45,13 +45,15 @@ class HeritageDownloadRetryTest : public QObject {
   Q_OBJECT
 private:
   static void restrictRequests(KaHeritageBrowser& browser, quint16 port = 0) {
+    if (!browser.m_profile)
+      browser.m_profile = new QWebEngineProfile(QStringLiteral("ka-heritage"), &browser);
     browser.m_profile->setUrlRequestInterceptor(new OfflineHeritageRequests(port, browser.m_profile));
+    browser.ensureProfile();
   }
 
 private slots:
   void detailsFitAvailableScreen() {
     KaHeritageBrowser browser;
-    restrictRequests(browser);
     browser.show();
     auto* details = browser.findChild<QPushButton*>(QStringLiteral("heritageDetails"));
     QVERIFY(details);

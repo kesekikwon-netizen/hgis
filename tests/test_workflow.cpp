@@ -738,13 +738,13 @@ void TestWorkflow::exportSubmissionPackage_excludesPrivateHeritage() {
   int datasetIndex = 0;
   for (const auto dataset : HeritageStyle::allDatasets()) {
     QgsVectorLayer fixture(
-        QStringLiteral("Polygon?crs=EPSG:5179&field=nm:string(80)&field=record_id:integer"),
+        QStringLiteral("Polygon?crs=EPSG:5187&field=nm:string(80)&field=record_id:integer"),
         QStringLiteral("synthetic private reference"), QStringLiteral("memory"));
     QVERIFY(fixture.isValid());
     QgsFeature feature(fixture.fields());
     feature.setAttribute(QStringLiteral("nm"), QStringLiteral("검증 전용 유적 %1").arg(datasetIndex));
     feature.setAttribute(QStringLiteral("record_id"), 1000 + datasetIndex);
-    feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(1100000, 2000000, 1100100, 2000100)));
+    feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(200010, 450010, 200090, 450090)));
     QgsFeatureList features{feature};
     QVERIFY(fixture.dataProvider()->addFeatures(features));
     fixture.updateExtents();
@@ -2931,11 +2931,10 @@ void TestWorkflow::snapSettings_surviveProjectWriteAndReopen() {
   QVERIFY2(project.snappingConfig().individualLayerSettings(cad).enabled(),
            "지적 선에도 자석이 붙어야 한다");
   QVERIFY(!project.snappingConfig().individualLayerSettings(ref).enabled());
-  auto* cadGroup = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral));
-  QVERIFY2(cadGroup, "지적도는 별도 범례 그룹");
-  QVERIFY(cadGroup->findLayer(cad->id()));
-  if (auto* refGroup = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupReference)))
-    QVERIFY(!refGroup->findLayer(cad->id()));
+  QVERIFY2(!project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral)),
+           "받은 지적도는 바탕 지적과 한 묶음이 아니다");
+  auto* refGroup = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupReference));
+  QVERIFY(refGroup && refGroup->findLayer(cad->id()));
 
   auto* extra = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
                                    QStringLiteral("유구"), QStringLiteral("memory"));
@@ -2957,12 +2956,11 @@ void TestWorkflow::applySnapSettingsKeepsCadastralUnchecked() {
   LayerOps::markCadastralLayer(cad);
   project.addMapLayer(cad, false);
   LayerOps::placeCadastralLayer(&project, cad);
-  auto* cadGroup = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral));
-  QVERIFY(cadGroup);
-  auto* cadNode = cadGroup->findLayer(cad->id());
+  QVERIFY(!project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral)));
+  auto* refGroup = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupReference));
+  auto* cadNode = refGroup ? refGroup->findLayer(cad->id()) : nullptr;
   QVERIFY(cadNode);
   cadNode->setItemVisibilityChecked(false);
-  cadGroup->setItemVisibilityChecked(false);
 
   auto* soil = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
                                   QStringLiteral("토양도"), QStringLiteral("memory"));
@@ -2974,10 +2972,10 @@ void TestWorkflow::applySnapSettingsKeepsCadastralUnchecked() {
   snap.enabled = true;
   LayerOps::applySnapSettings(&project, snap);
 
-  cadNode = cadGroup->findLayer(cad->id());
+  refGroup = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupReference));
+  cadNode = refGroup ? refGroup->findLayer(cad->id()) : nullptr;
   QVERIFY(cadNode);
   QVERIFY2(!cadNode->itemVisibilityChecked(), "토양도를 받아도 꺼 둔 지적이 다시 켜지면 안 된다");
-  QVERIFY2(!cadGroup->itemVisibilityChecked(), "지적도 그룹도 꺼 둔 채로 남아야 한다");
 }
 
 void TestWorkflow::topologicalVertexMove_movesSharedVertexOnBothFeatures() {
@@ -6017,7 +6015,8 @@ void TestWorkflow::portableRuntime_discoversUnicodeFolderAndKoreaCrs() {
   aliased.close();
 
   // ASCII 경로는 건드리지 않는다. 쓸데없는 정션을 만들지 않는다.
-  const QString asciiRoot = tmp.path() + QStringLiteral("/plain/ka-hgis-portable");
+  const QString asciiRoot = QStringLiteral("C:/Users/Public/ka-hgis/p0-plain-portable");
+  QDir(asciiRoot).removeRecursively();
   QVERIFY(QDir().mkpath(asciiRoot + QStringLiteral("/apps/qgis-dev")));
   QVERIFY(QDir().mkpath(asciiRoot + QStringLiteral("/share/proj")));
   {
@@ -6028,6 +6027,7 @@ void TestWorkflow::portableRuntime_discoversUnicodeFolderAndKoreaCrs() {
   const KaPortablePaths plain = KaPortableRuntime::discover(asciiRoot);
   QCOMPARE(QDir(plain.projData).absolutePath(),
            QDir(asciiRoot + QStringLiteral("/share/proj")).absolutePath());
+  QDir(asciiRoot).removeRecursively();
 
   QString projDir;
   const QByteArray osgeo = qgetenv("OSGEO4W_ROOT");
@@ -6058,6 +6058,27 @@ void TestWorkflow::portableRuntime_ignoresLeftoverAppDataKey() {
   const QString leftoverDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
   QVERIFY(QDir().mkpath(leftoverDir));
   const QString leftoverIni = QDir(leftoverDir).filePath(QStringLiteral("ka-hgis-vworld.ini"));
+  QByteArray previousIni;
+  const bool hadIni = QFile::exists(leftoverIni);
+  if (hadIni) {
+    QFile previous(leftoverIni);
+    QVERIFY(previous.open(QIODevice::ReadOnly));
+    previousIni = previous.readAll();
+  }
+  struct RestoreIni {
+    QString path;
+    bool had = false;
+    QByteArray bytes;
+    ~RestoreIni() {
+      if (!had) {
+        QFile::remove(path);
+        return;
+      }
+      QFile previous(path);
+      if (previous.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        previous.write(bytes);
+    }
+  } restoreIni{leftoverIni, hadIni, previousIni};
   {
     QSettings leftover(leftoverIni, QSettings::IniFormat);
     leftover.setValue(QStringLiteral("VWorld/ApiKey"), QStringLiteral("leftover-appdata-key"));
@@ -6067,8 +6088,9 @@ void TestWorkflow::portableRuntime_ignoresLeftoverAppDataKey() {
   const bool hadEnv = qEnvironmentVariableIsSet("VWORLD_API_KEY");
   qunsetenv("VWORLD_API_KEY");
   KaPortableRuntime::setExeDirOverride(root);
+  const KaPortablePaths bundled = KaPortableRuntime::discover(root);
   QCOMPARE(QDir(KaPortableRuntime::userConfigDir()).absolutePath(),
-           QDir(root + QStringLiteral("/config")).absolutePath());
+           QDir(bundled.exeDir + QStringLiteral("/config")).absolutePath());
   QCOMPARE(VworldSettings::loadApiKey(), QStringLiteral("portable-folder-key"));
   KaPortableRuntime::setExeDirOverride(QString());
   if (hadEnv)

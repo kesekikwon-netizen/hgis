@@ -109,9 +109,10 @@ private slots:
 };
 
 int main(int argc, char** argv) {
-  QTemporaryDir logs;
-  if (!logs.isValid()) return 1;
-  qputenv("KA_HGIS_LOG_DIR", logs.path().toUtf8());
+  const QString logs = QStringLiteral("build/test-logs/gdal-fixed");
+  QDir().mkpath(logs);
+  QFile::remove(logs + QStringLiteral("/session.log"));
+  qputenv("KA_HGIS_LOG_DIR", logs.toUtf8());
   QCoreApplication app(argc, argv);
   GdalErrorLogTest test;
   return QTest::qExec(&test, argc, argv);

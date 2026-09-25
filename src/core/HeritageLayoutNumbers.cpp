@@ -37,6 +37,7 @@
 #include <qgsgeometrygeneratorsymbollayer.h>
 #include <qgsmarkersymbol.h>
 #include <qgsmarkersymbollayer.h>
+#include <qgslayertreemodellegendnode.h>
 #include <qgspallabeling.h>
 #include <qgsproject.h>
 #include <qgsrendercontext.h>
@@ -987,7 +988,28 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
       fallbackCategories.append(QgsRendererCategory(QVariant(), sites.first().symbol->clone(), HeritageStyle::unnamedLabel()));
       drawing->setRenderer(new QgsCategorizedSymbolRenderer(QStringLiteral("$id"), fallbackCategories));
     }
-    drawing->setLabelsEnabled(false);
+    if (drawing->labeling() && !sites.isEmpty()) {
+      QgsPalLayerSettings labels = drawing->labeling()->settings();
+      QgsTextFormat format = labels.format();
+      QgsTextBackgroundSettings background = format.background();
+      background.setFillColor(sites.first().color);
+      format.setBackground(background);
+      labels.setFormat(format);
+      QString numberCase = QStringLiteral("CASE");
+      for (const Entry& entry : entries) {
+        if (entry.layerId != layer->id() || entry.number <= 0) continue;
+        for (qint64 id : entry.featureIds)
+          numberCase += QStringLiteral(" WHEN $id = %1 THEN %2").arg(id).arg(entry.number);
+      }
+      labels.fieldName = numberCase + QStringLiteral(" ELSE NULL END");
+      labels.isExpression = true;
+      labels.scaleVisibility = false;
+      applyHeritageNumberCallout(labels);
+      drawing->setLabeling(new QgsVectorLayerSimpleLabeling(labels));
+      drawing->setLabelsEnabled(true);
+    } else {
+      drawing->setLabelsEnabled(false);
+    }
     drawing->setCustomProperty(QStringLiteral("rendering/renderAboveLabels"), false);
     QgsMapLayerStyle style;
     style.readFromLayer(drawing.get());
@@ -1109,9 +1131,38 @@ void HeritageLayoutNumbers::raiseAboveGeometries(QgsLayoutItemMap* base) {
   numbers->setBackgroundEnabled(false);
   numbers->setKeepLayerSet(true);
   numbers->setFollowVisibilityPreset(false);
-  numbers->setLayers({m_numberLayer});
-  numbers->setKeepLayerStyles(false);
-  numbers->setLayerStyleOverrides({});
+  QList<QgsMapLayer*> labelLayers{m_numberLayer};
+  QSet<QString> seen{m_numberLayer->id()};
+  QgsProject* project = layout->project();
+  for (const auto& entry : m_entries) {
+    if (entry.number <= 0 || seen.contains(entry.layerId) || !project) continue;
+    if (auto* layer = project->mapLayer(entry.layerId)) {
+      labelLayers.append(layer);
+      seen.insert(entry.layerId);
+    }
+  }
+  QMap<QString, QString> labelStyles;
+  for (auto it = m_overrides.cbegin(); it != m_overrides.cend(); ++it) {
+    auto* vector = qobject_cast<QgsVectorLayer*>(project ? project->mapLayer(it.key()) : nullptr);
+    if (!vector) {
+      labelStyles.insert(it.key(), it.value());
+      continue;
+    }
+    std::unique_ptr<QgsVectorLayer> drawing(vector->clone());
+    QgsMapLayerStyle(it.value()).writeToLayer(drawing.get());
+    if (QgsFeatureRenderer* renderer = drawing->renderer()) {
+      QgsRenderContext context;
+      const auto symbols = renderer->symbols(context);
+      for (QgsSymbol* symbol : symbols)
+        if (symbol) symbol->setOpacity(0);
+    }
+    QgsMapLayerStyle style;
+    style.readFromLayer(drawing.get());
+    labelStyles.insert(it.key(), style.xmlData());
+  }
+  numbers->setLayers(labelLayers);
+  numbers->setKeepLayerStyles(true);
+  numbers->setLayerStyleOverrides(labelStyles);
   numbers->setCrs(base->crs());
   numbers->setMapRotation(base->mapRotation());
   numbers->attemptSetSceneRect(base->rect().translated(base->pos()));
@@ -1133,7 +1184,6 @@ void HeritageLayoutNumbers::raiseAboveGeometries(QgsLayoutItemMap* base) {
 void HeritageLayoutNumbers::applyLegend(QgsLayoutItemLegend* legend) const {
   if (!legend || !legend->model() || !legend->model()->rootGroup() || m_applying) return;
   const QScopedValueRollback<bool> applying(m_applying, true);
-  bindLegendFilterMaps(legend);
   auto* model = legend->model();
   const QString stamp = QString::number(reinterpret_cast<quintptr>(this)) + QLatin1Char(':') + QString::number(m_revision)
       + QLatin1Char(':') + QString::number(m_placementRevision);
@@ -1142,14 +1192,25 @@ void HeritageLayoutNumbers::applyLegend(QgsLayoutItemLegend* legend) const {
   bool needsMapFilter = m_entries.isEmpty();
   for (auto* node : model->rootGroup()->findLayers()) {
     if (auto* layer = qobject_cast<QgsVectorLayer*>(node->layer())) {
-      if (layer == m_numberLayer) continue;
+      if (layer == m_numberLayer || layer->name() == QLatin1String("layout_blank")) continue;
       if (datasetFor(layer)) current = current && node->customProperty(key).toString() == stamp;
       else needsMapFilter = true;
     }
   }
   // Heritage rows are already limited to the on-paper map. Other vectors
   // (e.g. geology/soil) still need QGIS symbol hit testing.
-  legend->setLegendFilterByMapEnabled(needsMapFilter);
+  if (legend->legendFilterByMapEnabled() != needsMapFilter)
+    legend->setLegendFilterByMapEnabled(needsMapFilter);
+  if (needsMapFilter)
+    bindLegendFilterMaps(legend);
+  for (auto* node : model->rootGroup()->findLayers()) {
+    auto* layer = qobject_cast<QgsVectorLayer*>(node->layer());
+    if (!layer || !datasetFor(layer)) continue;
+    int numbered = 0;
+    for (const auto& entry : m_entries)
+      if (entry.layerId == layer->id() && entry.number > 0) ++numbered;
+    if (model->layerLegendNodes(node).size() != numbered) current = false;
+  }
   if (current) return;
   // Numbered rows already passed the paper-footprint intersection test.
   if (!m_entries.isEmpty()) {
@@ -1158,7 +1219,6 @@ void HeritageLayoutNumbers::applyLegend(QgsLayoutItemLegend* legend) const {
     if (auto* linked = legend->linkedMap())
       QObject::disconnect(linked, &QgsLayoutItemMap::layerStyleOverridesChanged, legend, nullptr);
   }
-  if (model->layerStyleOverrides() != m_overrides) model->setLayerStyleOverrides(m_overrides);
   bool rebuilt = false;
   QSet<QString> legendLayerIds;
   for (auto* node : model->rootGroup()->findLayers()) {
@@ -1193,10 +1253,29 @@ void HeritageLayoutNumbers::applyLegend(QgsLayoutItemLegend* legend) const {
       }
       continue;
     }
-    if (node->customProperty(seriesKey).toString() == series) {
+    const auto existingNodes = model->layerLegendNodes(node);
+    QString shown;
+    for (auto* legendNode : existingNodes) {
+      if (!legendNode) continue;
+      shown += legendNode->data(Qt::DisplayRole).toString() + QLatin1Char('\n');
+    }
+    QString wanted;
+    for (const QString& row : series.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+      const QStringList parts = row.split(QLatin1Char('\t'));
+      if (parts.size() >= 2) wanted += parts.at(1) + QLatin1Char('\n');
+    }
+    int customBadges = 0;
+    for (auto* legendNode : existingNodes) {
+      auto* symbolNode = dynamic_cast<QgsSymbolLegendNode*>(legendNode);
+      if (symbolNode && symbolNode->customSymbol()) ++customBadges;
+    }
+    if (customBadges == order.size() &&
+        (node->customProperty(seriesKey).toString() == series || shown == wanted)) {
+      node->setCustomProperty(seriesKey, series);
       node->setCustomProperty(key, stamp);
       continue;
     }
+    if (model->layerStyleOverrides() != m_overrides) model->setLayerStyleOverrides(m_overrides);
     auto stampBadges = [&]() {
       for (const Entry& entry : m_entries) {
         if (entry.number <= 0) continue;

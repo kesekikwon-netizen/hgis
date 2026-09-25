@@ -795,8 +795,8 @@ bool KaDrawingStudio::promptPaper(QWidget* parent, double* widthMm, double* heig
   auto* btnLand = makeChoice(QStringLiteral("가로"), paperIcon(true), false);
   auto* orientGroup = new QButtonGroup(&dlg);
   orientGroup->setExclusive(true);
-  orientGroup->addButton(btnLand, 0);
-  orientGroup->addButton(btnPort, 1);
+  orientGroup->addButton(btnPort, 0);
+  orientGroup->addButton(btnLand, 1);
   orientLay->addWidget(btnPort);
   orientLay->addWidget(btnLand);
   orientLay->addStretch(1);
@@ -811,9 +811,9 @@ bool KaDrawingStudio::promptPaper(QWidget* parent, double* widthMm, double* heig
   h->setDecimals(1);
   h->setSuffix(QStringLiteral(" mm"));
   h->setValue(297.0);
-  auto applyPreset = [paperGroup, orientGroup, w, h]() {
+  auto applyPreset = [paperGroup, btnLand, w, h]() {
     const int p = paperGroup->checkedId();
-    const bool land = orientGroup->checkedId() == 0;
+    const bool land = btnLand->isChecked();
     const bool custom = p == 2;
     w->setEnabled(custom);
     h->setEnabled(custom);
@@ -861,13 +861,8 @@ KaDrawingStudio::KaDrawingStudio(QgsProject* project, QgsMapCanvas* mapCanvas,
   resize(1280, 860);
   ensureLayoutGuiRegistered(mapCanvas);
   const auto* savedLayout = layout();
-  if (savedLayout && savedLayout->pageCollection()->pageCount() > 0) {
-    const auto size = savedLayout->renderContext().measurementConverter().convert(
-        savedLayout->pageCollection()->page(0)->pageSize(), Qgis::LayoutUnit::Millimeters);
-    m_paperW = size.width();
-    m_paperH = size.height();
-  }
   if (!savedLayout) ensureBlankLayout();
+  else LayoutService::ensureLayoutPage(layout(), m_paperW, m_paperH);
   buildUi();
   if (savedLayout) {
     if (isLegacyA4LandscapeMm(m_paperW, m_paperH))
@@ -2572,6 +2567,16 @@ void KaDrawingStudio::applyLayersToMap(QgsLayoutItemMap* map, bool includeLiveBa
   // 도면을 그릴 때마다 다시 계산해, 지도에서만 먹고 조판에서는 안 먹는 일이 없게 한다.
   LayerOps::applyLayerOrderToLabels(m_project, nullptr);
   QList<QgsMapLayer*> layers = LayerOps::sheetBasePaintLayers(m_project);
+  // Heritage polygons are painted again above labels, so the base list omits them.
+  // The sheet map still has to list a checked heritage layer.
+  if (auto* root = m_project->layerTreeRoot()) {
+    for (auto* node : root->findLayers()) {
+      if (!node || !node->isVisible() || !node->layer() || layers.contains(node->layer())) continue;
+      auto* parent = node->parent();
+      if (parent && HeritageStyle::fromLayerName(parent->name()))
+        layers.append(node->layer());
+    }
+  }
   if (!includeLiveBasemap) {
     QList<QgsMapLayer*> safe;
     for (QgsMapLayer* ml : layers) {
@@ -2831,6 +2836,7 @@ void KaDrawingStudio::applyLegendSettings() {
     LayoutService::flowSheetLegend(legend);
   }
   legend->update();
+  legend->setCacheMode(QGraphicsItem::DeviceCoordinateCache);
 }
 
 void KaDrawingStudio::placeLegend(const QRectF& layoutRect) {
@@ -3081,6 +3087,35 @@ void KaDrawingStudio::flushLayerSync() {
   if (auto* map = mapItem()) {
     applyLayersToMap(map, true, false);
     syncHeritageNumbers();
+    if (auto* legend = dynamic_cast<QgsLayoutItemLegend*>(findItemById(layout(), kIdLegend))) {
+      if (legend->model() && legend->model()->rootGroup()) {
+        const auto live = map->layers();
+        QList<QgsLayerTreeLayer*> drop;
+        QSet<QString> shown;
+        for (auto* node : legend->model()->rootGroup()->findLayers()) {
+          if (!node->layer()) continue;
+          shown.insert(node->layer()->id());
+          auto* treeNode = m_project ? m_project->layerTreeRoot()->findLayer(node->layer()->id()) : nullptr;
+          if (treeNode && !treeNode->isVisible()) drop.append(node);
+        }
+        for (auto* node : drop) {
+          shown.remove(node->layer()->id());
+          if (auto* parent = qobject_cast<QgsLayerTreeGroup*>(node->parent()))
+            parent->removeChildNode(node);
+        }
+        bool missing = false;
+        for (auto* layer : live) {
+          if (!layer || shown.contains(layer->id()) || !m_project) continue;
+          auto* treeNode = m_project->layerTreeRoot()->findLayer(layer->id());
+          auto* parent = treeNode ? treeNode->parent() : nullptr;
+          if (parent && HeritageStyle::fromLayerName(parent->name())) missing = true;
+        }
+        if (missing) {
+          LayoutService::tuneSheetLegend(legend);
+          m_heritageNumbers.applyLegend(legend);
+        }
+      }
+    }
   }
 }
 
@@ -3363,7 +3398,20 @@ void KaDrawingStudio::applyHeritageNumberChrome() {
   syncAboveLabelsMap(map);
   m_heritageNumbers.raiseAboveGeometries(map);
   if (auto* legend = dynamic_cast<QgsLayoutItemLegend*>(findItemById(ly, kIdLegend))) {
-    LayoutService::tuneSheetLegend(legend);
+    bool missing = !legend->model() || !legend->model()->rootGroup();
+    QSet<QString> present;
+    if (!missing) {
+      for (auto* node : legend->model()->rootGroup()->findLayers()) {
+        if (node->layer()) present.insert(node->layer()->id());
+      }
+    }
+    for (const auto& entry : m_heritageNumbers.entries()) {
+      if (entry.number > 0 && !present.contains(entry.layerId)) {
+        missing = true;
+        break;
+      }
+    }
+    if (missing) LayoutService::tuneSheetLegend(legend);
     m_heritageNumbers.applyLegend(legend);
   }
   // 번호만 바뀌면 번호 레이어만 다시 그린다. 수치지형도가 있는 본지도는 그대로 둔다.

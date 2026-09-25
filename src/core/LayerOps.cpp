@@ -1269,34 +1269,32 @@ void LayerOps::placeCadastralLayer(QgsProject* project, QgsMapLayer* layer) {
   if (!project || !layer) return;
   QgsLayerTree* root = project->layerTreeRoot();
   if (!root) return;
-  QgsLayerTreeGroup* cad = root->findGroup(QString::fromUtf8(kGroupCadastral));
-  const bool created = cad == nullptr;
-  if (!cad) {
-    int idx = 0;
-    const QList<QgsLayerTreeNode*> children = root->children();
-    if (auto* survey = root->findGroup(QString::fromUtf8(kGroupSurveyData)))
-      idx = children.indexOf(survey) + 1;
-    else if (auto* ref = root->findGroup(QString::fromUtf8(kGroupReference)))
-      idx = qMax(0, children.indexOf(ref));
-    cad = root->insertGroup(idx, QString::fromUtf8(kGroupCadastral));
+  // 바탕 지적 그림과 받은 지적도, 조사구역·옛 지도는 한 묶음이 아니다.
+  // 예전 "지적도" 그룹에 들어가 있던 줄은 각각 최상위 한 줄로 올린다.
+  if (QgsLayerTreeGroup* bundled = root->findGroup(QString::fromUtf8(kGroupCadastral))) {
+    const int at = root->children().indexOf(bundled);
+    while (!bundled->children().isEmpty()) {
+      QgsLayerTreeNode* child = bundled->children().constFirst();
+      if (!bundled->takeChild(child)) break;
+      root->insertChildNode(qMax(0, at), child);
+    }
+    if (auto* parent = qobject_cast<QgsLayerTreeGroup*>(bundled->parent()))
+      parent->removeChildNode(bundled);
   }
-  if (!cad) return;
+  QgsLayerTreeGroup* refs = root->findGroup(QString::fromUtf8(kGroupReference));
+  if (!refs)
+    refs = root->addGroup(QString::fromUtf8(kGroupReference));
+  if (!refs) return;
   if (QgsLayerTreeLayer* node = root->findLayer(layer->id())) {
-    auto* parent = qobject_cast<QgsLayerTreeGroup*>(node->parent());
-    if (parent == cad)
-      return;
-    // Move only. Keep the user's on/off. Snap refresh used to force both on.
+    if (node->parent() == refs) return;
     auto* clone = node->clone();
-    cad->insertChildNode(0, clone);
-    if (parent) parent->removeChildNode(node);
-  } else {
-    if (auto* added = cad->addLayer(layer))
-      added->setItemVisibilityChecked(true);
-    cad->setItemVisibilityChecked(true);
+    refs->insertChildNode(0, clone);
+    if (auto* parent = qobject_cast<QgsLayerTreeGroup*>(node->parent()))
+      parent->removeChildNode(node);
+    return;
   }
-  if (created)
-    cad->setItemVisibilityChecked(true);
-  pruneEmptyLegendGroups(project);
+  if (auto* added = refs->addLayer(layer))
+    added->setItemVisibilityChecked(true);
 }
 
 void LayerOps::applyThematicOverlayScaleRange(QgsMapLayer* layer) {
@@ -1394,7 +1392,7 @@ bool LayerOps::isCadastralLayer(const QgsMapLayer* layer) {
 }
 
 bool LayerOps::isVworldCadastralPicture(const QgsMapLayer* layer) {
-  if (!layer || isCadastralLayer(layer)) return false;
+  if (!layer) return false;
   const QString n = layer->name();
   if (n.contains(QStringLiteral("VWorld")) && n.contains(QStringLiteral("지적")))
     return true;
@@ -1437,19 +1435,8 @@ QList<QgsMapLayer*> LayerOps::removableCadastralLayersFromNode(QgsLayerTreeNode*
     if (isCadastralLayer(layer) || isVworldCadastralPicture(layer))
       out.append(layer);
   };
-  if (auto* leaf = qobject_cast<QgsLayerTreeLayer*>(node)) {
+  if (auto* leaf = qobject_cast<QgsLayerTreeLayer*>(node))
     push(leaf->layer());
-    return out;
-  }
-  auto* group = qobject_cast<QgsLayerTreeGroup*>(node);
-  if (!group) return out;
-  const bool cadastralGroup = group->name() == QString::fromUtf8(kGroupCadastral);
-  for (QgsLayerTreeLayer* child : group->findLayers()) {
-    QgsMapLayer* layer = child ? child->layer() : nullptr;
-    if (!layer || !layerKeyOf(layer).isEmpty() || out.contains(layer)) continue;
-    if (cadastralGroup || isCadastralLayer(layer) || isVworldCadastralPicture(layer))
-      out.append(layer);
-  }
   return out;
 }
 
@@ -1461,35 +1448,22 @@ QList<QgsMapLayer*> LayerOps::removableReferenceLayersFromNode(QgsLayerTreeNode*
     if (isCadastralLayer(layer) || isVworldCadastralPicture(layer)) return;
     out.append(layer);
   };
-  if (auto* leaf = qobject_cast<QgsLayerTreeLayer*>(node)) {
+  if (auto* leaf = qobject_cast<QgsLayerTreeLayer*>(node))
     push(leaf->layer());
-    return out;
-  }
-  auto* group = qobject_cast<QgsLayerTreeGroup*>(node);
-  if (!group) return out;
-  const QString name = group->name();
-  if (name == QString::fromUtf8(kGroupSurveyData) || name == QString::fromUtf8(kGroupCadastral))
-    return out;
-  const bool heritageKind = HeritageStyle::fromLayerName(name).has_value();
-  const bool referenceRoot = name == QString::fromUtf8(kGroupReference);
-  if (referenceRoot) {
-    for (QgsLayerTreeLayer* child : group->findLayers())
-      push(child ? child->layer() : nullptr);
-    return out;
-  }
-  bool underReference = heritageKind;
-  for (QgsLayerTreeNode* parent = group->parent(); !underReference && parent;
-       parent = parent->parent()) {
-    if (parent->name() == QString::fromUtf8(kGroupReference))
-      underReference = true;
-  }
-  if (!underReference) return out;
-  for (QgsLayerTreeLayer* child : group->findLayers())
-    push(child ? child->layer() : nullptr);
   return out;
 }
 
 QList<QgsMapLayer*> LayerOps::removableLegendLayersFromNode(QgsLayerTreeNode* node) {
+  // 묶음 줄을 지우면 안의 레이어가 하위 묶음까지 모두 빠진다. 보이지 않는 맨 위 뿌리는 묶음 줄이 아니다.
+  if (auto* group = qobject_cast<QgsLayerTreeGroup*>(node); group && group->parent()) {
+    QList<QgsMapLayer*> out;
+    for (QgsLayerTreeLayer* child : group->findLayers()) {
+      QgsMapLayer* layer = child ? child->layer() : nullptr;
+      if (layer && !out.contains(layer))
+        out.append(layer);
+    }
+    return out;
+  }
   QList<QgsMapLayer*> out = removableCadastralLayersFromNode(node);
   for (QgsMapLayer* layer : removableReferenceLayersFromNode(node)) {
     if (layer && !out.contains(layer))
@@ -1500,7 +1474,8 @@ QList<QgsMapLayer*> LayerOps::removableLegendLayersFromNode(QgsLayerTreeNode* no
 
 bool LayerOps::isReferenceLayer(const QgsMapLayer* layer) {
   if (!layer) return false;
-  if (isCadastralLayer(layer)) return false;
+  if (isCadastralLayer(layer))
+    return !isVworldCadastralPicture(layer);
   if (layer->customProperty(QString::fromUtf8(kPropLayerRole)).toString() ==
       QLatin1String(kRoleReference))
     return true;

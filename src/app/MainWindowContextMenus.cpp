@@ -200,14 +200,21 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
   if (!layer) {
     QgsLayerTreeNode* target = raw ? raw : treeView->currentNode();
     const QList<QgsMapLayer*> removable = LayerOps::removableLegendLayersFromNode(target);
-    if (!removable.isEmpty()) {
+    // 우클릭한 묶음 줄은 안에 레이어가 없어도 지울 수 있다.
+    auto* clickedGroup = qobject_cast<QgsLayerTreeGroup*>(raw);
+    const bool group = clickedGroup && clickedGroup->parent();
+    if (!removable.isEmpty() || group) {
       addMenuAction(&menu, "layer.remove", QStringLiteral("레이어 삭제"), {},
           [this, treeView, index]() {
-            if (index.isValid())
+            if (index.isValid()) {
+              // The clicked row is the target even if another row was selected before.
+              treeView->clearSelection();
               treeView->setCurrentIndex(index);
+            }
             removeLayersFromTree(treeView);
           },
-          QStringLiteral("목록에서 제거합니다. 원본 파일은 보존하며 Ctrl+Z로 복원할 수 있습니다."));
+          group ? QStringLiteral("이 묶음과 안의 레이어를 목록과 지도에서 뺍니다. 원본 파일은 보존하며 Ctrl+Z로 복원할 수 있습니다.")
+                : QStringLiteral("목록에서 제거합니다. 원본 파일은 보존하며 Ctrl+Z로 복원할 수 있습니다."));
     }
     addMenuAction(&menu, "layer.import", QStringLiteral("참고 자료 불러오기…"), {}, [this]() { addUserLayer(); });
     menu.exec(treeView->viewport()->mapToGlobal(pos));

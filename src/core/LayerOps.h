@@ -354,8 +354,10 @@ public:
   static void rememberUserRemovedCadastral(QgsProject* project);
   static void clearUserRemovedCadastral(QgsProject* project);
   static QList<QgsMapLayer*> removableCadastralLayersFromNode(QgsLayerTreeNode* node);
-  // 참조 지도 루트·그 아래 모든 묶음과 SHP. 조사 데이터(layer_key)와 지적도는 넣지 않는다.
+  // 레이어 한 줄만 본다. 조사 데이터(layer_key)와 지적도는 넣지 않는다.
   static QList<QgsMapLayer*> removableReferenceLayersFromNode(QgsLayerTreeNode* node);
+  // 묶음 줄은 안의 레이어 전부(하위 묶음 포함). 레이어 한 줄은 위 두 함수의 몫이고,
+  // 조사 레이어 한 줄은 여기 없이 레이어 창에서 고른 것으로 지운다.
   static QList<QgsMapLayer*> removableLegendLayersFromNode(QgsLayerTreeNode* node);
   static bool isBasemapLayer(const QgsMapLayer* layer);
   // Survey vectors and cadastral parcel lines. WMS/XYZ pictures cannot snap.

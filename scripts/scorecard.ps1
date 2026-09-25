@@ -1,0 +1,133 @@
+# Read existing ka-hgis measurements. Does not run CTest.
+# ASCII only.
+$ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent $PSScriptRoot
+$build = Join-Path $root 'build'
+$junit = Join-Path $build 'release-tests.xml'
+$failedLog = Join-Path $build 'Testing\Temporary\LastTestsFailed.log'
+$costLog = Join-Path $build 'Testing\Temporary\CTestCostData.txt'
+$nowPath = Join-Path $root '.codex\NOW.md'
+
+function Count-Lines([string]$path) {
+  if (-not (Test-Path -LiteralPath $path)) { return $null }
+  return @(Get-Content -LiteralPath $path).Count
+}
+
+function Count-TodoFixme() {
+  $n = 0
+  foreach ($dir in @('src', 'tests')) {
+    $base = Join-Path $root $dir
+    if (-not (Test-Path -LiteralPath $base)) { continue }
+    Get-ChildItem -LiteralPath $base -Recurse -File -Include *.cpp,*.h,*.hpp | ForEach-Object {
+      $n += @(Select-String -LiteralPath $_.FullName -Pattern 'TODO|FIXME' -AllMatches).Count
+    }
+  }
+  return $n
+}
+
+$tests = [ordered]@{
+  source = 'missing'
+  total = $null
+  passed = $null
+  failed = $null
+  failedNames = @()
+}
+if (Test-Path -LiteralPath $junit) {
+  [xml]$xml = Get-Content -LiteralPath $junit -Raw
+  $suites = @($xml.SelectNodes('//testsuite'))
+  $failedNames = New-Object System.Collections.Generic.List[string]
+  $total = 0
+  $failed = 0
+  foreach ($suite in $suites) {
+    $cases = @($suite.SelectNodes('testcase'))
+    if ($cases.Count -eq 0) {
+      $total += [int]$suite.tests
+      $failed += [int]$suite.failures + [int]$suite.errors
+      continue
+    }
+    foreach ($case in $cases) {
+      $total++
+      $bad = @($case.SelectNodes('failure')).Count + @($case.SelectNodes('error')).Count
+      if ($bad -gt 0) {
+        $failed++
+        $name = [string]$case.name
+        if (-not $name) { $name = [string]$case.classname }
+        if ($name) { $failedNames.Add($name) }
+      }
+    }
+  }
+  $tests.source = 'release-tests.xml'
+  $tests.total = $total
+  $tests.failed = $failed
+  $tests.passed = $total - $failed
+  $tests.failedNames = @($failedNames)
+} elseif ((Test-Path -LiteralPath $failedLog) -or (Test-Path -LiteralPath $costLog)) {
+  $failedNames = New-Object System.Collections.Generic.List[string]
+  if (Test-Path -LiteralPath $failedLog) {
+    foreach ($line in Get-Content -LiteralPath $failedLog) {
+      if ($line -match '^\d+:(\S+)$') { $failedNames.Add($Matches[1]) }
+    }
+  }
+  $total = $null
+  if (Test-Path -LiteralPath $costLog) {
+    $total = @(Get-Content -LiteralPath $costLog | Where-Object { $_ -match '^\S+ \d+ ' }).Count
+  }
+  $tests.source = 'Testing/Temporary/LastTestsFailed.log'
+  $tests.total = $total
+  $tests.failed = $failedNames.Count
+  if ($null -ne $total) { $tests.passed = $total - $failedNames.Count }
+  $tests.failedNames = @($failedNames)
+}
+
+$flake = $null
+$qa = Join-Path $build 'qa'
+if (Test-Path -LiteralPath $qa) {
+  $latest = Get-ChildItem -LiteralPath $qa -Directory -Filter 'ctest-flake-*' -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+  if ($latest) {
+    $summary = Join-Path $latest.FullName 'SUMMARY.md'
+    $flake = [ordered]@{
+      dir = $latest.Name
+      summary = $(if (Test-Path -LiteralPath $summary) { 'present' } else { 'missing' })
+    }
+  }
+}
+
+$hotspots = [ordered]@{
+  'src/app/MainWindow.cpp' = Count-Lines (Join-Path $root 'src\app\MainWindow.cpp')
+  'src/core/LayerOps.cpp' = Count-Lines (Join-Path $root 'src\core\LayerOps.cpp')
+}
+$nowBytes = $null
+if (Test-Path -LiteralPath $nowPath) { $nowBytes = (Get-Item -LiteralPath $nowPath).Length }
+
+$card = [ordered]@{
+  schema = 1
+  readOnly = $true
+  generatedUtc = [DateTime]::UtcNow.ToString('o')
+  tests = $tests
+  flake = $flake
+  hotspots = $hotspots
+  nowMdBytes = $nowBytes
+  todoFixme = Count-TodoFixme
+}
+
+New-Item -ItemType Directory -Force -Path $build | Out-Null
+$out = Join-Path $build 'scorecard.json'
+($card | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $out -Encoding ascii
+
+Write-Host 'ka-hgis scorecard (no CTest run)'
+Write-Host ("tests.source  {0}" -f $tests.source)
+Write-Host ("tests         passed={0} failed={1} total={2}" -f $tests.passed, $tests.failed, $tests.total)
+if ($tests.failedNames.Count -gt 0) {
+  Write-Host ("failed        {0}" -f ($tests.failedNames -join ', '))
+}
+Write-Host ("MainWindow.cpp lines {0}" -f $hotspots['src/app/MainWindow.cpp'])
+Write-Host ("LayerOps.cpp lines   {0}" -f $hotspots['src/core/LayerOps.cpp'])
+Write-Host ("NOW.md bytes         {0}" -f $nowBytes)
+Write-Host ("TODO|FIXME           {0}" -f $card.todoFixme)
+if ($flake) { Write-Host ("flake              {0} summary={1}" -f $flake.dir, $flake.summary) }
+else { Write-Host 'flake              none' }
+Write-Host ("wrote              {0}" -f $out)
+if ($null -eq $tests.total -or $null -eq $tests.failed) { exit 2 }
+exit 0

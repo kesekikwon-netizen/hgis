@@ -1998,7 +1998,11 @@ void MainWindow::ensureDefaultBasemaps() {
     if (l->name().contains(QStringLiteral("위성")))
       hasSat = true;
   }
-  bool hasCad = LayerOps::projectHasCadastralLayer(proj);
+  bool hasCad = false;
+  for (QgsMapLayer* l : proj->mapLayers()) {
+    if (l && l->isValid() && LayerOps::isVworldCadastralPicture(l))
+      hasCad = true;
+  }
   const QString key = VworldSettings::loadApiKey();
   QString satErr;
   QString cadErr;

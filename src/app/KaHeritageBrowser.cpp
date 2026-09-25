@@ -285,10 +285,14 @@ KaHeritageBrowser::KaHeritageBrowser(QWidget* parent) : QDialog(parent) {
 }
 
 void KaHeritageBrowser::ensureProfile() {
-  if (m_profile) return;
-  m_profile = new QWebEngineProfile(QStringLiteral("ka-heritage"), this);
-  m_requestLog = new HeritageRequestLog(this);
-  m_profile->setUrlRequestInterceptor(m_requestLog);
+  if (m_profile && m_profileWired) return;
+  const bool installDefaultInterceptor = m_profile == nullptr;
+  if (!m_profile)
+    m_profile = new QWebEngineProfile(QStringLiteral("ka-heritage"), this);
+  if (!m_requestLog)
+    m_requestLog = new HeritageRequestLog(this);
+  if (installDefaultInterceptor)
+    m_profile->setUrlRequestInterceptor(m_requestLog);
   connect(m_profile->cookieStore(), &QWebEngineCookieStore::cookieAdded, this,
           [this](const QNetworkCookie& cookie) {
             m_cookies.removeIf([&cookie](const QNetworkCookie& c) { return c.name() == cookie.name(); });
@@ -296,6 +300,7 @@ void KaHeritageBrowser::ensureProfile() {
           });
   connect(m_profile, &QWebEngineProfile::downloadRequested, this,
           &KaHeritageBrowser::handleDownload);
+  m_profileWired = true;
 }
 
 KaHeritageBrowser::~KaHeritageBrowser() { stop(); m_poll->stop(); }

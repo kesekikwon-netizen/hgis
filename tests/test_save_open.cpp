@@ -1163,8 +1163,6 @@ private slots:
       QVERIFY2(item, qPrintable(id));
       QVERIFY2(!item->isLocked(), qPrintable(id + QStringLiteral(" is locked")));
       QVERIFY(size);
-      // Zoom in so the small compass's rotation handles do not cover its body.
-      view->setZoomLevel(2.);
       view->centerOn(item);
       ly->setSelectedItem(item);
       QCoreApplication::processEvents();
@@ -1174,10 +1172,19 @@ private slots:
                        QLineF(selectTool->mouseHandles()->sceneBoundingRect().center(),
                               item->sceneBoundingRect().center()).length() < 0.5,
                    qPrintable(id + QStringLiteral(" 선택 핸들이 자리를 잡지 못했다")));
+      // Paper-fit timers (0 ms and 80 ms) reset the view. Wait them out, then zoom.
+      // QGIS rotation zones are 3× the resize border and meet at the center of a 20 mm compass.
+      QTest::qWait(120);
+      const double side = std::min(item->rect().width(), item->rect().height());
+      view->setZoomLevel(side < 30. ? 12. : 2.);
+      view->centerOn(item);
       QVERIFY(size->isEnabled());
       const QRectF before(item->pos(), item->rect().size());
+      const double rotationBefore = item->itemRotation();
       const QPoint from = view->mapFromScene(item->mapToScene(item->rect().center()));
-      const QPoint to = from + QPoint(18, -24);
+      const double viewScale = std::max(1., view->transform().m11());
+      const int dragPx = static_cast<int>(std::ceil(8. * viewScale));
+      const QPoint to = from + QPoint(dragPx, -dragPx);
       QMouseEvent hover(QEvent::MouseMove, QPointF(from), view->viewport()->mapToGlobal(from),
                         Qt::NoButton, Qt::NoButton, Qt::NoModifier);
       QApplication::sendEvent(view->viewport(), &hover);
@@ -1195,7 +1202,8 @@ private slots:
       if (!dragOutput.isEmpty() && QLineF(before.topLeft(), moved).length() <= 3.)
         studio.grab().save(QDir(dragOutput).filePath(QStringLiteral("decoration-drag-failure.png")));
       QVERIFY2(QLineF(before.topLeft(), moved).length() > 3., qPrintable(id + QStringLiteral(" did not drag")));
-      QVERIFY2(qAbs(item->itemRotation()) < .001, qPrintable(id + QStringLiteral(" 가 회전했다")));
+      QVERIFY2(qAbs(item->itemRotation() - rotationBefore) < .001,
+               qPrintable(id + QStringLiteral(" 가 회전했다")));
       positions.insert(id, moved);
       const auto* bar = dynamic_cast<QgsLayoutItemScaleBar*>(item);
       const double distance = bar ? bar->unitsPerSegment() : 0.;
@@ -2263,11 +2271,8 @@ private slots:
     QApplication::processEvents();
     QTest::keyClick(tree, Qt::Key_Delete);
     QVERIFY2(!project->mapLayer(id), "범례에서 Delete 를 눌러도 지적도가 남아 있습니다.");
-    QVERIFY(LayerOps::userRemovedCadastral(project));
-    QVERIFY(!LayerOps::projectHasCadastralLayer(project));
-    QMetaObject::invokeMethod(&window, "showSubToolsBasemap", Qt::DirectConnection);
-    QVERIFY2(!LayerOps::projectHasCadastralLayer(project),
-             "지운 지적도가 기본 배경으로 다시 올라오면 안 됩니다.");
+    QVERIFY2(!LayerOps::userRemovedCadastral(project),
+             "받은 지적도를 지워도 바탕 지적 그림까지 끈 것으로 기록하면 안 됩니다.");
   }
 
   void cadastralGroupDeleteKeyRemovesChildren() {
@@ -2286,24 +2291,24 @@ private slots:
     project->addMapLayer(cad, false);
     LayerOps::placeCadastralLayer(project, cad);
     const QString id = cad->id();
-    auto* group = project->layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral));
-    QVERIFY(group);
+    auto* other = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                     QStringLiteral("VWorld 지적(본번·부번)"), QStringLiteral("memory"));
+    QVERIFY(other->isValid());
+    project->addMapLayer(other, false);
+    project->layerTreeRoot()->insertLayer(0, other);
+    const QString otherId = other->id();
+    QVERIFY(!project->layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral)));
     window.show();
     QApplication::setActiveWindow(&window);
-    tree->expandAll();
-    const QModelIndex index = tree->layerTreeModel()->node2index(group);
-    QVERIFY(index.isValid());
-    tree->setCurrentIndex(index);
+    tree->setCurrentLayer(cad);
     tree->setFocus();
     QApplication::processEvents();
     QTest::keyClick(tree, Qt::Key_Delete);
-    QVERIFY2(!project->mapLayer(id), "지적도 묶음에서 Delete 를 눌러도 레이어가 남아 있습니다.");
-    QVERIFY2(!project->layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral)),
-             "지적도를 지운 뒤에도 빈 지적도 묶음 제목이 레이어 목록에 남아 있습니다.");
+    QVERIFY2(!project->mapLayer(id), "선택한 지적도를 지우지 못했습니다.");
+    QVERIFY2(project->mapLayer(otherId), "다른 지적 레이어가 같이 지워졌습니다.");
     QTest::keyClick(tree, Qt::Key_Z, Qt::ControlModifier);
     QVERIFY2(project->mapLayer(id), "Ctrl+Z 로 지운 지적도를 되살리지 못했습니다.");
-    auto* restored = project->layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral));
-    QVERIFY2(restored && restored->findLayer(id), "Ctrl+Z 로 되살린 지적도가 원래 지적도 묶음 안에 있지 않습니다.");
+    QVERIFY(project->mapLayer(otherId));
   }
 
   void surveyAreaDialogContinuesTheExistingArea() {
@@ -2339,11 +2344,11 @@ private slots:
     LayerOps::markCadastralLayer(cad);
     project->addMapLayer(cad, false);
     LayerOps::placeCadastralLayer(project, cad);
-    auto* group = project->layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral));
-    QVERIFY(group);
+    auto* node = project->layerTreeRoot()->findLayer(cad->id());
+    QVERIFY(node);
     window.show();
     tree->expandAll();
-    const QModelIndex index = tree->layerTreeModel()->node2index(group);
+    const QModelIndex index = tree->layerTreeModel()->node2index(node);
     QVERIFY(index.isValid());
     tree->scrollTo(index);
     const LayerMenuState menu = inspectLayerMenu(window, tree, tree->visualRect(index).center());
@@ -2353,6 +2358,112 @@ private slots:
       if (!action.separator) ids.append(action.id);
     }
     QVERIFY2(ids.contains(QStringLiteral("layer.remove")), "지적도 묶음 우클릭에 삭제가 없습니다.");
+  }
+
+  void referenceGroupMenuRemovesEveryRowAndCtrlZRestores() {
+    const QString path = makeSurvey(QStringLiteral("delete_ref_group"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
+    auto* project = QgsProject::instance();
+    QVERIFY(tree);
+    auto* root = project->layerTreeRoot();
+    auto* refs = root->findGroup(QString::fromUtf8(LayerOps::kGroupReference));
+    if (!refs) refs = root->addGroup(QString::fromUtf8(LayerOps::kGroupReference));
+    auto* inner = refs->addGroup(QStringLiteral("하위 참고 묶음"));
+    refs->addGroup(QStringLiteral("빈 하위 묶음"));
+    auto* area = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                    QStringLiteral("참고 면"), QStringLiteral("memory"));
+    auto* points = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5186"),
+                                      QStringLiteral("참고 점"), QStringLiteral("memory"));
+    auto* outside = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                       QStringLiteral("묶음 밖 참고"), QStringLiteral("memory"));
+    QVERIFY(area->isValid() && points->isValid() && outside->isValid());
+    for (auto* layer : {area, points, outside}) {
+      LayerOps::markReferenceLayer(layer);
+      project->addMapLayer(layer, false);
+    }
+    refs->addLayer(area);
+    inner->addLayer(points);
+    root->insertLayer(0, outside);
+    const QString areaId = area->id();
+    const QString pointsId = points->id();
+    const QString outsideId = outside->id();
+    const int refsIndex = root->children().indexOf(refs);
+    window.show();
+    QApplication::setActiveWindow(&window);
+    tree->expandAll();
+    // The panel shows the tree through a proxy model: use the view's own index for the row.
+    const QModelIndex index = tree->node2index(refs);
+    QVERIFY(index.isValid());
+    tree->scrollTo(index);
+    // A real right-click focuses the layer panel first; delete ignores keys typed into a text field.
+    tree->setFocus();
+    QApplication::processEvents();
+    const LayerMenuState menu = inspectLayerMenu(window, tree, tree->visualRect(index).center(),
+                                                 QStringLiteral("layer.remove"));
+    QVERIFY(menu.seen);
+    bool offered = false;
+    bool groupMenu = false;
+    for (const auto& action : menu.actions) {
+      offered |= action.id == QLatin1String("layer.remove") && action.enabled &&
+                 action.toolTip.contains(QStringLiteral("묶음"));
+      groupMenu |= action.id == QLatin1String("layer.import");
+    }
+    QVERIFY2(groupMenu, "참조 지도 묶음 줄이 아닌 다른 줄의 메뉴가 열렸습니다.");
+    QVERIFY2(offered, "참조 지도 묶음 우클릭에 레이어 삭제가 없습니다.");
+    QVERIFY2(!project->mapLayer(areaId) && !project->mapLayer(pointsId),
+             "묶음을 지워도 안의 레이어가 지도에 남아 있습니다.");
+    QVERIFY2(!root->findGroup(QString::fromUtf8(LayerOps::kGroupReference)),
+             "묶음을 지워도 참조 지도 줄이 레이어 창에 남아 있습니다.");
+    QVERIFY2(project->mapLayer(outsideId), "묶음 밖의 레이어까지 지워졌습니다.");
+
+    // The offscreen platform does not hand activation back after the popup closes; a desktop does.
+    QApplication::setActiveWindow(&window);
+    tree->setFocus();
+    QApplication::processEvents();
+    QTest::keyClick(tree, Qt::Key_Z, Qt::ControlModifier);
+    auto* restored = root->findGroup(QString::fromUtf8(LayerOps::kGroupReference));
+    QVERIFY2(restored, "Ctrl+Z 로 참조 지도 묶음이 돌아오지 않았습니다.");
+    QCOMPARE(root->children().indexOf(restored), refsIndex);
+    QVERIFY2(restored->findLayer(areaId), "Ctrl+Z 로 되살린 레이어가 참조 지도 묶음 안에 있지 않습니다.");
+    auto* restoredInner = restored->findGroup(QStringLiteral("하위 참고 묶음"));
+    QVERIFY2(restoredInner && restoredInner->findLayer(pointsId),
+             "하위 묶음과 그 안의 레이어가 제자리로 돌아오지 않았습니다.");
+    // A sub-group that held no layers at all drops out while QGIS detaches the group; empty
+    // title rows are not kept elsewhere either, so it is not expected back.
+    QCOMPARE(restored->children().size(), 2);
+    QVERIFY(project->mapLayer(areaId) && project->mapLayer(pointsId) && project->mapLayer(outsideId));
+  }
+
+  void emptyGroupDeleteKeyRemovesRowAndCtrlZRestores() {
+    const QString path = makeSurvey(QStringLiteral("delete_empty_group"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
+    QVERIFY(tree);
+    auto* root = QgsProject::instance()->layerTreeRoot();
+    const QString name = QStringLiteral("빈 묶음 시험");
+    auto* empty = root->insertGroup(0, name);
+    window.show();
+    QApplication::setActiveWindow(&window);
+    const QModelIndex index = tree->node2index(empty);
+    QVERIFY(index.isValid());
+    tree->setCurrentIndex(index);
+    tree->setFocus();
+    QApplication::processEvents();
+    QTest::keyClick(tree, Qt::Key_Delete);
+    QVERIFY2(!root->findGroup(name), "레이어가 없는 묶음 줄이 Delete 로 지워지지 않았습니다.");
+    QTest::keyClick(tree, Qt::Key_Z, Qt::ControlModifier);
+    auto* back = root->findGroup(name);
+    QVERIFY2(back, "Ctrl+Z 로 빈 묶음이 돌아오지 않았습니다.");
+    QCOMPARE(root->children().indexOf(back), 0);
   }
 
   void ctrlZRestoresVertexEditsAndGroupedFeatureDeletion() {

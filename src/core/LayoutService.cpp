@@ -1104,11 +1104,9 @@ bool LayoutService::ensureLayoutPage(QgsLayout* layout, double widthMm, double h
   QgsLayoutItemPage* page = pages->page(0);
   if (!page)
     return false;
-  const QRectF scene = page->mapRectToScene(page->rect());
-  if (scene.width() < 8.0 || scene.height() < 8.0) {
-    page->setPageSize(paper);
-    layout->refresh();
-  }
+  // initializeDefaults()가 A4 가로를 먼저 만든다. 요청한 세로 크기로 다시 맞춘다.
+  page->setPageSize(paper);
+  layout->refresh();
   const QRectF ready = page->mapRectToScene(page->rect());
   return ready.width() >= 8.0 && ready.height() >= 8.0;
 }
@@ -1594,7 +1592,9 @@ void LayoutService::settleSheetLegendsForExport(QgsLayout* layout) {
 
 void LayoutService::tuneSheetLegend(QgsLayoutItemLegend* legend) {
   if (!legend) return;
-  legend->setLegendFilterByMapEnabled(true);
+  // Map filtering is decided in HeritageLayoutNumbers::applyLegend.
+  // Turning it on here starts an async hit test that replaces legend rows
+  // after the sheet has already been numbered.
 
   QgsProject* proj = legend->layout() ? legend->layout()->project() : nullptr;
   if (proj) {

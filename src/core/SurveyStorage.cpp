@@ -431,6 +431,11 @@ bool copySurvey(const QString& sourceGpkg, const QString& targetGpkg, QString* e
     if (writtenPath) *writtenPath = source.absoluteFilePath();
     return true;
   }
+  for (const QString& suffix : {QStringLiteral("-wal"), QStringLiteral("-shm"),
+                                QStringLiteral("-journal")}) {
+    if (QFileInfo::exists(target.absoluteFilePath() + suffix))
+      return fail(QStringLiteral("대상 조사 파일이 사용 중입니다."));
+  }
   dropIdleJournals(target.absoluteFilePath());
   QTemporaryDir temporary(target.dir().filePath(QStringLiteral(".ka-survey-copy-XXXXXX")));
   if (!temporary.isValid()) return fail(QStringLiteral("저장 폴더에 임시 사본을 만들 수 없습니다."));

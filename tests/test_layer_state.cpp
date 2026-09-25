@@ -540,9 +540,11 @@ private slots:
     QVERIFY(LayerOps::isCadastralLayer(cad));
     QVERIFY(LayerOps::projectHasCadastralLayer(&project));
     QVERIFY(!LayerOps::userRemovedCadastral(&project));
-    auto* group = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral));
-    QVERIFY(group);
-    QCOMPARE(LayerOps::removableCadastralLayersFromNode(group), QList<QgsMapLayer*>{cad});
+    QVERIFY(!project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral)));
+    auto* refs = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupReference));
+    auto* node = refs ? refs->findLayer(cad->id()) : nullptr;
+    QVERIFY(node);
+    QCOMPARE(LayerOps::removableCadastralLayersFromNode(node), QList<QgsMapLayer*>{cad});
   }
 
   void userRemovedCadastralStopsAutoAdd() {
@@ -569,7 +571,9 @@ private slots:
     refs->addLayer(heritage);
     QVERIFY(LayerOps::isVworldCadastralPicture(picture));
     QVERIFY(!LayerOps::isVworldCadastralPicture(heritage));
-    QCOMPARE(LayerOps::removableCadastralLayersFromNode(refs), QList<QgsMapLayer*>{picture});
+    QVERIFY(LayerOps::removableCadastralLayersFromNode(refs).isEmpty());
+    QCOMPARE(LayerOps::removableCadastralLayersFromNode(refs->findLayer(picture->id())),
+             QList<QgsMapLayer*>{picture});
   }
 
   void heritageKindGroupListsChildrenForDelete() {
@@ -591,18 +595,23 @@ private slots:
     project.addMapLayer(survey, false);
     kind->addLayer(permit);
     kind->addLayer(points);
-    const QList<QgsMapLayer*> fromKind = LayerOps::removableReferenceLayersFromNode(kind);
+    QVERIFY(LayerOps::removableReferenceLayersFromNode(kind).isEmpty());
+    QCOMPARE(LayerOps::removableReferenceLayersFromNode(kind->findLayer(permit->id())),
+             QList<QgsMapLayer*>{permit});
+    QCOMPARE(LayerOps::removableReferenceLayersFromNode(kind->findLayer(points->id())),
+             QList<QgsMapLayer*>{points});
+    const QList<QgsMapLayer*> fromKind = LayerOps::removableLegendLayersFromNode(kind);
     QCOMPARE(fromKind.size(), 2);
-    QVERIFY(fromKind.contains(permit));
-    QVERIFY(fromKind.contains(points));
-    QVERIFY(!fromKind.contains(survey));
+    QVERIFY(fromKind.contains(permit) && fromKind.contains(points));
     const QList<QgsMapLayer*> fromRoot = LayerOps::removableLegendLayersFromNode(refs);
-    QVERIFY(fromRoot.contains(permit));
-    QVERIFY(fromRoot.contains(points));
+    QCOMPARE(fromRoot.size(), 2);
+    QVERIFY(fromRoot.contains(permit) && fromRoot.contains(points));
     QVERIFY(!fromRoot.contains(survey));
     auto* surveyGroup = project.layerTreeRoot()->addGroup(QString::fromUtf8(LayerOps::kGroupSurveyData));
     surveyGroup->addLayer(survey);
-    QVERIFY(LayerOps::removableLegendLayersFromNode(surveyGroup).isEmpty());
+    // 묶음 줄은 무엇이 들었든 통째로 지운다. 조사 레이어 한 줄은 레이어 창 선택으로 지운다.
+    QCOMPARE(LayerOps::removableLegendLayersFromNode(surveyGroup), QList<QgsMapLayer*>{survey});
+    QVERIFY(LayerOps::removableLegendLayersFromNode(surveyGroup->findLayer(survey->id())).isEmpty());
   }
 
   void referenceRootDeleteKeepsCadastralOut() {
@@ -620,10 +629,11 @@ private slots:
     refs->addLayer(sat);
     auto* kind = refs->addGroup(QStringLiteral("문화유적분포지도"));
     kind->addLayer(heritage);
-    const QList<QgsMapLayer*> out = LayerOps::removableReferenceLayersFromNode(refs);
-    QVERIFY(out.contains(sat));
-    QVERIFY(out.contains(heritage));
-    QVERIFY(!out.contains(nullptr));
+    QVERIFY(LayerOps::removableReferenceLayersFromNode(refs).isEmpty());
+    QCOMPARE(LayerOps::removableReferenceLayersFromNode(refs->findLayer(sat->id())),
+             QList<QgsMapLayer*>{sat});
+    QCOMPARE(LayerOps::removableReferenceLayersFromNode(kind->findLayer(heritage->id())),
+             QList<QgsMapLayer*>{heritage});
   }
 
   void anyReferenceBundleListsUnmarkedChildrenForDelete() {
@@ -635,10 +645,13 @@ private slots:
     QVERIFY(lines->isValid());
     project.addMapLayer(lines, false);
     topo->addLayer(lines);
-    const QList<QgsMapLayer*> fromBundle = LayerOps::removableReferenceLayersFromNode(topo);
-    QCOMPARE(fromBundle, QList<QgsMapLayer*>{lines});
-    const QList<QgsMapLayer*> fromRoot = LayerOps::removableLegendLayersFromNode(refs);
-    QCOMPARE(fromRoot, QList<QgsMapLayer*>{lines});
+    QVERIFY(LayerOps::removableReferenceLayersFromNode(topo).isEmpty());
+    QCOMPARE(LayerOps::removableReferenceLayersFromNode(topo->findLayer(lines->id())),
+             QList<QgsMapLayer*>{lines});
+    QCOMPARE(LayerOps::removableLegendLayersFromNode(topo), QList<QgsMapLayer*>{lines});
+    QCOMPARE(LayerOps::removableLegendLayersFromNode(refs), QList<QgsMapLayer*>{lines});
+    QVERIFY2(LayerOps::removableLegendLayersFromNode(project.layerTreeRoot()).isEmpty(),
+             "보이지 않는 맨 위 뿌리를 지우면 모든 레이어가 사라진다");
   }
 
   void wheelZoomFactorIsFinerThanQgisDefault() {

@@ -160,16 +160,28 @@ void MainWindow::removeLayersFromTree(QgsLayerTreeView* tree) {
   }
   auto* project = QgsProject::instance();
   auto* root = project ? project->layerTreeRoot() : nullptr;
+  // 고른 묶음 줄은 줄 자체도 뺀다. 레이어 없이 빈 하위 묶음만 남은 묶음도 마찬가지다.
+  // 바깥 묶음과 그 안쪽 묶음을 같이 골랐으면 바깥 것만 떼어 낸다. 안쪽은 따라간다.
+  QList<QgsLayerTreeGroup*> groups;
   if (root) {
-    for (QgsMapLayer* layer : QList<QgsMapLayer*>(selected)) {
-      QgsLayerTreeLayer* item = root->findLayer(layer->id());
-      auto* parent = item ? qobject_cast<QgsLayerTreeGroup*>(item->parent()) : nullptr;
-      if (!parent) continue;
-      for (QgsMapLayer* extra : LayerOps::removableCadastralLayersFromNode(parent))
-        addLayer(extra);
+    for (QgsLayerTreeNode* node : nodes) {
+      auto* group = qobject_cast<QgsLayerTreeGroup*>(node);
+      if (!group || group == root) continue;
+      bool inProject = false;
+      for (QgsLayerTreeNode* up = group->parent(); up && !inProject; up = up->parent())
+        inProject = up == root;
+      if (inProject) groups.append(group);
+    }
+    const QList<QgsLayerTreeGroup*> picked = groups;
+    groups.clear();
+    for (QgsLayerTreeGroup* group : picked) {
+      bool nested = false;
+      for (QgsLayerTreeNode* up = group->parent(); up && !nested; up = up->parent())
+        nested = picked.contains(qobject_cast<QgsLayerTreeGroup*>(up));
+      if (!nested) groups.append(group);
     }
   }
-  if (selected.isEmpty() || !project || !root) {
+  if ((selected.isEmpty() && groups.isEmpty()) || !project || !root) {
     statusBar()->showMessage(QStringLiteral("제거할 레이어를 먼저 클릭하세요."), 4000);
     return;
   }
@@ -214,14 +226,26 @@ void MainWindow::removeLayersFromTree(QgsLayerTreeView* tree) {
       group = above;
     }
   }
-  if (removed->entries.empty()) return;
-  bool removedCadastral = false;
-  for (const auto& entry : removed->entries) {
-    QgsMapLayer* layer = entry.layer.get();
-    if (LayerOps::isCadastralLayer(layer) || LayerOps::isVworldCadastralPicture(layer))
-      removedCadastral = true;
+  // 고른 묶음 줄 자체. 레이어가 든 하위 묶음은 위에서 따로 떼어 두었고, 처음부터 빈 하위 묶음은
+  // takeChild 동안 QGIS 쪽에서 빠져 Ctrl+Z 로 돌아오지 않는다(빈 제목 줄은 원래 남기지 않는다).
+  for (QgsLayerTreeGroup* group : groups) {
+    auto* above = qobject_cast<QgsLayerTreeGroup*>(group->parent());
+    if (!above) continue;  // 비어서 위에서 이미 떼어 냈다.
+    KaRemovedLayers::Group detached;
+    detached.parent = above;
+    detached.index = above->children().indexOf(group);
+    if (!above->takeChild(group)) continue;
+    detached.node.reset(group);
+    removed->groups.push_back(std::move(detached));
   }
-  if (removedCadastral)
+  if (removed->entries.empty() && removed->groups.empty()) return;
+  const bool onlyGroups = removed->entries.empty();
+  bool removedBackground = false;
+  for (const auto& entry : removed->entries) {
+    if (LayerOps::isVworldCadastralPicture(entry.layer.get()))
+      removedBackground = true;
+  }
+  if (removedBackground)
     LayerOps::rememberUserRemovedCadastral(project);
   KaUndoAction action;
   action.type = KaUndoAction::LayersRemoved;
@@ -234,7 +258,9 @@ void MainWindow::removeLayersFromTree(QgsLayerTreeView* tree) {
   if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
   if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
   updateUndoRedoActions();
-  statusBar()->showMessage(QStringLiteral("레이어를 목록에서 제거했습니다. Ctrl+Z로 복원할 수 있습니다. 원본 파일은 그대로입니다."), 6000);
+  statusBar()->showMessage(onlyGroups
+      ? QStringLiteral("빈 묶음을 목록에서 지웠습니다. Ctrl+Z로 복원할 수 있습니다.")
+      : QStringLiteral("레이어를 목록에서 제거했습니다. Ctrl+Z로 복원할 수 있습니다. 원본 파일은 그대로입니다."), 6000);
 }
 
 void MainWindow::updateUndoRedoActions() {
@@ -433,10 +459,16 @@ void MainWindow::deleteFeaturesOrSelectedReferenceLayers() {
     removeSelectedLayers();
     return;
   }
-  if (m_layerTree &&
-      !LayerOps::removableLegendLayersFromNode(m_layerTree->currentNode()).isEmpty()) {
-    removeSelectedLayers();
-    return;
+  if (m_layerTree) {
+    // 지도에서 누른 Delete 로는 조사 레이어가 든 묶음을 통째로 빼지 않는다. 그런 묶음은 레이어 창에서 지운다.
+    const QList<QgsMapLayer*> fromNode = LayerOps::removableLegendLayersFromNode(m_layerTree->currentNode());
+    const bool touchesSurvey = std::any_of(fromNode.cbegin(), fromNode.cend(), [](const QgsMapLayer* layer) {
+      return !LayerOps::layerKeyOf(layer).isEmpty();
+    });
+    if (!fromNode.isEmpty() && !touchesSurvey) {
+      removeSelectedLayers();
+      return;
+    }
   }
   deleteSelectedFeatures();
 }

@@ -48,7 +48,9 @@ elseif (EXISTS "A:/OSGeo4W")
   set(OSGEO4W_ROOT_DEFAULT "A:/OSGeo4W")
 endif()
 set(OSGEO4W_ROOT "${OSGEO4W_ROOT_DEFAULT}" CACHE PATH "OSGeo4W root")
-set(QGIS_PREFIX_PATH "${OSGEO4W_ROOT}/apps/qgis-dev" CACHE PATH "QGIS prefix")
+# Keep the prefix under the selected root. A stale cache still pointed tests
+# at another PC's qgis-dev, so the WMS provider never loaded.
+set(QGIS_PREFIX_PATH "${OSGEO4W_ROOT}/apps/qgis-dev" CACHE PATH "QGIS prefix" FORCE)
 list(PREPEND CMAKE_PREFIX_PATH "${OSGEO4W_ROOT}/apps/Qt6" "${OSGEO4W_ROOT}/apps/Qt6/lib/cmake")
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Xml PrintSupport Network Svg Test Multimedia MultimediaWidgets)
 find_package(Qt6 REQUIRED COMPONENTS WebEngineWidgets)
@@ -771,6 +773,8 @@ if(KA_HGIS_BUILD_TESTS)
     cadastralGroupDeleteKeyRemovesChildren
     surveyAreaDialogContinuesTheExistingArea
     cadastralGroupContextMenuCanRemove
+    referenceGroupMenuRemovesEveryRowAndCtrlZRestores
+    emptyGroupDeleteKeyRemovesRowAndCtrlZRestores
     ctrlZRestoresVertexEditsAndGroupedFeatureDeletion
     layerContextMenu_usesClickedRowAndLeavesSourceIntact
     layerContextMenu_moveToBottomPreservesRegisteredLayer

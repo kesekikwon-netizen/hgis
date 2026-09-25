@@ -270,15 +270,12 @@ QgsVectorLayer* CadastralImport::addPrepared(QgsProject* project, QgsMapCanvas* 
   }
   QStringList previous;
   QColor retainedColor(Qt::black); bool retainedLabels = true;
+  const QString downloadedName = QStringLiteral("지적도 · 조사 주변 5km");
   for (auto* existing : project->mapLayers()) {
-    if (existing->customProperty(QStringLiteral("ka_hgis/cadastral")).toBool()) {
-      previous.append(existing->id());
-      retainedColor = QColor(existing->customProperty(QStringLiteral("ka_hgis/cadastral_color"), QStringLiteral("#000000")).toString());
-      if (auto* vector = qobject_cast<QgsVectorLayer*>(existing)) retainedLabels = vector->labelsEnabled();
-    }
-    // Keep the old online layer, but don't draw its baked-in labels twice.
-    if (existing->providerType() == QLatin1String("wms") && existing->source().contains(QLatin1String("lp_pa_cbnd"), Qt::CaseInsensitive))
-      if (auto* node = project->layerTreeRoot()->findLayer(existing->id())) node->setItemVisibilityChecked(false);
+    if (existing->name() != downloadedName) continue;
+    previous.append(existing->id());
+    retainedColor = QColor(existing->customProperty(QStringLiteral("ka_hgis/cadastral_color"), QStringLiteral("#000000")).toString());
+    if (auto* vector = qobject_cast<QgsVectorLayer*>(existing)) retainedLabels = vector->labelsEnabled();
   }
   applyStyle(layer.get(), retainedColor, retainedLabels);
   LayerOps::markCadastralLayer(layer.get());

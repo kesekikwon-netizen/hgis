@@ -440,6 +440,7 @@ private slots:
     server.downloadFixture=R"HTML(<html><body><table><tr><td><input type="checkbox"></td><td>13780449.zip</td><td>1 MB</td></tr></table><button>선택 다운로드</button></body></html>)HTML";
     QVERIFY(server.listen(QHostAddress::LocalHost));QTemporaryDir files;
     KaTopographicBrowser browser(nullptr,files.path());browser.show();
+    browser.setCompactMode(false);
     auto* tabs=browser.findChild<QTabWidget*>(QStringLiteral("topographicTabs"));
     auto* view=qobject_cast<QWebEngineView*>(tabs->widget(0));QSignalSpy loaded(view,&QWebEngineView::loadFinished);
     browser.navigate(server.url(QStringLiteral("/pd/purchs/download.do")));
@@ -777,6 +778,8 @@ private slots:
     server.failPortalConnection=true;
     KaTopographicBrowser browser(nullptr,files.path());browser.setCompactMode(true);browser.show();
     browser.setPortalTestUrl(server.url(QStringLiteral("/ms/map/NlipMap.do")));
+    browser.setCompactMode(false);
+    browser.setCompactMode(true);
     auto* view=browser.findChild<QWebEngineView*>();QVERIFY(view);
     connect(view->page(),&QWebEnginePage::loadingChanged,&browser,[&](const QWebEngineLoadingInfo& info){
       failedLoad|=info.status()==QWebEngineLoadingInfo::LoadFailedStatus;

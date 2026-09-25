@@ -39,7 +39,7 @@ void CPL_STDCALL handleGdalError(CPLErr level, CPLErrorNum code, const char* mes
     if (const CPLErrorHandler previous = g_previous.load())
       previous(level, code, message);
     else
-      CPLDefaultErrorHandler(level, code, message);
+      CPLCallPreviousHandler(level, code, message);
   } catch (...) {
     KaCrashGuard::logLine(QStringLiteral("[except] app/KaGdalErrorLog.cpp:43"));
   }
@@ -59,11 +59,15 @@ QString describe(int level, int code, const QString& message) {
 
 void install() {
   if (g_installed.exchange(true)) return;
+  // Set updates the process handler. Push updates this thread, which is what
+  // CPLError actually calls once any handler is already on the thread.
   g_previous.store(CPLSetErrorHandler(handleGdalError));
+  CPLPushErrorHandler(handleGdalError);
 }
 
 void uninstall() {
   if (!g_installed.exchange(false)) return;
+  CPLPopErrorHandler();
   CPLSetErrorHandler(g_previous.exchange(nullptr));
 }
 
