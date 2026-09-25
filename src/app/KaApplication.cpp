@@ -3,6 +3,7 @@
 #include "KaCrashGuard.h"
 #include "KaGdalErrorLog.h"
 #include "KaTheme.h"
+#include "KaUserError.h"
 #include "KaIcons.h"
 #include "KaStartupSplash.h"
 #include "MainWindow.h"
@@ -655,11 +656,13 @@ int KaApplication::run(int argc, char** argv) {
 #endif
   if (!sessionTempReady) {
     QApplication app(argc, argv);
-    QMessageBox::critical(
-        nullptr, QStringLiteral("앱을 시작할 수 없습니다"),
-        QStringLiteral("작업에 필요한 임시 폴더를 준비하지 못했습니다.\n"
-                       "디스크의 남은 공간과 임시 폴더의 쓰기 권한을 확인한 뒤 다시 실행해 주세요.\n"
-                       "조사 파일은 변경하지 않았습니다."));
+    KaUserError::critical(nullptr, {
+        QStringLiteral("앱을 시작할 수 없습니다"),
+        QStringLiteral("작업에 필요한 임시 폴더를 준비하지 못했습니다."),
+        QStringLiteral("디스크 공간이 부족하거나 임시 폴더에 쓸 수 없습니다."),
+        QStringLiteral("디스크의 남은 공간과 임시 폴더의 쓰기 권한을 확인한 뒤 다시 실행해 주세요. "
+                       "조사 파일은 변경하지 않았습니다."),
+    });
     return 2;
   }
 #if KA_HGIS_HAS_QGIS
@@ -707,12 +710,12 @@ int KaApplication::run(int argc, char** argv) {
                                 .arg(bundled.projData, crsOk ? QStringLiteral("ok")
                                                              : QStringLiteral("fail")));
       if (!crsOk && !autoQa) {
-        QMessageBox::warning(
-            nullptr, QStringLiteral("좌표계 자료를 읽지 못했습니다"),
-            QStringLiteral(
-                "이 폴더의 proj.db로 작업 좌표계(5186/5187)와 위성·지적(3857)을 읽지 못했습니다.\n"
-                "폴더 전체를 복사한 뒤 ka-hgis.exe 또는 start.bat으로 다시 실행하세요.\n"
-                "실행 파일만 옮기면 지도가 나타나지 않습니다."));
+        KaUserError::warn(nullptr, {
+            QStringLiteral("좌표계 자료를 읽지 못했습니다"),
+            QStringLiteral("작업 좌표계(5186/5187)와 위성·지적(3857)을 읽지 못했습니다."),
+            QStringLiteral("이 폴더의 proj.db가 없거나 깨져 있습니다. 실행 파일만 옮기면 지도가 나타나지 않습니다."),
+            QStringLiteral("폴더 전체를 복사한 뒤 ka-hgis.exe 또는 start.bat으로 다시 실행하세요."),
+        });
       }
     }
   }

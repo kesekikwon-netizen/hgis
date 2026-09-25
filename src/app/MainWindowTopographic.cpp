@@ -3,6 +3,7 @@
 #include "KaTopographicImportDialog.h"
 #include "KaTopographicScopePanel.h"
 #include "KaTopographicAccountDialog.h"
+#include "KaUserError.h"
 #include "core/TopographicSettings.h"
 #include <QDir>
 #include <QFileDialog>
@@ -23,7 +24,12 @@ void MainWindow::openTopographicDownload() {
   }
   const QString directory=QFileInfo(m_surveyPath).absoluteDir().filePath(QStringLiteral("지형도"));
   if (!QDir().mkpath(directory)) {
-    QMessageBox::warning(this,QStringLiteral("수치지형도"),QStringLiteral("조사 폴더에 지형도 폴더를 만들지 못했습니다. 저장 위치의 쓰기 권한과 공간을 확인하세요."));
+    KaUserError::warn(this, {
+        QStringLiteral("수치지형도"),
+        QStringLiteral("조사 폴더에 지형도 폴더를 만들지 못했습니다."),
+        QStringLiteral("저장 위치의 쓰기 권한이나 공간이 부족할 수 있습니다."),
+        QStringLiteral("저장 위치의 쓰기 권한과 공간을 확인한 뒤 다시 열어 주세요."),
+    });
     return;
   }
   if (!m_topographicBrowser) {

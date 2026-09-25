@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "KaDownloadUi.h"
 #include "KaReferenceDownloadJob.h"
+#include "KaUserError.h"
 #include "core/CadastralImport.h"
 #include "core/CadastralPortal.h"
 #include "core/LayerOps.h"
@@ -100,7 +101,13 @@ void MainWindow::downloadCadastral() {
       }
     }
   } catch (const QgsCsException&) {
-    QMessageBox::warning(this, QStringLiteral("지적도"), QStringLiteral("조사구역 좌표계를 확인하지 못했습니다.")); return;
+    KaUserError::warn(this, {
+        QStringLiteral("지적도"),
+        QStringLiteral("조사구역 좌표계를 확인하지 못했습니다."),
+        QStringLiteral("조사구역 레이어의 좌표계와 작업 좌표계를 맞추지 못했습니다."),
+        QStringLiteral("조사구역을 다시 그리거나 작업 좌표계를 확인한 뒤 다시 받아 주세요."),
+    });
+    return;
   }
   if (parts.isEmpty()) { QMessageBox::information(this, QStringLiteral("지적도"), QStringLiteral("조사구역을 먼저 그려 주세요. 경계에서 주변 5km의 지적도를 받습니다.")); return; }
   request.survey = QgsGeometry::unaryUnion(parts);
@@ -132,14 +139,28 @@ void MainWindow::downloadCadastral() {
     auto* layer = result.isReady() ? CadastralImport::addPrepared(QgsProject::instance(), window->m_canvas, result, &error) : nullptr;
     if (!layer && result.accountRejected) {
       // Offer the account right where the login failed, not only in 더보기 or the 지적 right-click menu.
-      QMessageBox box(QMessageBox::Warning, QStringLiteral("지적도 받기"), error, QMessageBox::NoButton, window);
-      auto* reenter = box.addButton(QStringLiteral("아이디·비밀번호 다시 입력"), QMessageBox::AcceptRole);
-      box.addButton(QStringLiteral("닫기"), QMessageBox::RejectRole);
-      box.exec();
-      if (box.clickedButton() == reenter && window && window->configureCadastralAccount()) window->downloadCadastral();
+      const auto choice = KaUserError::warn(window, {
+          QStringLiteral("지적도 받기"),
+          QStringLiteral("지적도를 받지 못했습니다."),
+          error.isEmpty() ? QStringLiteral("아이디나 비밀번호가 맞지 않습니다.") : error,
+          QStringLiteral("아이디·비밀번호를 다시 입력한 뒤 받기를 누르세요."),
+          QStringLiteral("아이디·비밀번호 다시 입력"),
+      });
+      if (choice == KaUserError::Result::ActionChosen && window &&
+          window->configureCadastralAccount())
+        window->downloadCadastral();
       return;
     }
-    if (!layer) { QMessageBox::warning(window, QStringLiteral("지적도 받기"), error.isEmpty() ? QStringLiteral("지적도를 준비하지 못했습니다.") : error); return; }
+    if (!layer) {
+      KaUserError::warn(window, {
+          QStringLiteral("지적도 받기"),
+          QStringLiteral("지적도를 준비하지 못했습니다."),
+          error.isEmpty() ? QStringLiteral("서버 응답이 없거나 받은 자료를 지도에 올리지 못했습니다.")
+                          : error,
+          QStringLiteral("인터넷 연결과 계정을 확인한 뒤 다시 받아 주세요."),
+      });
+      return;
+    }
     if (window->m_layerTree) window->m_layerTree->setCurrentLayer(layer);
     QgsProject::instance()->setDirty(true);
     window->statusBar()->showMessage(QStringLiteral("조사 주변 5km 지적도를 추가했습니다. 지적도 옆 메뉴에서 선 색·지번 표시를 바꿀 수 있습니다."), 10000);

@@ -11,6 +11,7 @@
 #include "KaTerrain3dLayoutStudio.h"
 #include "KaTerrain3dStudio.h"
 #include "KaTheme.h"
+#include "KaUserError.h"
 #include "core/LayerOps.h"
 
 #include <QAbstractSpinBox>
@@ -676,9 +677,14 @@ void MainWindow::editFeatureAttributes(QgsVectorLayer* layer, const QgsFeature& 
   const bool wasEditable = layer->isEditable();
   if (!wasEditable && !layer->startEditing()) {
     QString detail = layer->dataProvider() ? layer->dataProvider()->error().message() : QString();
-    QMessageBox::warning(this, QStringLiteral("속성"),
-                         QStringLiteral("편집 모드를 열 수 없습니다: %1\n%2")
-                             .arg(layer->name(), detail));
+    KaUserError::warn(this, {
+        QStringLiteral("속성"),
+        QStringLiteral("속성 편집 모드를 열지 못했습니다."),
+        QStringLiteral("%1\n%2").arg(layer->name(),
+                                     detail.isEmpty() ? QStringLiteral("레이어가 잠겨 있거나 다른 프로그램에서 열려 있을 수 있습니다.")
+                                                      : detail),
+        QStringLiteral("다른 프로그램에서 같은 파일을 닫은 뒤 다시 저장하세요."),
+    });
     return;
   }
 
@@ -733,8 +739,12 @@ void MainWindow::editFeatureAttributes(QgsVectorLayer* layer, const QgsFeature& 
   m_undoActions.append(undo);
   if (!wasEditable) {
     if (!layer->commitChanges()) {
-      QMessageBox::warning(this, QStringLiteral("속성"),
-                           QStringLiteral("저장 실패\n%1").arg(layer->commitErrors().join(QLatin1Char('\n'))));
+      KaUserError::warn(this, {
+          QStringLiteral("속성"),
+          QStringLiteral("바꾼 속성을 저장하지 못했습니다."),
+          layer->commitErrors().join(QLatin1Char('\n')),
+          QStringLiteral("파일이 다른 곳에서 열려 있지 않은지 확인한 뒤 다시 저장하세요."),
+      });
       return;
     }
   }
@@ -862,8 +872,12 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
 void MainWindow::beginEdit(QgsVectorLayer* layer) {
   try {
     if (!layer || !layer->isValid()) {
-      QMessageBox::warning(this, QStringLiteral("알림"),
-                           QStringLiteral("먼저 「새 조사」로 프로젝트를 만드세요."));
+      KaUserError::warn(this, {
+          QStringLiteral("알림"),
+          QStringLiteral("그릴 조사 레이어가 없습니다."),
+          QStringLiteral("아직 새 조사를 만들지 않았거나 조사 파일이 열려 있지 않습니다."),
+          QStringLiteral("먼저 「새 조사」로 프로젝트를 만든 뒤 다시 그리세요."),
+      });
       return;
     }
     if (!m_canvas) return;
@@ -875,11 +889,15 @@ void MainWindow::beginEdit(QgsVectorLayer* layer) {
     if (!layer->isEditable()) {
       if (!layer->startEditing()) {
         QString detail = layer->dataProvider() ? layer->dataProvider()->error().message() : QString();
-        QMessageBox::warning(
-            this, QStringLiteral("편집"),
-            QStringLiteral("편집 모드를 열 수 없습니다: %1\n%2")
-                .arg(layer->name(), detail.isEmpty() ? QStringLiteral("GPKG가 다른 프로그램에서 열려 있는지 확인")
-                                                     : detail));
+        KaUserError::warn(this, {
+            QStringLiteral("편집"),
+            QStringLiteral("편집 모드를 열지 못했습니다."),
+            QStringLiteral("%1\n%2")
+                .arg(layer->name(),
+                     detail.isEmpty() ? QStringLiteral("GPKG가 다른 프로그램에서 열려 있는지 확인")
+                                      : detail),
+            QStringLiteral("같은 파일을 연 다른 프로그램을 닫은 뒤 다시 그리세요."),
+        });
         return;
       }
     }

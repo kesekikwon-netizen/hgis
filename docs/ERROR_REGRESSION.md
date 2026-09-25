@@ -5,6 +5,7 @@
 
 | 증상 | 원인 | 재발 방지 |
 | --- | --- | --- |
+| 오류 창이 원인·해결 없이 한 줄만 뜸 | QMessageBox/notify가 짧은 본문만 씀. 해결 단추는 지적 로그인 정도만. | KaUserError what/why/how + 선택 단추. 상위 20곳. 시험: user_error (ormatBody_containsWhatWhyHow, warn_withAction_returnsActionChosen, warn_withoutAction_returnsDismissed). 표: docs/user/error-message-standard-p4-2.md |
 | 위성/지적 버튼을 눌러도 지도가 안 보임 | 공식 WMTS URI가 `isValid()`만 통과하고 타일은 실패. 폴백 xdworld를 안 탐. 지적 WMS를 5186/5179로 먼저 열어 `Cannot calculate extent`. | 위성은 xdworld를 먼저. 지적은 `cadastralWmsCrsCandidates()`가 **4326→3857→900913만**. 5186/5187/5179 금지. 테스트: `cadastralWmsCrs_neverStartsWithWorkCrs5179`, `addVworldSatellite_allowsEmptyKeyViaPublicTiles` |
 | 지적 레이어는 범례에 있는데 필지가 안 보임 | 구버전(eac6c9c)은 `crs=EPSG:3857` + `tilePixelRatio=2` + `KEY/DOMAIN` tiled WMS. 이후 GDAL/4326/5179 경로가 그걸 깨뜨림. | 구버전 URI로 복구. GDAL은 최후 폴백만. 테스트: `cadastralWmsCrs_neverStartsWithWorkCrs5179` |
 | 「이 레이어만 보기」가 그 레이어로 안 감 | `QgsRectangle::isEmpty()`가 점/축평행 선을 “도형 없음”으로 처리. 우클릭 선택을 `QgsLayerTreeModel`로 캐스팅해 실패. | `isNull()`/`isFinite()`만 실패. `index2node` + `currentLayer()`. 줌 실패 시 isolate 안 함. 테스트: `zoomToLayerMax_movesCanvasToPointFeature`, `isolateAndZoom_hidesOtherSurveyKeepsReference` |

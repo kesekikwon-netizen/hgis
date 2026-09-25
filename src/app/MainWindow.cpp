@@ -6,6 +6,7 @@
 #include "KaWindowGeometry.h"
 #include "core/DemPresentation.h"
 #include "KaTheme.h"
+#include "KaUserError.h"
 #include "KaIcons.h"
 #include "KaCaptureMapTool.h"
 #include "KaAttributeMapTool.h"
@@ -1527,9 +1528,13 @@ void MainWindow::buildUi() {
   connect(filesPanel, &KaFileBrowserPanel::fileActivated, this, [this](const QString& path) {
     const bool raster = GeorefService::isImagePath(path);
     if (raster ? !addRasterFromPath(path) : !addVectorFromPath(path)) {
-      QMessageBox::warning(this, QStringLiteral("파일"),
-                           QStringLiteral("지도 레이어로 열 수 없습니다 (SHP/DXF/DWG/GPKG/GeoTIFF/JPG):\n%1")
-                               .arg(QDir::toNativeSeparators(path)));
+      KaUserError::warn(this, {
+          QStringLiteral("파일"),
+          QStringLiteral("선택한 파일을 지도 레이어로 열지 못했습니다."),
+          QStringLiteral("SHP/DXF/DWG/GPKG/GeoTIFF/JPG만 지도에 올릴 수 있습니다.\n%1")
+              .arg(QDir::toNativeSeparators(path)),
+          QStringLiteral("지원 형식인지 확인한 뒤 다시 열어 주세요. DWG는 DXF로 저장해 보세요."),
+      });
     }
   });
   connect(filesPanel, &KaFileBrowserPanel::statusMessage, this, [this](const QString& msg) {
@@ -3566,7 +3571,12 @@ void MainWindow::importControlCsv() {
   const LayerOps::ControlCsvPreview preview =
       LayerOps::previewControlPointsCsv(layer, path, QgsProject::instance(), &err);
   if (!preview.ok) {
-    QMessageBox::warning(this, QStringLiteral("CSV"), err.isEmpty() ? QStringLiteral("CSV를 읽지 못했습니다.") : err);
+    KaUserError::warn(this, {
+        QStringLiteral("CSV"),
+        QStringLiteral("기준점 CSV를 읽지 못했습니다."),
+        err.isEmpty() ? QStringLiteral("파일 형식이나 좌표 칸을 확인하지 못했습니다.") : err,
+        QStringLiteral("CSV에 X·Y(또는 경도·위도) 칸이 있는지 확인한 뒤 다시 가져오세요."),
+    });
     return;
   }
   QMessageBox box(this);
@@ -4193,8 +4203,12 @@ void MainWindow::georefAssistant() {
     const bool ok = GeorefService::isImagePath(path) ? addRasterFromPath(path)
                                                      : addVectorFromPath(path);
     if (!ok) {
-      QMessageBox::warning(this, QStringLiteral("맞추기"),
-                           QStringLiteral("파일을 열 수 없습니다.\nDWG면 DXF로 저장한 뒤 다시 시도하세요."));
+      KaUserError::warn(this, {
+          QStringLiteral("맞추기"),
+          QStringLiteral("맞출 도면 파일을 열지 못했습니다."),
+          QStringLiteral("지원하지 않는 형식이거나 DWG 드라이버가 이 버전을 읽지 못합니다."),
+          QStringLiteral("DWG면 AutoCAD에서 DXF로 저장한 뒤 다시 시도하세요."),
+      });
       return;
     }
     layer = m_layerTree ? m_layerTree->currentLayer() : nullptr;
@@ -5199,9 +5213,13 @@ void MainWindow::onFileBrowserActivated(QListWidgetItem* item) {
   const QString low = path.toLower();
   const bool raster = GeorefService::isImagePath(path);
   if (raster ? !addRasterFromPath(path) : !addVectorFromPath(path)) {
-    QMessageBox::warning(this, QStringLiteral("파일"),
-                         QStringLiteral("지도 레이어로 열 수 없습니다 (SHP/DXF/DWG/GPKG/GeoTIFF/JPG):\n%1")
-                             .arg(QDir::toNativeSeparators(path)));
+    KaUserError::warn(this, {
+        QStringLiteral("파일"),
+        QStringLiteral("선택한 파일을 지도 레이어로 열지 못했습니다."),
+        QStringLiteral("SHP/DXF/DWG/GPKG/GeoTIFF/JPG만 지도에 올릴 수 있습니다.\n%1")
+            .arg(QDir::toNativeSeparators(path)),
+        QStringLiteral("지원 형식인지 확인한 뒤 다시 열어 주세요. DWG는 DXF로 저장해 보세요."),
+    });
   } else {
     if (m_layersCard && !m_layersCard->isVisible())
       m_layersCard->setVisible(true);
@@ -5402,11 +5420,13 @@ bool MainWindow::addVectorFromPath(const QString& path) {
   if (added.isEmpty()) {
     const QString low = path.toLower();
     if (low.endsWith(QLatin1String(".dwg")) || low.endsWith(QLatin1String(".dxf"))) {
-      QMessageBox::warning(this, QStringLiteral("파일"),
-                           QStringLiteral("이 CAD 파일을 열 수 없습니다.\n"
-                                          "DXF는 보통 열리고, DWG는 버전/드라이버에 따라 안 열릴 수 있습니다.\n"
-                                          "AutoCAD에서 DXF로 저장한 뒤 다시 끌어 넣으세요.\n%1")
-                               .arg(QDir::toNativeSeparators(path)));
+      KaUserError::warn(this, {
+          QStringLiteral("파일"),
+          QStringLiteral("이 CAD 파일을 열지 못했습니다."),
+          QStringLiteral("DXF는 보통 열리고, DWG는 버전·드라이버에 따라 안 열릴 수 있습니다.\n%1")
+              .arg(QDir::toNativeSeparators(path)),
+          QStringLiteral("AutoCAD에서 DXF로 저장한 뒤 다시 끌어 넣으세요."),
+      });
     }
     return false;
   }
@@ -5470,7 +5490,12 @@ bool MainWindow::configureHeritageAccount() {
 void MainWindow::fetchNearbyHeritage() {
   // 막히면 조용히 끝내지 않는다. 왜 못 하는지 창으로 말한다.
   auto stopWith = [this](const QString& why) {
-    QMessageBox::warning(this, QStringLiteral("주변유적 받기"), why);
+    KaUserError::warn(this, {
+        QStringLiteral("주변유적 받기"),
+        QStringLiteral("주변유적을 받기 전에 막혔습니다."),
+        why,
+        QStringLiteral("안내를 확인한 뒤 조건이 되면 다시 「주변유적」을 누르세요."),
+    });
   };
 
   auto* areaVl = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"));
@@ -5567,8 +5592,12 @@ void MainWindow::openHeritageBrowserFor(const HeritageRegion& region, const QStr
   const QString root = QDir(localBase).filePath(
       QStringLiteral("주변유적/%1 %2/원본").arg(sido, city));
   if (!QDir().mkpath(root)) {
-    QMessageBox::warning(this, QStringLiteral("주변유적 받기"),
-                         QStringLiteral("조사폴더에 주변유적 폴더를 만들지 못했습니다."));
+    KaUserError::warn(this, {
+        QStringLiteral("주변유적 받기"),
+        QStringLiteral("주변유적 자료를 둘 폴더를 만들지 못했습니다."),
+        QStringLiteral("저장 위치의 쓰기 권한이나 공간이 부족할 수 있습니다."),
+        QStringLiteral("디스크 공간과 폴더 권한을 확인한 뒤 다시 받아 주세요."),
+    });
     return;
   }
 

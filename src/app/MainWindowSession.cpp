@@ -9,6 +9,7 @@
 #include "KaTerrain3dLayoutStudio.h"
 #include "KaTerrain3dStudio.h"
 #include "KaTopographicBrowser.h"
+#include "KaUserError.h"
 #include "core/DemPresentation.h"
 #include "core/KaSafeQgis.h"
 #include "core/LayerOps.h"
@@ -216,11 +217,12 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
             .arg(embCrashed ? QStringLiteral("예외") : QStringLiteral("실패"), embErr));
     if (embCrashed) {
       kaMarkQgisProjectUnsafeToRead(gpkgPath);
-      QMessageBox::warning(
-          this, QStringLiteral("조사 열기"),
-          QStringLiteral("조사 파일 안의 작업공간을 읽는 중 오류가 났습니다.\n\n"
-                         "프로그램을 닫았다가 다시 열어 주세요. 다시 열면 조사 데이터"
-                         "(.gpkg)만으로 엽니다."));
+      KaUserError::warn(this, {
+          QStringLiteral("조사 열기"),
+          QStringLiteral("조사 파일 안의 작업공간을 읽는 중 오류가 났습니다."),
+          QStringLiteral("작업공간 자료가 손상되었거나 이 버전에서 읽지 못합니다."),
+          QStringLiteral("프로그램을 닫았다가 다시 열어 주세요. 다시 열면 조사 데이터(.gpkg)만으로 엽니다."),
+      });
       return abortOpen();
     }
   }
@@ -256,13 +258,14 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
       KaCrashGuard::logLine(
           QStringLiteral("[open] 동반 프로젝트 읽기 중 예외 — 이어서 열지 않음: %1")
               .arg(projectToRead));
-      QMessageBox::warning(
-          this, QStringLiteral("조사 열기"),
-          QStringLiteral(
-              "동반 프로젝트 파일이 손상되어 읽는 중 오류가 났습니다.\n\n%1\n\n"
-              "프로그램을 닫았다가 다시 열면 이 파일을 건너뛰고 조사 데이터(.gpkg)로 "
-              "정상적으로 열립니다. 손상된 파일을 지우고 다시 저장하면 원래대로 돌아갑니다.")
-              .arg(QDir::toNativeSeparators(projectToRead)));
+      KaUserError::warn(this, {
+          QStringLiteral("조사 열기"),
+          QStringLiteral("동반 프로젝트 파일을 읽는 중 오류가 났습니다."),
+          QStringLiteral("파일이 손상되었거나 이 버전에서 읽지 못합니다.\n%1")
+              .arg(QDir::toNativeSeparators(projectToRead)),
+          QStringLiteral("프로그램을 닫았다가 다시 열면 이 파일을 건너뛰고 조사 데이터(.gpkg)로 "
+                         "엽니다. 손상된 파일을 지우고 다시 저장하면 원래대로 돌아갑니다."),
+      });
       return abortOpen();
     }
     if (readOk) {
@@ -1334,8 +1337,12 @@ void MainWindow::saveProjectAs() {
   if (!m_surveyPath.isEmpty() && QFile::exists(m_surveyPath) && !sameFile) {
     QString copyError;
     if (!SurveyStorage::copySurvey(m_surveyPath, targetGpkg, &copyError)) {
-      QMessageBox::warning(this, QStringLiteral("저장 실패"),
-                           QStringLiteral("파일을 생성할 수 없습니다:\n%1\n%2").arg(targetGpkg, copyError));
+      KaUserError::warn(this, {
+          QStringLiteral("저장 실패"),
+          QStringLiteral("다른 이름으로 저장할 조사 파일을 만들지 못했습니다."),
+          QStringLiteral("%1\n%2").arg(QDir::toNativeSeparators(targetGpkg), copyError),
+          QStringLiteral("저장 폴더의 쓰기 권한과 남은 공간을 확인한 뒤 다시 저장하세요."),
+      });
       return;
     }
     // 논리 키는 같은 구역도 실제 테이블은 survey_area_2 등으로 다를 수 있다.
@@ -1365,7 +1372,12 @@ void MainWindow::saveProjectAs() {
                                                                   targetFile.completeBaseName(),
                                                                   &err, m_workCrs);
     if (created.isEmpty()) {
-      QMessageBox::warning(this, QStringLiteral("저장 실패"), err);
+      KaUserError::warn(this, {
+          QStringLiteral("저장 실패"),
+          QStringLiteral("새 조사 파일을 만들지 못했습니다."),
+          err.isEmpty() ? QStringLiteral("저장 위치나 권한을 확인하지 못했습니다.") : err,
+          QStringLiteral("다른 폴더를 고르거나 쓰기 권한을 확인한 뒤 다시 저장하세요."),
+      });
       return;
     }
     targetGpkg = created;
@@ -1384,9 +1396,12 @@ void MainWindow::saveProjectAs() {
   }
   QString serr;
   if (!SurveyStorage::writeEmbedded(QgsProject::instance(), targetGpkg, &serr)) {
-    QMessageBox::warning(this, QStringLiteral("저장 실패"),
-                         QStringLiteral("새 조사 파일에 작업공간을 저장하지 못했습니다:\n%1\n\n%2")
-                             .arg(targetGpkg, serr));
+    KaUserError::warn(this, {
+        QStringLiteral("저장 실패"),
+        QStringLiteral("새 조사 파일에 작업공간을 저장하지 못했습니다."),
+        QStringLiteral("%1\n%2").arg(QDir::toNativeSeparators(targetGpkg), serr),
+        QStringLiteral("저장 공간을 확인한 뒤 다시 저장하세요. 현재 열린 조사는 그대로입니다."),
+    });
     return;
   }
   m_surveyPath = targetGpkg;
@@ -1701,8 +1716,14 @@ void MainWindow::setWorkCrs5187() {
 QString MainWindow::vworldApiKeyOrPrompt() {
   QString key = VworldSettings::loadApiKey();
   if (!key.isEmpty()) return key;
-  QMessageBox::information(this, QStringLiteral("VWorld API 키 필요"),
-      QStringLiteral("VWorld 배경지도를 쓰려면 API 키가 필요합니다.\n도움말 → VWorld API 키 설정"));
+  const auto choice = KaUserError::warn(this, {
+      QStringLiteral("VWorld API 키 필요"),
+      QStringLiteral("위성·지적 등 VWorld 배경지도를 켤 수 없습니다."),
+      QStringLiteral("이 PC에 저장한 VWorld API 키가 없습니다."),
+      QStringLiteral("더보기 → VWorld API 키에서 키를 넣은 뒤 다시 켜 주세요."),
+      QStringLiteral("VWorld API 키 입력"),
+  });
+  if (choice == KaUserError::Result::ActionChosen) configureVworldKey();
   return {};
 }
 

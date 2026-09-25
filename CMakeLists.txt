@@ -259,6 +259,7 @@ add_executable(ka-hgis
   src/app/KaDownloadUi.h
   src/app/KaReferenceDownloadJob.cpp
   src/app/KaTheme.cpp
+  src/app/KaUserError.cpp
   src/app/KaIcons.cpp
   src/app/KaCaptureMapTool.cpp
   src/app/KaAttributeMapTool.cpp
@@ -302,6 +303,7 @@ add_executable(ka-hgis
   src/app/KaBeginnerRibbon.h
   src/app/KaApplication.h
   src/app/KaTheme.h
+  src/app/KaUserError.h
   src/app/KaIcons.h
   src/app/KaCaptureMapTool.h
   src/app/KaAttributeMapTool.h
@@ -506,6 +508,15 @@ if(KA_HGIS_BUILD_TESTS)
     ${CMAKE_BINARY_DIR}/generated
   )
   ka_add_qtest(theme_qss ka_theme_tests)
+
+  add_executable(ka_user_error_tests
+    tests/test_user_error.cpp
+    src/app/KaUserError.cpp
+  )
+  set_target_properties(ka_user_error_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_user_error_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
+  target_include_directories(ka_user_error_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  ka_add_qtest(user_error ka_user_error_tests)
 
   add_executable(ka_region_locator_tests tests/test_region_locator.cpp
     src/app/KaRegionLocator.cpp src/app/KaBeginnerRibbon.cpp src/app/KaTheme.cpp
@@ -840,7 +851,7 @@ if(KA_HGIS_BUILD_TESTS)
       "${OSGEO4W_ROOT}/bin"
     )
     string(JOIN "\\;" _ka_path_esc ${_ka_path})
-    set_tests_properties(layer_labels layer_information checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine terrain_3d_engine ${KA_SAVE_OPEN_TESTS} e2e_opaque_suite network_services storage_safety reference_download region_locator_popup layer_state_regressions map_render above_labels above_labels_125 above_labels_150 above_labels_200 PROPERTIES
+    set_tests_properties(layer_labels layer_information checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss user_error recent_surveys section_layout_engine section_studio_engine terrain_3d_engine ${KA_SAVE_OPEN_TESTS} e2e_opaque_suite network_services storage_safety reference_download region_locator_popup layer_state_regressions map_render above_labels above_labels_125 above_labels_150 above_labels_200 PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(dem_legend PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(topographic_catalog PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)

@@ -1,4 +1,9 @@
 <!-- Recent window only. Older entries: docs/archive/NOW-before-2026-09-25.md -->
+## 2026-09-25 P4-2 오류 메시지 표준
+
+- `KaUserError` what/why/how + 선택 해결 단추. 상위 20곳 적용. 전후표 `docs/user/error-message-standard-p4-2.md`.
+- 시험 `user_error` 3개. 지적 본번/부번은 루트 유지. removeAllMapLayers·VWorld 키 하드코딩 없음.
+
 ## 2026-09-22 지도는 한 번만 그린다
 
 - 조사선·유적은 덧그림에서 한 번. 지적 지번은 본 화면. 번호만 바뀌면 `ka_map_numbers`만 갱신. 범례 공간 검사는 범위·지질·토양이 바뀔 때만.
