@@ -1,6 +1,7 @@
 #include "KaSessionLog.h"
 #include "SurveyStorage.h"
 #include "LayerOps.h"
+#include "SurveyBundle.h"
 
 #include <algorithm>
 #include <memory>
@@ -26,6 +27,7 @@
 #include <qgsvectorfilewriter.h>
 #include <qgsvectorlayer.h>
 #include <qgsogrproviderutils.h>
+#include <qgspathresolver.h>
 
 #include <gdal.h>
 #include <cpl_error.h>
@@ -895,6 +897,18 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
     return attempt;
   }
 
+  // 다른 PC·새 포터블에서도 열리게 AppData·임시·앱 폴더의 자료를 조사 폴더로 모은다.
+  const SurveyBundle::CollectResult collected =
+      SurveyBundle::collectIntoSurvey(project, QFileInfo(gpkgPath).absolutePath());
+  attempt.collectedLayers = collected.copied;
+  if (!collected.copied.isEmpty())
+    KaSessionLog::line(QStringLiteral("[save] 조사 폴더로 모은 자료 %1개 — %2")
+                           .arg(collected.copied.size())
+                           .arg(collected.copied.join(QStringLiteral(", "))));
+  if (!collected.failed.isEmpty())
+    KaSessionLog::line(QStringLiteral("[save] 조사 폴더로 모으지 못한 자료 — %1")
+                           .arg(collected.failed.join(QStringLiteral(", "))));
+
   const AbsorbResult absorbed = absorbExternalVectors(project, generation, gpkgPath);
   attempt.skippedRaster = absorbed.skippedRaster;
   attempt.skippedReference = absorbed.skippedReference;
@@ -907,7 +921,7 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
 
   QString writeError;
   try {
-    if (!writeEmbedded(project, generation, &writeError)) {
+    if (!writeEmbedded(project, generation, &writeError, gpkgPath)) {
       recover(writeError.isEmpty() ? QStringLiteral("조사 파일에 작업 구성을 저장하지 못했습니다.")
                                    : writeError);
       return attempt;
@@ -1049,7 +1063,7 @@ ExtractAttempt extractEmbeddedReferenceVectors(QgsProject* project, const QStrin
   }
   QString writeError;
   try {
-    if (!writeEmbedded(project, generation, &writeError)) {
+    if (!writeEmbedded(project, generation, &writeError, gpkgPath)) {
       attempt.error = writeError.isEmpty() ? QStringLiteral("작업 구성을 저장하지 못했습니다.")
                                            : writeError;
       return attempt;
@@ -1082,7 +1096,8 @@ ExtractAttempt extractEmbeddedReferenceVectors(QgsProject* project, const QStrin
   return attempt;
 }
 
-bool writeEmbedded(QgsProject* project, const QString& gpkgPath, QString* errorOut) {
+bool writeEmbedded(QgsProject* project, const QString& gpkgPath, QString* errorOut,
+                   const QString& publishedGpkg) {
   if (!project || gpkgPath.isEmpty()) {
     if (errorOut) *errorOut = QStringLiteral("저장 경로가 없습니다.");
     return false;
@@ -1111,6 +1126,28 @@ bool writeEmbedded(QgsProject* project, const QString& gpkgPath, QString* errorO
   if (QDir(home).dirName().startsWith(QLatin1String(".ka-survey-gen-")))
     home = QFileInfo(home).absolutePath();
   project->setPresetHomePath(home);
+  // 옮긴 뒤 열 때 이 폴더 아래 경로를 새 조사 폴더 아래로 옮겨 붙인다(LayerOps::repairPersistedFileSources).
+  SurveyBundle::rememberSurveyDir(project, home);
+  // 세대 파일로 흡수한 레이어는 아직 세대 파일을 가리킨다. 그대로 적으면 저장 뒤 지워진
+  // .ka-survey-gen-*/survey.gpkg 를 찾아 매번 끊긴다. 진짜 조사 파일 경로로 적는다.
+  QString pathWriter;
+  if (!publishedGpkg.isEmpty()) {
+    const QString generationFile = QDir::cleanPath(QDir::fromNativeSeparators(abs));
+    const QString finalFile =
+        QDir::cleanPath(QDir::fromNativeSeparators(QFileInfo(publishedGpkg).absoluteFilePath()));
+    if (generationFile.compare(finalFile, Qt::CaseInsensitive) != 0) {
+      pathWriter = QgsPathResolver::setPathWriter([generationFile, finalFile](const QString& path) {
+        const QString clean = QDir::fromNativeSeparators(path);
+        if (!clean.startsWith(generationFile, Qt::CaseInsensitive)) return path;
+        const QString rest = clean.mid(generationFile.size());
+        if (!rest.isEmpty() && !rest.startsWith(QLatin1Char('|'))) return path;
+        return finalFile + rest;
+      });
+    }
+  }
+  const auto dropPathWriter = qScopeGuard([&pathWriter] {
+    if (!pathWriter.isEmpty()) QgsPathResolver::removePathWriter(pathWriter);
+  });
   const Qgis::FilePathType previousPathType = project->filePathStorage();
   project->setFilePathStorage(Qgis::FilePathType::Absolute);
   const QString uri = projectUri(gpkgPath);

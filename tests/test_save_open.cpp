@@ -57,6 +57,8 @@
 #include <QElapsedTimer>
 #include "core/LayerOps.h"
 #include "core/RecentSurveys.h"
+#include "core/KaPortableRuntime.h"
+#include "core/SurveyBundle.h"
 #include "core/SurveyProjectFactory.h"
 #include "core/SurveyStorage.h"
 #include "core/DemPresentation.h"
@@ -111,6 +113,7 @@
 #include <qgsfillsymbol.h>
 #include <qgsvectorlayer.h>
 #include <qgsvectordataprovider.h>
+#include <qgsogrproviderutils.h>
 #include <qgsvectorfilewriter.h>
 #include <qgsvectorlayerlabeling.h>
 #include <qgspallabeling.h>
@@ -161,6 +164,56 @@ private:
     }
     if (!SurveyStorage::writeEmbedded(&project, path, &error)) return {};
     return path;
+  }
+  // 조사 폴더를 따로 둔 새 조사(조사구역 1개). makeSurvey 는 모든 시험이 같은 폴더를 쓴다.
+  static QString makeSurveyIn(const QString& dir, const QString& name) {
+    QString error;
+    const QString path = SurveyProjectFactory::createNewSurvey(dir, name, &error, QStringLiteral("EPSG:5187"));
+    if (path.isEmpty()) return {};
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+    auto* layer = LayerOps::ensureDomainLayer(&project, path, QStringLiteral("survey_area"), name, &error);
+    if (!layer || !layer->startEditing()) return {};
+    QgsFeature feature(layer->fields());
+    feature.setAttribute(QStringLiteral("survey_name"), name);
+    feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(190000, 560000, 190100, 560100)));
+    if (!layer->addFeature(feature) || !layer->commitChanges()) return {};
+    if (!SurveyStorage::writeEmbedded(&project, path, &error)) return {};
+    return path;
+  }
+  // count 개 도형이 든 GPKG 벡터 파일을 만든다.
+  static bool writeVectorFile(const QString& path, const QString& table, int count) {
+    QgsVectorLayer memory(QStringLiteral("Polygon?crs=EPSG:5187&field=nm:string(40)"), table,
+                          QStringLiteral("memory"));
+    if (!memory.isValid() || !memory.startEditing()) return false;
+    for (int i = 0; i < count; ++i) {
+      QgsFeature feature(memory.fields());
+      feature.setAttribute(0, QStringLiteral("유적 %1").arg(i + 1));
+      feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(190010. + i * 20, 560010., 190020. + i * 20, 560020.)));
+      if (!memory.addFeature(feature)) return false;
+    }
+    if (!memory.commitChanges()) return false;
+    QgsVectorFileWriter::SaveVectorOptions options;
+    options.driverName = QStringLiteral("GPKG");
+    options.layerName = table;
+    QString error;
+    return QgsVectorFileWriter::writeAsVectorFormatV3(&memory, path, QgsCoordinateTransformContext(), options,
+                                                      &error) == QgsVectorFileWriter::NoError;
+  }
+  static bool copyDirectory(const QString& from, const QString& to) {
+    if (!QDir().mkpath(to)) return false;
+    const QDir source(from);
+    for (const QFileInfo& entry : source.entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot)) {
+      const QString target = QDir(to).filePath(entry.fileName());
+      if (entry.isDir() ? !copyDirectory(entry.absoluteFilePath(), target)
+                        : !QFile::copy(entry.absoluteFilePath(), target))
+        return false;
+    }
+    return true;
+  }
+  static QgsMapLayer* layerNamed(const QString& name) {
+    const QList<QgsMapLayer*> found = QgsProject::instance()->mapLayersByName(name);
+    return found.isEmpty() ? nullptr : found.first();
   }
   static void disableRendering(MainWindow& window) {
     window.setRestoreLastSurveyEnabled(false);
@@ -3013,6 +3066,136 @@ private slots:
       QCOMPARE(shadeNode->itemVisibilityChecked(), reliefEnabled);
     }
   }
+  // 포터블을 USB 로 쓰면 꽂을 때마다 드라이브 글자가 바뀌고(E: → F:), 조사 폴더를 옮기기도
+  // 한다. 앱이 이 PC의 AppData·임시 폴더에 만든 자료(주변유적 등)도 저장할 때 조사 폴더로
+  // 모여야, 그 자료가 없는 곳에서 조사를 다시 열어도 모든 레이어가 살아 있다.
+  void surveyReopensAfterUsbDriveOrFolderChange() {
+    QTemporaryDir usb;
+    QTemporaryDir appData;
+    QVERIFY(usb.isValid() && appData.isValid());
+    const QString surveyDir = usb.filePath(QStringLiteral("조사/안동"));
+    QVERIFY(QDir().mkpath(surveyDir));
+    const QString path = makeSurveyIn(surveyDir, QStringLiteral("안동"));
+    QVERIFY(!path.isEmpty());
+    const QString heritageFile = QDir(appData.path()).filePath(QStringLiteral("주변유적/heritage-T/heritage.gpkg"));
+    QVERIFY(QDir().mkpath(QFileInfo(heritageFile).absolutePath()));
+    QVERIFY(writeVectorFile(heritageFile, QStringLiteral("heritage"), 3));
+    QVERIFY(SurveyBundle::isAppManagedPath(heritageFile));
+    {
+      MainWindow window;
+      disableRendering(window);
+      QVERIFY(window.openSurveyGpkg(path));
+      auto* heritage = new QgsVectorLayer(heritageFile + QStringLiteral("|layername=heritage"),
+                                          QStringLiteral("국가지정유산"), QStringLiteral("ogr"));
+      QVERIFY(heritage->isValid());
+      LayerOps::markReferenceLayer(heritage);
+      QgsProject::instance()->addMapLayer(heritage);
+      QVERIFY(saveNow(window));
+      const QString source = QDir::fromNativeSeparators(SurveyBundle::sourceFile(heritage->source()));
+      QVERIFY2(source.startsWith(QDir::fromNativeSeparators(surveyDir), Qt::CaseInsensitive), qPrintable(source));
+      QVERIFY2(source.contains(SurveyBundle::collectedFolderName()), qPrintable(source));
+      QCOMPARE(heritage->featureCount(), 3LL);
+      QgsProject::instance()->setDirty(false);
+    }
+    // 앱 자료는 이 PC에만 있었다. 지우고, 조사 폴더는 다른 드라이브·폴더로 옮긴다.
+    QVERIFY(appData.remove());
+    QTemporaryDir otherUsb;
+    QVERIFY(otherUsb.isValid());
+    const QString movedDir = otherUsb.filePath(QStringLiteral("다른 폴더/안동"));
+    QVERIFY(copyDirectory(surveyDir, movedDir));
+    // 원래 자리는 이 PC에 없는 것처럼 지운다. 먼저 열린 파일을 모두 놓는다.
+    QStringList held;
+    for (QgsMapLayer* layer : QgsProject::instance()->mapLayers())
+      held << SurveyBundle::sourceFile(layer->source());
+    QgsProject::instance()->clear();
+    for (const QString& file : held)
+      if (!file.isEmpty()) QgsOgrProviderUtils::invalidateCachedDatasets(file);
+    QTRY_VERIFY_WITH_TIMEOUT(QDir(usb.filePath(QStringLiteral("조사"))).removeRecursively(), 15000);
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(QDir(movedDir).filePath(QFileInfo(path).fileName())));
+    QTRY_VERIFY(layerNamed(QStringLiteral("국가지정유산")) && layerNamed(QStringLiteral("국가지정유산"))->isValid());
+    auto* heritage = qobject_cast<QgsVectorLayer*>(layerNamed(QStringLiteral("국가지정유산")));
+    QVERIFY(heritage);
+    QCOMPARE(heritage->featureCount(), 3LL);
+    QVERIFY2(QDir::fromNativeSeparators(heritage->source()).startsWith(QDir::fromNativeSeparators(movedDir), Qt::CaseInsensitive),
+             qPrintable(heritage->source()));
+    auto* area = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"));
+    QVERIFY(area && area->isValid());
+    QCOMPARE(area->featureCount(), 1LL);
+    QVERIFY2(SurveyBundle::missingFileLayers(QgsProject::instance()).isEmpty(),
+             qPrintable(SurveyBundle::missingFileLayers(QgsProject::instance()).join(QStringLiteral(", "))));
+    QgsProject::instance()->setDirty(false);
+  }
+  // 저장 때 조사 파일로 흡수한 레이어(주변 500m 버퍼 등)가 저장 뒤 지워지는 세대 폴더
+  // (.ka-survey-gen-*)를 가리킨 채 기록되면, 열 때마다 끊기고 다음 저장이 「unable to open
+  // database file」로 실패했다(안동시 조사, 2026-09-26 05:53).
+  void savedWorkspaceNeverPointsIntoTheSaveGenerationFolder() {
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString path = makeSurveyIn(root.filePath(QStringLiteral("세대")), QStringLiteral("세대"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    auto* buffer = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187&field=nm:string(20)"),
+                                      QStringLiteral("주변 500m"), QStringLiteral("memory"));
+    QVERIFY(buffer->startEditing());
+    QgsFeature ring(buffer->fields());
+    ring.setGeometry(QgsGeometry::fromRect(QgsRectangle(189900, 559900, 190200, 560200)));
+    QVERIFY(buffer->addFeature(ring));
+    QVERIFY(buffer->commitChanges());
+    QgsProject::instance()->addMapLayer(buffer);
+    QVERIFY(saveNow(window));
+    QgsProject stored;
+    QVERIFY(stored.read(SurveyStorage::projectUri(path)));
+    int checked = 0;
+    for (QgsMapLayer* layer : stored.mapLayers()) {
+      QVERIFY2(!layer->source().contains(QLatin1String(".ka-survey-gen-")),
+               qPrintable(layer->name() + QStringLiteral(": ") + layer->source()));
+      ++checked;
+    }
+    QVERIFY(checked >= 2);
+    const QList<QgsMapLayer*> rings = stored.mapLayersByName(QStringLiteral("주변 500m"));
+    QVERIFY(!rings.isEmpty());
+    QVERIFY2(rings.first()->isValid(), "고치지 않고 바로 열려야 한다");
+    QCOMPARE(qobject_cast<QgsVectorLayer*>(rings.first())->featureCount(), 1LL);
+    QCOMPARE(SurveyBundle::savedSurveyDir(&stored),
+             QDir::cleanPath(QDir::fromNativeSeparators(QFileInfo(path).absolutePath())));
+    QgsProject::instance()->setDirty(false);
+  }
+  // 새 버전 포터블은 새 폴더다. 설정이 포터블 폴더 안에 있어 「이어서 열기」가 비어 예전 조사를
+  // 못 찾는 것처럼 보였다. 옆에 있는 이전 포터블의 설정을 이어받되 계정·키 파일은 옮기지 않는다.
+  void newPortableFolderInheritsRecentSurveys() {
+    QTemporaryDir usb;
+    QVERIFY(usb.isValid());
+    const QString oldDir = usb.filePath(QStringLiteral("Strata-0925"));
+    const QString newDir = usb.filePath(QStringLiteral("Strata-0926"));
+    for (const QString& dir : {oldDir, newDir}) {
+      QVERIFY(QDir().mkpath(dir));
+      QFile exe(QDir(dir).filePath(QStringLiteral("ka-hgis.exe")));
+      QVERIFY(exe.open(QIODevice::WriteOnly));
+    }
+    const QString oldIni = QDir(oldDir).filePath(QStringLiteral("config/ka-hgis/ka-hgis.ini"));
+    const QStringList recent{QStringLiteral("E:/조사/안동/안동.gpkg\t안동\t1")};
+    {
+      QSettings old(oldIni, QSettings::IniFormat);
+      old.setValue(QStringLiteral("RecentSurveys/items"), recent);
+      old.sync();
+    }
+    QFile secret(QDir(oldDir).filePath(QStringLiteral("config/secrets.ini")));
+    QVERIFY(secret.open(QIODevice::WriteOnly));
+    secret.close();
+    const QString newConfig = QDir(newDir).filePath(QStringLiteral("config"));
+    QCOMPARE(QFileInfo(KaPortableRuntime::inheritSiblingSettings(newDir, newConfig)).absoluteFilePath(),
+             QFileInfo(oldIni).absoluteFilePath());
+    QSettings inherited(QDir(newConfig).filePath(QStringLiteral("ka-hgis/ka-hgis.ini")), QSettings::IniFormat);
+    QCOMPARE(inherited.value(QStringLiteral("RecentSurveys/items")).toStringList(), recent);
+    QVERIFY2(!QFileInfo::exists(QDir(newConfig).filePath(QStringLiteral("secrets.ini"))), "키 파일은 옮기지 않는다");
+    // 이미 쓰던 설정은 덮어쓰지 않는다.
+    QVERIFY(KaPortableRuntime::inheritSiblingSettings(newDir, newConfig).isEmpty());
+  }
+
   void saveAndReopen_keepsTreeGeometryAttributesAndStyle() {
     const QString path = makeSurvey(QStringLiteral("왕복조사"));
     QVERIFY(!path.isEmpty());

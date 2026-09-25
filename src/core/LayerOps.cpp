@@ -10,6 +10,7 @@
 #include "SoilMapService.h"
 #include "VworldSettings.h"
 #include "KaPortableRuntime.h"
+#include "SurveyBundle.h"
 #include <QDateTime>
 #include <QEvent>
 #include <QFile>
@@ -2410,6 +2411,10 @@ int LayerOps::repairPersistedFileSources(QgsProject* project) {
   addBase(QDir(localData).filePath(QStringLiteral("ka-hgis")));
   addBase(QDir::home().filePath(QStringLiteral("AppData/Local/ka-hgis")));
   addBase(QDir::home().filePath(QStringLiteral("AppData/Local/ka-hgis/ka-hgis")));
+  // 저장할 때 적어 둔 조사 폴더. 조사 폴더를 다른 PC·드라이브·사용자로 옮겼으면 그 아래를
+  // 가리키던 경로를 지금 조사 폴더 아래로 정확히 옮겨 붙인다. 뒤쪽 조각 맞추기보다 먼저 한다.
+  const QString savedDir = SurveyBundle::savedSurveyDir(project);
+  const QString currentDir = surveyGpkg.isEmpty() ? QString() : QFileInfo(surveyGpkg).absolutePath();
   int n = 0;
   for (QgsMapLayer* layer : project->mapLayers()) {
     if (!layer || layer->isValid()) continue;
@@ -2424,9 +2429,15 @@ int LayerOps::repairPersistedFileSources(QgsProject* project) {
     if (provider != QLatin1String("ogr") && provider != QLatin1String("gdal")) continue;
     const QString original = layer->source();
     QString repaired = original;
+    for (const QString& candidate : {SurveyBundle::rebaseIntoSurvey(original, savedDir, currentDir),
+                                     SurveyBundle::onSurveyDrive(original, currentDir)}) {
+      if (candidate.isEmpty() || !QFileInfo::exists(SurveyBundle::sourceFile(candidate))) continue;
+      repaired = candidate;
+      break;
+    }
     for (const QString& base : bases) {
-      repaired = kaResolvePersistedSource(original, base, surveyGpkg);
       if (repaired != original) break;
+      repaired = kaResolvePersistedSource(original, base, surveyGpkg);
     }
     if (repaired == original) continue;
     layer->setDataSource(repaired, layer->name(), provider);

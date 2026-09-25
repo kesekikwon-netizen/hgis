@@ -302,9 +302,36 @@ void KaPortableRuntime::isolateUserState(const KaPortablePaths& paths) {
   QSettings::setDefaultFormat(QSettings::IniFormat);
   QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, QDir(cfg).absolutePath());
   QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, QDir(cfg).absolutePath());
+  const QString inherited = inheritSiblingSettings(paths.exeDir, cfg);
+  if (!inherited.isEmpty())
+    KaSessionLog::line(QStringLiteral("[boot] 이전 포터블의 설정을 이어받음 — %1")
+                           .arg(QDir::toNativeSeparators(inherited)));
   const QString qgisProfile = QDir(cfg).filePath(QStringLiteral("qgis-profile"));
   QDir().mkpath(qgisProfile);
   setEnvUtf8AndWide("QGIS_CUSTOM_CONFIG_PATH", L"QGIS_CUSTOM_CONFIG_PATH", qgisProfile);
+}
+
+QString KaPortableRuntime::inheritSiblingSettings(const QString& exeDir, const QString& configDir) {
+  const QString relative = QStringLiteral("ka-hgis/ka-hgis.ini");
+  const QString mine = QDir(configDir).filePath(relative);
+  if (exeDir.isEmpty() || configDir.isEmpty() || QFileInfo::exists(mine)) return {};
+  const QString own = QDir(exeDir).absolutePath();
+  QDir parent(own);
+  if (!parent.cdUp()) return {};
+  QFileInfo newest;
+  for (const QFileInfo& sibling : parent.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+    const QString dir = sibling.absoluteFilePath();
+    if (dir.compare(own, Qt::CaseInsensitive) == 0) continue;
+    // 포터블 폴더만 본다: 실행 파일과 config 설정이 함께 있는 폴더.
+    if (!QFileInfo::exists(QDir(dir).filePath(QStringLiteral("ka-hgis.exe")))) continue;
+    const QFileInfo ini(QDir(dir).filePath(QStringLiteral("config/") + relative));
+    if (ini.isFile() && (!newest.exists() || ini.lastModified() > newest.lastModified())) newest = ini;
+  }
+  if (!newest.exists()) return {};
+  if (!QDir().mkpath(QFileInfo(mine).absolutePath())) return {};
+  if (!QFile::copy(newest.absoluteFilePath(), mine)) return {};
+  QFile::setPermissions(mine, QFile::permissions(mine) | QFileDevice::WriteOwner);
+  return newest.absoluteFilePath();
 }
 
 QString KaPortableRuntime::resolvedExeDir() {

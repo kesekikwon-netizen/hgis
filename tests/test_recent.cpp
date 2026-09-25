@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QSettings>
@@ -9,6 +10,7 @@ class TestRecent : public QObject {
   Q_OBJECT
 private slots:
   void rememberPutsNewestFirstAndDropsMissing();
+  void recentSurveyFollowsUsbDriveLetter();
   void forgetRemovesPath();
   void lastPath_isNewestRemembered();
   void takeSkipAutoRestore_clearsOneShot();
@@ -16,6 +18,30 @@ private slots:
   void closeEvent_asksBeforeDiscardingUnsavedWork();
   void captureTool_dragsSavedPolygonVertex();
 };
+
+void TestRecent::recentSurveyFollowsUsbDriveLetter() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  const QString real = QDir::fromNativeSeparators(QFileInfo(dir.filePath(QStringLiteral("안동.gpkg"))).absoluteFilePath());
+  QVERIFY(QFile(real).open(QIODevice::WriteOnly));
+  if (real.size() < 3 || real.at(1) != QLatin1Char(':')) QSKIP("드라이브 글자는 Windows 에만 있다");
+  QChar unused;
+  for (char c = 'Z'; c >= 'D'; --c) {
+    if (!QFileInfo::exists(QStringLiteral("%1:/").arg(QLatin1Char(c)))) {
+      unused = QLatin1Char(c);
+      break;
+    }
+  }
+  QVERIFY(!unused.isNull());
+  // 지난번에는 USB 가 다른 글자였다(예: F:). 지금은 real 의 드라이브에 꽂혀 있다.
+  const QString before = QString(unused) + real.mid(1);
+  QCOMPARE(RecentSurveys::onAnotherDrive(before, {real.left(3)}), real);
+  QSettings st(dir.filePath(QStringLiteral("recent.ini")), QSettings::IniFormat);
+  st.setValue(QStringLiteral("RecentSurveys/items"), QStringList{before + QStringLiteral("\t안동\t1")});
+  const auto items = RecentSurveys::load(st);
+  QCOMPARE(items.size(), 1);
+  QCOMPARE(QDir::fromNativeSeparators(items.first().path), real);
+}
 
 void TestRecent::rememberPutsNewestFirstAndDropsMissing() {
   QTemporaryDir dir;

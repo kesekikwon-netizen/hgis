@@ -78,6 +78,7 @@ struct PersistAttempt {
     QStringList failedLayers;
     QStringList skippedRaster;
     QStringList skippedReference;
+    QStringList collectedLayers;  // 조사 폴더로 모아 온 바깥 자료
   };
 PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
                                 const QString& recoveryDirectory,
@@ -102,7 +103,10 @@ ExtractAttempt extractEmbeddedReferenceVectors(QgsProject* project, const QStrin
                                                const QString& outputDirectory);
 
 // 프로젝트를 .gpkg 안에 기록한다.
-bool writeEmbedded(QgsProject* project, const QString& gpkgPath, QString* errorOut = nullptr);
+// publishedGpkg: gpkgPath 가 저장용 세대 파일이면 나중에 바뀔 진짜 조사 파일 경로. 세대 파일을
+// 가리키는 레이어를 그 경로로 적는다. 세대 폴더는 저장 뒤 지워지기 때문이다.
+bool writeEmbedded(QgsProject* project, const QString& gpkgPath, QString* errorOut = nullptr,
+                   const QString& publishedGpkg = QString());
 
 // .gpkg 안의 프로젝트를 읽는다. crashedOut은 KaSafeQgis와 같은 의미다(SEH 발생).
 // 사용자가 명시적으로 작업공간을 열 때만 loadLayouts=true로 저장 조판도 복원한다.

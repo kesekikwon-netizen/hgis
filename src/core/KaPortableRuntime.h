@@ -29,6 +29,11 @@ bool prependOsgeoPath();
 // QApplication 을 만들기 전에 불러야 한다.
 bool applyWebEngineFlags();
 void isolateUserState(const KaPortablePaths& paths);
+// 새 버전 포터블은 새 폴더라 설정(config)이 비어 「이어서 열기」의 최근 조사가 사라진다.
+// configDir 에 설정이 아직 없으면, exeDir 옆에 있는 이전 포터블 폴더 중 가장 최근에 쓴
+// 설정(ka-hgis.ini: 최근 조사·인쇄·폴더 기억)을 복사해 온다. 계정·키 파일은 옮기지 않는다.
+// 복사해 온 설정 파일 경로를 돌려준다. 없으면 빈 문자열.
+QString inheritSiblingSettings(const QString& exeDir, const QString& configDir);
 bool bindProjSearchPaths(const QString& projDataDir);
 bool koreaWorkAndWebCrsValid();
 QString resolvedExeDir();

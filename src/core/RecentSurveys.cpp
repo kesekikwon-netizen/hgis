@@ -1,6 +1,7 @@
 #include "RecentSurveys.h"
 
 #include <QDateTime>
+#include <QDir>
 #include <QFileInfo>
 #include <QSettings>
 #include <QStringList>
@@ -25,6 +26,13 @@ QVector<RecentSurveys::Item> RecentSurveys::load(QSettings& settings) {
     it.name = parts.at(1).trimmed();
     if (parts.size() >= 3)
       it.lastOpenedMs = parts.at(2).toLongLong();
+    if (!it.path.isEmpty() && !QFileInfo::exists(it.path)) {
+      // 포터블을 USB 로 들고 다니면 드라이브 글자가 바뀌어 예전 조사가 목록에서 사라졌다.
+      QStringList drives;
+      for (const QFileInfo& drive : QDir::drives()) drives << drive.absoluteFilePath();
+      const QString moved = onAnotherDrive(it.path, drives);
+      if (!moved.isEmpty()) it.path = moved;
+    }
     if (it.path.isEmpty() || !QFileInfo::exists(it.path))
       continue;
     if (it.name.isEmpty())
@@ -34,6 +42,20 @@ QVector<RecentSurveys::Item> RecentSurveys::load(QSettings& settings) {
       break;
   }
   return out;
+}
+
+QString RecentSurveys::onAnotherDrive(const QString& path, const QStringList& driveRoots) {
+  const QString clean = QDir::fromNativeSeparators(path);
+  if (clean.size() < 4 || clean.at(1) != QLatin1Char(':') || clean.at(2) != QLatin1Char('/')) return {};
+  const QString rest = clean.mid(2);
+  for (const QString& root : driveRoots) {
+    const QString drive = QDir::fromNativeSeparators(root);
+    if (drive.size() < 2 || drive.at(1) != QLatin1Char(':')) continue;
+    if (drive.at(0).toUpper() == clean.at(0).toUpper()) continue;
+    const QString candidate = drive.left(2) + rest;
+    if (QFileInfo::exists(candidate)) return candidate;
+  }
+  return {};
 }
 
 QString RecentSurveys::lastPath(QSettings& settings) {

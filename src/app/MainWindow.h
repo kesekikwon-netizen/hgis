@@ -369,6 +369,8 @@ private:
   void clearRecoveryOffer(const QString& recoveryDirectory);
   // 레이어 점호. 직전과 달라졌으면 무엇이 사라졌는지 세션 로그에 적고 되살린다.
   void auditLayerHealth();
+  // 조사를 연 뒤에도 원본 파일을 못 찾은 레이어를 알림 줄로 알린다(다른 PC에서 옮겨 온 조사).
+  void reportMissingLayerFiles();
   void logLayerCensus(const QString& tag);
   // 화면에 실제로 무엇이 그려졌는지. 확대했을 때 위성이 비는 현상을 잡기 위한 계측 —
   // 캔버스가 그리기로 잡고 있는 레이어 목록과 축척을, 목록이 바뀔 때만 기록한다.

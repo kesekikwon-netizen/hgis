@@ -82,6 +82,7 @@ add_library(ka_core STATIC
   src/core/ChecklistEngine.cpp
   src/core/SurveyProjectFactory.cpp
   src/core/SurveyStorage.cpp
+  src/core/SurveyBundle.cpp
   src/core/SurveySession.cpp
   src/core/PreparedReferenceMap.cpp
   src/core/DemDownloadService.cpp
@@ -838,10 +839,14 @@ if(KA_HGIS_BUILD_TESTS)
     save_qgisExceptionStaysInsideSlot
     save_companionFailureKeepsEmbeddedWorkspaceAndWarns
     fieldCopy_restoresAllValidLayersAndSavesTree)
+  ka_add_qtest_filter(save_open_portable ka_save_open_tests
+    surveyReopensAfterUsbDriveOrFolderChange
+    savedWorkspaceNeverPointsIntoTheSaveGenerationFolder
+    newPortableFolderInheritsRecentSurveys)
   set(KA_SAVE_OPEN_TESTS
     save_open_window save_open_topo save_open_drawing
     save_open_edit save_open_roundtrip save_open_open
-    save_open_open_invalid save_open_commit save_open_saveas)
+    save_open_open_invalid save_open_commit save_open_saveas save_open_portable)
   set_tests_properties(${KA_SAVE_OPEN_TESTS} PROPERTIES TIMEOUT 180 RESOURCE_LOCK ka_save_open)
 
   add_executable(ka_e2e_tests tests/test_e2e_opaque.cpp)

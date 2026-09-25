@@ -14,6 +14,7 @@
 #include "core/KaSafeQgis.h"
 #include "core/LayerOps.h"
 #include "core/RecentSurveys.h"
+#include "core/SurveyBundle.h"
 #include "core/SurveyProjectFactory.h"
 #include "core/SurveySession.h"
 #include "core/SurveyStorage.h"
@@ -131,6 +132,7 @@ void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sou
     const int repaired = LayerOps::repairPersistedFileSources(QgsProject::instance());
     if (repaired > 0 && m_canvas)
       LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+    reportMissingLayerFiles();
     for (QgsMapLayer* layer : QgsProject::instance()->mapLayers()) {
       auto* vector = qobject_cast<QgsVectorLayer*>(layer);
       if (vector && vector->isEditable() && vector->isModified()) return;
@@ -323,6 +325,7 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
     const int repaired = LayerOps::repairPersistedFileSources(QgsProject::instance());
     if (repaired > 0 && m_canvas)
       LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+    reportMissingLayerFiles();
     for (QgsMapLayer* layer : QgsProject::instance()->mapLayers()) {
       auto* vector = qobject_cast<QgsVectorLayer*>(layer);
       if (vector && vector->isEditable() && vector->isModified()) return;
@@ -862,6 +865,13 @@ bool MainWindow::persistSurveyWork() {
     remapUndoFeatureIdsAfterSave();
     markSurveySaved();
     saved = true;
+    if (!attempt.collectedLayers.isEmpty())
+      notify(Notice::Info, QStringLiteral("조사 폴더로 모았습니다"),
+             QStringLiteral("이 PC에만 있던 자료 %1개를 조사 폴더의 「%2」에 모았습니다. "
+                            "이제 조사 폴더만 옮기면 다른 PC나 새 포터블에서도 그대로 열립니다.")
+                 .arg(attempt.collectedLayers.size())
+                 .arg(SurveyBundle::collectedFolderName()),
+             attempt.collectedLayers.join(QStringLiteral(", ")));
     if (!attempt.skippedRaster.isEmpty())
       notify(Notice::Info, QStringLiteral("함께 보관할 파일"),
              QStringLiteral("사진·래스터 원본도 함께 보관하세요: %1")
@@ -935,6 +945,23 @@ void MainWindow::extractEmbeddedReferenceVectors() {
 #else
   notify(Notice::Warning, QStringLiteral("QGIS 없음"),
          QStringLiteral("이 빌드에서는 참조 벡터를 밖으로 옮길 수 없습니다."));
+#endif
+}
+
+// 다른 PC에서 옮겨 온 조사에서 원본을 못 찾은 레이어는 빈 채로 조용히 두지 않고, 무엇이
+// 없는지와 어떻게 하면 되는지를 알린다. 창을 막지 않는 알림 줄이다.
+void MainWindow::reportMissingLayerFiles() {
+#if KA_HGIS_HAS_QGIS
+  const QStringList missing = SurveyBundle::missingFileLayers(QgsProject::instance());
+  if (missing.isEmpty()) return;
+  KaCrashGuard::logLine(QStringLiteral("[open] 원본 파일을 못 찾은 레이어 %1개 — %2")
+                            .arg(missing.size())
+                            .arg(missing.join(QStringLiteral(", "))));
+  notify(Notice::Warning, QStringLiteral("원본 파일을 못 찾은 레이어 %1개").arg(missing.size()),
+         QStringLiteral("저장할 때 가리키던 파일이 지금 그 자리에 없습니다. USB 드라이브 글자가 "
+                        "바뀌었거나, 예전 포터블 폴더·다른 PC에만 있던 파일일 수 있습니다. 파일이 있는 "
+                        "USB·폴더를 연결한 뒤 조사를 다시 여세요."),
+         missing.join(QStringLiteral("\n")));
 #endif
 }
 
@@ -1383,7 +1410,16 @@ void MainWindow::saveProjectAs() {
     targetGpkg = created;
   }
 
-  // 2. 외부 벡터를 새 조사 파일 안으로 들여온 뒤 작업공간을 그 안에 기록한다.
+  // 2. 이전 조사 폴더와 이 PC의 AppData·임시·앱 폴더에 있던 자료를 새 조사 폴더로 모은다.
+  //    새 조사 폴더 하나만 건네도 다른 PC에서 그대로 열리게 하기 위해서다.
+  const SurveyBundle::CollectResult collected = SurveyBundle::collectIntoSurvey(
+      QgsProject::instance(), QFileInfo(targetGpkg).absolutePath(),
+      m_surveyPath.isEmpty() ? QString() : QFileInfo(m_surveyPath).absolutePath());
+  if (!collected.copied.isEmpty())
+    KaCrashGuard::logLine(QStringLiteral("[saveas] 조사 폴더로 모은 자료 %1개 — %2")
+                              .arg(collected.copied.size())
+                              .arg(collected.copied.join(QStringLiteral(", "))));
+  //    외부 벡터를 새 조사 파일 안으로 들여온 뒤 작업공간을 그 안에 기록한다.
   //    이렇게 해야 새로 만든 .gpkg 하나만 건네도 상대가 그대로 열 수 있다.
   const SurveyStorage::AbsorbResult absorbed =
       SurveyStorage::absorbExternalVectors(QgsProject::instance(), targetGpkg);
