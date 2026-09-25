@@ -25,7 +25,9 @@
 #include <qgsmaplayerstyle.h>
 #include <qgsrasterlayer.h>
 #include <qgsvectorfilewriter.h>
+#include <qgsvectordataprovider.h>
 #include <qgsvectorlayer.h>
+#include <qgsvectorlayereditbuffer.h>
 #include <qgsogrproviderutils.h>
 #include <qgspathresolver.h>
 
@@ -89,6 +91,83 @@ bool writeLayerToGpkg(QgsVectorLayer* layer, const QString& gpkgPath, const QStr
     return false;
   }
   return true;
+}
+
+// 편집 버퍼(더한·고친·지운 도형)만 세대 사본의 같은 테이블에 옮긴다. 레이어를 통째로 다시
+// 쓰면 새 도형이 이미 있는 fid 와 부딪혀 「UNIQUE constraint failed: survey_area.fid」로
+// 저장이 실패하고 편집이 복구 사본에만 남았다(9월 22일 판부터, 안동시 2026-09-26 05:53).
+// 새 도형의 fid 는 파일이 새로 매기게 비워 두고, 기존 도형의 fid 는 그대로 둔다.
+enum class CopyEdits { Applied, SchemaChanged, Failed };
+
+CopyEdits applyEditBufferToCopy(QgsVectorLayer* layer, const QString& copyGpkg, const QString& table,
+                                QString* errorOut) {
+  QgsVectorLayerEditBuffer* buffer = layer ? layer->editBuffer() : nullptr;
+  if (!buffer) return CopyEdits::Applied;
+  // 필드를 더하거나 지운 편집은 테이블 모양이 바뀌므로 통째로 다시 쓴다.
+  if (!buffer->addedAttributes().isEmpty() || !buffer->deletedAttributeIds().isEmpty())
+    return CopyEdits::SchemaChanged;
+  QgsVectorLayer target(QStringLiteral("%1|layername=%2").arg(copyGpkg, table), QStringLiteral("세대 사본"),
+                        QStringLiteral("ogr"));
+  QgsVectorDataProvider* provider = target.isValid() ? target.dataProvider() : nullptr;
+  const auto fail = [&](const QString& what) {
+    if (errorOut) {
+      QString detail = what;
+      if (provider && provider->hasErrors())
+        detail += QStringLiteral(": ") + provider->errors().join(QStringLiteral("; "));
+      *errorOut = detail;
+    }
+    return CopyEdits::Failed;
+  };
+  if (!provider) return fail(QStringLiteral("세대 사본의 %1 테이블을 열지 못했습니다").arg(table));
+  provider->clearErrors();
+  const QgsFields layerFields = layer->fields();
+  const QgsFields targetFields = provider->fields();
+  const int fidField = targetFields.lookupField(QStringLiteral("fid"));
+  // 레이어 필드 번호 → 사본 필드 번호. 이름으로 맞추고 식·조인 필드는 뺀다.
+  QHash<int, int> toTarget;
+  for (int i = 0; i < layerFields.count(); ++i) {
+    if (layerFields.fieldOrigin(i) != Qgis::FieldOrigin::Provider) continue;
+    const int t = targetFields.lookupField(layerFields.at(i).name());
+    if (t >= 0) toTarget.insert(i, t);
+  }
+  const QgsFeatureIds deleted = buffer->deletedFeatureIds();
+  QgsFeatureIds existingDeleted;
+  for (QgsFeatureId id : deleted)
+    if (id >= 0) existingDeleted.insert(id);
+  if (!existingDeleted.isEmpty() && !provider->deleteFeatures(existingDeleted))
+    return fail(QStringLiteral("%1의 지운 도형을 옮기지 못했습니다").arg(layer->name()));
+  QgsChangedAttributesMap changed;
+  const QgsChangedAttributesMap edits = buffer->changedAttributeValues();
+  for (auto it = edits.cbegin(); it != edits.cend(); ++it) {
+    if (it.key() < 0 || deleted.contains(it.key())) continue;
+    QgsAttributeMap mapped;
+    for (auto a = it.value().cbegin(); a != it.value().cend(); ++a) {
+      const int t = toTarget.value(a.key(), -1);
+      if (t >= 0 && t != fidField) mapped.insert(t, a.value());
+    }
+    if (!mapped.isEmpty()) changed.insert(it.key(), mapped);
+  }
+  if (!changed.isEmpty() && !provider->changeAttributeValues(changed))
+    return fail(QStringLiteral("%1의 고친 속성을 옮기지 못했습니다").arg(layer->name()));
+  QgsGeometryMap geometries;
+  const QgsGeometryMap moved = buffer->changedGeometries();
+  for (auto it = moved.cbegin(); it != moved.cend(); ++it)
+    if (it.key() >= 0 && !deleted.contains(it.key())) geometries.insert(it.key(), it.value());
+  if (!geometries.isEmpty() && !provider->changeGeometryValues(geometries))
+    return fail(QStringLiteral("%1의 고친 도형을 옮기지 못했습니다").arg(layer->name()));
+  QgsFeatureList added;
+  const QgsFeatureMap fresh = buffer->addedFeatures();
+  for (const QgsFeature& source : fresh) {
+    QgsFeature copy(targetFields);
+    copy.setGeometry(source.geometry());
+    for (auto it = toTarget.cbegin(); it != toTarget.cend(); ++it)
+      if (it.value() != fidField && it.key() < source.attributeCount())
+        copy.setAttribute(it.value(), source.attribute(it.key()));
+    added << copy;
+  }
+  if (!added.isEmpty() && !provider->addFeatures(added))
+    return fail(QStringLiteral("%1의 새 도형을 옮기지 못했습니다").arg(layer->name()));
+  return CopyEdits::Applied;
 }
 
 void retargetGpkgLayers(QgsProject* project, const QString& fromPath, const QString& toPath) {
@@ -861,8 +940,12 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
     }
     if (livesInGpkg(vector, gpkgPath)) {
       QString writeLayerError;
-      if (!writeLayerToGpkg(vector, generation, gpkgTableName(vector), project->transformContext(),
-                            &writeLayerError)) {
+      const CopyEdits copied =
+          applyEditBufferToCopy(vector, generation, gpkgTableName(vector), &writeLayerError);
+      if (copied == CopyEdits::Failed ||
+          (copied == CopyEdits::SchemaChanged &&
+           !writeLayerToGpkg(vector, generation, gpkgTableName(vector), project->transformContext(),
+                             &writeLayerError))) {
         attempt.failedLayers << vector->name();
         recover(writeLayerError.isEmpty()
                     ? QStringLiteral("%1의 편집을 다음 세대 파일에 쓰지 못했습니다.").arg(vector->name())
