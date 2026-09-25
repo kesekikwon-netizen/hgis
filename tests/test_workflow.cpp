@@ -7488,7 +7488,7 @@ void TestWorkflow::copySurvey_failurePreservesExistingDestination() {
   QString written;
   QVERIFY2(SurveyStorage::copySurvey(source, target, &err, &written), qPrintable(err));
   const QString out = written.isEmpty() ? QFileInfo(target).absoluteFilePath() : written;
-  QVERIFY2(SurveyStorage::hasEmbeddedProject(out), qPrintable(out));
+  QVERIFY2(SurveyStorage::validateForOpen(out, &err), qPrintable(err.isEmpty() ? out : err));
 }
 
 void TestWorkflow::test_export_failure_aborts_and_reports_error() {

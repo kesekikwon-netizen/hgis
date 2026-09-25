@@ -1486,8 +1486,8 @@ QList<QgsMapLayer*> LayerOps::removableLegendLayersFromNode(QgsLayerTreeNode* no
 
 bool LayerOps::isReferenceLayer(const QgsMapLayer* layer) {
   if (!layer) return false;
-  if (isCadastralLayer(layer))
-    return !isVworldCadastralPicture(layer);
+  // Downloaded cadastral has its own role for snap/edit; it is not a generic reference layer.
+  if (isCadastralLayer(layer)) return false;
   if (layer->customProperty(QString::fromUtf8(kPropLayerRole)).toString() ==
       QLatin1String(kRoleReference))
     return true;
