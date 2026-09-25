@@ -76,24 +76,29 @@ double lineLengthMeters(const QVector<QgsPointXY>& pts,
   return fallbackLength(pts);
 }
 
+double geometryAreaSquareMeters(const QgsGeometry& geometry,
+                                const QgsCoordinateReferenceSystem& crs,
+                                const QgsCoordinateTransformContext& ctx) {
+  if (geometry.isNull() || geometry.isEmpty())
+    return 0.0;
+  QgsDistanceArea da = makeEngine(crs, ctx);
+  try {
+    const double v = da.measureArea(geometry);
+    if (std::isfinite(v) && v >= 0.0)
+      return v;
+  } catch (const std::exception&) {
+  } catch (...) {
+    KaSessionLog::line(QStringLiteral("[except] core/MeasureOps.cpp:geometryArea"));
+  }
+  return std::abs(geometry.area());
+}
+
 double polygonAreaSquareMeters(const QVector<QgsPointXY>& pts,
                                const QgsCoordinateReferenceSystem& crs,
                                const QgsCoordinateTransformContext& ctx) {
   if (pts.size() < 3)
     return 0.0;
-  QgsDistanceArea da = makeEngine(crs, ctx);
-  const QgsGeometry g = polygonGeom(pts);
-  if (g.isNull() || g.isEmpty())
-    return 0.0;
-  try {
-    const double v = da.measureArea(g);
-    if (std::isfinite(v) && v >= 0.0)
-      return v;
-  } catch (const std::exception&) {
-  } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/MeasureOps.cpp:91"));
-  }
-  return std::abs(g.area());
+  return geometryAreaSquareMeters(polygonGeom(pts), crs, ctx);
 }
 
 double polygonPerimeterMeters(const QVector<QgsPointXY>& pts,

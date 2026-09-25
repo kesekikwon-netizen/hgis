@@ -9,6 +9,7 @@
 #include "core/GeorefService.h"
 #include "core/LayerOps.h"
 #include "core/LayerLabelControls.h"
+#include "core/MeasureOps.h"
 
 #include <QAction>
 #include <QApplication>
@@ -23,7 +24,6 @@
 #include <cmath>
 #include <functional>
 
-#include <qgsdistancearea.h>
 #include <qgsfeatureiterator.h>
 #include <qgsgeometry.h>
 #include <qgsexception.h>
@@ -427,15 +427,14 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
 void MainWindow::showLayerAreaSummary(QgsVectorLayer* layer, bool showRatio) {
   if (!layer || !layer->isValid()) return;
   const auto measure = [](QgsVectorLayer* vector) {
-    QgsDistanceArea calculator;
-    calculator.setSourceCrs(vector->crs(), QgsProject::instance()->transformContext());
-    calculator.setEllipsoid(QgsProject::instance()->ellipsoid());
     double area = 0.0;
     QgsFeature feature;
     auto iterator = vector->getFeatures();
     while (iterator.nextFeature(feature)) {
       if (!feature.hasGeometry()) continue;
-      area += calculator.convertAreaMeasurement(calculator.measureArea(feature.geometry()), Qgis::AreaUnit::SquareMeters);
+      // Planimetric work-CRS area — same as tape / select / area($geometry).
+      area += MeasureOps::geometryAreaSquareMeters(
+          feature.geometry(), vector->crs(), QgsProject::instance()->transformContext());
     }
     return area;
   };

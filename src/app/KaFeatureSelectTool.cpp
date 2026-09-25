@@ -3,6 +3,7 @@
 
 #include "KaVertexEditTool.h"
 #include "core/LayerOps.h"
+#include "core/MeasureOps.h"
 
 #include <qgsmapcanvas.h>
 #include <qgsvectorlayer.h>
@@ -15,7 +16,6 @@
 #include <qgscoordinatetransform.h>
 #include <qgsfeaturerequest.h>
 #include <qgsfeatureiterator.h>
-#include <qgsdistancearea.h>
 
 #include <QApplication>
 #include <QClipboard>
@@ -207,12 +207,9 @@ void KaFeatureSelectTool::handleContextMenu(QgsMapMouseEvent* e) {
       continue;
     QgsGeometry geom = f.geometry();
     if (geom.isEmpty()) continue;
-    QgsDistanceArea da;
-    da.setSourceCrs(item.layer->crs(), QgsProject::instance()->transformContext());
-    da.setEllipsoid(QgsProject::instance()->ellipsoid());
-    double area = da.measureArea(geom);
-    if (area <= 0.0) area = std::abs(geom.area());
-    totalAreaM2 += area;
+    // Planimetric work-CRS area — same as tape / area($geometry) labels.
+    totalAreaM2 += MeasureOps::geometryAreaSquareMeters(
+        geom, item.layer->crs(), QgsProject::instance()->transformContext());
     polyCount++;
   }
 
