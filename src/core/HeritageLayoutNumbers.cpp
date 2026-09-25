@@ -1006,7 +1006,8 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
       labels.scaleVisibility = false;
       applyHeritageNumberCallout(labels);
       drawing->setLabeling(new QgsVectorLayerSimpleLabeling(labels));
-      drawing->setLabelsEnabled(true);
+      // 번호는 핀 레이어만 그린다. 도면 복제본의 글자를 켜면 같은 번호가 한 번 더 나온다.
+      drawing->setLabelsEnabled(false);
     } else {
       drawing->setLabelsEnabled(false);
     }
@@ -1132,15 +1133,7 @@ void HeritageLayoutNumbers::raiseAboveGeometries(QgsLayoutItemMap* base) {
   numbers->setKeepLayerSet(true);
   numbers->setFollowVisibilityPreset(false);
   QList<QgsMapLayer*> labelLayers{m_numberLayer};
-  QSet<QString> seen{m_numberLayer->id()};
   QgsProject* project = layout->project();
-  for (const auto& entry : m_entries) {
-    if (entry.number <= 0 || seen.contains(entry.layerId) || !project) continue;
-    if (auto* layer = project->mapLayer(entry.layerId)) {
-      labelLayers.append(layer);
-      seen.insert(entry.layerId);
-    }
-  }
   QMap<QString, QString> labelStyles;
   for (auto it = m_overrides.cbegin(); it != m_overrides.cend(); ++it) {
     auto* vector = qobject_cast<QgsVectorLayer*>(project ? project->mapLayer(it.key()) : nullptr);
@@ -1201,7 +1194,7 @@ void HeritageLayoutNumbers::applyLegend(QgsLayoutItemLegend* legend) const {
   // (e.g. geology/soil) still need QGIS symbol hit testing.
   if (legend->legendFilterByMapEnabled() != needsMapFilter)
     legend->setLegendFilterByMapEnabled(needsMapFilter);
-  if (needsMapFilter)
+  if (needsMapFilter || layoutMapById(legend->layout(), QStringLiteral("ka_map_above")))
     bindLegendFilterMaps(legend);
   for (auto* node : model->rootGroup()->findLayers()) {
     auto* layer = qobject_cast<QgsVectorLayer*>(node->layer());
