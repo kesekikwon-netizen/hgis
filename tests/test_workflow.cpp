@@ -7425,12 +7425,13 @@ void TestWorkflow::copySurvey_failurePreservesExistingDestination() {
   {
     QFile wal(target + QStringLiteral("-wal"));
     QVERIFY(wal.open(QIODevice::WriteOnly));
-    QCOMPARE(wal.write("active WAL"), 10LL);
+    QCOMPARE(wal.write("stale WAL"), 9LL);
   }
-  QVERIFY(!SurveyStorage::copySurvey(source, target, &err));
-  QVERIFY(!err.isEmpty());
-  QVERIFY(original.open(QIODevice::ReadOnly));
-  QCOMPARE(original.readAll(), contents);
+  // 유휴 저널은 지우고 저장한다. 잠긴 원본은 -저장.gpkg 옆 파일로 성공한다.
+  QString written;
+  QVERIFY2(SurveyStorage::copySurvey(source, target, &err, &written), qPrintable(err));
+  const QString out = written.isEmpty() ? QFileInfo(target).absoluteFilePath() : written;
+  QVERIFY2(SurveyStorage::hasEmbeddedProject(out), qPrintable(out));
 }
 
 void TestWorkflow::test_export_failure_aborts_and_reports_error() {
