@@ -842,7 +842,9 @@ if(KA_HGIS_BUILD_TESTS)
   ka_add_qtest_filter(save_open_portable ka_save_open_tests
     surveyReopensAfterUsbDriveOrFolderChange
     savedWorkspaceNeverPointsIntoTheSaveGenerationFolder
-    newPortableFolderInheritsRecentSurveys)
+    newPortableFolderInheritsRecentSurveys
+    saveAgainAfterAddingSurveyAreaKeepsEveryFeature
+    oldVersionSurveysStillOpen)
   set(KA_SAVE_OPEN_TESTS
     save_open_window save_open_topo save_open_drawing
     save_open_edit save_open_roundtrip save_open_open

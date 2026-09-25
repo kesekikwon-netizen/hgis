@@ -3196,6 +3196,141 @@ private slots:
     QVERIFY(KaPortableRuntime::inheritSiblingSettings(newDir, newConfig).isEmpty());
   }
 
+  // 9월 22일 판은 조사구역에 도형을 더해 두 번째로 저장하면 「UNIQUE constraint failed:
+  // survey_area.fid」로 실패하고 편집이 복구 사본에만 남았다. 다른 PC에서 그 판으로 일한 뒤
+  // 조사를 열면 마지막 작업이 없었다. 여러 번 고쳐 저장해도 모든 도형이 조사 파일에 남아야 한다.
+  void saveAgainAfterAddingSurveyAreaKeepsEveryFeature() {
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString path = makeSurveyIn(root.filePath(QStringLiteral("다시저장")), QStringLiteral("다시저장"));
+    QVERIFY(!path.isEmpty());
+    {
+      MainWindow window;
+      disableRendering(window);
+      QVERIFY(window.openSurveyGpkg(path));
+      auto* area = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"));
+      QVERIFY(area && area->isValid());
+      QCOMPARE(area->featureCount(), 1LL);
+      for (int round = 1; round <= 3; ++round) {
+        QVERIFY(area->isEditable() || area->startEditing());
+        QgsFeature feature(area->fields());
+        feature.setAttribute(QStringLiteral("survey_name"), QStringLiteral("추가 %1").arg(round));
+        feature.setGeometry(QgsGeometry::fromRect(
+            QgsRectangle(190200. + round * 150, 560000., 190300. + round * 150, 560100.)));
+        QVERIFY(area->addFeature(feature));
+        QVERIFY2(saveNow(window), qPrintable(QStringLiteral("%1번째 저장이 실패했습니다").arg(round)));
+        QgsVectorLayer stored(SurveyBundle::sourceFile(area->source()) + QStringLiteral("|layername=") +
+                                  area->source().section(QLatin1String("layername="), 1, 1).section(QLatin1Char('|'), 0, 0),
+                              QStringLiteral("저장본"), QStringLiteral("ogr"));
+        QVERIFY(stored.isValid());
+        QCOMPARE(stored.featureCount(), 1LL + round);
+      }
+      // 이미 저장된 도형을 고치고 하나는 지운 뒤 저장해도 그대로 남아야 한다.
+      QVERIFY(area->isEditable() || area->startEditing());
+      QgsFeature first;
+      QVERIFY(area->getFeatures().nextFeature(first));
+      const int nameField = area->fields().lookupField(QStringLiteral("survey_name"));
+      QVERIFY(nameField >= 0);
+      QVERIFY(area->changeAttributeValue(first.id(), nameField, QStringLiteral("고친 이름")));
+      QgsGeometry movedShape = QgsGeometry::fromRect(QgsRectangle(189000, 559000, 189050, 559050));
+      QVERIFY(area->changeGeometry(first.id(), movedShape));
+      QgsFeature last;
+      QgsFeatureIterator rows = area->getFeatures();
+      QgsFeature row;
+      while (rows.nextFeature(row)) last = row;
+      QVERIFY(last.id() != first.id());
+      QVERIFY(area->deleteFeature(last.id()));
+      QVERIFY2(saveNow(window), "고치고 지운 뒤 저장이 실패했습니다");
+      QgsProject::instance()->setDirty(false);
+    }
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    auto* area = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"));
+    QVERIFY(area && area->isValid());
+    QCOMPARE(area->featureCount(), 3LL);
+    bool renamed = false;
+    QgsFeature row;
+    QgsFeatureIterator rows = area->getFeatures();
+    while (rows.nextFeature(row)) {
+      if (row.attribute(QStringLiteral("survey_name")).toString() != QStringLiteral("고친 이름")) continue;
+      renamed = true;
+      QVERIFY(qAbs(row.geometry().boundingBox().xMinimum() - 189000.) < 0.01);
+    }
+    QVERIFY2(renamed, "고친 속성이 남아 있어야 한다");
+    QgsProject::instance()->setDirty(false);
+  }
+
+  // 예전 판 앱이 저장한 조사가 지금 판에서 열려야 한다. tests/data/compat/<판 날짜>/ 는 그 판의
+  // 앱 코드로 저장한 합성 조사다(실제 유적 자료 없음). manifest.ini 에 그 판이 저장한 레이어·
+  // 조사구역 도형 수·도면 수를 적어 두었다. 앱을 고쳐 이 시험이 깨지면, 포터블을 새 판으로
+  // 바꿨을 때 예전 작업이 안 열리게 된 것이다. KA_COMPAT_DIR 로 다른 표본 폴더를 줄 수 있다.
+  void oldVersionSurveysStillOpen() {
+    const QString rootPath = qEnvironmentVariableIsEmpty("KA_COMPAT_DIR")
+                                 ? QStringLiteral("tests/data/compat")
+                                 : qEnvironmentVariable("KA_COMPAT_DIR");
+    const QDir root(rootPath);
+    QVERIFY2(root.exists(), qPrintable(QStringLiteral("호환 표본 폴더가 없습니다: ") + root.absolutePath()));
+    const QStringList versions = root.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    QVERIFY(!versions.isEmpty());
+    for (const QString& version : versions) {
+      // 표본을 더럽히지 않게 사본에서 연다. 다시 저장까지 해 본다.
+      QTemporaryDir work;
+      QVERIFY(work.isValid());
+      QVERIFY(copyDirectory(root.filePath(version), work.path()));
+      QSettings manifest(QDir(work.path()).filePath(QStringLiteral("manifest.ini")), QSettings::IniFormat);
+      const QString survey = QDir(work.path()).filePath(QStringLiteral("survey/") +
+                                                        manifest.value(QStringLiteral("survey")).toString());
+      const qint64 areaCount = manifest.value(QStringLiteral("survey_area")).toLongLong();
+      const int layouts = manifest.value(QStringLiteral("layouts")).toInt();
+      const QStringList layers = manifest.value(QStringLiteral("layers")).toStringList();
+      // 표본을 만든 PC 의 조사 폴더 밖(AppData 등)에 있던 자료. 여기서는 없을 수 있다.
+      const QStringList external = manifest.value(QStringLiteral("external")).toStringList();
+      const auto check = [&](const QString& stage) {
+        const QString where = version + QStringLiteral(" ") + stage + QStringLiteral(": ");
+        auto* area = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"));
+        QVERIFY2(area && area->isValid(), qPrintable(where + QStringLiteral("조사구역을 열지 못했습니다")));
+        QCOMPARE(area->featureCount(), areaCount);
+        QCOMPARE(QgsProject::instance()->layoutManager()->layouts().size(), layouts);
+        const QStringList missing = SurveyBundle::missingFileLayers(QgsProject::instance());
+        for (const QString& name : layers) {
+          QgsMapLayer* layer = layerNamed(name);
+          if (!layer) {
+            QStringList present;
+            for (QgsMapLayer* l : QgsProject::instance()->mapLayers()) present << l->name();
+            present.sort();
+            QVERIFY2(layer, qPrintable(where + name + QStringLiteral(" 레이어가 없어졌습니다. 지금 있는 것: ") +
+                                       present.join(QStringLiteral(", "))));
+          }
+          if (external.contains(name) && !layer->isValid()) {
+            QVERIFY2(missing.contains(name), qPrintable(where + name + QStringLiteral(" 가 없다는 알림이 없습니다")));
+            continue;
+          }
+          QVERIFY2(layer->isValid(), qPrintable(where + name + QStringLiteral(" 레이어를 열지 못했습니다: ") +
+                                                layer->source()));
+        }
+      };
+      {
+        MainWindow window;
+        disableRendering(window);
+        QVERIFY2(window.openSurveyGpkg(survey), qPrintable(version + QStringLiteral(": 조사를 열지 못했습니다")));
+        QCoreApplication::processEvents();
+        check(QStringLiteral("처음 열기"));
+        if (QTest::currentTestFailed()) return;
+        // 새 판에서 이어서 작업하고 저장한 뒤 다시 열어도 그대로여야 한다.
+        QVERIFY2(saveNow(window), qPrintable(version + QStringLiteral(": 새 판으로 저장하지 못했습니다")));
+        QgsProject::instance()->setDirty(false);
+      }
+      MainWindow window;
+      disableRendering(window);
+      QVERIFY(window.openSurveyGpkg(survey));
+      QCoreApplication::processEvents();
+      check(QStringLiteral("새 판 저장 뒤 다시 열기"));
+      if (QTest::currentTestFailed()) return;
+      QgsProject::instance()->setDirty(false);
+    }
+  }
+
   void saveAndReopen_keepsTreeGeometryAttributesAndStyle() {
     const QString path = makeSurvey(QStringLiteral("왕복조사"));
     QVERIFY(!path.isEmpty());
