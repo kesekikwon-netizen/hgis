@@ -62,7 +62,7 @@ Use official online documentation only when local repo evidence is missing or ve
 - Architecture B only: link `qgis_core` / `qgis_gui`; do not fork QGIS; do not reimplement PROJ, GDAL, QGIS rendering, or CRS transformation.
 - Domain layer logic keys are `survey_area`, `feature_poly`, `feature_line`, `section_line`, `control_points`, and existing `artifact_point` where already supported.
 - Store logical domain identity in `ka_hgis/layer_key`; Korean titles are UI labels only.
-- Keep legend groups separated as **조사 데이터**, **지적도**, and **참조 지도**. Downloaded cadastral (**지적도 · 조사 주변 5km**) stays in **지적도**, not under **참조 지도**. VWorld cadastral picture layers (**지적 본번/부번**, VWorld 지적) stay outside the **참조 지도** group. Basemaps, WMS, XYZ, soil, geology, masks, and aligned rasters are reference maps, not survey data. VWorld cadastral WMS is a picture and cannot snap.
+- Keep legend groups separated as **조사 데이터** and **참조 지도**. Downloaded cadastral (**지적도 · 조사 주변 5km**) is its own child of **참조 지도**, not merged into a **지적도** group and not merged with the VWorld picture. VWorld cadastral picture layers (**지적 본번/부번**, VWorld 지적) stay at the layer-tree root, outside the **참조 지도** group. Basemaps, WMS, XYZ, soil, geology, masks, and aligned rasters are reference maps, not survey data. VWorld cadastral WMS is a picture and cannot snap.
 - Work CRS may be EPSG:5186 or EPSG:5187. Upload/export output is EPSG:5179 SHP + PDF + MANIFEST.
 - `loadSurveyLayers` must not call `removeAllMapLayers()`. Drop domain layers only and keep basemaps/reference layers when the workflow requires it.
 - `loadSurveyLayers` must not auto-add empty domain layers. GPKG schema can exist on disk; legend entries appear only after an explicit user draw/import/open action.

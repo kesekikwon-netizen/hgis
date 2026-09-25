@@ -87,7 +87,7 @@ for raw in files:
             hits.append(f"{path}:{i}: password assignment ({val[:4]}...)")
         for m in BEARER_RE.finditer(line):
             token = m.group(1).strip().strip("\"'")
-            if token.lower() in {"<", "token", "xxx", "...", "$token"}:
+            if token.lower() in {"<", "token", "<token>", "xxx", "...", "$token"} or token.startswith("<"):
                 continue
             hits.append(f"{path}:{i}: Authorization Bearer")
 

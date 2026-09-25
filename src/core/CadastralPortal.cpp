@@ -40,8 +40,10 @@ public:
                      int offset = 0, int span = 0) {
     error.clear(); QByteArray bytes;
     if (canceled && canceled()) return {};
+    // Idle cuts a stalled transfer. The absolute cap is only so a trickle cannot
+    // run forever. A county ZIP may keep sending past two minutes.
     const int idleMs = absoluteTimeoutMs > 0 ? absoluteTimeoutMs : (file ? 120000 : 40000);
-    const int deadlineMs = absoluteTimeoutMs > 0 ? absoluteTimeoutMs : idleMs;
+    const int deadlineMs = absoluteTimeoutMs > 0 ? absoluteTimeoutMs : (file ? 30 * 60 * 1000 : idleMs);
     QNetworkRequest req(url);
     req.setRawHeader("User-Agent", "Mozilla/5.0 ka-hgis");
     req.setRawHeader("Referer", url.host() == QLatin1String("api.vworld.kr") ? QByteArray("https://localhost") : (base + dataset).toUtf8());
