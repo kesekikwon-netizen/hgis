@@ -1281,6 +1281,18 @@ void LayerOps::placeCadastralLayer(QgsProject* project, QgsMapLayer* layer) {
     if (auto* parent = qobject_cast<QgsLayerTreeGroup*>(bundled->parent()))
       parent->removeChildNode(bundled);
   }
+  if (isVworldCadastralPicture(layer)) {
+    if (QgsLayerTreeLayer* node = root->findLayer(layer->id())) {
+      if (node->parent() == root) return;
+      auto* clone = node->clone();
+      root->insertChildNode(0, clone);
+      if (auto* parent = qobject_cast<QgsLayerTreeGroup*>(node->parent()))
+        parent->removeChildNode(node);
+      return;
+    }
+    root->insertLayer(0, layer);
+    return;
+  }
   QgsLayerTreeGroup* refs = root->findGroup(QString::fromUtf8(kGroupReference));
   if (!refs)
     refs = root->addGroup(QString::fromUtf8(kGroupReference));
