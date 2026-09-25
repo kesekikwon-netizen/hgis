@@ -138,6 +138,7 @@ private slots:
   void exportLayoutPdf_userSheetMissing_doesNotSeedFiveTemplates();
   void shpKoreanRoundTripUtf8();
   void soilShpImport_crsOverrideAndCategorizedStyle();
+  void openVectorLayer_missingPrjUsesProjectCrs();
   void soilTerrainLegend_officialCodesAndStyle();
   void geologyEraLegend_icsColorsAndStyle();
   void geologyLithoWfs_excludesJejuUsesOfficialRasterUri();
@@ -931,6 +932,62 @@ void TestWorkflow::soilShpImport_crsOverrideAndCategorizedStyle() {
 }
 
 // 흙토람 공식 분포지형 범례(코드→이름·색)와 스타일 적용을 검증한다.
+
+// SHP without .prj: openVectorLayer assigns the project/work CRS (same idea as GeoTIFF).
+// QGIS CRS-for-layers can prompt or use project CRS; ka-hgis uses project CRS and tells the user.
+// https://docs.qgis.org/3.44/en/docs/user_manual/working_with_projections/working_with_projections.html
+void TestWorkflow::openVectorLayer_missingPrjUsesProjectCrs() {
+  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
+  if (!f.exists()) f.setFileName(QStringLiteral("../src/app/MainWindow.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QByteArray body = f.readAll();
+  const int fn = body.indexOf("void MainWindow::openVectorLayer()");
+  QVERIFY(fn >= 0);
+  const int soil = body.indexOf("void MainWindow::importSoilShapefile()", fn);
+  QVERIFY(soil > fn);
+  const QByteArray chunk = body.mid(fn, soil - fn);
+  QVERIFY2(chunk.contains(QStringLiteral("벡터에 좌표계가 없어 작업 좌표계").toUtf8()),
+           "openVectorLayer must warn like GeoTIFF when CRS is missing");
+  QVERIFY2(chunk.contains("layer->setCrs(QgsProject::instance()->crs())"),
+           "openVectorLayer must assign project CRS when layer CRS is invalid");
+
+  const QString dir = QDir::temp().filePath(
+      QStringLiteral("ka_vec_noprj_") + QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QDir().mkpath(dir);
+  QgsVectorLayer mem(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("poly"),
+                     QStringLiteral("memory"));
+  QVERIFY(mem.isValid());
+  QVERIFY(mem.startEditing());
+  QgsFeature feat(mem.fields());
+  QgsPolylineXY ring;
+  ring << QgsPointXY(200000.0, 500000.0) << QgsPointXY(200010.0, 500000.0)
+       << QgsPointXY(200010.0, 500010.0) << QgsPointXY(200000.0, 500010.0)
+       << QgsPointXY(200000.0, 500000.0);
+  feat.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+  QVERIFY(mem.addFeature(feat));
+  QVERIFY(mem.commitChanges());
+
+  const QString shp = QDir(dir).filePath(QStringLiteral("noprj.shp"));
+  QgsVectorFileWriter::SaveVectorOptions opts;
+  opts.driverName = QStringLiteral("ESRI Shapefile");
+  opts.fileEncoding = QStringLiteral("UTF-8");
+  QString err, nf, nl;
+  QCOMPARE(QgsVectorFileWriter::writeAsVectorFormatV3(
+               &mem, shp, QgsCoordinateTransformContext(), opts, &err, &nf, &nl),
+           QgsVectorFileWriter::NoError);
+  QFile::remove(QDir(dir).filePath(QStringLiteral("noprj.prj")));
+  QFile::remove(QDir(dir).filePath(QStringLiteral("noprj.qpj")));
+
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  QgsVectorLayer layer(shp, QStringLiteral("noprj"), QStringLiteral("ogr"));
+  QVERIFY(layer.isValid());
+  if (!layer.crs().isValid()) {
+    layer.setCrs(proj.crs());
+  }
+  QCOMPARE(layer.crs().authid(), QStringLiteral("EPSG:5186"));
+}
+
 void TestWorkflow::soilTerrainLegend_officialCodesAndStyle() {
   QCOMPARE(SoilMapService::terrainName(QStringLiteral("01")), QStringLiteral("산악지"));
   QCOMPARE(SoilMapService::terrainName(QStringLiteral("04")), QStringLiteral("곡간지/선상지"));

@@ -4244,8 +4244,15 @@ void MainWindow::openVectorLayer() {
   if (!nameField.isEmpty()) {
     LayerOps::applyNameAttributeLabels(layer, nameField, 5.0, false);
   }
-  LayerOps::applyLegendCrsLabel(layer);
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
+  if (!layer->crs().isValid() && QgsProject::instance() &&
+      QgsProject::instance()->crs().isValid()) {
+    layer->setCrs(QgsProject::instance()->crs());
+    statusBar()->showMessage(
+        QStringLiteral("벡터에 좌표계가 없어 작업 좌표계(%1)를 붙였습니다.").arg(m_workCrs),
+        8000);
+  }
+  LayerOps::applyLegendCrsLabel(layer);
   QgsProject::instance()->addMapLayer(layer, true);
   LayerOps::pruneEmptyLegendGroups(QgsProject::instance());
   if (m_canvas) {
