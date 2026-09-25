@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Work lives on dated branches (e.g. 20260922-1) long before it reaches main.
+    branches: [main, '20*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -38,13 +39,18 @@ jobs:
           test -f scripts/e2e-smoke.ps1
           echo "Required paths OK"
 
+      # These files keep their UTF-8 BOM on purpose: Windows PowerShell 5.1 reads
+      # BOM-less UTF-8 as the ANSI code page (CP949), and scripts/e2e-smoke.ps1
+      # reads the checklist without -Encoding. Accept the BOM here instead.
       - name: Validate checklist JSON
-        run: python3 -m json.tool data/rules/drawing_checklist.v1.json > /dev/null
+        run: python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8-sig"))' data/rules/drawing_checklist.v1.json
 
       - name: Validate sample survey JSON
         run: |
-          python3 -m json.tool samples/demo_survey/demo.ka-survey.json > /dev/null
-          python3 -m json.tool samples/bad_survey/bad.ka-survey.json > /dev/null
+          set -euo pipefail
+          for f in samples/demo_survey/demo.ka-survey.json samples/bad_survey/bad.ka-survey.json; do
+            python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8-sig"))' "$f"
+          done
 
       - name: CMakeLists basic shape
         run: |
