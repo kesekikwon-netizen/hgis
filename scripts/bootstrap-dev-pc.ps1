@@ -3,9 +3,11 @@
 #   .\scripts\bootstrap-dev-pc.ps1
 #   .\scripts\bootstrap-dev-pc.ps1 -SkipInstall
 #   .\scripts\bootstrap-dev-pc.ps1 -OsgeoRoot A:\OSGeo4W
+#   .\scripts\bootstrap-dev-pc.ps1 -AllowEnvDrift   # build even if dev-env.lock.json differs
 param(
   [switch]$SkipInstall,
-  [string]$OsgeoRoot = ""
+  [string]$OsgeoRoot = "",
+  [switch]$AllowEnvDrift
 )
 
 $ErrorActionPreference = "Stop"
@@ -88,6 +90,19 @@ if (-not (Test-Path $qgisDev)) {
 Write-Ok "OSGEO4W_ROOT=$($env:OSGEO4W_ROOT)"
 Write-Ok "QGIS_PREFIX_PATH=$($env:QGIS_PREFIX_PATH)"
 
+Write-Step "Compare with the reference PC (dev-env.lock.json)"
+& "$PSScriptRoot\dev-env-lock.ps1"
+$lockExit = $LASTEXITCODE
+if ($lockExit -eq 1) {
+  if (-not $AllowEnvDrift) {
+    Write-Fail "This PC differs from dev-env.lock.json. Fix the mismatched lines above (see docs/other-pc-setup.md) or re-run with -AllowEnvDrift."
+    exit 6
+  }
+  Write-Warn "Continuing with a different environment (-AllowEnvDrift). Build and test results may not match the reference PC."
+} elseif ($lockExit -eq 2) {
+  Write-Warn "No dev-env.lock.json yet; cannot confirm this PC matches the reference PC."
+}
+
 Write-Step "Optional: download large QGIS user-guide PDFs"
 try {
   & "$PSScriptRoot\download-qgis-manuals.ps1"
@@ -109,8 +124,8 @@ Write-Host @"
 Next:
   .\scripts\run-ka-hgis.ps1
   # agent rules: AGENTS.md , .codex/NOW.md , HANDOFF.md
-  # daily sync:
-  git pull origin main
+  # daily sync (current work branch):
+  git pull
   .\scripts\build-all.ps1
 
 Product reminders:

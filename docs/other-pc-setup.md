@@ -1,16 +1,55 @@
 # 다른 PC에서 바로 개발하기 (Windows)
 
-원격: **https://github.com/kwonyoungin11/hgis** · 브랜치 **`main`**  
+원격: **https://github.com/kwonyoungin11/hgis** · 브랜치: 지금 작업 중인 브랜치(예: `20260922-1`). `main`은 뒤처져 있을 수 있다.  
 DLL 미포함 → 대상 PC에 **OSGeo4W `qgis-dev`** 필요.
 
 ---
 
-## 30초 요약 (권장)
+## 같은 개발 환경 만들기 (PC가 달라도 같은 판)
+
+`qgis-dev`는 매일 새로 빌드된다. `install-deps.ps1`로 설치하면 설치한 날의 판이 들어오므로 PC마다 QGIS·Qt·GDAL 판이 달라지고, 같은 코드도 다르게 동작하거나 검사 결과가 달라진다. 지난 판은 다시 받을 수 없다. 그래서 기준 PC 하나의 판을 잠그고, 다른 PC는 그 폴더를 복사해 맞춘다.
+
+| 무엇 | 어떻게 맞추나 |
+|------|------|
+| OSGeo4W (qgis-dev, Qt, GDAL, PROJ …) | 기준 PC 폴더를 `osgeo4w-bundle.ps1`로 복사. 패키지 판까지 비교 |
+| MSVC 도구 모음 · Windows SDK · CMake | 같은 판을 설치. MSVC·CMake는 앞 두 자리(14.44, 4.1), SDK는 전체 판을 비교 |
+| Git · Node · Python · clangd | 경고만. Graft는 Node 주 판이 같아야 한다 |
+| Cursor | 모델 Grok 4.7, USER MCP `hgis_graft`를 이 PC 경로로 (비교 스크립트가 넣을 내용을 출력) |
+| 계정·API 키 | PC마다 앱에서 입력(DPAPI). git·번들로 옮기지 않는다 |
+| 조사 GPKG·SHP | git에 없음. OneDrive/NAS 별도 |
+
+**기준 PC** (지금 `A:\qgis`, `A:\OSGeo4W`). OSGeo4W나 VS를 업데이트할 때마다 1~2를 다시 한다.
+
+```powershell
+.\scripts\dev-env-lock.ps1 -Write                  # 1. dev-env.lock.json 갱신 → 커밋·push
+.\scripts\osgeo4w-bundle.ps1 -Export E:\ka-hgis-sdk # 2. 외장 디스크/NAS로 SDK 복사 (수 GB)
+```
+
+**다른 PC**
+
+```powershell
+git clone https://github.com/kwonyoungin11/hgis.git
+cd hgis
+git checkout 20260922-1                               # 지금 작업 브랜치
+.\scripts\osgeo4w-bundle.ps1 -Import E:\ka-hgis-sdk  # 기준 PC와 같은 경로(A:\OSGeo4W)로 복사
+.\scripts\dev-env-lock.ps1                            # [다름]이 없어야 한다
+.\scripts\bootstrap-dev-pc.ps1                        # 같은 비교 후 빌드·ctest·smoke
+```
+
+- `-Import`는 가져올 자리에 폴더가 있으면 지우지 않고 `<폴더>.before-<시각>`으로 이름만 바꿔 둔다.
+- A: 드라이브가 없으면 `subst A: D:\drive-a`처럼 만들거나 `-Root C:\OSGeo4W`로 다른 위치를 준다. 다른 위치면 스크립트가 알려 주는 대로 `OSGEO4W_ROOT`를 설정한다.
+- `dev-env-lock.ps1` 종료 코드: 0 같음, 1 다름, 2 잠금 파일 없음. `bootstrap-dev-pc.ps1`은 1이면 빌드하지 않는다(`-AllowEnvDrift`로 무시).
+- CI의 Windows 빌드(기준 PC runner)도 같은 비교를 한다. 기준 PC를 업데이트하고 잠금을 갱신하지 않으면 CI가 실패한다.
+
+---
+
+## 30초 요약 (기준 PC를 처음 만들 때)
 
 ```powershell
 git clone https://github.com/kwonyoungin11/hgis.git
 cd hgis
 # 최초 1회만 — 관리자 PowerShell 권장 (CMake/VS/OSGeo4W 설치 시도)
+# 다른 PC는 설치 대신 위 「같은 개발 환경 만들기」의 -Import 를 쓴다.
 # .\scripts\install-deps.ps1
 
 .\scripts\bootstrap-dev-pc.ps1
@@ -40,9 +79,11 @@ OSGeo4W 패키지:
 - `sqlite3-devel`
 - `pdal-dev`
 
-핀: 저장소 `VERSION_QGIS_PIN.txt` (가능하면 같은 qgis-dev 계열).
+판 기준: 저장소 `dev-env.lock.json`(패키지별 정확한 판). `VERSION_QGIS_PIN.txt`는 사람이 읽는 메모다.
 
 ### 의존성 자동 설치 (관리자 PowerShell)
+
+설치한 날의 최신 `qgis-dev`가 들어온다. 기준 PC를 처음 만들거나 일부러 판을 올릴 때만 쓰고, 그 뒤에는 `dev-env-lock.ps1 -Write`로 잠금을 갱신한다.
 
 ```powershell
 cd <클론>\hgis
@@ -60,7 +101,7 @@ cd <클론>\hgis
 ```powershell
 git clone https://github.com/kwonyoungin11/hgis.git
 cd hgis
-git checkout main
+git checkout 20260922-1   # 지금 작업 브랜치
 git pull
 .\scripts\bootstrap-dev-pc.ps1
 .\scripts\run-ka-hgis.ps1
@@ -102,13 +143,16 @@ cd A:\qgis
 ## C) 일상 동기화 (두 PC)
 
 ```powershell
-# 시작
-git pull origin main
-.\scripts\build-all.ps1   # 또는 cmake --build build --config Release
+# 시작 — 지금 작업 브랜치에서
+git pull
+.\scripts\dev-env-lock.ps1   # 기준 PC가 판을 올렸으면 여기서 [다름]이 보인다
+.\scripts\build-all.ps1      # 또는 cmake --build build --config Release
 
 # 끝 (커밋 후)
-git push origin main
+git push
 ```
+
+다른 PC에서 push 한 뒤 원래 PC로 돌아오면 작업 전에 `git pull`부터 한다. 먼저 커밋했다면 push가 거절되므로 `git pull` 후 다시 push 한다.
 
 - 조사 파일 `*.gpkg` / 필드 SHP는 **git에 없음** → OneDrive/NAS 별도.
 - VWorld 키: **도움말 → VWorld API 키 설정** (PC 로컬, 커밋 금지).
@@ -154,7 +198,9 @@ git push origin main
 
 | 증상 | 조치 |
 |------|------|
-| `OSGEO4W_ROOT not found` | OSGeo4W 설치 또는 `$env:OSGEO4W_ROOT` |
+| `OSGEO4W_ROOT not found` | 기준 PC 번들 `-Import` 또는 `$env:OSGEO4W_ROOT` |
+| `dev-env-lock.ps1`에 `[다름] OSGeo4W 패키지` | 설치로는 같은 판을 못 받는다. 기준 PC에서 `-Export` → 이 PC에서 `-Import` |
+| `[다름] MSVC 도구 모음` / `Windows SDK` | Visual Studio Installer에서 기준 PC와 같은 판으로 수정 |
 | `qgis-dev missing` | OSGeo4W에서 `qgis-dev` |
 | DLL 없음 / 즉시 종료 | `dev-env.ps1` 후 실행; `pdal-dev\bin` PATH |
 | CMake 없음 | `winget install Kitware.CMake` |
@@ -166,7 +212,8 @@ git push origin main
 
 ## G) 검증 체크리스트 (다른 PC 첫날)
 
-- [ ] `git log -1 --oneline` 가 GitHub `main` tip과 같음
+- [ ] `git log -1 --oneline` 가 GitHub 작업 브랜치 tip과 같음
+- [ ] `.\scripts\dev-env-lock.ps1` 결과가 「기준 PC와 같다」
 - [ ] `.\scripts\bootstrap-dev-pc.ps1` 성공
 - [ ] `ctest` 100%
 - [ ] 앱 기동 → 새 조사 → 레이어 목록 비어 있음

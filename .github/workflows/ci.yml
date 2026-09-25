@@ -76,6 +76,16 @@ jobs:
         with:
           fetch-depth: 2
 
+      # The runner is the reference PC: fail when it has drifted from the
+      # committed dev-env.lock.json. A missing lock (exit 2) only warns.
+      - name: Compare with dev-env.lock.json
+        shell: pwsh
+        run: |
+          . .\scripts\dev-env.ps1
+          .\scripts\dev-env-lock.ps1
+          if ($LASTEXITCODE -eq 1) { exit 1 }
+          exit 0
+
       - name: Configure (VS 2022 x64)
         shell: pwsh
         run: |

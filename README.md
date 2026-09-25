@@ -13,13 +13,14 @@ C++/Qt6 독립 실행형 필드고고학 HGIS. **OSGeo4W qgis-dev (QGIS 4.x) 라
 ```powershell
 git clone https://github.com/kwonyoungin11/hgis.git
 cd hgis
-# (최초 1회, 관리자 권장) CMake / VS2022 C++ / OSGeo4W
-# .\scripts\install-deps.ps1
+# 기준 PC와 같은 OSGeo4W 판을 복사해 온다 (install-deps 는 설치한 날의 qgis-dev 를 받는다)
+.\scripts\osgeo4w-bundle.ps1 -Import E:\ka-hgis-sdk
 
-.\scripts\bootstrap-dev-pc.ps1   # env 검사 + build + ctest + smoke
+.\scripts\bootstrap-dev-pc.ps1   # dev-env.lock.json 비교 + build + ctest + smoke
 .\scripts\run-ka-hgis.ps1
 ```
 
+- **같은 환경:** 기준 PC 판은 `dev-env.lock.json`에 잠근다. `.\scripts\dev-env-lock.ps1`로 이 PC가 같은지 본다.
 - **개발:** 클론 + OSGeo4W(`qgis-dev`) + VS2022 + CMake → `bootstrap-dev-pc.ps1` 또는 `build-all.ps1`
 - **실행만:** 개발 PC에서 `.\scripts\make-portable.ps1` 후 `dist\ka-hgis-portable\` 폴더 전체를 복사 → `start.bat` (OSGeo4W 설치 불필요)
 - 조사 GPKG/SHP는 git에 없음 → 별도 복사
