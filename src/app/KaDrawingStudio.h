@@ -108,6 +108,8 @@ public slots:
   void removeSelectedLayers();
   void undoLastChange();
   void savePdf();
+  // 「PDF 내보내기」와 같은 도면 PDF를 임시로 만든 뒤 인쇄 창(한 장 / 여러 장 나눠 찍기)을 연다.
+  void printDrawing();
 
 signals:
   void drawingScaleChanged(double denominator);
@@ -151,6 +153,8 @@ private:
   // 라벨 위에 위 레이어를 한 번 더 그리는 덧지도를 본 지도에 맞춘다.
   void syncAboveLabelsMap(QgsLayoutItemMap* base);
   bool syncHeritageNumbers(bool force = false);
+  // 저장과 인쇄가 같은 도면을 쓰도록 PDF 한 벌을 path 에 만든다(300 DPI, 유적 번호 확정 포함).
+  bool exportDrawingPdf(const QString& path, QString* error);
   void applyHeritageNumberChrome();
   QgsVectorLayer* blankMapLayer();
   static void ensureLayoutGuiRegistered(QgsMapCanvas* mapCanvas);

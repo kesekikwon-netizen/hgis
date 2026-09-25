@@ -32,6 +32,7 @@ QColor groupColor(const QString& id) {
       id == QLatin1String("import") || id == QLatin1String("save") ||
       id == QLatin1String("save_as")) return palette.file;
   if (id.startsWith(QLatin1String("layout_")) || id == QLatin1String("pdf") ||
+      id == QLatin1String("print") ||
       id == QLatin1String("export") || id == QLatin1String("upload") ||
       id == QLatin1String("check") || id == QLatin1String("section") ||
       id == QLatin1String("section_layout")) return palette.output;
@@ -241,6 +242,23 @@ void dPdf(QPainter& p) {
   p.drawPath(page);
   p.drawLine(38, 12, 38, 20);
   p.drawLine(38, 20, 46, 20);
+}
+
+// 프린터: 위로 나온 용지, 몸통, 아래로 나오는 인쇄물.
+void dPrint(QPainter& p) {
+  prep(p, 2.5);
+  p.drawRect(QRectF(20, 10, 24, 14));
+  QPainterPath body;
+  body.moveTo(20, 42);
+  body.lineTo(12, 42);
+  body.lineTo(12, 24);
+  body.lineTo(52, 24);
+  body.lineTo(52, 42);
+  body.lineTo(44, 42);
+  p.drawPath(body);
+  p.drawRect(QRectF(20, 34, 24, 20));
+  p.drawLine(QPointF(25, 42), QPointF(39, 42));
+  p.drawLine(QPointF(25, 48), QPointF(35, 48));
 }
 
 void dTerrain3d(QPainter& p) {
@@ -766,6 +784,7 @@ QIcon icon(const QString& id) {
     ic = bake(dCheck);
   else if (id == QLatin1String("export")) ic = bake(dExport);
   else if (id == QLatin1String("pdf")) ic = bake(dPdf);
+  else if (id == QLatin1String("print")) ic = bake(dPrint);
   else if (id == QLatin1String("section") || id == QLatin1String("section_layout")) ic = bake(dSection);
   else if (id == QLatin1String("terrain_3d") || id == QLatin1String("terrain3d")) ic = bake(dTerrain3d);
   else if (id == QLatin1String("crs")) ic = bake(dCrs);

@@ -52,7 +52,8 @@ set(OSGEO4W_ROOT "${OSGEO4W_ROOT_DEFAULT}" CACHE PATH "OSGeo4W root")
 # at another PC's qgis-dev, so the WMS provider never loaded.
 set(QGIS_PREFIX_PATH "${OSGEO4W_ROOT}/apps/qgis-dev" CACHE PATH "QGIS prefix" FORCE)
 list(PREPEND CMAKE_PREFIX_PATH "${OSGEO4W_ROOT}/apps/Qt6" "${OSGEO4W_ROOT}/apps/Qt6/lib/cmake")
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Xml PrintSupport Network Svg Test Multimedia MultimediaWidgets)
+# Pdf: 인쇄는 저장한 도면 PDF를 잘라 찍는다(TilePrint). Qt6Pdf.dll 은 OSGeo4W Qt 에 이미 있다.
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Xml PrintSupport Pdf Network Svg Test Multimedia MultimediaWidgets)
 find_package(Qt6 REQUIRED COMPONENTS WebEngineWidgets)
 
 set(KA_INCLUDES
@@ -128,6 +129,7 @@ add_library(ka_core STATIC
   src/core/SectionLayoutService.cpp
   src/core/Terrain3dService.cpp
   src/core/Terrain3dLayoutService.cpp
+  src/core/TilePrint.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
   src/core/SurveyStorage.h
@@ -169,10 +171,11 @@ add_library(ka_core STATIC
   src/core/SectionLayoutService.h
   src/core/Terrain3dService.h
   src/core/Terrain3dLayoutService.h
+  src/core/TilePrint.h
 )
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
-target_link_libraries(ka_core PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::PrintSupport Qt6::Network Qt6::Svg qgis_core qgis_gui gdal_i)
+target_link_libraries(ka_core PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::PrintSupport Qt6::Pdf Qt6::Network Qt6::Svg qgis_core qgis_gui gdal_i)
 if (WIN32)
   target_link_libraries(ka_core PUBLIC crypt32)
 endif()
@@ -296,6 +299,8 @@ add_executable(ka-hgis
   src/app/KaSnapSettingsWidget.h
   src/app/KaFeatureFormDialog.cpp
   src/app/KaFeatureFormDialog.h
+  src/app/KaPrintDialog.cpp
+  src/app/KaPrintDialog.h
   src/app/MainWindow.h
   src/app/KaSurveyAreaDialog.h
   src/app/KaFileBrowserPanel.h
@@ -679,6 +684,13 @@ if(KA_HGIS_BUILD_TESTS)
   set_target_properties(ka_download_ui_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(download_ui ka_download_ui_tests)
   set_tests_properties(download_ui PROPERTIES TIMEOUT 90)
+  add_executable(ka_tile_print_tests tests/test_tile_print.cpp
+    src/app/KaPrintDialog.cpp src/app/KaPrintDialog.h)
+  target_include_directories(ka_tile_print_tests PRIVATE src)
+  target_link_libraries(ka_tile_print_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_tile_print_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(tile_print ka_tile_print_tests)
+  set_tests_properties(tile_print PROPERTIES TIMEOUT 90)
   add_executable(ka_dem_rendering_tests tests/test_dem_rendering.cpp)
   add_executable(ka_dem_presentation_tests tests/test_dem_presentation.cpp src/app/KaDemClassDialog.cpp src/app/KaDemClassDialog.h)
   target_link_libraries(ka_dem_presentation_tests PRIVATE ka_core Qt6::Test)
@@ -777,6 +789,7 @@ if(KA_HGIS_BUILD_TESTS)
     drawingStudioAboveLabelsMapDrawsGeometryWithoutDuplicateNumberLabels
     drawingStudio_largeScaleChipsApplyToMapAndInput
     drawingInspectorUsesHeightWithoutOverlapping
+    drawingStudioPrintSplitsTheDrawingIntoSheets
     scaleControlFollowsActiveDrawingWithoutChangingMapCanvas
     scaleControl_isSingleWidgetAcceptingBothForms)
   ka_add_qtest_filter(save_open_edit ka_save_open_tests

@@ -11,8 +11,11 @@
 #include "core/GeorefService.h"
 #include "KaFileBrowserPanel.h"
 #include "KaLayerOpacityRail.h"
+#include "KaPrintDialog.h"
 #include "MainWindow.h"
 
+#include <QShortcut>
+#include <QTemporaryDir>
 #include <algorithm>
 #include <cmath>
 
@@ -1388,10 +1391,23 @@ void KaDrawingStudio::buildUi() {
                                 QStringLiteral("용지/방향"), QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
   paperBtn->setToolTip(QStringLiteral("A4/A3 용지 크기 및 가로/세로 방향을 전환합니다"));
   connect(paperBtn, &QToolButton::clicked, this, &KaDrawingStudio::openPaperSettingsDialog);
+  auto* printBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("print")),
+                                QStringLiteral("인쇄"), QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
+  printBtn->setObjectName(QStringLiteral("btnPrint"));
+  printBtn->setToolTip(QStringLiteral("프린터로 찍거나, 큰 도면을 작은 용지 여러 장으로 나눠 찍습니다 (Ctrl+P)"));
+  connect(printBtn, &QToolButton::clicked, this, &KaDrawingStudio::printDrawing);
+  auto* printKey = new QShortcut(QKeySequence::Print, this);
+  printKey->setContext(Qt::WidgetWithChildrenShortcut);
+  connect(printKey, &QShortcut::activated, this, &KaDrawingStudio::printDrawing);
   legendRow->addWidget(legendBtn, 1);
   legendRow->addWidget(paperBtn, 1);
-  legendRow->addWidget(pdfBtn, 1);
   legendLay->addLayout(legendRow);
+  // 내보내기와 인쇄는 한 줄에 모은다. 한 줄에 네 칸이면 좁은 창에서 글자가 잘린다.
+  auto* outputRow = new QHBoxLayout;
+  outputRow->setSpacing(14);
+  outputRow->addWidget(pdfBtn, 1);
+  outputRow->addWidget(printBtn, 1);
+  legendLay->addLayout(outputRow);
   m_legendTitle = new QLineEdit(m_cardLegend);
   m_legendTitle->setPlaceholderText(QStringLiteral("제목을 입력하세요"));
   m_legendTitle->setText(QStringLiteral("범례"));
@@ -4103,15 +4119,12 @@ void KaDrawingStudio::centerSurveyInMap() {
                           .arg(displayScale(map->scale())));
 }
 
-void KaDrawingStudio::savePdf() {
+bool KaDrawingStudio::exportDrawingPdf(const QString& path, QString* error) {
   auto* ly = layout();
   if (!ly) {
-    QMessageBox::information(this, QStringLiteral("PDF"), QStringLiteral("용지가 없습니다."));
-    return;
+    if (error) *error = QStringLiteral("용지가 없습니다.");
+    return false;
   }
-  const QString path = QFileDialog::getSaveFileName(
-      this, QStringLiteral("도면 PDF 저장"), QStringLiteral("도면.pdf"), QStringLiteral("PDF (*.pdf)"));
-  if (path.isEmpty()) return;
   // Drain queued UI changes before the export's mandatory synchronous update.
   if (m_layerSyncTimer) m_layerSyncTimer->stop();
   if (m_layerSyncPending) {
@@ -4119,8 +4132,8 @@ void KaDrawingStudio::savePdf() {
     if (auto* map = mapItem()) applyLayersToMap(map, true, false);
   }
   if (!syncHeritageNumbers(true)) {
-    QMessageBox::warning(this, QStringLiteral("도면 번호"), m_heritageNumbers.error());
-    return;
+    if (error) *error = m_heritageNumbers.error();
+    return false;
   }
   if (auto* map = mapItem())
     applyCrsGrid(map);
@@ -4140,14 +4153,54 @@ void KaDrawingStudio::savePdf() {
     KaCrashGuard::logLine(QStringLiteral("[layout] PDF 내보내기 실패 %1 — %2")
                               .arg(pdfError)
                               .arg(path));
-    QMessageBox::warning(this, QStringLiteral("PDF"),
-                         pdfError);
+    if (error) *error = pdfError;
+    return false;
+  }
+  return true;
+}
+
+void KaDrawingStudio::savePdf() {
+  if (!layout()) {
+    QMessageBox::information(this, QStringLiteral("PDF"), QStringLiteral("용지가 없습니다."));
+    return;
+  }
+  const QString path = QFileDialog::getSaveFileName(
+      this, QStringLiteral("도면 PDF 저장"), QStringLiteral("도면.pdf"), QStringLiteral("PDF (*.pdf)"));
+  if (path.isEmpty()) return;
+  QString pdfError;
+  if (!exportDrawingPdf(path, &pdfError)) {
+    QMessageBox::warning(this, QStringLiteral("PDF"), pdfError);
     return;
   }
   if (auto* composed = layout())
     LayoutService::markStudioSheetComposed(composed);
   if (m_status) m_status->setText(QStringLiteral("저장: %1").arg(path));
   QMessageBox::information(this, QStringLiteral("PDF"), QStringLiteral("저장했습니다.\n%1").arg(path));
+}
+
+void KaDrawingStudio::printDrawing() {
+  auto* ly = layout();
+  if (!ly) {
+    QMessageBox::information(this, QStringLiteral("인쇄"), QStringLiteral("용지가 없습니다."));
+    return;
+  }
+  QTemporaryDir temporary;
+  if (!temporary.isValid()) {
+    QMessageBox::warning(this, QStringLiteral("인쇄"), QStringLiteral("인쇄용 임시 폴더를 만들지 못했습니다."));
+    return;
+  }
+  const QString pdf = temporary.filePath(QStringLiteral("drawing-print.pdf"));
+  QString error;
+  QApplication::setOverrideCursor(Qt::WaitCursor);
+  const bool ok = exportDrawingPdf(pdf, &error);
+  QApplication::restoreOverrideCursor();
+  if (!ok) {
+    QMessageBox::warning(this, QStringLiteral("인쇄"), error);
+    return;
+  }
+  const QString name = ly->project() ? ly->project()->baseName() : QString();
+  KaPrintDialog dialog(pdf, name.isEmpty() ? QStringLiteral("도면") : name, this);
+  dialog.exec();
 }
 
 #include "KaDrawingStudio.moc"

@@ -44,7 +44,9 @@
 #include "app/KaVertexEditTool.h"
 #include "app/KaDrawingStudio.h"
 #include "app/KaLayerInformation.h"
+#include "app/KaPrintDialog.h"
 #include "app/KaTheme.h"
+#include <QPdfDocument>
 #include "app/KaRegionLocator.h"
 #include "app/KaSurveyAreaDialog.h"
 #include "app/KaTopographicBrowser.h"
@@ -3245,6 +3247,64 @@ private slots:
     QVERIFY(window.openSurveyGpkg(path));
     QCOMPARE(tabs->tabText(tabs->currentIndex()), QStringLiteral("지도"));
     QVERIFY(LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area")));
+  }
+  // 도면 만들기의 「인쇄」는 PDF 내보내기와 같은 도면을 만들어 인쇄 창에 넘기고,
+  // 인쇄 창은 큰 도면을 작은 용지 여러 장으로 나눠 PDF 쪽마다 한 장씩 쓴다.
+  void drawingStudioPrintSplitsTheDrawingIntoSheets() {
+    MainWindow window;
+    disableRendering(window);
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.show();
+    auto* canvas = window.findChild<QgsMapCanvas*>(QStringLiteral("mapCanvas"));
+    QVERIFY(canvas);
+    canvas->setDestinationCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+    canvas->setExtent(QgsRectangle(190000., 560000., 191000., 561000.));
+    QTimer acceptPaper;
+    acceptPaper.setInterval(10);
+    connect(&acceptPaper, &QTimer::timeout, &window, [&] {
+      auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+      if (dialog && dialog->windowTitle() == QStringLiteral("용지 설정")) {
+        acceptPaper.stop();
+        dialog->accept();
+      }
+    });
+    acceptPaper.start();
+    QVERIFY(QMetaObject::invokeMethod(&window, "openLayoutDesigner"));
+    acceptPaper.stop();
+    QCoreApplication::processEvents();
+    auto* studio = window.findChild<KaDrawingStudio*>();
+    QVERIFY(studio);
+    auto* printButton = studio->findChild<QToolButton*>(QStringLiteral("btnPrint"));
+    QVERIFY2(printButton, "도면 만들기에 인쇄 단추가 없습니다.");
+
+    QTemporaryDir out;
+    QVERIFY(out.isValid());
+    const QString tiles = out.filePath(QStringLiteral("tiles.pdf"));
+    bool opened = false;
+    int planned = 0;
+    QString error;
+    QTimer handle;
+    handle.setInterval(20);
+    connect(&handle, &QTimer::timeout, &window, [&] {
+      auto* dialog = qobject_cast<KaPrintDialog*>(QApplication::activeModalWidget());
+      if (!dialog) return;
+      handle.stop();
+      opened = true;
+      dialog->setTiled(true);
+      dialog->setSheet(KaPrintDialog::SheetA4);
+      dialog->setOutput(KaPrintDialog::OutputA2);
+      if (dialog->plan().ok && dialog->saveTilesPdf(tiles, &error))
+        planned = int(dialog->plan().sheets.size());
+      dialog->reject();
+    });
+    handle.start();
+    printButton->click();
+    handle.stop();
+    QVERIFY2(opened, "인쇄 창이 열리지 않았습니다.");
+    QVERIFY2(planned > 1, qPrintable(error));
+    QPdfDocument doc;
+    QCOMPARE(doc.load(tiles), QPdfDocument::Error::None);
+    QCOMPARE(doc.pageCount(), planned);
   }
   // 축척 칸은 하나뿐이어야 한다. 예전에는 자유 입력 QLineEdit 과 프리셋 QComboBox 가
   // 따로 있어서 같은 축척인데도 어느 쪽으로 넣었느냐에 따라 화면이 달랐다.

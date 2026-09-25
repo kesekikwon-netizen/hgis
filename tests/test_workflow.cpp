@@ -6300,9 +6300,17 @@ void TestWorkflow::drawingStudio_sheetOmitsCrossesAndBorderRuler() {
 
   QVERIFY2(src.contains(QLatin1String("&KaDrawingStudio::savePdf")),
            "조판 PDF 버튼이 savePdf에 연결되어야 한다");
-  const int save = src.indexOf(QLatin1String("void KaDrawingStudio::savePdf()"));
-  QVERIFY2(save >= 0, "savePdf");
-  const QString pdfFn = src.mid(save, 900);
+  // PDF 저장과 인쇄는 같은 도면 PDF(exportDrawingPdf)를 쓴다.
+  const auto body = [&src](const QString& signature, int length) {
+    const int at = src.indexOf(signature);
+    return at >= 0 ? src.mid(at, length) : QString();
+  };
+  const QString saveFn = body(QStringLiteral("void KaDrawingStudio::savePdf()"), 700);
+  const QString printFn = body(QStringLiteral("void KaDrawingStudio::printDrawing()"), 900);
+  QVERIFY2(saveFn.contains(QLatin1String("exportDrawingPdf(")), "PDF 저장이 공통 도면 PDF를 거쳐야 한다");
+  QVERIFY2(printFn.contains(QLatin1String("exportDrawingPdf(")), "인쇄가 PDF 저장과 같은 도면 PDF를 거쳐야 한다");
+  const QString pdfFn = body(QStringLiteral("bool KaDrawingStudio::exportDrawingPdf("), 1600);
+  QVERIFY2(!pdfFn.isEmpty(), "exportDrawingPdf");
   QVERIFY2(pdfFn.contains(QLatin1String("applyCrsGrid")),
            "PDF 저장 전에 조판과 같은 격자 상태를 맞춘다");
   QVERIFY2(!pdfFn.contains(QLatin1String("applySurveyFrameGrid")),
