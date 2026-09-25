@@ -971,7 +971,10 @@ void TestTheme::chromeFontIsFieldKorean() {
 void TestTheme::beginnerChrome_questionLabels() {
   QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString main = QString::fromUtf8(mw.readAll());
+  QString main = QString::fromUtf8(mw.readAll());
+  QFile ribbonFile(QStringLiteral("src/app/MainWindowRibbon.cpp"));
+  QVERIFY2(ribbonFile.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindowRibbon.cpp");
+  main += QString::fromUtf8(ribbonFile.readAll());
   QVERIFY2(main.contains(QLatin1String("beginnerRibbon")) ||
                main.contains(QLatin1String("KaBeginnerRibbon")),
            "메인에 초보자 리본");

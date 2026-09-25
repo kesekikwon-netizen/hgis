@@ -13,6 +13,9 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QLabel>
+#include <QPushButton>
+#include <QWidgetAction>
 #include <QClipboard>
 #include <QFileInfo>
 #include <QItemSelectionModel>
@@ -252,14 +255,32 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
   };
   const auto zoom = [&]() {
     const QString reason = vector ? emptyReason : invalidReason;
-    add(&menu, "layer.zoom", QStringLiteral("이 레이어로 이동"),
-        reason, [this, layer]() {
-          if (!LayerOps::zoomToLayerMax(m_canvas, layer)) {
-            statusBar()->showMessage(QStringLiteral("표시할 범위가 없습니다. 도형이나 자료 범위를 확인하세요."), 6000);
-            return;
-          }
-          if (m_drawingStudio) m_drawingStudio->centerOnMapCanvas();
-        });
+    auto* zoomButton = new QPushButton(QStringLiteral("이 레이어로 이동"), &menu);
+    zoomButton->setObjectName(QStringLiteral("layer.zoom"));
+    zoomButton->setFlat(true);
+    zoomButton->setCursor(Qt::PointingHandCursor);
+    zoomButton->setEnabled(reason.isEmpty());
+    zoomButton->setToolTip(reason);
+    zoomButton->setStyleSheet(reason.isEmpty()
+                                  ? QStringLiteral("QPushButton { color: #c62828; text-align: left; border: none;"
+                                                   " background: transparent; padding: 4px 28px; }")
+                                  : QStringLiteral("QPushButton { color: #e8b4b4; text-align: left; border: none;"
+                                                   " background: transparent; padding: 4px 28px; }"));
+    QObject::connect(zoomButton, &QPushButton::clicked, &menu, [this, layer, &menu]() {
+      menu.close();
+      if (!layer || m_closingWindow) return;
+      if (m_layerTree) m_layerTree->setCurrentLayer(layer);
+      if (!LayerOps::zoomToLayerMax(m_canvas, layer)) {
+        statusBar()->showMessage(QStringLiteral("표시할 범위가 없습니다. 도형이나 자료 범위를 확인하세요."), 6000);
+        return;
+      }
+      if (m_drawingStudio) m_drawingStudio->centerOnMapCanvas();
+    });
+    auto* zoomAction = new QWidgetAction(&menu);
+    zoomAction->setObjectName(QStringLiteral("layer.zoom"));
+    zoomAction->setEnabled(reason.isEmpty());
+    zoomAction->setDefaultWidget(zoomButton);
+    menu.addAction(zoomAction);
   };
   const auto draw = [&]() { add(&menu, "layer.draw", QStringLiteral("그리기·편집 시작"), drawReason,
       [this, vector]() { if (vector) beginEdit(vector); }); };

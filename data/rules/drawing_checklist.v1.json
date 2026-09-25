@@ -1,4 +1,4 @@
-﻿{
+{
   "version": 1,
   "title_ko": "발굴 위치도면 유의사항 기반 검수",
   "rules": [
@@ -21,7 +21,7 @@
     {"id": "FEATURE_NO_SYMBOL_ONLY", "severity": "error", "message_ko": "유구는 면/선 기하여야 합니다.", "check_type": "geometry_type:feature_poly|feature_line"},
     {"id": "FEATURE_LEGEND_FIELDS", "severity": "error", "message_ko": "유구 종류/시대 속성 필요.", "check_type": "field_any:feature_poly:kind,period"},
     {"id": "EXTENT_MATCH", "severity": "warn", "message_ko": "유구 범위가 조사구역과 어긋날 수 있음.", "check_type": "extent_within:features,survey_area"},
-    {"id": "CRS_PROJECT_SET", "severity": "error", "message_ko": "프로젝트 좌표계 미설정 (EPSG:5179 권장).", "check_type": "project_crs_set"},
+    {"id": "CRS_PROJECT_SET", "severity": "error", "message_ko": "프로젝트 좌표계가 없습니다. 작업 좌표계는 EPSG:5186 또는 EPSG:5187입니다.", "check_type": "project_crs_set"},
     {"id": "EXPORT_SHP_READY", "severity": "error", "message_ko": "SHP 내보내기 전 조사구역 무효.", "check_type": "export_ready:survey_area"}
   ]
 }

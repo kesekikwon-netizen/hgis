@@ -609,6 +609,13 @@ bool LayerOps::zoomToProjectDataLayers(QgsMapCanvas* canvas, QgsProject* project
   const QgsRectangle kr = koreaExtentForCrs(mapAuth);
 
   for (QgsMapLayer* l : project->mapLayers()) {
+    if (layerKeyOf(l) != QLatin1String("survey_area")) continue;
+    auto* survey = qobject_cast<QgsVectorLayer*>(l);
+    if (survey && survey->featureCount() > 0 && zoomToLayerMax(canvas, survey))
+      return true;
+  }
+
+  for (QgsMapLayer* l : project->mapLayers()) {
     if (!l || !l->isValid() || isBasemapLayer(l)) continue;
     const QString n = l->name();
     if (n.contains(QStringLiteral("위성")) || n.contains(QStringLiteral("지적"))) continue;

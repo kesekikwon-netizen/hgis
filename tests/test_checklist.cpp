@@ -79,7 +79,18 @@ void TestKaHgis::cleanupTestCase() {}
 void TestKaHgis::loadRules() {
   ChecklistEngine e;
   QVERIFY2(e.loadRules(rulesFile()), qPrintable(rulesFile()));
-  QVERIFY(e.ruleCount() >= 12);
+  QCOMPARE(e.ruleCount(), 21);
+  const auto results = e.evaluate(ProjectStateBuilder::empty());
+  bool sawCrs = false;
+  for (const auto& x : results) {
+    if (x.id != QLatin1String("CRS_PROJECT_SET")) continue;
+    sawCrs = true;
+    QVERIFY2(x.messageKo.contains(QStringLiteral("5186")) &&
+                 x.messageKo.contains(QStringLiteral("5187")) &&
+                 !x.messageKo.contains(QStringLiteral("5179")),
+             qPrintable(x.messageKo));
+  }
+  QVERIFY(sawCrs);
 }
 
 void TestKaHgis::evaluateFailsWithoutSurvey() {

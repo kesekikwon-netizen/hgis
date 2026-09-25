@@ -1,4 +1,5 @@
 #include "KaSessionLog.h"
+#include "app/KaHgisVersion.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -50,6 +51,20 @@ void rotateIfNeeded(QFile& logFile, const QString& path) {
 
 }  // namespace
 
+namespace {
+QString g_qgisVersion = QStringLiteral("없음");
+}
+
+QString KaSessionLog::buildLabel() {
+  return QStringLiteral("ka-hgis %1 · 커밋 %2 · QGIS %3")
+      .arg(QLatin1String(KA_HGIS_VERSION), QLatin1String(KA_HGIS_GIT_HASH), g_qgisVersion);
+}
+
+void KaSessionLog::setQgisVersion(const QString& version) {
+  const QString trimmed = version.trimmed();
+  if (!trimmed.isEmpty()) g_qgisVersion = trimmed;
+}
+
 void KaSessionLog::line(const QString& text) {
   thread_local bool inLogLine = false;
   if (inLogLine) return;
@@ -76,15 +91,22 @@ void KaSessionLog::line(const QString& text) {
   if (logFile.isOpen() && QDir::fromNativeSeparators(logFile.fileName()) != path) {
     logFile.close();
   }
+  bool openedNow = false;
   if (!logFile.isOpen()) {
     QDir().mkpath(dir());
     logFile.setFileName(path);
     if (!logFile.open(QIODevice::Append | QIODevice::Text)) return;
+    openedNow = true;
   }
   rotateIfNeeded(logFile, path);
   if (!logFile.isOpen()) return;
 
   QTextStream ts(&logFile);
+  if (openedNow) {
+    const QString openedAt =
+        QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"));
+    ts << openedAt << ' ' << buildLabel() << '\n';
+  }
   const QString stamp =
       QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"));
   if (foldedNote) {

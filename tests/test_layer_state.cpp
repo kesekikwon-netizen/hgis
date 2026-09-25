@@ -541,9 +541,9 @@ private slots:
     QVERIFY(LayerOps::projectHasCadastralLayer(&project));
     QVERIFY(!LayerOps::userRemovedCadastral(&project));
     QVERIFY(!project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral)));
-    auto* refs = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupReference));
-    auto* node = refs ? refs->findLayer(cad->id()) : nullptr;
+    auto* node = project.layerTreeRoot()->findLayer(cad->id());
     QVERIFY(node);
+    QVERIFY(node->parent() == project.layerTreeRoot());
     QCOMPARE(LayerOps::removableCadastralLayersFromNode(node), QList<QgsMapLayer*>{cad});
   }
 

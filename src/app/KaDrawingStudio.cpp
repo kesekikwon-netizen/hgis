@@ -668,6 +668,17 @@ private slots:
       } else {
         mPendingMap->setScale(cur / mPendingFactor, true);
       }
+      if (mPendingMap->layout()) {
+        QList<QgsLayoutItemMap*> maps;
+        mPendingMap->layout()->layoutItems(maps);
+        for (QgsLayoutItemMap* other : maps) {
+          if (!other || other == mPendingMap) continue;
+          const QString id = other->id();
+          if (id != QLatin1String(kIdMapAbove) && id != QLatin1String(kIdMapNumbers)) continue;
+          other->setCrs(mPendingMap->crs());
+          other->zoomToExtent(mPendingMap->extent());
+        }
+      }
     }
     mPendingFactor = 1.0;
     emit mapViewChanged();
@@ -677,10 +688,22 @@ private:
   QgsLayoutItemMap* mapAt(const QPoint& viewPos) const {
     if (!view() || !layout()) return nullptr;
     const QPointF scenePt = view()->mapToScene(viewPos);
-    if (auto* hit = dynamic_cast<QgsLayoutItemMap*>(layout()->layoutItemAt(scenePt, true)))
-      return hit;
+    QgsLayoutItemMap* hit = dynamic_cast<QgsLayoutItemMap*>(layout()->layoutItemAt(scenePt, true));
     QList<QgsLayoutItemMap*> maps;
     layout()->layoutItems(maps);
+    // 번호·덧그림 지도는 본 지도와 같은 칸을 덮는다. 휠이 그 칸을 집으면
+    // 본 지도는 그대로라 확대 대신 번호만 다른 곳으로 밀린다.
+    const auto isOverlay = [](const QgsLayoutItemMap* map) {
+      if (!map) return false;
+      const QString id = map->id();
+      return id == QLatin1String(kIdMapAbove) || id == QLatin1String(kIdMapNumbers);
+    };
+    if (!hit || isOverlay(hit)) {
+      for (QgsLayoutItemMap* map : maps) {
+        if (map && map->id() == QLatin1String(kIdMap)) return map;
+      }
+    }
+    if (hit) return hit;
     return maps.isEmpty() ? nullptr : maps.first();
   }
 
@@ -1176,6 +1199,7 @@ void KaDrawingStudio::buildUi() {
   m_layerModel->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility, true);
   m_layerModel->setFlag(QgsLayerTreeModel::AllowNodeReorder, true);
   m_layerModel->setFlag(QgsLayerTreeModel::AllowNodeRename, false);
+  m_layerModel->setAutoCollapseLegendNodes(1);
   m_layerTree = new KaLayerInformationView(layerBox);
   m_layerTree->setObjectName(QStringLiteral("layoutLayerTree"));
   m_layerTree->setModel(m_layerModel);

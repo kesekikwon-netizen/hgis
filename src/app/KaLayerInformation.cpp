@@ -1,4 +1,5 @@
 #include "KaLayerInformation.h"
+#include "core/HeritageStyle.h"
 #include "core/LayerLabelControls.h"
 #include "core/LayerOps.h"
 
@@ -27,6 +28,20 @@ namespace {
 int labelColumnWidth(const QgsLayerTreeView* view) {
   return qMax(88, view->fontMetrics().horizontalAdvance(QStringLiteral("이름·면적")) +
       view->style()->pixelMetric(QStyle::PM_IndicatorWidth, nullptr, view) + 18);
+}
+
+// 목록 이름은 종류 색으로 찾는다. 색은 HeritageStyle 한 곳만 쓴다.
+// 오른쪽 글자 칸은 그대로 둔다. 꺼진 줄은 종류와 상관없이 흐리게 둔다.
+QColor layerListInk(QgsLayerTreeNode* node, int column) {
+  if (!node->isVisible()) return QColor(QStringLiteral("#64727e"));
+  if (column == 0) {
+    for (QgsLayerTreeNode* n = node; n; n = n->parent()) {
+      if (const auto dataset = HeritageStyle::fromLayerName(n->name()))
+        return HeritageStyle::color(*dataset);
+    }
+  }
+  if (column == 1) return QColor(QStringLiteral("#52606d"));
+  return QColor(QgsLayerTree::isGroup(node) ? QStringLiteral("#1f5275") : QStringLiteral("#202831"));
 }
 }
 
@@ -150,9 +165,7 @@ QVariant KaLayerInformationModel::data(const QModelIndex& item, int role) const 
     if (auto* node = index2node(item.siblingAtColumn(0))) {
       const bool group = QgsLayerTree::isGroup(node);
       if (role == Qt::ForegroundRole)
-        return QBrush(QColor(!node->isVisible() ? QStringLiteral("#64727e") :
-            group ? QStringLiteral("#1f5275") :
-            item.column() == 1 ? QStringLiteral("#52606d") : QStringLiteral("#202831")));
+        return QBrush(layerListInk(node, item.column()));
       QFont font = layerTreeNodeFont(node->nodeType());
       font.setBold(group);
       if (!node->isVisible()) font.setItalic(true);

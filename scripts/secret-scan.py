@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Fail closed if tracked files look like they contain live secrets.
 
 Looks for:

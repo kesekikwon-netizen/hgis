@@ -253,6 +253,10 @@ void TestCatchLog::sessionLog_writesLine() {
   QVERIFY2(log.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(tmp.path()));
   const QString text = QString::fromUtf8(log.readAll());
   QVERIFY2(text.contains(QStringLiteral("[except] test-probe")), qPrintable(text));
+  const QString first = text.section(QLatin1Char('\n'), 0, 0);
+  QVERIFY2(first.contains(QStringLiteral("ka-hgis ")) && first.contains(QStringLiteral("커밋 ")) &&
+               first.contains(QStringLiteral("QGIS ")),
+           qPrintable(first));
 }
 
 void TestCatchLog::sessionLog_rotatesWhenOverMax() {

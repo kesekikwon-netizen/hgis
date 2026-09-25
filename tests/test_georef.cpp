@@ -448,7 +448,10 @@ void TestGeoref::styleAlignedRasterOverlay_colorGeotiffKeepsNaturalColors() {
 void TestGeoref::updateAlignOverlay_remapsDestFromMapOnEveryPaint() {
   QFile f(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString src = QString::fromUtf8(f.readAll());
+  QString src = QString::fromUtf8(f.readAll());
+  QFile alignSrc(QStringLiteral("src/app/MainWindowAlign.cpp"));
+  QVERIFY2(alignSrc.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindowAlign.cpp");
+  src += QString::fromUtf8(alignSrc.readAll());
   const int fn = src.indexOf(QLatin1String("void MainWindow::updateAlignOverlay"));
   QVERIFY2(fn >= 0, "updateAlignOverlay");
   const int next = src.indexOf(QLatin1String("void MainWindow::"), fn + 10);

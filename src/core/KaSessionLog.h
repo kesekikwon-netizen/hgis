@@ -12,6 +12,8 @@ public:
   static constexpr qint64 kDefaultMaxBytes = 10LL * 1024 * 1024;
 
   static void line(const QString& text);
+  static void setQgisVersion(const QString& version);
+  static QString buildLabel();
   static QString dir();
   static qint64 maxBytes();
   static QString dumpHint();

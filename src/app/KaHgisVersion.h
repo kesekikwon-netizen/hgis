@@ -5,3 +5,6 @@
 #ifndef KA_HGIS_VERSION
 #define KA_HGIS_VERSION "2.0.0"
 #endif
+#ifndef KA_HGIS_GIT_HASH
+#define KA_HGIS_GIT_HASH "unknown"
+#endif

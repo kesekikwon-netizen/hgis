@@ -1,4 +1,6 @@
 #include <QtTest>
+#include <QBrush>
+#include <QColor>
 #include <QAbstractItemModelTester>
 #include <QCheckBox>
 #include <QComboBox>
@@ -17,6 +19,7 @@
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
 #include "app/KaLayerInformation.h"
+#include "core/HeritageStyle.h"
 #include "core/LayerLabelControls.h"
 #include "core/LayerOps.h"
 
@@ -240,6 +243,29 @@ private slots:
                             .arg(row)
                             .arg(window.width())
                             .arg(window.height())));
+  }
+
+  void heritageNamesUseDatasetColor() {
+    QgsProject project;
+    auto* refs = project.layerTreeRoot()->addGroup(QStringLiteral("참조 지도"));
+    auto* designated = refs->addGroup(HeritageStyle::layerName(HeritageDataset::DesignatedHeritage));
+    auto* child = add(project, designated, QStringLiteral("국보"));
+    auto* plain = add(project, refs, QStringLiteral("위성"));
+    KaLayerInformationModel model(&project, false);
+    const auto designatedColor = HeritageStyle::color(HeritageDataset::DesignatedHeritage);
+    QCOMPARE(model.data(model.node2index(designated), Qt::ForegroundRole).value<QBrush>().color(), designatedColor);
+    QCOMPARE(model.data(model.node2index(project.layerTreeRoot()->findLayer(child->id())), Qt::ForegroundRole)
+                 .value<QBrush>().color(),
+             designatedColor);
+    QCOMPARE(model.data(model.node2index(project.layerTreeRoot()->findLayer(plain->id())), Qt::ForegroundRole)
+                 .value<QBrush>().color(),
+             QColor(QStringLiteral("#202831")));
+    QCOMPARE(model.data(model.node2index(designated).siblingAtColumn(1), Qt::ForegroundRole).value<QBrush>().color(),
+             QColor(QStringLiteral("#52606d")));
+    designated->setItemVisibilityChecked(false);
+    QCoreApplication::processEvents();
+    QCOMPARE(model.data(model.node2index(designated), Qt::ForegroundRole).value<QBrush>().color(),
+             QColor(QStringLiteral("#64727e")));
   }
 
   void unknownFieldsRequireExplicitChoice() {

@@ -1,6 +1,8 @@
 #include "KaApplication.h"
 #include "KaHgisVersion.h"
 #include "KaCrashGuard.h"
+#include "core/KaSessionLog.h"
+#include <qgis.h>
 #include "KaGdalErrorLog.h"
 #include "KaTheme.h"
 #include "KaUserError.h"
@@ -595,6 +597,9 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
 }
 
 int KaApplication::run(int argc, char** argv) {
+#if KA_HGIS_HAS_QGIS
+  KaSessionLog::setQgisVersion(Qgis::version());
+#endif
   // 충돌 시 심볼 스택·미니덤프가 남도록 가장 먼저 설치한다.
   KaCrashGuard::install();
   QElapsedTimer bootTimer;

@@ -23,8 +23,10 @@
 | 조판 범례가 흙토람 그림·지적·위성 이름만 | 그림 XYZ/WMS는 색칩이 없고, 범례 기본이 `AllProjectLayers`라 레이어 제목만 나열됨. | `tuneSheetLegend`: Manual 전용 트리에서 그림·지적·위성 제거, 벡터 분포지형 분류 유지. 테스트: `sheetLegend_soilShowsTerrainClassesNotPictureName` |
 | 레이어에서 토양도를 꺼도 조판 범례에 남음 | Manual 범례가 레이어 체크를 안 따라가고, 숨긴 `토양도(흙토람)`을 다시 넣었음. | 체크·지도에 있는 레이어만 범례. 끄면 빠지고 켜면 돌아옴. 테스트: `sheetLegend_followsLayerCheckOnAndOff` |
 | 조판으로 넘어가면 맵이 축소된다 | 진입 시 가운데만 옮기고 조판 축척을 유지. 첫 칸은 `niceScaleDenominator`가 1:1847→1:2000처럼 분모를 올림. | `applyCanvasViewToLayoutMap`: 화면 extent + canvas scale. 테스트: `layoutEnter_matchesCanvasViewWithoutNiceSnap` |
-| 한글 사용자 경로 PC에서 CTest·조판 범례/번호·참조 지도 Ctrl+Z가 깨짐 | VWorld 지적 본번·부번이 `참조 지도` 안에 들어가 묶음 삭제·복원 개수가 틀림. `tuneSheetLegend` 지도 필터·스타일 재적용이 유적 번호 노드를 지움. 낮은 줌에서 방위 드래그가 회전 핸들에 걸림. | VWorld 지적은 트리 루트. 범례는 불필요 재빌드·지도필터 금지·번호 배지 restamp. 방위 드래그 전 paper-fit 대기+줌. 2026-09-25 이 PC(`C:\Users\권을\…`) Release CTest **65/65** (`ctest_exit=0`, 540.64s). |
+| 한글 사용자 경로 PC에서 CTest·조판 범례/번호·참조 지도 Ctrl+Z가 깨짐 | VWorld 지적 본번·부번이 `참조 지도` 안에 들어가 묶음 삭제·복원 개수가 틀림. `tuneSheetLegend` 지도 필터·스타일 재적용이 유적 번호 노드를 지움. 낮은 줌에서 방위 드래그가 회전 핸들에 걸림. | VWorld 지적은 트리 루트. 범례는 불필요 재빌드·지도필터 금지·번호 배지 restamp. 방위 드래그 전 paper-fit 대기+줌. 2026-09-25 이 PC(`C:\Users\권을\…`) Release CTest **65/65** (`ctest_exit=0`, 540.64s). 같은 날 MainWindow 분할 뒤 **67/67** (`full_ctest_exit=0`, 533.30s). 기준 PC 65/65는 이 PC에서 확인하지 않음. |
 | 지적도 받기가 trickle 응답에 멈추는 듯 보임 | `CadastralPortal` idle 타이머가 `readyRead`마다 리셋되어 절대 마감이 없음. | idle + **절대** QTimer(동일 기본값) + `setTransferTimeout`. 시험: `trickleResponseHasAbsoluteDeadline`. 표: `docs/network-download-timeout-checklist.md`. |
+| 검수 문구가 작업 좌표계를 EPSG:5179로 권함 | `CRS_PROJECT_SET`은 좌표계가 있는지만 보는데 문구가 업로드 CRS를 권함. | 문구는 작업 좌표계 EPSG:5186 또는 EPSG:5187. 시험: `TestKaHgis::loadRules` (`checklist_engine`, 2026-09-26 `check_exit=0`, 7.61초). |
+| 조판에서 같은 유적 번호가 두 번 나오고 덧그림 범례가 비음 | 도면 복제본 글자가 켜지고, 번호 지도에 원본 레이어가 같이 올라가며, 범례 필터가 덧그림을 빼먹음. | 복제본 글자는 끄고 번호 지도는 핀만. 덧그림이 있으면 범례 필터에 넣음. 시험: `heritage_style` (2026-09-26 전체 CTest 67/67, `full_ctest_exit=0`, 539.75초). |
 
 ## 지적 GetMap (확인된 사실)
 

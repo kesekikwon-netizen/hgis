@@ -343,7 +343,12 @@ static QString readMainWindowSources() {
   for (const QString& path : {QStringLiteral("src/app/MainWindow.cpp"),
                               QStringLiteral("src/app/MainWindowExport.cpp"),
                               QStringLiteral("src/app/MainWindowEditing.cpp"),
-                              QStringLiteral("src/app/MainWindowSession.cpp")}) {
+                              QStringLiteral("src/app/MainWindowSession.cpp"),
+                              QStringLiteral("src/app/MainWindowRibbon.cpp"),
+                              QStringLiteral("src/app/MainWindowOffline.cpp"),
+                              QStringLiteral("src/app/MainWindowAlign.cpp"),
+                              QStringLiteral("src/app/MainWindowOverlay.cpp"),
+                              QStringLiteral("src/app/MainWindowFiles.cpp")}) {
     QFile f(path);
     if (f.open(QIODevice::ReadOnly | QIODevice::Text))
       out += QString::fromUtf8(f.readAll());
@@ -1193,7 +1198,7 @@ void TestWorkflow::geologyDownload_skipsBlockingWmsAndRefreshWhileDrawing() {
 
   QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString app = QString::fromUtf8(mw.readAll());
+  const QString app = readMainWindowSources();
   const int fn = app.indexOf(QLatin1String("void MainWindow::refreshMapCanvasNow"));
   QVERIFY2(fn >= 0, "refreshMapCanvasNow");
   const int next = app.indexOf(QLatin1String("void MainWindow::"), fn + 10);
@@ -1666,9 +1671,8 @@ void TestWorkflow::elevationMap_is3857ReferenceToggleNotTiffDialog() {
   QVERIFY2(elev->source().contains(QLatin1String("opentopomap"), Qt::CaseInsensitive),
            "지형맵 is contour/hillshade terrain, not color DEM");
 
-  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString src = QString::fromUtf8(mw.readAll());
+  const QString src = readMainWindowSources();
+  QVERIFY2(!src.isEmpty(), "MainWindow.cpp");
   const int fn = src.indexOf(QLatin1String("void MainWindow::toggleTerrainMap"));
   QVERIFY2(fn >= 0, "지형맵 버튼은 toggleTerrainMap");
   const int next = src.indexOf(QLatin1String("\nvoid MainWindow::"), fn + 10);
@@ -1713,7 +1717,7 @@ void TestWorkflow::elevationMap_xyzOnlySkipsAbortWhilePanning() {
 
   QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString app = QString::fromUtf8(mw.readAll());
+  const QString app = readMainWindowSources();
   const int toggleFn = app.indexOf(QLatin1String("void MainWindow::toggleTerrainMap"));
   QVERIFY2(toggleFn >= 0, "toggleTerrainMap");
   const int toggleNext = app.indexOf(QLatin1String("void MainWindow::"), toggleFn + 10);
@@ -1807,7 +1811,7 @@ void TestWorkflow::demColorRelief_is3857XyzNotTerrainMap() {
 
   QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString app = QString::fromUtf8(mw.readAll());
+  const QString app = readMainWindowSources();
   const int toggleFn = app.indexOf(QLatin1String("void MainWindow::toggleDemMap"));
   QVERIFY2(toggleFn >= 0, "DEM 버튼은 toggleDemMap");
   const int toggleNext = app.indexOf(QLatin1String("void MainWindow::"), toggleFn + 10);
@@ -2102,7 +2106,7 @@ void TestWorkflow::paleoLandform_candidateEmphasisAndReferenceLayer() {
 void TestWorkflow::paleoLandform_toolbarIsNotDomainExport() {
   QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString app = QString::fromUtf8(mw.readAll());
+  const QString app = readMainWindowSources();
   QVERIFY2(app.contains(QStringLiteral("고지형")), "toolbar label 고지형");
   QVERIFY2(app.contains(QLatin1String("startPaleoLandform")), "slot startPaleoLandform");
   const int paleoFn = app.indexOf(QLatin1String("void MainWindow::startPaleoLandform"));
@@ -2230,7 +2234,7 @@ void TestWorkflow::paleoLandform_seedFromSoilSplitsFloodplain() {
 void TestWorkflow::demNgiiImg_loadsWithMeterLegend() {
   QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString app = QString::fromUtf8(mw.readAll());
+  const QString app = readMainWindowSources();
   QVERIFY2(app.contains(QLatin1String("importDemElevationRaster")),
            "DEM menu loads 국토지리원 .img");
   QVERIFY2(app.contains(QLatin1String(".img")), "file filter includes ERDAS Imagine");
@@ -2692,9 +2696,8 @@ void TestWorkflow::koreaRegionCatalog_gyeonggiGangwonAddressQuery() {
 }
 
 void TestWorkflow::regionLocator_sitsInAppBarRegionMenu() {
-  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString src = QString::fromUtf8(mw.readAll());
+  const QString src = readMainWindowSources();
+  QVERIFY2(!src.isEmpty(), "MainWindow.cpp");
   const int menusStart = src.indexOf(QLatin1String("void MainWindow::buildMenus()"));
   const int menusEnd = src.indexOf(QLatin1String("\nvoid MainWindow::"), menusStart + 1);
   QVERIFY(menusStart >= 0 && menusEnd > menusStart);
@@ -2990,8 +2993,8 @@ void TestWorkflow::snapSettings_surviveProjectWriteAndReopen() {
   QVERIFY(!project.snappingConfig().individualLayerSettings(ref).enabled());
   QVERIFY2(!project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral)),
            "받은 지적도는 바탕 지적과 한 묶음이 아니다");
-  auto* refGroup = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupReference));
-  QVERIFY(refGroup && refGroup->findLayer(cad->id()));
+  auto* cadNode = project.layerTreeRoot()->findLayer(cad->id());
+  QVERIFY(cadNode && cadNode->parent() == project.layerTreeRoot());
 
   auto* extra = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
                                    QStringLiteral("유구"), QStringLiteral("memory"));
@@ -3014,9 +3017,9 @@ void TestWorkflow::applySnapSettingsKeepsCadastralUnchecked() {
   project.addMapLayer(cad, false);
   LayerOps::placeCadastralLayer(&project, cad);
   QVERIFY(!project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral)));
-  auto* refGroup = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupReference));
-  auto* cadNode = refGroup ? refGroup->findLayer(cad->id()) : nullptr;
+  auto* cadNode = project.layerTreeRoot()->findLayer(cad->id());
   QVERIFY(cadNode);
+  QVERIFY(cadNode->parent() == project.layerTreeRoot());
   cadNode->setItemVisibilityChecked(false);
 
   auto* soil = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
@@ -4180,7 +4183,7 @@ void TestWorkflow::subToolbar_marksTheActiveToolForTheBlueUnderline() {
 
   QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString app = QString::fromUtf8(mw.readAll());
+  const QString app = readMainWindowSources();
   const int fn = app.indexOf(QLatin1String("void MainWindow::updateSubToolbarChecks"));
   QVERIFY2(fn >= 0, "켜진 도구를 표시하는 함수가 있어야 한다");
   const QString body = app.mid(fn, 1400);
@@ -4209,7 +4212,7 @@ void TestWorkflow::alignPanel_showsHugeTiffViaGdalPreview() {
   QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text),
            "run from source tree (ctest WORKING_DIRECTORY)");
-  const QString app = QString::fromUtf8(mw.readAll());
+  const QString app = readMainWindowSources();
   const int split = app.indexOf(QLatin1String("void MainWindow::showAlignSplit"));
   QVERIFY2(split >= 0, "showAlignSplit must exist");
   const QString splitBody = app.mid(split, 1400);
@@ -4277,7 +4280,7 @@ void TestWorkflow::layerPanel_hasOneCheckAllToggle() {
   QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text),
            "run from source tree (ctest WORKING_DIRECTORY)");
-  const QString app = QString::fromUtf8(mw.readAll());
+  const QString app = readMainWindowSources();
   QVERIFY2(app.contains(QLatin1String("layerCheckAllBtn")),
            "레이어 제목 줄에 단추가 있어야 한다");
   const int fn = app.indexOf(QLatin1String("void MainWindow::toggleAllLayersChecked"));
@@ -4370,7 +4373,7 @@ void TestWorkflow::layoutLegend_deletableAndStaysDeleted() {
            "바깥에서 Delete 를 넘겨받을 자리가 있어야 한다");
   QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString app = QString::fromUtf8(mw.readAll());
+  const QString app = readMainWindowSources();
   const int route = app.indexOf(QLatin1String("bool MainWindow::routeEditKeyToActiveStudio"));
   QVERIFY2(route >= 0, "창 단축키를 조판으로 넘기는 곳이 있어야 한다");
   const QString rb = app.mid(route, 1200);
@@ -4991,7 +4994,7 @@ void TestWorkflow::uiComboActions_doNotBustTileCacheWhileDrawing() {
 
   QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString app = QString::fromUtf8(mw.readAll());
+  const QString app = readMainWindowSources();
   fn = app.indexOf(QLatin1String("void MainWindow::onLayerTreeRowsMoved"));
   QVERIFY2(fn >= 0, "onLayerTreeRowsMoved");
   next = app.indexOf(QLatin1String("void MainWindow::"), fn + 10);
@@ -5028,10 +5031,8 @@ void TestWorkflow::uiComboActions_doNotBustTileCacheWhileDrawing() {
 }
 
 void TestWorkflow::startupView_doesNotRestackXyzRefreshWhileWmsDownloads() {
-  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
-           "run from source tree (ctest WORKING_DIRECTORY)");
-  const QString src = QString::fromUtf8(f.readAll());
+  const QString src = readMainWindowSources();
+  QVERIFY2(!src.isEmpty(), "run from source tree (ctest WORKING_DIRECTORY)");
   const int fn = src.indexOf(QLatin1String("void MainWindow::ensureStartupViewReady"));
   QVERIFY2(fn >= 0, "ensureStartupViewReady must exist");
   const int next = src.indexOf(QLatin1String("void MainWindow::"), fn + 10);
@@ -5785,10 +5786,8 @@ void TestWorkflow::legendTitlesHideEpsgAndUseShortKorean() {
 }
 
 void TestWorkflow::drawSubToolbarWiresEachDomainSlot() {
-  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
-           "run from source tree (ctest WORKING_DIRECTORY)");
-  const QString src = QString::fromUtf8(f.readAll());
+  const QString src = readMainWindowSources();
+  QVERIFY2(!src.isEmpty(), "run from source tree (ctest WORKING_DIRECTORY)");
   const int fn = src.indexOf(QLatin1String("void MainWindow::showSubToolsDraw"));
   QVERIFY2(fn >= 0, "showSubToolsDraw must exist");
   const int next = src.indexOf(QLatin1String("void MainWindow::showSubToolsBasemap"), fn + 1);

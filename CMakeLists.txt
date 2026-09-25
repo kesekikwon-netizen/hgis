@@ -5,6 +5,19 @@ if(NOT KA_HGIS_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
   message(FATAL_ERROR "VERSION must be major.minor.patch, got '${KA_HGIS_VERSION}'")
 endif()
 project(ka-hgis VERSION ${KA_HGIS_VERSION} LANGUAGES CXX)
+find_package(Git QUIET)
+set(KA_HGIS_GIT_HASH "unknown")
+if(GIT_FOUND)
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" rev-parse --short=12 HEAD
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE KA_HGIS_GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+endif()
+if(NOT KA_HGIS_GIT_HASH MATCHES "^[0-9a-fA-F]+$")
+  set(KA_HGIS_GIT_HASH "unknown")
+endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -183,7 +196,12 @@ endif()
 if (MSVC)
   target_compile_options(ka_core PRIVATE /openmp /utf-8)
 endif()
-target_compile_definitions(ka_core PUBLIC KA_HGIS_HAS_QGIS=1 "CORE_EXPORT=__declspec(dllimport)" "GUI_EXPORT=__declspec(dllimport)")
+target_compile_definitions(ka_core PUBLIC
+  KA_HGIS_HAS_QGIS=1
+  "CORE_EXPORT=__declspec(dllimport)"
+  "GUI_EXPORT=__declspec(dllimport)"
+  "KA_HGIS_VERSION=\"${PROJECT_VERSION}\""
+  "KA_HGIS_GIT_HASH=\"${KA_HGIS_GIT_HASH}\"")
 
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
   "${CMAKE_SOURCE_DIR}/data/theme/ka-hgis.qss")
@@ -232,6 +250,11 @@ add_executable(ka-hgis
   src/app/MainWindow.cpp
     src/app/MainWindowContextMenus.cpp
     src/app/MainWindowUndo.cpp
+    src/app/MainWindowRibbon.cpp
+    src/app/MainWindowOffline.cpp
+    src/app/MainWindowAlign.cpp
+    src/app/MainWindowOverlay.cpp
+    src/app/MainWindowFiles.cpp
     src/app/MainWindowDownloads.cpp
     src/app/MainWindowExport.cpp
     src/app/MainWindowEditing.cpp
@@ -347,7 +370,8 @@ target_compile_definitions(ka-hgis PRIVATE
   KA_HGIS_HAS_QGIS=1
   "CORE_EXPORT=__declspec(dllimport)"
   "GUI_EXPORT=__declspec(dllimport)"
-  "KA_HGIS_VERSION=\"${PROJECT_VERSION}\"")
+  "KA_HGIS_VERSION=\"${PROJECT_VERSION}\""
+  "KA_HGIS_GIT_HASH=\"${KA_HGIS_GIT_HASH}\"")
 # Desktop GUI. QGIS/Qt debug text must not open a console behind the window.
 set_target_properties(ka-hgis PROPERTIES WIN32_EXECUTABLE TRUE)
 

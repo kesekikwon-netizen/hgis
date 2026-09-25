@@ -61,9 +61,46 @@ if (Test-Path -LiteralPath $junit) {
   $tests.failed = $failed
   $tests.passed = $total - $failed
   $tests.failedNames = @($failedNames)
-} elseif ((Test-Path -LiteralPath $failedLog) -or (Test-Path -LiteralPath $costLog)) {
+} else {
+  $lastTest = Join-Path $build 'Testing\Temporary\LastTest.log'
+  $lastTestNewer = $false
+  if (Test-Path -LiteralPath $lastTest) {
+    $lastTestTime = (Get-Item -LiteralPath $lastTest).LastWriteTimeUtc
+    $failedTime = [datetime]::MinValue
+    if (Test-Path -LiteralPath $failedLog) {
+      $failedTime = (Get-Item -LiteralPath $failedLog).LastWriteTimeUtc
+    }
+    $lastTestNewer = $lastTestTime -ge $failedTime
+  }
+  if ($lastTestNewer) {
+    $raw = Get-Content -LiteralPath $lastTest -Raw
+    $found = [regex]::Matches($raw, '(\d+) tests failed out of (\d+)')
+    if ($found.Count -gt 0) {
+      $sum = $found[$found.Count - 1]
+      $failed = [int]$sum.Groups[1].Value
+      $total = [int]$sum.Groups[2].Value
+      $failedNames = New-Object System.Collections.Generic.List[string]
+      if ($failed -gt 0) {
+        $tail = $raw.Substring($sum.Index)
+        foreach ($m in [regex]::Matches($tail, '(?m)^\s+\d+ - (\S+) \(Failed\)')) {
+          $failedNames.Add($m.Groups[1].Value)
+        }
+      }
+      $tests.source = 'Testing/Temporary/LastTest.log'
+      $tests.total = $total
+      $tests.failed = $failed
+      $tests.passed = $total - $failed
+      $tests.failedNames = @($failedNames)
+    }
+  }
+}
+if ($tests.source -eq 'missing' -and ((Test-Path -LiteralPath $failedLog) -or (Test-Path -LiteralPath $costLog))) {
   $failedNames = New-Object System.Collections.Generic.List[string]
-  if (Test-Path -LiteralPath $failedLog) {
+  $staleFailed = $false
+  if ((Test-Path -LiteralPath $costLog) -and (Test-Path -LiteralPath $failedLog)) {
+    $staleFailed = (Get-Item -LiteralPath $costLog).LastWriteTimeUtc -gt (Get-Item -LiteralPath $failedLog).LastWriteTimeUtc
+  }
+  if ((Test-Path -LiteralPath $failedLog) -and -not $staleFailed) {
     foreach ($line in Get-Content -LiteralPath $failedLog) {
       if ($line -match '^\d+:(\S+)$') { $failedNames.Add($Matches[1]) }
     }
@@ -72,7 +109,8 @@ if (Test-Path -LiteralPath $junit) {
   if (Test-Path -LiteralPath $costLog) {
     $total = @(Get-Content -LiteralPath $costLog | Where-Object { $_ -match '^\S+ \d+ ' }).Count
   }
-  $tests.source = 'Testing/Temporary/LastTestsFailed.log'
+  if ($staleFailed) { $tests.source = 'Testing/Temporary/CTestCostData.txt' }
+  else { $tests.source = 'Testing/Temporary/LastTestsFailed.log' }
   $tests.total = $total
   $tests.failed = $failedNames.Count
   if ($null -ne $total) { $tests.passed = $total - $failedNames.Count }

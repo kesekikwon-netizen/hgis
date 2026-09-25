@@ -1299,20 +1299,16 @@ void LayerOps::placeCadastralLayer(QgsProject* project, QgsMapLayer* layer) {
     root->insertLayer(0, layer);
     return;
   }
-  QgsLayerTreeGroup* refs = root->findGroup(QString::fromUtf8(kGroupReference));
-  if (!refs)
-    refs = root->addGroup(QString::fromUtf8(kGroupReference));
-  if (!refs) return;
+  // 받은 지적도는 참조 지도 묶음 밖, 최상위 한 줄이다.
   if (QgsLayerTreeLayer* node = root->findLayer(layer->id())) {
-    if (node->parent() == refs) return;
+    if (node->parent() == root) return;
     auto* clone = node->clone();
-    refs->insertChildNode(0, clone);
+    root->insertChildNode(0, clone);
     if (auto* parent = qobject_cast<QgsLayerTreeGroup*>(node->parent()))
       parent->removeChildNode(node);
     return;
   }
-  if (auto* added = refs->addLayer(layer))
-    added->setItemVisibilityChecked(true);
+  root->insertLayer(0, layer);
 }
 
 void LayerOps::applyThematicOverlayScaleRange(QgsMapLayer* layer) {
@@ -2084,6 +2080,10 @@ int LayerOps::restoreMissingLayerTreeNodes(QgsProject* project) {
     QgsMapLayer* layer = project->mapLayer(id);
     if (layer && layer->isValid() && kaEnsureLayerTreeNode(project, layer))
       ++restored;
+  }
+  for (QgsMapLayer* layer : project->mapLayers()) {
+    if (isCadastralLayer(layer))
+      placeCadastralLayer(project, layer);
   }
   return restored;
 }

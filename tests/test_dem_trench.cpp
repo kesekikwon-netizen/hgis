@@ -719,7 +719,8 @@ void TestDemTrench::layerTreeMenu_hasLabelToggleAndTrenchRatio() {
 void TestDemTrench::applySnapConfig_vertexAndSegmentNotWmsPromise() {
   QString src;
   for (const QString& path : {QStringLiteral("src/app/MainWindow.cpp"),
-                              QStringLiteral("src/app/MainWindowEditing.cpp")}) {
+                              QStringLiteral("src/app/MainWindowEditing.cpp"),
+                              QStringLiteral("src/app/MainWindowRibbon.cpp")}) {
     QFile f(path);
     QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(path));
     src += QString::fromUtf8(f.readAll());
