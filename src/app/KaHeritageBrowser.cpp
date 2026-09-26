@@ -303,7 +303,16 @@ void KaHeritageBrowser::ensureProfile() {
   m_profileWired = true;
 }
 
-KaHeritageBrowser::~KaHeritageBrowser() { stop(); m_poll->stop(); }
+KaHeritageBrowser::~KaHeritageBrowser() {
+  // 메인 창이 이 창을 지우는 중이다. stop() 이 단계 신호를 내면
+  // 이미 없어진 상태줄을 건드려 앱이 죽는다(2026-09-26 13:08).
+  blockSignals(true);
+  m_running = false;
+  ++m_generation;
+  for (const auto& request : std::as_const(m_downloadRequests))
+    if (request && !request->isFinished()) request->cancel();
+  if (m_poll) m_poll->stop();
+}
 
 void KaHeritageBrowser::showEvent(QShowEvent* event) {
   QDialog::showEvent(event);

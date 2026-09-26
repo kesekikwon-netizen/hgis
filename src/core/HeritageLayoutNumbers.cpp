@@ -3,6 +3,8 @@
 #include "HeritageImport.h"
 #include "HeritageStyle.h"
 
+#include <cmath>
+
 #include <qgscategorizedsymbolrenderer.h>
 #include <qgsexception.h>
 #include <qgscallout.h>
@@ -713,8 +715,18 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
   const auto layers = numberedSourceLayers(map);
   QByteArray signature;
   QDataStream stream(&signature, QIODevice::WriteOnly);
-  stream << map->uuid() << map->extent() << map->crs().toWkt() << map->scale()
-         << mapFootprintOnPaper(map, m_exporting).asWkt();
+  // Round the view so a repeated refresh of the same screen does not miss the
+  // cache and rebuild every legend row. QGIS scale and footprint text drift.
+  const QgsRectangle extent = map->extent();
+  const QgsRectangle paperBox = mapFootprintOnPaper(map, m_exporting).boundingBox();
+  auto whole = [](double value) {
+    return std::isfinite(value) ? std::llround(value) : 0LL;
+  };
+  stream << map->uuid() << whole(extent.xMinimum()) << whole(extent.yMinimum())
+         << whole(extent.xMaximum()) << whole(extent.yMaximum())
+         << map->crs().authid() << whole(map->scale())
+         << whole(paperBox.xMinimum()) << whole(paperBox.yMinimum())
+         << whole(paperBox.xMaximum()) << whole(paperBox.yMaximum());
   // Do not serialize thousands of symbols merely to discover a cache hit.
   // Track source changes with lifetime-bound connections, including in-place
   // renderer check state changes (repaintRequested) and uncommitted edits.
@@ -1262,13 +1274,10 @@ void HeritageLayoutNumbers::applyLegend(QgsLayoutItemLegend* legend) const {
       auto* symbolNode = dynamic_cast<QgsSymbolLegendNode*>(legendNode);
       if (symbolNode && symbolNode->customSymbol()) ++customBadges;
     }
+    // 같은 번호 배지면 속성을 다시 쓰지 않는다. 쓰면 범례 노드가 바뀐다.
     if (customBadges == order.size() &&
-        (node->customProperty(seriesKey).toString() == series || shown == wanted)) {
-      node->setCustomProperty(seriesKey, series);
-      node->setCustomProperty(key, stamp);
+        (node->customProperty(seriesKey).toString() == series || shown == wanted))
       continue;
-    }
-    if (model->layerStyleOverrides() != m_overrides) model->setLayerStyleOverrides(m_overrides);
     auto stampBadges = [&]() {
       for (const Entry& entry : m_entries) {
         if (entry.number <= 0) continue;
@@ -1294,6 +1303,7 @@ void HeritageLayoutNumbers::applyLegend(QgsLayoutItemLegend* legend) const {
       }
       QgsMapLayerLegendUtils::setLegendNodeOrder(node, order);
     };
+    if (model->layerStyleOverrides() != m_overrides) model->setLayerStyleOverrides(m_overrides);
     stampBadges();
     QgsLegendRenderer::setNodeLegendStyle(node, Qgis::LegendComponent::Hidden);
     model->refreshLayerLegend(node);
@@ -1305,7 +1315,8 @@ void HeritageLayoutNumbers::applyLegend(QgsLayoutItemLegend* legend) const {
     node->setCustomProperty(key, stamp);
     rebuilt = true;
   }
-  legend->setCustomProperty(key, stamp);
+  if (rebuilt)
+    legend->setCustomProperty(key, stamp);
   if (!legend->property("ka_hgis/number_legend_follow").toBool()) {
     legend->setProperty("ka_hgis/number_legend_follow", true);
     QObject::connect(model, &QgsLayerTreeModel::hitTestCompleted, legend, [this, legend]() {

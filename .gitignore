@@ -41,6 +41,7 @@ Desktop.ini
 !.agents/skills/ka-hgis-gis/
 !.agents/skills/heritage-intranet/
 !.agents/skills/ka-hgis-sheet/
+!.agents/skills/ka-hgis-verify/
 .claude/
 .repowise/
 .mcp.json

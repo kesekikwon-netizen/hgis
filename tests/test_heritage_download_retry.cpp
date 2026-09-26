@@ -1,6 +1,8 @@
 #include <QtTest>
 #include <QApplication>
+#include <QMainWindow>
 #include <QPushButton>
+#include <QStatusBar>
 #include <QScreen>
 #include <QFile>
 #include <QSignalSpy>
@@ -52,6 +54,15 @@ private:
   }
 
 private slots:
+  void closingMainWindowDuringDownloadDoesNotCrash() {
+    auto* window = new QMainWindow;
+    auto* browser = new KaHeritageBrowser(window);
+    connect(browser, &KaHeritageBrowser::stageChanged, window,
+            [window](HeritageStage, const QString&) { window->statusBar()->showMessage(QStringLiteral("받기")); });
+    browser->m_running = true;
+    delete window;
+  }
+
   void detailsFitAvailableScreen() {
     KaHeritageBrowser browser;
     browser.show();

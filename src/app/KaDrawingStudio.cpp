@@ -2598,7 +2598,8 @@ QgsVectorLayer* KaDrawingStudio::blankMapLayer() {
 
 void KaDrawingStudio::applyLayersToMap(QgsLayoutItemMap* map, bool includeLiveBasemap, bool refitExtent) {
   if (!map || !m_project) return;
-  m_aboveMapDigest.clear();
+  // 같은 화면을 다시 맞출 때마다 서명을 지우면 덧지도를 다시 만들고,
+  // 그 과정에서 이미 찍힌 범례 노드가 사라진다.
   LayerOps::knockOutProjectRasterPaper(m_project);
   // 조판도 지도와 같은 규칙을 따라야 한다. 밑에 있는 레이어의 글자는 밑으로.
   // 도면을 그릴 때마다 다시 계산해, 지도에서만 먹고 조판에서는 안 먹는 일이 없게 한다.
@@ -2669,11 +2670,23 @@ void KaDrawingStudio::syncAboveLabelsMap(QgsLayoutItemMap* base) {
   QByteArray digest;
   QDataStream digestStream(&digest, QIODevice::WriteOnly);
   const QgsRectangle ext = base->extent();
-  digestStream << ext.xMinimum() << ext.yMinimum() << ext.xMaximum() << ext.yMaximum()
-               << base->scale() << base->crs().authid() << base->mapRotation()
-               << base->rect() << base->pos();
-  for (auto* layer : above)
+  // Exact doubles drift between two refreshes of the same sheet. Rewriting the
+  // overlay then makes QGIS replace the legend nodes.
+  auto whole = [](double value) {
+    return std::isfinite(value) ? std::llround(value) : 0LL;
+  };
+  const QRectF paper = base->rect();
+  const QPointF origin = base->pos();
+  digestStream << whole(ext.xMinimum()) << whole(ext.yMinimum())
+               << whole(ext.xMaximum()) << whole(ext.yMaximum())
+               << whole(base->scale()) << base->crs().authid() << whole(base->mapRotation())
+               << whole(paper.x()) << whole(paper.y()) << whole(paper.width()) << whole(paper.height())
+               << whole(origin.x()) << whole(origin.y());
+  const auto styles = base->layerStyleOverrides();
+  for (auto* layer : above) {
     digestStream << (layer ? layer->id() : QString());
+    if (layer) digestStream << styles.value(layer->id());
+  }
   if (top && digest == m_aboveMapDigest)
     return;
   m_aboveMapDigest = digest;
@@ -3371,17 +3384,28 @@ void KaDrawingStudio::syncScaleDecorations() {
     m_scaleSpin->setValue(sc);
     m_scaleSpin->blockSignals(blocked);
   }
+  bool scaleChanged = sc <= 0;
   if (auto* lbl = dynamic_cast<QgsLayoutItemLabel*>(findItemById(ly, kIdScale))) {
-    if (sc > 0)
-      lbl->setText(QStringLiteral("축척 1 : %1").arg(sc));
+    const QString text = QStringLiteral("축척 1 : %1").arg(sc);
+    if (sc > 0 && lbl->text() != text) {
+      lbl->setText(text);
+      scaleChanged = true;
+    }
+  } else if (sc > 0) {
+    scaleChanged = true;
   }
   if (auto* crs = dynamic_cast<QgsLayoutItemLabel*>(findItemById(ly, kIdCrs))) {
     const QgsCoordinateReferenceSystem dest =
         map->crs().isValid() ? map->crs() : studioMapCrs(m_mapCanvas, m_project);
-    crs->setText(koreanCrsLabel(dest));
+    const QString text = koreanCrsLabel(dest);
+    if (crs->text() != text) {
+      crs->setText(text);
+      scaleChanged = true;
+    }
   }
   syncScaleChips();
-  if (m_scaleSyncTimer)
+  // 같은 축척으로 다시 맞추면 번호·범례를 다시 만들지 않는다.
+  if (m_scaleSyncTimer && scaleChanged)
     m_scaleSyncTimer->start();
 }
 
@@ -4072,11 +4096,13 @@ void KaDrawingStudio::centerOnMapCanvas() {
   // still makes QGIS rebuild its extent-filtered legend and render the map.
   const QgsRectangle current = map->extent();
   const double targetScale = m_mapCanvas->scale();
-  const double tolerance = qMax(current.width(), current.height()) * 1e-10;
-  if (current.isFinite() && ext.isFinite() && targetScale > 1. &&
-      std::abs(current.center().x() - ext.center().x()) <= tolerance &&
-      std::abs(current.center().y() - ext.center().y()) <= tolerance &&
-      std::abs(map->scale() - targetScale) <= targetScale * 1e-9)
+  const double tolerance = std::max(1.0, std::max(current.width(), current.height()) * 1e-6);
+  const bool sameCenter = current.isFinite() && ext.isFinite() &&
+                          std::abs(current.center().x() - ext.center().x()) <= tolerance &&
+                          std::abs(current.center().y() - ext.center().y()) <= tolerance;
+  const bool sameScale = !(targetScale > 1.0) ||
+                         std::abs(map->scale() - targetScale) <= std::max(1.0, targetScale * 1e-4);
+  if (sameCenter && sameScale)
     return;
   if (!LayoutService::applyCanvasViewToLayoutMap(map, ext, m_mapCanvas->scale()))
     return;

@@ -3328,8 +3328,8 @@ void MainWindow::ensureHeritageBrowser() {
     notify(Notice::Warning, QStringLiteral("주변유적 받기"), why);
   });
   connect(m_heritageBrowser, &KaHeritageBrowser::stageChanged, this,
-          [this](HeritageStage, const QString& message) {
-            statusBar()->showMessage(message, 6000);
+          [bar = QPointer<QStatusBar>(statusBar())](HeritageStage, const QString& message) {
+            if (bar) bar->showMessage(message, 6000);
           });
   // 한 종류를 받을 때마다 바로 지도에 올린다. 여섯 종을 다 기다리게 하지 않는다.
   connect(m_heritageBrowser, &KaHeritageBrowser::datasetReady, this,

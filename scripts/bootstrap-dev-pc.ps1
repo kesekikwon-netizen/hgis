@@ -124,6 +124,7 @@ Write-Host @"
 Next:
   .\scripts\run-ka-hgis.ps1
   # agent rules: AGENTS.md , .codex/NOW.md , HANDOFF.md
+  # skills travel with the repo: .agents/skills/ka-hgis-gis, heritage-intranet, ka-hgis-sheet, ka-hgis-verify
   # daily sync (current work branch):
   git pull
   .\scripts\build-all.ps1

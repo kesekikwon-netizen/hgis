@@ -984,6 +984,21 @@ private slots:
                qPrintable(QStringLiteral("%1 폭에서 배경 지도가 리본에 남아 있다").arg(width)));
       auto* folded = window.findChild<QMenu*>(QStringLiteral("ribbonOverflowGroup_basemap"));
       QVERIFY(folded && folded->menuAction()->isVisible());
+      const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+      if (!output.isEmpty() && width == 1280) {
+        QVERIFY(QDir().mkpath(output));
+        QVERIFY(window.grab().save(QDir(output).filePath(QStringLiteral("ribbon-1280.png"))));
+      }
+      QgsProject::instance()->setDirty(false);
+    }
+    const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if (!output.isEmpty()) {
+      MainWindow maximized;
+      disableRendering(maximized);
+      maximized.showMaximized();
+      QCoreApplication::processEvents();
+      QVERIFY(QDir().mkpath(output));
+      QVERIFY(maximized.grab().save(QDir(output).filePath(QStringLiteral("ribbon-maximized.png"))));
       QgsProject::instance()->setDirty(false);
     }
   }
@@ -1605,6 +1620,7 @@ private slots:
         ->addGroup(HeritageStyle::layerName(HeritageDataset::SurfaceSurveyArea))->addLayer(layer);
     QgsMapCanvas canvas;
     canvas.setRenderFlag(false);
+    canvas.resize(800, 600);
     canvas.setDestinationCrs(project.crs());
     canvas.setLayers({layer});
     canvas.setExtent(QgsRectangle(190000., 560000., 192000., 562000.));

@@ -12,6 +12,7 @@
 | Graft MCP | 후보 정의 검색, 파일 구조, 인덱싱된 파일의 문자열 검색 | `src/`, `tests/`; 전체 호출/영향 분석 제외 |
 | Archify | 소스로 확인한 구조를 독립 HTML로 검토 | [설치·실행](archify-setup.md), 구조도 품질·브라우저 검증 |
 | CMake / CTest | Release 컴파일과 동작 검증 | 기존 프로젝트 스크립트; 도구 결과로 대체하지 않음 |
+| ka-hgis-verify | 화면에서 보던 확인을 측정값으로 돌린다. 주변유적 받기는 `파일 수신 시작` 다음 `받음`과 0보다 큰 크기만 통과 | `.agents/skills/ka-hgis-verify/SKILL.md`. 다른 PC는 이 저장소를 받으면 같은 스킬을 쓴다 |
 
 ## Cursor 설정
 

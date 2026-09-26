@@ -10,7 +10,7 @@ Reply in the user's language, usually Korean. Code, paths, and identifiers may r
 
 - Use Cursor native Agent, subagents (Task), MCP, hooks, and skills when they are available and useful.
 - The fixed model for this repository is Grok 4.7 in the Cursor model picker. Do not use Auto, Fast, or a different model unless the user switches it for that turn. https://cursor.com/docs/models
-- Legacy `.codex/`, `.grok`, and `.agents` dispatch/history files may remain for history or compatibility; they are not the authoritative harness. Current project skills remain `.agents/skills/ka-hgis-gis/`, [ka-hgis-sheet](.agents/skills/ka-hgis-sheet/SKILL.md), [Archify](.agents/skills/archify/SKILL.md), and [문화재인트라넷](.agents/skills/heritage-intranet/SKILL.md).
+- Legacy `.codex/`, `.grok`, and `.agents` dispatch/history files may remain for history or compatibility; they are not the authoritative harness. Current project skills remain `.agents/skills/ka-hgis-gis/`, [ka-hgis-sheet](.agents/skills/ka-hgis-sheet/SKILL.md), [Archify](.agents/skills/archify/SKILL.md), [문화재인트라넷](.agents/skills/heritage-intranet/SKILL.md), and [ka-hgis-verify](.agents/skills/ka-hgis-verify/SKILL.md).
 - Do not introduce OpenCode, Sisyphus, hidden auto-push, or hardcoded personal credentials.
 - Work directly for small and local changes. Use Cursor Task subagents only for bounded independent research, review, or verification when that improves correctness or throughput.
 - Commit only when the user explicitly asks.

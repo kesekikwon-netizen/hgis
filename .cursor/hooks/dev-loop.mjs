@@ -53,6 +53,8 @@ if (event === "sessionStart") {
   if (/clangd-definition\.py/.test(raw)) setMarker("clangd");
   if (/archify\.ps1/.test(raw)) setMarker("archify");
   if (/(^|[^A-Za-z])ctest([^A-Za-z]|$)/.test(raw)) setMarker("ctest");
+  // hgis_graft MCP가 이 세션에 없어도, 프로젝트 서버 스크립트 조회는 Graft 기록이다.
+  if (/graft-mcp\.mjs|graft_find_|graft_file_api|graft_check_freshness/.test(raw)) setMarker("graft");
   emit({});
 } else if (event === "afterMCPExecution") {
   if (/graft_/.test(raw)) setMarker("graft");
