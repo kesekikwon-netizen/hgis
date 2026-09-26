@@ -1,15 +1,19 @@
 #include "KaAppBar.h"
+#include "core/AddressQuery.h"
 
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QMenu>
 #include <QRegularExpression>
+#include <QSizePolicy>
 #include <QToolButton>
 #include <QWidgetAction>
 
 KaAppBar::KaAppBar(QWidget* parent) : QWidget(parent) {
   setObjectName(QStringLiteral("appBar"));
-  setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+  // 리본이 남는 폭을 가져가야 1280 에서 조사·기록·내보내기가 남는다.
+  // Maximum 은 sizeHint 를 넘기지 않는다. https://doc.qt.io/qt-6/qsizepolicy.html
+  setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
   auto* row = new QHBoxLayout(this);
   row->setContentsMargins(12, 0, 8, 0);
   row->setSpacing(8);
@@ -25,10 +29,11 @@ KaAppBar::KaAppBar(QWidget* parent) : QWidget(parent) {
 
   m_search = new QLineEdit(this);
   m_search->setObjectName(QStringLiteral("appBarSearch"));
-  m_search->setPlaceholderText(QStringLiteral("주소·지번으로 찾기 (예: 제주시 애월읍 광령리 1615)  Ctrl+F"));
+  m_search->setPlaceholderText(
+      QStringLiteral("도로명·지번 (예: 하회종가길 40, 광령리 1615)  Ctrl+F"));
   m_search->setClearButtonEnabled(true);
-  m_search->setMinimumWidth(320);
-  m_search->setMaximumWidth(460);
+  m_search->setMinimumWidth(220);
+  m_search->setMaximumWidth(320);
   m_search->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   connect(m_search, &QLineEdit::returnPressed, this, [this]() {
     const QString query = m_search->text().simplified();
@@ -54,6 +59,7 @@ void KaAppBar::focusSearch() {
 }
 
 bool KaAppBar::looksLikeLot(const QString& query) {
+  if (kaIsRoadAddress(query)) return false;
   static const QRegularExpression lot(QStringLiteral(R"(^산?\d+(-\d+)?(번지)?$)"));
   const QStringList words = query.simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);
   return words.size() >= 2 && lot.match(words.last()).hasMatch();

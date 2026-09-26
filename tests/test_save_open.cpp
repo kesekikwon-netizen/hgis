@@ -46,6 +46,7 @@
 #include "app/KaLayerInformation.h"
 #include "app/KaPrintDialog.h"
 #include "app/KaTheme.h"
+#include "app/KaBeginnerRibbon.h"
 #include <QPdfDocument>
 #include "app/KaRegionLocator.h"
 #include "app/KaSurveyAreaDialog.h"
@@ -887,6 +888,10 @@ private slots:
       auto* draw = window.findChild<QToolButton*>(QStringLiteral("btnDraw"));
       QVERIFY(mainTb && sub && appBar && draw);
       QCOMPARE(draw->text(), QStringLiteral("그리기"));
+      const QString path = makeSurvey(QStringLiteral("그리기줄"));
+      QVERIFY(!path.isEmpty());
+      QVERIFY(window.openSurveyGpkg(path));
+      QTRY_VERIFY(draw->isEnabled());
       draw->click();
       QTRY_VERIFY(sub->isVisible());
       // 그리기 도구는 리본 아래 한 줄을 쓰고, 주소 찾기는 리본 줄에 남아 서로 밀어내지 않는다.
@@ -920,14 +925,92 @@ private slots:
       QCOMPARE(appBar->parentWidget(), mainTb);
       const QRect ribbonBox = ribbon->geometry();
       const QRect searchBox = appBar->geometry();
-      QVERIFY2(!ribbonBox.intersects(searchBox),
-               qPrintable(QStringLiteral("%1 폭에서 찾기 칸이 리본과 겹친다").arg(size.width())));
+      QVERIFY2(!ribbonBox.intersects(searchBox) && appBar->isVisible(),
+               qPrintable(QStringLiteral("%1 폭(창 %2, 리본 %3, 찾기 %4)에서 찾기 칸이 리본과 겹치거나 숨는다")
+                              .arg(size.width())
+                              .arg(window.width())
+                              .arg(ribbonBox.width())
+                              .arg(appBar->isVisible())));
       QVERIFY(qAbs(ribbonBox.center().y() - searchBox.center().y()) < ribbonBox.height());
       if (ribbon->sizeHint().width() > ribbon->width())
         QVERIFY2(overflow->isVisible(),
                  qPrintable(QStringLiteral("%1 폭에서 더 많은 작업으로 접히지 않았다").arg(size.width())));
       QgsProject::instance()->setDirty(false);
     }
+  }
+  void ribbonGroupsMatchTheirPurpose() {
+    MainWindow window;
+    disableRendering(window);
+    auto* ribbon = window.findChild<KaBeginnerRibbon*>(QStringLiteral("beginnerRibbon"));
+    QVERIFY(ribbon);
+    const auto inGroup = [&](const QString& groupId, QWidget* widget) {
+      auto* group = ribbon->group(groupId);
+      return widget && group && group->isAncestorOf(widget);
+    };
+    QVERIFY(inGroup(QStringLiteral("record"), window.findChild<QToolButton*>(QStringLiteral("btnBuffer"))));
+    QVERIFY(inGroup(QStringLiteral("fetch"), window.findChild<QToolButton*>(QStringLiteral("btnHeritageFetch"))));
+    QVERIFY(inGroup(QStringLiteral("fetch"), window.findChild<QToolButton*>(QStringLiteral("btnTopographic"))));
+    QVERIFY(inGroup(QStringLiteral("fetch"), window.findChild<QToolButton*>(QStringLiteral("btnWeb"))));
+    QToolButton* cadastral = nullptr;
+    for (auto* button : window.findChildren<QToolButton*>()) {
+      if (button->defaultAction() &&
+          button->defaultAction()->objectName() == QLatin1String("actionCadastralDownload"))
+        cadastral = button;
+    }
+    QVERIFY(inGroup(QStringLiteral("fetch"), cadastral));
+    QVERIFY(inGroup(QStringLiteral("basemap"), window.findChild<QToolButton*>(QStringLiteral("btnOldMaps"))));
+    QVERIFY(inGroup(QStringLiteral("out"), window.findChild<QToolButton*>(QStringLiteral("btnRibbonPrint"))));
+  }
+  void narrowWindowKeepsDrawingAndPrintVisible() {
+    for (const int width : {1280, 1536}) {
+      MainWindow window;
+      disableRendering(window);
+      window.resize(width, 800);
+      window.show();
+      QCoreApplication::processEvents();
+      auto* ribbon = window.findChild<KaBeginnerRibbon*>(QStringLiteral("beginnerRibbon"));
+      auto* save = window.findChild<QToolButton*>(QStringLiteral("ribbonSave"));
+      auto* draw = window.findChild<QToolButton*>(QStringLiteral("btnDraw"));
+      auto* print = window.findChild<QToolButton*>(QStringLiteral("btnRibbonPrint"));
+      QVERIFY(ribbon && save && draw && print);
+      QVERIFY2(save->isVisible() && draw->isVisible() && print->isVisible(),
+               qPrintable(QStringLiteral("%1 폭(창 %2, 리본 %3)에서 저장·그리기·인쇄가 보이지 않는다")
+                              .arg(width)
+                              .arg(window.width())
+                              .arg(ribbon->width())));
+      auto* basemap = ribbon->group(QStringLiteral("basemap"));
+      QVERIFY(basemap);
+      QVERIFY2(basemap->parentWidget() != ribbon,
+               qPrintable(QStringLiteral("%1 폭에서 배경 지도가 리본에 남아 있다").arg(width)));
+      auto* folded = window.findChild<QMenu*>(QStringLiteral("ribbonOverflowGroup_basemap"));
+      QVERIFY(folded && folded->menuAction()->isVisible());
+      QgsProject::instance()->setDirty(false);
+    }
+  }
+  void recordToolsWaitForASurvey() {
+    MainWindow window;
+    disableRendering(window);
+    window.show();
+    QCoreApplication::processEvents();
+    auto* draw = window.findChild<QToolButton*>(QStringLiteral("btnDraw"));
+    auto* select = window.findChild<QToolButton*>(QStringLiteral("btnSelect"));
+    QVERIFY(draw);
+    if (!select) {
+      for (auto* button : window.findChildren<QToolButton*>()) {
+        if (button->defaultAction() && button->text() == QStringLiteral("선택")) {
+          select = button;
+          break;
+        }
+      }
+    }
+    QVERIFY(select);
+    QVERIFY2(!draw->isEnabled() && !select->isEnabled(), "홈에서는 기록 단추가 흐려야 한다");
+    const QString path = makeSurvey(QStringLiteral("기록단추"));
+    QVERIFY(!path.isEmpty());
+    QVERIFY(window.openSurveyGpkg(path));
+    QTRY_VERIFY(draw->isEnabled());
+    QVERIFY(select->isEnabled());
+    QgsProject::instance()->setDirty(false);
   }
 
   // 리본 단추는 그림만 보고도 찾을 수 있게 모두 다른 그림이어야 한다.
@@ -1693,10 +1776,17 @@ private slots:
     auto placedNumbers = [&]() {
       QSet<QString> result;
       auto* numberMap = HeritageLayoutNumbers::numbersMapOf(map);
-      if (auto* labels = numberMap ? numberMap->previewLabelingResults() : map->previewLabelingResults())
-        for (const auto& label : labels->allLabels())
-          if (!label.isUnplaced && !label.isDiagram && label.layerID == layer->id())
-            result.insert(label.labelText);
+      if (!numberMap) return result;
+      for (auto* candidate : numberMap->layers()) {
+        auto* pins = qobject_cast<QgsVectorLayer*>(candidate);
+        if (!pins || pins->fields().indexOf(QStringLiteral("num")) < 0) continue;
+        QgsFeature feature;
+        auto it = pins->getFeatures();
+        while (it.nextFeature(feature)) {
+          if (feature.attribute(QStringLiteral("layer")).toString() != layer->id()) continue;
+          result.insert(feature.attribute(QStringLiteral("num")).toString());
+        }
+      }
       return result;
     };
     auto legendNumbers = [&]() {
@@ -1863,26 +1953,36 @@ private slots:
     QVERIFY(overlay->layers().contains(sources[1]));
     QVERIFY(base->layers().contains(sources[0]));
     QVERIFY(base->layers().contains(sources[1]));
-    QVERIFY(numbersMap->layers().contains(sources[0]));
-    QVERIFY(numbersMap->layers().contains(sources[1]));
+    QVERIFY(!numbersMap->layers().contains(sources[0]));
+    QVERIFY(!numbersMap->layers().contains(sources[1]));
+    bool numberPins = false;
+    for (auto* candidate : numbersMap->layers()) {
+      auto* pins = qobject_cast<QgsVectorLayer*>(candidate);
+      numberPins = numberPins || (pins && pins->fields().indexOf(QStringLiteral("num")) >= 0);
+    }
+    QVERIFY2(numberPins, "번호는 원본 도형이 아니라 조판 번호 핀에 그린다");
     for (auto* source : sources) {
       std::unique_ptr<QgsVectorLayer> baseDrawing(source->clone());
       QgsMapLayerStyle(base->layerStyleOverrides().value(source->id())).writeToLayer(baseDrawing.get());
       QVERIFY(!baseDrawing->labelsEnabled());
       std::unique_ptr<QgsVectorLayer> drawing(source->clone());
       QgsMapLayerStyle(numbersMap->layerStyleOverrides().value(source->id())).writeToLayer(drawing.get());
-      QVERIFY(drawing->labelsEnabled());
-      QVERIFY(drawing->labeling());
-      const auto settings = drawing->labeling()->settings();
-      QVERIFY(settings.isExpression);
-      QgsExpression number(settings.fieldName);
-      QVERIFY(!number.hasParserError());
-      QgsFeature feature;
-      QVERIFY(drawing->getFeatures().nextFeature(feature));
-      auto context = drawing->createExpressionContext();
-      context.setFeature(feature);
-      QCOMPARE(number.evaluate(&context).toInt(), 1); // Each dataset starts at 1.
-      QVERIFY(!number.hasEvalError());
+      QVERIFY(!drawing->labelsEnabled());
+      QgsVectorLayer* pins = nullptr;
+      for (auto* candidate : numbersMap->layers()) {
+        auto* vector = qobject_cast<QgsVectorLayer*>(candidate);
+        if (vector && vector->fields().indexOf(QStringLiteral("num")) >= 0) pins = vector;
+      }
+      QVERIFY(pins);
+      bool sawOne = false;
+      QgsFeature pin;
+      auto features = pins->getFeatures();
+      while (features.nextFeature(pin)) {
+        if (pin.attribute(QStringLiteral("layer")).toString() != source->id()) continue;
+        QCOMPARE(pin.attribute(QStringLiteral("num")).toInt(), 1);
+        sawOne = true;
+      }
+      QVERIFY2(sawOne, "자료마다 조판 번호는 1부터 시작한다");
       QgsMapLayerStyle unchanged;
       unchanged.readFromLayer(source);
       QCOMPARE(unchanged.xmlData(), sourceStyles.value(source->id()));

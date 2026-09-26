@@ -25,11 +25,19 @@ set(ENV{KA_HGIS_LOG_DIR} "${_ka_log_dir}/app-logs/${_ka_test_name}")
 file(MAKE_DIRECTORY "$ENV{KA_HGIS_LOG_DIR}")
 
 set(_ka_cmd "${KA_TEST_EXE}" -o "${KA_TEST_LOG},txt")
+# Qt 6.11 offscreen 기본 화면은 800x800 이다. 그 상태로는 1280 창이
+# showEvent 의 화면 맞춤으로 잘려, 리본 검사가 논리 폭을 보지 못한다.
+# https://doc.qt.io/qt-6/qpa.html
+get_filename_component(_ka_root "${CMAKE_CURRENT_LIST_DIR}" DIRECTORY)
+# 플랫폼 인자는 ':' 로 자르므로 C: 경로는 쓸 수 없다. 저장소 상대 경로만 넘긴다.
+if(NOT DEFINED ENV{QT_QPA_PLATFORM} OR "$ENV{QT_QPA_PLATFORM}" MATCHES "^offscreen")
+  list(APPEND _ka_cmd -platform "offscreen:configfile=cmake/offscreen-1920.json")
+endif()
 if(DEFINED KA_TEST_FILTER AND NOT KA_TEST_FILTER STREQUAL "")
   separate_arguments(_ka_filter NATIVE_COMMAND "${KA_TEST_FILTER}")
   list(APPEND _ka_cmd ${_ka_filter})
 endif()
-execute_process(COMMAND ${_ka_cmd} RESULT_VARIABLE _ka_result)
+execute_process(COMMAND ${_ka_cmd} WORKING_DIRECTORY "${_ka_root}" RESULT_VARIABLE _ka_result)
 
 if(NOT _ka_result EQUAL 0)
   # 실패했을 때만 전체 결과를 남긴다. 통과 로그까지 찍으면 ctest 출력이 파묻힌다.

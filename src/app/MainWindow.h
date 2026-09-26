@@ -308,6 +308,7 @@ private:
   // 끄면 아이콘도 꺼져야 한다(범례가 진실).
   void syncThematicButtons();
   void updateHistoricalMapButtons();
+  void syncRecordTools();
   // 조사구역 안 DEM 표고로 오르막 방위를 낸다(트렌치 장축 = 등고선 직교).
   TrenchGridGenerator::SlopeAspect terrainAspectForArea(const QByteArray& areaWkb,
                                                        const QString& areaCrs);

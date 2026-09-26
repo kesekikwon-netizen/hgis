@@ -253,12 +253,16 @@ void MainWindow::buildMenus() {
 
   auto* ribbon = new KaBeginnerRibbon(mainTb);
   m_ribbon = ribbon;
-  ribbon->addGroup(QStringLiteral("survey"), QStringLiteral("조사파일"));
+  ribbon->addGroup(QStringLiteral("survey"), QStringLiteral("조사"));
   ribbon->addGroup(QStringLiteral("record"), QStringLiteral("기록"));
+  ribbon->addGroup(QStringLiteral("fetch"), QStringLiteral("자료 받기"));
   ribbon->addGroup(QStringLiteral("basemap"), QStringLiteral("배경 지도"));
-  ribbon->addGroup(QStringLiteral("align"), QStringLiteral("좌표 정합"));
+  ribbon->addGroup(QStringLiteral("align"), QStringLiteral("정합"));
   ribbon->addGroup(QStringLiteral("out"), QStringLiteral("내보내기"));
   ribbon->addGroup(QStringLiteral("more"), QStringLiteral("기타"));
+  ribbon->setKeepPriority({QStringLiteral("survey"), QStringLiteral("out"), QStringLiteral("record"),
+                           QStringLiteral("align"), QStringLiteral("fetch"), QStringLiteral("basemap"),
+                           QStringLiteral("more")});
 
   auto addIcon = [this, ribbon](const QString& group, const QString& iconId, const QString& text,
                                 const QString& tip, auto slot) -> QPair<QAction*, QToolButton*> {
@@ -364,9 +368,10 @@ void MainWindow::buildMenus() {
   });
   addAction(actDraw);
 
-  addIcon(QStringLiteral("record"), QStringLiteral("trench_grid"), QStringLiteral("시굴격자"),
+  auto trenchAdded = addIcon(QStringLiteral("record"), QStringLiteral("trench_grid"), QStringLiteral("시굴격자"),
           QStringLiteral("조사구역이 있으면 바로 깔고, 없으면 맵을 찍어 놓습니다. 깐 뒤에는 끌어 옮깁니다"),
           &MainWindow::startTrenchGrid);
+  trenchAdded.second->setObjectName(QStringLiteral("btnTrenchGrid"));
 
   // Reference maps stay one click away on the ribbon. A narrow window folds the whole
   // group into 「더 많은 작업」 (KaBeginnerRibbon::updateOverflow) instead of hiding it.
@@ -386,7 +391,7 @@ void MainWindow::buildMenus() {
   auto* topographic = new QToolButton(ribbon);
   topographic->setObjectName(QStringLiteral("btnTopographic"));
   topographic->setIcon(KaIcons::icon(QStringLiteral("topo_download")));
-  topographic->setText(QStringLiteral("수치"));
+  topographic->setText(QStringLiteral("수치지형"));
   topographic->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   topographic->setToolTip(QStringLiteral(
       "HGIS 안에서 국토지리정보원에 로그인하고 수치지형도를 받습니다. 우클릭: 받아 둔 폴더 불러오기"));
@@ -400,7 +405,6 @@ void MainWindow::buildMenus() {
   connect(topographic, &QToolButton::customContextMenuRequested, this,
           [topographic, topographicMenu](const QPoint& pos) { topographicMenu->exec(topographic->mapToGlobal(pos)); });
   connect(topographic, &QToolButton::clicked, this, &MainWindow::openTopographicDownload);
-  ribbon->addWidget(QStringLiteral("basemap"), topographic);
   m_btnDem = new QToolButton(ribbon);
   m_btnDem->setObjectName(QStringLiteral("btnDem"));
   m_btnDem->setIcon(KaIcons::icon(QStringLiteral("dem")));
@@ -461,7 +465,7 @@ void MainWindow::buildMenus() {
   connect(m_btnPaleo, &QToolButton::clicked, this, &MainWindow::startPaleoLandform);
   ribbon->addWidget(QStringLiteral("basemap"), m_btnPaleo);
   auto [actCadastral, btnCadastral] = addIcon(
-      QStringLiteral("basemap"), QStringLiteral("cadastral"), QStringLiteral("지적"),
+      QStringLiteral("fetch"), QStringLiteral("cadastral"), QStringLiteral("지적"),
       QStringLiteral("조사구역 주변 5km 지적도를 받아 경계선과 지번을 표시합니다. 우클릭: 계정·선 색 설정"),
       &MainWindow::downloadCadastral);
   actCadastral->setObjectName(QStringLiteral("actionCadastralDownload"));
@@ -473,22 +477,23 @@ void MainWindow::buildMenus() {
   btnCadastral->setContextMenuPolicy(Qt::CustomContextMenu);
   connect(btnCadastral, &QToolButton::customContextMenuRequested, this,
           [btnCadastral, cadastralMenu](const QPoint& pos) { cadastralMenu->exec(btnCadastral->mapToGlobal(pos)); });
-  m_btnDaedong = new QToolButton(ribbon);
-  m_btnDaedong->setObjectName(QStringLiteral("btnDaedongyeojido"));
-  m_btnDaedong->setIcon(KaIcons::icon(QStringLiteral("old_map")));
-  m_btnDaedong->setText(QStringLiteral("대동여지"));
-  m_btnDaedong->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-  m_btnDaedong->setToolTip(
-      QStringLiteral("대동여지도를 참조 지도로 올립니다. API 키가 필요 없습니다"));
-  connect(m_btnDaedong, &QToolButton::clicked, this, &MainWindow::addDaedongyeojidoMap);
-  ribbon->addWidget(QStringLiteral("basemap"), m_btnDaedong);
-  m_btnMap1919 = new QToolButton(ribbon);
-  m_btnMap1919->setObjectName(QStringLiteral("btnMap1919"));
-  m_btnMap1919->setIcon(KaIcons::icon(QStringLiteral("old_topo")));
-  m_btnMap1919->setText(QStringLiteral("1919지형"));
-  m_btnMap1919->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-  connect(m_btnMap1919, &QToolButton::clicked, this, &MainWindow::addHistoryGisMap1919);
-  ribbon->addWidget(QStringLiteral("basemap"), m_btnMap1919);
+  ribbon->addWidget(QStringLiteral("fetch"), topographic);
+  auto* oldMaps = new QToolButton(ribbon);
+  oldMaps->setObjectName(QStringLiteral("btnOldMaps"));
+  oldMaps->setIcon(KaIcons::icon(QStringLiteral("old_map")));
+  oldMaps->setText(QStringLiteral("옛 지도"));
+  oldMaps->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+  oldMaps->setPopupMode(QToolButton::InstantPopup);
+  oldMaps->setToolTip(QStringLiteral("대동여지도와 1919년 조선지형도를 참조 지도로 올립니다"));
+  auto* oldMenu = new QMenu(oldMaps);
+  auto* daedong = oldMenu->addAction(KaIcons::icon(QStringLiteral("old_map")), QStringLiteral("대동여지도"),
+                                    this, &MainWindow::addDaedongyeojidoMap);
+  daedong->setObjectName(QStringLiteral("actionDaedongyeojido"));
+  auto* map1919 = oldMenu->addAction(KaIcons::icon(QStringLiteral("old_topo")),
+                                    QStringLiteral("1919 조선지형도 1:5만"),
+                                    this, &MainWindow::addHistoryGisMap1919);
+  map1919->setObjectName(QStringLiteral("actionMap1919"));
+  oldMaps->setMenu(oldMenu);
   auto [actGeology, btnGeology] = addIcon(
       QStringLiteral("basemap"), QStringLiteral("geology"), QStringLiteral("지질"),
       QStringLiteral("KIGAM 1:5만 지질 색 위에 지형 음영을 겹칩니다. 다시 누르면 숨깁니다"),
@@ -509,6 +514,7 @@ void MainWindow::buildMenus() {
       QTimer::singleShot(0, this, [this]() { syncThematicButtons(); });
     });
   }
+  ribbon->addWidget(QStringLiteral("basemap"), oldMaps);
   addIcon(QStringLiteral("align"), QStringLiteral("georef"), QStringLiteral("정합"),
           QStringLiteral("좌표없는 사진·CAD를 도면에 합치기"), &MainWindow::georefAssistant);
 
@@ -525,7 +531,7 @@ void MainWindow::buildMenus() {
     btnBuffer->setChecked(m_subToolbar && m_subToolbar->isVisible()
                           && m_subToolsMode == QLatin1String("buffer"));
   });
-  ribbon->addWidget(QStringLiteral("align"), btnBuffer);
+  ribbon->addWidget(QStringLiteral("record"), btnBuffer);
 
   // 위 버튼은 이미 올라온 레이어에 버퍼를 그린다. 이 버튼은 자료를 받아 온다. 역할이 다르다.
   auto* btnHeritage = new QToolButton(ribbon);
@@ -537,7 +543,7 @@ void MainWindow::buildMenus() {
       "조사구역이 속한 시·군의 국가유산 자료를 인트라넷에서 받아 참조 지도로 올립니다.\n"
       "받은 자료는 조사폴더 안에만 두며 포터블·제출물에 실리지 않습니다"));
   connect(btnHeritage, &QToolButton::clicked, this, &MainWindow::fetchNearbyHeritage);
-  ribbon->addWidget(QStringLiteral("align"), btnHeritage);
+  ribbon->addWidget(QStringLiteral("fetch"), btnHeritage);
 
   auto [actLayout, btnLayout] = addIcon(
       QStringLiteral("out"), QStringLiteral("pdf"), QStringLiteral("도면"),
@@ -669,8 +675,9 @@ void MainWindow::buildMenus() {
   moreMenu->addAction(QStringLiteral("정보"), this, &MainWindow::showAbout);
   more->setMenu(moreMenu);
   more->setPopupMode(QToolButton::InstantPopup);
-  ribbon->addWidget(QStringLiteral("more"), webBtn);
+  ribbon->addWidget(QStringLiteral("fetch"), webBtn);
   ribbon->addWidget(QStringLiteral("more"), more);
+  syncRecordTools();
   mainTb->addWidget(ribbon);
   // The ribbon expands and keeps its buttons packed left, so place search ends up on the right.
   mainTb->addWidget(m_appBar);

@@ -1425,14 +1425,25 @@ void MainWindow::syncThematicButtons() {
 void MainWindow::updateHistoricalMapButtons() {
   const bool hasHistoryKey =
       LayerOps::historyGisApiKeyUsable(VworldSettings::loadHistoryGisApiKey());
-  if (m_btnMap1919) {
-    m_btnMap1919->setEnabled(hasHistoryKey);
-    m_btnMap1919->setToolTip(
+  if (auto* map1919 = findChild<QAction*>(QStringLiteral("actionMap1919"))) {
+    map1919->setEnabled(hasHistoryKey);
+    map1919->setToolTip(
         hasHistoryKey
             ? QStringLiteral("1919년 조선지형도 1:5만 (국사편찬위원회 WMTS, EPSG:5179)")
             : QStringLiteral(
                   "더보기 → API 키 입력에 역사지리정보DB 키를 저장하면 켤 수 있습니다"));
   }
+}
+
+void MainWindow::syncRecordTools() {
+  const bool ready = m_surveySessionReady;
+  if (m_actSelect) m_actSelect->setEnabled(ready);
+  if (m_actMeasure) m_actMeasure->setEnabled(ready);
+  if (m_btnDraw) m_btnDraw->setEnabled(ready);
+  if (auto* trench = findChild<QToolButton*>(QStringLiteral("btnTrenchGrid")))
+    trench->setEnabled(ready);
+  if (auto* buffer = findChild<QToolButton*>(QStringLiteral("btnBuffer")))
+    buffer->setEnabled(ready);
 }
 
 void MainWindow::loadBootBasemaps() {

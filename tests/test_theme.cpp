@@ -27,6 +27,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 #include "app/KaAppBar.h"
+#include "core/AddressQuery.h"
 #include "app/KaBeginnerRibbon.h"
 #include "app/KaIcons.h"
 #include "app/KaTheme.h"
@@ -38,6 +39,7 @@ private slots:
   void ribbonButtons_renderAtIntendedSize();
   void ribbonOverflow_preservesControlsAndKeyboard();
   void ribbonOverflow_keepsAlignAtFieldWidth();
+  void ribbonKeepPriorityKeepsExportAndOriginalOrder();
   void ribbon_tabEnterNewSurveyToSave();
   void domainIcons_useDistinctColors();
   void iconStates_preserveMeaningAndDisableColor();
@@ -251,60 +253,85 @@ void TestTheme::ribbonOverflow_preservesControlsAndKeyboard() {
 void TestTheme::ribbonOverflow_keepsAlignAtFieldWidth() {
   KaBeginnerRibbon ribbon;
   ribbon.setAttribute(Qt::WA_DontShowOnScreen);
-  ribbon.addGroup(QStringLiteral("survey"), QStringLiteral("조사파일"));
+  ribbon.addGroup(QStringLiteral("survey"), QStringLiteral("조사"));
   ribbon.addGroup(QStringLiteral("record"), QStringLiteral("기록"));
+  ribbon.addGroup(QStringLiteral("fetch"), QStringLiteral("자료 받기"));
   ribbon.addGroup(QStringLiteral("basemap"), QStringLiteral("배경 지도"));
-  ribbon.addGroup(QStringLiteral("align"), QStringLiteral("좌표 정합"));
+  ribbon.addGroup(QStringLiteral("align"), QStringLiteral("정합"));
   ribbon.addGroup(QStringLiteral("out"), QStringLiteral("내보내기"));
-  ribbon.addGroup(QStringLiteral("find"), QStringLiteral("찾기"));
+  ribbon.addGroup(QStringLiteral("more"), QStringLiteral("기타"));
+  ribbon.setKeepPriority({QStringLiteral("survey"), QStringLiteral("out"), QStringLiteral("record"),
+                          QStringLiteral("align"), QStringLiteral("fetch"), QStringLiteral("basemap"),
+                          QStringLiteral("more")});
   const struct { const char* group; const char* text; } chips[] = {
       {"survey", "신규"}, {"survey", "열기"}, {"survey", "저장"}, {"survey", "다른이름"},
       {"record", "선택"}, {"record", "측거"}, {"record", "그리기"}, {"record", "시굴격자"},
-      {"basemap", "지형"}, {"basemap", "수치"}, {"basemap", "DEM"}, {"basemap", "토양"},
-      {"basemap", "고지형"}, {"basemap", "지적"}, {"basemap", "대동여지"}, {"basemap", "1919지형"},
+      {"basemap", "지형"}, {"fetch", "수치지형"}, {"basemap", "DEM"}, {"basemap", "토양"},
+      {"basemap", "고지형"}, {"fetch", "지적"}, {"basemap", "옛 지도"},
       {"basemap", "지질"}, {"basemap", "수계"},
-      {"align", "정합"}, {"align", "버퍼"}, {"align", "유산"},
-      {"out", "도면"}, {"out", "단면"}, {"out", "GeoTIFF"}, {"out", "5179"},
-      {"find", "웹"}, {"find", "더보기"},
+      {"align", "정합"}, {"record", "버퍼"}, {"fetch", "유산"},
+      {"out", "도면"}, {"out", "인쇄"}, {"out", "단면"}, {"out", "GeoTIFF"}, {"out", "5179"},
+      {"fetch", "웹"}, {"more", "더보기"},
   };
   for (const auto& chip : chips) {
     auto* button = new QToolButton(&ribbon);
     button->setText(QString::fromUtf8(chip.text));
-    if (QString::fromLatin1(chip.group) == QLatin1String("align"))
-      button->setObjectName(QStringLiteral("fieldAlign_") + QString::fromUtf8(chip.text));
+    if (QString::fromLatin1(chip.group) == QLatin1String("out") &&
+        QString::fromUtf8(chip.text) == QStringLiteral("도면"))
+      button->setObjectName(QStringLiteral("fieldOut_도면"));
     ribbon.addWidget(QString::fromLatin1(chip.group), button);
   }
-  auto* locator = new QWidget(&ribbon);
-  locator->setObjectName(QStringLiteral("fieldRegionLocator"));
-  locator->setMinimumWidth(230);
-  locator->setFixedHeight(48);
-  ribbon.addWidget(QStringLiteral("find"), locator);
-  ribbon.resize(1366, ribbon.sizeHint().height());
+  ribbon.resize(1280, ribbon.sizeHint().height());
   ribbon.show();
   QCoreApplication::processEvents();
   auto* overflow = ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
   QVERIFY(overflow);
-  auto* align = ribbon.group(QStringLiteral("align"));
-  QVERIFY(align);
-  QVERIFY2(align->parentWidget() == &ribbon,
-           "좌표 정합 must stay on the ribbon at 1366, not inside 더 많은 작업");
-  auto* georef = ribbon.findChild<QToolButton*>(QStringLiteral("fieldAlign_정합"));
-  QVERIFY(georef);
-  QVERIFY(georef->isVisible());
+  auto* out = ribbon.group(QStringLiteral("out"));
+  QVERIFY(out);
+  QVERIFY2(out->parentWidget() == &ribbon,
+           "내보내기 must stay on the ribbon at 1280, not inside 더 많은 작업");
+  auto* drawing = ribbon.findChild<QToolButton*>(QStringLiteral("fieldOut_도면"));
+  QVERIFY(drawing);
+  QVERIFY(drawing->isVisible());
   QCOMPARE(KaTheme::buttonMetrics().ribbonChipGap, 0);
   QCOMPARE(KaTheme::buttonMetrics().ribbonChipWidth, 56);
   QCOMPARE(KaTheme::buttonMetrics().ribbonMinWidth, 56);
   QCOMPARE(KaTheme::buttonMetrics().ribbonFontSize, 12);
-  QVERIFY(georef->width() >= KaTheme::buttonMetrics().ribbonChipWidth);
-  QVERIFY(georef->height() >= KaTheme::buttonMetrics().ribbonHeight);
+  QVERIFY(drawing->width() >= KaTheme::buttonMetrics().ribbonChipWidth);
+  QVERIFY(drawing->height() >= KaTheme::buttonMetrics().ribbonHeight);
   ribbon.resize(2200, ribbon.height());
-  QTRY_VERIFY(ribbon.group(QStringLiteral("find"))->parentWidget() == &ribbon);
-  QVERIFY(georef->width() >= KaTheme::buttonMetrics().ribbonChipWidth);
-  auto* find = ribbon.group(QStringLiteral("find"));
-  QVERIFY(find);
-  const int packedRight = find->mapTo(&ribbon, QPoint(find->width(), 0)).x();
+  QTRY_VERIFY(ribbon.group(QStringLiteral("more"))->parentWidget() == &ribbon);
+  QVERIFY(drawing->width() >= KaTheme::buttonMetrics().ribbonChipWidth);
+  auto* more = ribbon.group(QStringLiteral("more"));
+  QVERIFY(more);
+  const int packedRight = more->mapTo(&ribbon, QPoint(more->width(), 0)).x();
   QVERIFY2(ribbon.width() - packedRight >= 80,
            "leftover window width must stay empty on the right, not on chips");
+}
+
+void TestTheme::ribbonKeepPriorityKeepsExportAndOriginalOrder() {
+  KaBeginnerRibbon ribbon;
+  ribbon.setAttribute(Qt::WA_DontShowOnScreen);
+  for (const auto& id : {QStringLiteral("survey"), QStringLiteral("record"), QStringLiteral("basemap"),
+                         QStringLiteral("out")}) {
+    ribbon.addGroup(id, id);
+    for (int i = 0; i < 4; ++i) {
+      auto* button = new QToolButton(&ribbon);
+      button->setText(id);
+      ribbon.addWidget(id, button);
+    }
+  }
+  ribbon.setKeepPriority({QStringLiteral("survey"), QStringLiteral("out"), QStringLiteral("record"),
+                          QStringLiteral("basemap")});
+  ribbon.resize(640, ribbon.sizeHint().height());
+  ribbon.show();
+  QCoreApplication::processEvents();
+  QVERIFY(ribbon.group(QStringLiteral("survey"))->parentWidget() == &ribbon);
+  QVERIFY(ribbon.group(QStringLiteral("out"))->parentWidget() == &ribbon);
+  QVERIFY(ribbon.group(QStringLiteral("basemap"))->parentWidget() != &ribbon);
+  const int surveyX = ribbon.group(QStringLiteral("survey"))->x();
+  const int outX = ribbon.group(QStringLiteral("out"))->x();
+  QVERIFY2(surveyX < outX, "화면 순서는 우선순위가 아니라 원래 왼쪽에서 오른쪽이다");
 }
 
 void TestTheme::ribbonButtons_renderAtIntendedSize() {
@@ -978,11 +1005,10 @@ void TestTheme::beginnerChrome_questionLabels() {
   QVERIFY2(main.contains(QLatin1String("beginnerRibbon")) ||
                main.contains(QLatin1String("KaBeginnerRibbon")),
            "메인에 초보자 리본");
-  QVERIFY2(main.contains(QString::fromUtf8("조사파일")), "조사파일 그룹");
+  QVERIFY2(main.contains(QString::fromUtf8("자료 받기")), "자료 받기 그룹");
   QVERIFY2(main.contains(QString::fromUtf8("기록")), "기록 그룹");
   QVERIFY2(main.contains(QString::fromUtf8("배경 지도")), "배경 그룹");
-  QVERIFY2(main.contains(QString::fromUtf8("좌표 정합")) ||
-               main.contains(QString::fromUtf8("정합·분석")),
+  QVERIFY2(main.contains(QString::fromUtf8("QStringLiteral(\"정합\")")),
            "정합 그룹");
   QVERIFY2(main.contains(QString::fromUtf8("산출")) ||
                main.contains(QString::fromUtf8("내보내기")),
@@ -1043,8 +1069,13 @@ void TestTheme::appBar_routesLotSearches() {
   QVERIFY(KaAppBar::looksLikeLot(QStringLiteral("제주시 애월읍 광령리 1615")));
   QVERIFY(KaAppBar::looksLikeLot(QStringLiteral("광령리 1615-3")));
   QVERIFY(KaAppBar::looksLikeLot(QStringLiteral("광령리 산12")));
+  QVERIFY(KaAppBar::looksLikeLot(QStringLiteral("서울 종로구 세종로 1-68")));
   QVERIFY(!KaAppBar::looksLikeLot(QStringLiteral("제주시 애월읍 광령리")));
   QVERIFY(!KaAppBar::looksLikeLot(QStringLiteral("1615")));
+  QVERIFY(!KaAppBar::looksLikeLot(QStringLiteral("안동시 풍천면 하회종가길 40")));
+  QVERIFY(kaIsRoadAddress(QStringLiteral("안동시 풍천면 하회종가길 40")));
+  QVERIFY(kaIsRoadAddress(QStringLiteral("안양시 동안구 부림로169번길 22")));
+  QVERIFY(!kaIsRoadAddress(QStringLiteral("서울 종로구 세종로 1-68")));
   KaAppBar bar;
   bar.setAttribute(Qt::WA_DontShowOnScreen);
   bar.resize(600, bar.sizeHint().height());

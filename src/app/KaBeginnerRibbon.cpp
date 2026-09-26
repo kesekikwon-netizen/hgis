@@ -173,6 +173,11 @@ QFrame* KaBeginnerRibbon::group(const QString& id) const {
   return m_groups.value(id, nullptr);
 }
 
+void KaBeginnerRibbon::setKeepPriority(const QStringList& ids) {
+  m_keepPriority = ids;
+  updateOverflow();
+}
+
 QList<QToolButton*> KaBeginnerRibbon::tabButtons() const {
   QList<QToolButton*> out;
   for (const QString& id : m_groupOrder) {
@@ -219,7 +224,11 @@ QSize KaBeginnerRibbon::sizeHint() const {
 }
 
 QSize KaBeginnerRibbon::minimumSizeHint() const {
-  return QSize(m_overflow->sizeHint().width() + 16, sizeHint().height());
+  // 최소 폭에 조사·내보내기·기록을 넣으면 툴바가 찾기 칸을 줄에서 뺀다.
+  // 남는 폭은 Expanding 으로 받고, 접기는 updateOverflow 가 한다.
+  const auto margins = m_row->contentsMargins();
+  const int width = margins.left() + margins.right() + m_overflow->sizeHint().width();
+  return QSize(std::max(width, m_overflow->sizeHint().width() + 16), sizeHint().height());
 }
 
 void KaBeginnerRibbon::resizeEvent(QResizeEvent* event) {
@@ -239,11 +248,11 @@ void KaBeginnerRibbon::updateOverflow() {
   const auto margins = m_row->contentsMargins();
   int available = width() - margins.left() - margins.right();
   if (overflow) available -= m_overflow->sizeHint().width() + m_row->spacing();
-  // Keep left groups; hide from the right. 좌표 정합이 내보내기보다 먼저
-  // 접히지 않게 한다. https://doc.qt.io/qt-6.8/qlayout.html#setContentsMargins
-  const QStringList priority = m_groupOrder;
+  // 남길 묶음은 우선순위대로 고르고, 화면에는 addGroup 순서로 놓는다.
+  const QStringList priority = m_keepPriority.isEmpty() ? m_groupOrder : m_keepPriority;
   QStringList visible;
   for (const auto& id : priority) {
+    if (!m_groups.contains(id)) continue;
     const int needed = m_groups.value(id)->sizeHint().width() + m_row->spacing();
     if (!overflow || needed <= available) {
       visible.append(id);

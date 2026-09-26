@@ -72,6 +72,7 @@ void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sou
   LayerOps::addNonEmptyDomainLayers(QgsProject::instance(), gpkgPath);
   m_workspaceRestoreSuppressesAutosave = false;
   m_surveySessionReady = true;
+  syncRecordTools();
   m_surveyPath = gpkgPath;
   if (QgsProject::instance()->crs().isValid())
     m_workCrs = QgsProject::instance()->crs().authid();
@@ -180,11 +181,13 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
   QElapsedTimer t;
   t.start();
   m_surveySessionReady = false;
+  syncRecordTools();
   m_workspaceRestoreFailed = false;
   auto abortOpen = [&]() -> bool {
     // 읽기는 이미 프로젝트를 바꿨을 수 있다. 이전 경로로 자동 저장하지 않는다.
     m_surveyPath.clear();
     m_surveySessionReady = false;
+  syncRecordTools();
     m_workspaceRestoreSuppressesAutosave = true;
     return false;
   };
@@ -294,6 +297,7 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
   loadSurveyLayers(gpkgPath);
 #if KA_HGIS_HAS_QGIS
   m_surveySessionReady = true;
+  syncRecordTools();
   applyStartupMap();
   ensureDefaultBasemaps();
   QgsProject* proj = QgsProject::instance();
@@ -518,6 +522,7 @@ void MainWindow::openRecentSurvey(const QString& path) {
   m_isSplittingPolygon = false;
   m_undoActions.clear();
   m_surveySessionReady = false;
+  syncRecordTools();
   m_surveyPath.clear();
   m_workspaceRestoreSuppressesAutosave = true;
   if (kaQgisProjectFileIsUnsafeToRead(path) ||
@@ -534,6 +539,7 @@ void MainWindow::openRecentSurvey(const QString& path) {
     LayerOps::addNonEmptySavedGpkgLayers(QgsProject::instance(), companionGpkg);
   }
   m_surveySessionReady = true;
+  syncRecordTools();
   m_workspaceRestoreSuppressesAutosave = false;
   if (QgsProject::instance()->crs().isValid())
     m_workCrs = QgsProject::instance()->crs().authid();
@@ -687,6 +693,7 @@ void MainWindow::newSurvey() {
     b87->setChecked(m_workCrs.contains(QLatin1String("5187")));
   setWindowTitle(name);
   m_surveySessionReady = true;
+  syncRecordTools();
   rememberSurvey(path, name);
   rememberSurveyDir(path);
   markSurveySaved();
@@ -1442,6 +1449,7 @@ void MainWindow::saveProjectAs() {
   }
   m_surveyPath = targetGpkg;
   m_surveySessionReady = true;
+  syncRecordTools();
   m_workspaceRestoreSuppressesAutosave = false;
   savedAs = true;
   kaClearQgisProjectUnsafeMark(targetGpkg);
@@ -1521,6 +1529,7 @@ void MainWindow::openProject() {
   m_isSplittingPolygon = false;
   m_undoActions.clear();
   m_surveySessionReady = false;
+  syncRecordTools();
   m_surveyPath.clear();
   m_workspaceRestoreSuppressesAutosave = true;
   if (kaQgisProjectFileIsUnsafeToRead(path) ||
@@ -1549,6 +1558,7 @@ void MainWindow::openProject() {
   if (!m_surveyPath.isEmpty())
     LayerOps::addNonEmptySavedGpkgLayers(QgsProject::instance(), m_surveyPath);
   m_surveySessionReady = true;
+  syncRecordTools();
   m_workspaceRestoreSuppressesAutosave = false;
   if (auto* cp = layerByKey(QStringLiteral("control_points")))
     LayerOps::ensureControlPointQualityFields(cp);
