@@ -403,6 +403,58 @@ private slots:
     QCOMPARE(finished.size(), 0);
   }
 
+  void roadAddressUsesRoadCategory() {
+    const QString address = QStringLiteral("안동시 풍천면 하회종가길 40");
+    QVERIFY(LocationSearch::isRoadAddress(address));
+    const QByteArray body = QJsonDocument(QJsonObject{{"response", QJsonObject{
+      {"status", "OK"},
+      {"result", QJsonObject{{"items", QJsonArray{
+        QJsonObject{{"title", "하회종가"},
+                    {"address", QJsonObject{{"road", address}, {"parcel", "경상북도 안동시 풍천면 하회리 615"}}},
+                    {"point", QJsonObject{{"x", "128.517"}, {"y", "36.539"}}}},
+        QJsonObject{{"title", "다른 건물"},
+                    {"address", QJsonObject{{"road", "안동시 풍천면 하회종가길 42"}}},
+                    {"point", QJsonObject{{"x", "128.518"}, {"y", "36.540"}}}}
+      }}}}}}}).toJson();
+    LocalServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.handler = [body](QTcpSocket* socket, const QString&) { LocalServer::respond(socket, body); };
+    auto network = std::make_unique<LocalNetwork>(server.serverPort());
+    auto* observed = network.get();
+    LocationSearch service(std::move(network), 3000);
+    QSignalSpy finished(&service, &LocationSearch::finished);
+    QSignalSpy failed(&service, &LocationSearch::failed);
+    qputenv("VWORLD_API_KEY", "local-test-key");
+    service.search(address);
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 3000);
+    QCOMPARE(failed.size(), 0);
+    QCOMPARE(server.requests.size(), 1);
+    QCOMPARE(observed->queries.first().queryItemValue(QStringLiteral("type")), QStringLiteral("ADDRESS"));
+    QCOMPARE(observed->queries.first().queryItemValue(QStringLiteral("category")), QStringLiteral("ROAD"));
+    const auto hits = qvariant_cast<QVector<LocationHit>>(finished.first().first());
+    QCOMPARE(hits.size(), 2);
+    QCOMPARE(hits.first().title, address);
+    QCOMPARE(hits.first().lon, 128.517);
+  }
+
+  void roadAddressDoesNotFallBackWhenMissing() {
+    LocalServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.handler = [](QTcpSocket* socket, const QString&) {
+      LocalServer::respond(socket, QByteArray(R"({"response":{"status":"NOT_FOUND"}})"));
+    };
+    auto network = std::make_unique<LocalNetwork>(server.serverPort());
+    LocationSearch service(std::move(network), 3000);
+    QSignalSpy failed(&service, &LocationSearch::failed);
+    QSignalSpy finished(&service, &LocationSearch::finished);
+    qputenv("VWORLD_API_KEY", "local-test-key");
+    service.search(QStringLiteral("안동시 풍천면 하회종가길 40"));
+    QTRY_COMPARE_WITH_TIMEOUT(failed.size(), 1, 3000);
+    QCOMPARE(finished.size(), 0);
+    QCOMPARE(server.requests.size(), 1);
+    QVERIFY(failed.first().first().toString().contains(QStringLiteral("도로명주소")));
+  }
+
   void locationCancelAndDestructionDisconnectReplies() {
     LocalServer server;
     QVERIFY(server.listen(QHostAddress::LocalHost));

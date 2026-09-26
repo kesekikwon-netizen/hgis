@@ -1,4 +1,5 @@
 #include "LocationSearch.h"
+#include "AddressQuery.h"
 #include "VworldSettings.h"
 #include "KoreaRegionCatalog.h"
 #include "KaPortableRuntime.h"
@@ -78,6 +79,10 @@ bool sameParcel(const ParcelAddress& requested, const ParcelAddress& result) {
 QString parcelNotFound() {
   return QStringLiteral("정확히 일치하는 지번이 없습니다. 법정동·리, 산 여부와 본번·부번을 확인하세요. 최근 분할·합병된 지번은 검색 자료에 아직 반영되지 않았을 수 있습니다.");
 }
+
+QString roadNotFound() {
+  return QStringLiteral("도로명주소를 찾지 못했습니다. 시·군·구, 도로명, 건물번호를 확인하세요. 예: 안동시 풍천면 하회종가길 40");
+}
 }
 
 static bool readCoordinate(const QJsonValue& value, double& coordinate) {
@@ -156,7 +161,30 @@ void LocationSearch::setVworldApiKey(const QString& key) {
   VworldSettings::saveApiKey(key);
 }
 
+bool LocationSearch::isRoadAddress(const QString& query) {
+  return kaIsRoadAddress(query);
+}
+
 void LocationSearch::search(const QString& query) {
+  if (isRoadAddress(query)) {
+    const QString q = query.simplified();
+    if (q.isEmpty()) {
+      emit failed(QStringLiteral("검색어를 입력하세요"));
+      return;
+    }
+    if (m_pending) {
+      emit failed(QStringLiteral("이전 위치를 검색하고 있습니다. 검색이 끝난 뒤 다시 검색하세요."));
+      return;
+    }
+    if (vworldApiKey().isEmpty()) {
+      emit failed(QStringLiteral("도로명주소 검색에는 VWorld API 키가 필요합니다. VWorld API 키 설정을 확인하세요."));
+      return;
+    }
+    m_pending = true;
+    m_deadline.start(m_timeoutMs);
+    searchVworld(q, VworldQuery::Road);
+    return;
+  }
   startSearch(query, false);
 }
 
@@ -192,7 +220,7 @@ void LocationSearch::startSearch(const QString& query, bool parcel) {
   // One deadline covers both providers; a slow fallback cannot extend it indefinitely.
   m_deadline.start(m_timeoutMs);
   if (!vworldApiKey().isEmpty())
-    searchVworld(q, parcel);
+    searchVworld(q, parcel ? VworldQuery::Parcel : VworldQuery::Place);
   else
     searchNominatim(q);
 }
@@ -261,7 +289,9 @@ void LocationSearch::handleNominatim(const QByteArray& body) {
     emit finished(hits);
 }
 
-void LocationSearch::searchVworld(const QString& query, bool parcel) {
+void LocationSearch::searchVworld(const QString& query, VworldQuery kind) {
+  const bool parcel = kind == VworldQuery::Parcel;
+  const bool road = kind == VworldQuery::Road;
   QUrl url(QStringLiteral("https://api.vworld.kr/req/search"));
   QUrlQuery uq;
   uq.addQueryItem(QStringLiteral("service"), QStringLiteral("search"));
@@ -271,8 +301,9 @@ void LocationSearch::searchVworld(const QString& query, bool parcel) {
   uq.addQueryItem(QStringLiteral("size"), parcel ? QStringLiteral("1000") : QStringLiteral("12"));
   uq.addQueryItem(QStringLiteral("page"), QStringLiteral("1"));
   uq.addQueryItem(QStringLiteral("query"), query);
-  uq.addQueryItem(QStringLiteral("type"), parcel ? QStringLiteral("ADDRESS") : QStringLiteral("place"));
+  uq.addQueryItem(QStringLiteral("type"), (parcel || road) ? QStringLiteral("ADDRESS") : QStringLiteral("place"));
   if (parcel) uq.addQueryItem(QStringLiteral("category"), QStringLiteral("PARCEL"));
+  if (road) uq.addQueryItem(QStringLiteral("category"), QStringLiteral("ROAD"));
   uq.addQueryItem(QStringLiteral("format"), QStringLiteral("json"));
   uq.addQueryItem(QStringLiteral("errorformat"), QStringLiteral("json"));
   uq.addQueryItem(QStringLiteral("key"), vworldApiKey());
@@ -283,12 +314,14 @@ void LocationSearch::searchVworld(const QString& query, bool parcel) {
   req.setTransferTimeout(m_timeoutMs);
   QNetworkReply* reply = m_nam->get(req);
   m_reply = reply;
-  connect(reply, &QNetworkReply::finished, this, [this, reply, query, parcel]() {
+  connect(reply, &QNetworkReply::finished, this, [this, reply, query, parcel, road]() {
     reply->deleteLater();
     if (reply->error() != QNetworkReply::NoError) {
-      if (parcel) {
+      if (parcel || road) {
         completeRequest();
-        emit failed(QStringLiteral("지번 검색 서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 검색하세요."));
+        emit failed(road
+            ? QStringLiteral("도로명 검색 서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 검색하세요.")
+            : QStringLiteral("지번 검색 서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 검색하세요."));
         return;
       }
       searchNominatim(query);
@@ -299,21 +332,23 @@ void LocationSearch::searchVworld(const QString& query, bool parcel) {
     const QString status = root.value(QStringLiteral("response")).toObject()
                                .value(QStringLiteral("status")).toString();
     if (status != QLatin1String("OK")) {
-      if (parcel) {
+      if (parcel || road) {
         completeRequest();
-        emit failed(status == QLatin1String("NOT_FOUND") ? parcelNotFound()
-          : QStringLiteral("지번 검색 서버가 정상 결과를 보내지 않았습니다. VWorld API 키와 서비스 상태를 확인하세요."));
+        emit failed(road ? (status == QLatin1String("NOT_FOUND") ? roadNotFound()
+            : QStringLiteral("도로명 검색 서버가 정상 결과를 보내지 않았습니다. VWorld API 키와 서비스 상태를 확인하세요."))
+          : (status == QLatin1String("NOT_FOUND") ? parcelNotFound()
+            : QStringLiteral("지번 검색 서버가 정상 결과를 보내지 않았습니다. VWorld API 키와 서비스 상태를 확인하세요.")));
         return;
       }
       searchNominatim(query);
       return;
     }
     completeRequest();
-    handleVworld(body, parcel ? query : QString());
+    handleVworld(body, parcel ? query : QString(), road);
   });
 }
 
-void LocationSearch::handleVworld(const QByteArray& body, const QString& parcelQuery) {
+void LocationSearch::handleVworld(const QByteArray& body, const QString& parcelQuery, bool roadList) {
   const QJsonObject resp = QJsonDocument::fromJson(body).object().value(QStringLiteral("response")).toObject();
   const QJsonArray items = resp.value(QStringLiteral("result")).toObject()
                                .value(QStringLiteral("items")).toArray();
@@ -334,10 +369,11 @@ void LocationSearch::handleVworld(const QByteArray& body, const QString& parcelQ
   for (const QJsonValue& v : items) {
     const QJsonObject o = v.toObject();
     LocationHit h;
-    h.title = o.value(QStringLiteral("title")).toString();
-    if (h.title.isEmpty()) h.title = o.value(QStringLiteral("address")).toObject()
-                                         .value(QStringLiteral("road")).toString();
     const QJsonObject addr = o.value(QStringLiteral("address")).toObject();
+    const QString road = addr.value(QStringLiteral("road")).toString();
+    h.title = o.value(QStringLiteral("title")).toString();
+    if (roadList && !road.isEmpty()) h.title = road;
+    if (h.title.isEmpty()) h.title = road;
     h.detail = addr.value(QStringLiteral("parcel")).toString();
     if (parcel) {
       const auto address = parseParcelAddress(h.detail);
@@ -367,7 +403,9 @@ void LocationSearch::handleVworld(const QByteArray& body, const QString& parcelQ
     return;
   }
   if (hits.isEmpty())
-    emit failed(parcel ? parcelNotFound() : QStringLiteral("검색한 위치를 찾지 못했습니다. 주소·지번·장소 이름을 확인한 뒤 다시 검색하세요."));
+    emit failed(parcel ? parcelNotFound()
+                       : roadList ? roadNotFound()
+                                  : QStringLiteral("검색한 위치를 찾지 못했습니다. 주소·지번·장소 이름을 확인한 뒤 다시 검색하세요."));
   else
     emit finished(hits);
 }

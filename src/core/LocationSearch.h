@@ -30,6 +30,8 @@ public:
   void search(const QString& query);
   void searchParcel(const QString& query);
   void cancel();
+  // 길·대로·로 뒤에 건물번호가 있으면 도로명주소다. 세종로는 법정동이라 지번으로 남긴다.
+  static bool isRoadAddress(const QString& query);
   static QString vworldApiKey();
   static void setVworldApiKey(const QString& key);
 
@@ -40,9 +42,10 @@ signals:
 private:
   void startSearch(const QString& query, bool parcel);
   void searchNominatim(const QString& query);
-  void searchVworld(const QString& query, bool parcel = false);
+  enum class VworldQuery { Place, Parcel, Road };
+  void searchVworld(const QString& query, VworldQuery kind);
   void handleNominatim(const QByteArray& body);
-  void handleVworld(const QByteArray& body, const QString& parcelQuery = {});
+  void handleVworld(const QByteArray& body, const QString& parcelQuery = {}, bool roadList = false);
   void completeRequest();
 
   std::unique_ptr<QNetworkAccessManager> m_nam;
