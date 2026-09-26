@@ -3032,9 +3032,9 @@ void TestWorkflow::applySnapSettingsKeepsCadastralUnchecked() {
   snap.enabled = true;
   LayerOps::applySnapSettings(&project, snap);
 
-  refGroup = project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupReference));
-  cadNode = refGroup ? refGroup->findLayer(cad->id()) : nullptr;
+  cadNode = project.layerTreeRoot()->findLayer(cad->id());
   QVERIFY(cadNode);
+  QVERIFY(cadNode->parent() == project.layerTreeRoot());
   QVERIFY2(!cadNode->itemVisibilityChecked(), "토양도를 받아도 꺼 둔 지적이 다시 켜지면 안 된다");
 }
 
