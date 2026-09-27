@@ -27,3 +27,11 @@ foreach ($relative in @('resources', 'translations/qtwebengine_locales')) {
     Copy-Item -LiteralPath $_.FullName -Destination $target -Force
   }
 }
+# Qt's own buttons (저장 / 저장 안 함 / 취소). KaApplication looks in apps/Qt6/translations
+# beside apps/qgis-dev; without the file the buttons stay English.
+$qtKorean = Join-Path $qtRuntimeRoot 'translations/qtbase_ko.qm'
+if (Test-Path -LiteralPath $qtKorean -PathType Leaf) {
+  Copy-Item -LiteralPath $qtKorean -Destination (Join-Path $Destination 'apps/Qt6/translations') -Force
+} else {
+  Write-Warning 'qtbase_ko.qm missing: Qt standard buttons stay English.'
+}

@@ -32,7 +32,9 @@ KaAppBar::KaAppBar(QWidget* parent) : QWidget(parent) {
   m_search->setPlaceholderText(
       QStringLiteral("도로명·지번 (예: 하회종가길 40, 광령리 1615)  Ctrl+F"));
   m_search->setClearButtonEnabled(true);
-  m_search->setMinimumWidth(220);
+  // 150 (was 220): at 1920 the ribbon then gets ~1650 px, above the 1643 px all
+  // groups need, so the one-button 정합·기타 groups stop folding into 「더 많은 작업」.
+  m_search->setMinimumWidth(150);
   m_search->setMaximumWidth(320);
   m_search->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   connect(m_search, &QLineEdit::returnPressed, this, [this]() {
