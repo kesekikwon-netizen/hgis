@@ -141,8 +141,11 @@ void KaLayerOpacityRail::setBrightness(int value, bool enabled) {
     m_bright->blockSignals(false);
   }
   if (m_brightValue) {
+    // 벡터(지적도·유적 경계)에는 밝기가 없다. 「-」는 값을 못 읽은 것처럼 보였다.
     m_brightValue->setEnabled(enabled);
-    m_brightValue->setText(enabled ? QString::number(val) : QStringLiteral("-"));
+    m_brightValue->setText(enabled ? QString::number(val) : QStringLiteral("그림만"));
+    m_brightValue->setToolTip(enabled ? QString()
+                                      : QStringLiteral("밝기는 위성·항공사진 같은 그림 레이어에만 있습니다."));
   }
   if (m_brightTitle)
     m_brightTitle->setEnabled(enabled);

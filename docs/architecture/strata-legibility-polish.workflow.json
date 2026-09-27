@@ -1,0 +1,222 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Strata legibility polish (base d4ae522)",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "list",
+      "label": "Layer list"
+    },
+    {
+      "id": "status",
+      "label": "Status bar"
+    },
+    {
+      "id": "home",
+      "label": "Map card, home"
+    },
+    {
+      "id": "dialog",
+      "label": "Dialogs"
+    }
+  ],
+  "phases": [
+    {
+      "id": "source",
+      "label": "Source",
+      "fromCol": 0,
+      "toCol": 0
+    },
+    {
+      "id": "rule",
+      "label": "Changed rule",
+      "fromCol": 1,
+      "toCol": 1,
+      "variant": "emphasis"
+    },
+    {
+      "id": "screen",
+      "label": "On screen",
+      "fromCol": 2,
+      "toCol": 2
+    }
+  ],
+  "mainPath": [
+    "symbol",
+    "readable",
+    "rowInk"
+  ],
+  "nodes": [
+    {
+      "id": "symbol",
+      "lane": "list",
+      "col": 0,
+      "type": "backend",
+      "label": "Symbol color",
+      "sublabel": "HeritageStyle.cpp:26-31",
+      "width": 176
+    },
+    {
+      "id": "readable",
+      "lane": "list",
+      "col": 1,
+      "type": "backend",
+      "label": "4.5:1 ink",
+      "sublabel": "KaLayerInformation.cpp:42",
+      "width": 176
+    },
+    {
+      "id": "rowInk",
+      "lane": "list",
+      "col": 2,
+      "type": "frontend",
+      "label": "Name color",
+      "sublabel": "KaLayerInformation.cpp:183",
+      "width": 176
+    },
+    {
+      "id": "studio",
+      "lane": "status",
+      "col": 0,
+      "type": "backend",
+      "label": "Studio notice",
+      "sublabel": "KaDrawingStudio.cpp:1766",
+      "width": 176
+    },
+    {
+      "id": "clear",
+      "lane": "status",
+      "col": 1,
+      "type": "backend",
+      "label": "Clear on leave",
+      "sublabel": "MainWindowExport.cpp:420",
+      "width": 176
+    },
+    {
+      "id": "bar",
+      "lane": "status",
+      "col": 2,
+      "type": "frontend",
+      "label": "Status line",
+      "sublabel": "MainWindowExport.cpp:412",
+      "width": 176
+    },
+    {
+      "id": "rows",
+      "lane": "home",
+      "col": 2,
+      "type": "frontend",
+      "label": "Home card rows",
+      "sublabel": "ka-hgis.qss:59,92",
+      "width": 176
+    },
+    {
+      "id": "vector",
+      "lane": "home",
+      "col": 0,
+      "type": "backend",
+      "label": "Vector layer",
+      "sublabel": "canAdjustBrightness",
+      "width": 176
+    },
+    {
+      "id": "bright",
+      "lane": "home",
+      "col": 1,
+      "type": "backend",
+      "label": "Pictures only",
+      "sublabel": "KaLayerOpacityRail.cpp:146",
+      "width": 176
+    },
+    {
+      "id": "qm",
+      "lane": "dialog",
+      "col": 0,
+      "type": "backend",
+      "label": "qtbase_ko.qm",
+      "sublabel": "apps/Qt6/translations",
+      "width": 176
+    },
+    {
+      "id": "tr",
+      "lane": "dialog",
+      "col": 1,
+      "type": "backend",
+      "label": "Install at boot",
+      "sublabel": "KaApplication.cpp:205",
+      "width": 176
+    },
+    {
+      "id": "btn",
+      "lane": "dialog",
+      "col": 2,
+      "type": "frontend",
+      "label": "Korean buttons",
+      "sublabel": "Discard: KaApplication.cpp:190",
+      "width": 176
+    }
+  ],
+  "edges": [
+    {
+      "from": "symbol",
+      "to": "readable",
+      "label": "hue kept"
+    },
+    {
+      "from": "readable",
+      "to": "rowInk",
+      "variant": "emphasis"
+    },
+    {
+      "from": "studio",
+      "to": "clear",
+      "label": "statusMessage"
+    },
+    {
+      "from": "clear",
+      "to": "bar",
+      "label": "tab change"
+    },
+    {
+      "from": "vector",
+      "to": "bright",
+      "label": "disabled"
+    },
+    {
+      "from": "qm",
+      "to": "tr",
+      "label": "after initQgis"
+    },
+    {
+      "from": "tr",
+      "to": "btn",
+      "label": "QPlatformTheme"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Was",
+      "items": [
+        "Yellow names 2.2:1; 1:25000 notice on a 1:469 map; invisible pill; '-' brightness; Save/Discard/Cancel"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Now",
+      "items": [
+        "Names >= 4.5:1 on every row tint; studio notice leaves with its tab; Korean Qt buttons"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Keep",
+      "items": [
+        "Map symbol colors, 10 px list (2026-09-16), drawing panel WIP untouched"
+      ]
+    }
+  ]
+}

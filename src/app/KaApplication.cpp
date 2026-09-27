@@ -42,6 +42,8 @@
 #include <cstdlib>
 #include <string>
 #include <QFileInfo>
+#include <QLibraryInfo>
+#include <QTranslator>
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -181,6 +183,40 @@ static void applyBundledRuntime() {
   // EXE만 눌러도 start.bat 없이 동작한다.
   KaPortableRuntime::applyEnvironment(paths);
   KaPortableRuntime::isolateUserState(paths);
+}
+
+// Qt's Korean file says 「무시」 (ignore) for Discard. Beside 「저장할까요?」 that
+// reads like skipping the question; Windows and Office say 「저장 안 함」.
+class KaButtonWording : public QTranslator {
+public:
+  using QTranslator::QTranslator;
+  bool isEmpty() const override { return false; }
+  QString translate(const char* context, const char* source, const char*, int) const override {
+    if (qstrcmp(context, "QPlatformTheme") == 0 && qstrcmp(source, "Discard") == 0)
+      return QStringLiteral("저장 안 함");
+    return {};
+  }
+};
+
+// Qt's own buttons (Save/Discard/Cancel, Yes/No, OK) and edit menus follow the
+// Korean UI; without this the close prompt read 「저장할까요?」 over English buttons.
+// No qt.conf sits next to the exe, so QLibraryInfo alone misses the SDK folder.
+// The OSGeo4W and portable layouts both keep apps/Qt6/translations beside qgis-dev.
+static void installQtKoreanTranslator(QCoreApplication& app, const QString& qgisPrefix) {
+  const QStringList dirs = {QDir(qgisPrefix).absoluteFilePath(QStringLiteral("../Qt6/translations")),
+                            QLibraryInfo::path(QLibraryInfo::TranslationsPath)};
+  auto* translator = new QTranslator(&app);
+  for (const QString& dir : dirs) {
+    if (translator->load(QStringLiteral("qtbase_ko"), dir)) {
+      app.installTranslator(translator);
+      // Installed last, so it is asked first.
+      app.installTranslator(new KaButtonWording(&app));
+      KaCrashGuard::logLine(QStringLiteral("[boot] Qt 한국어 단추 — %1").arg(QDir::cleanPath(dir)));
+      return;
+    }
+  }
+  KaCrashGuard::logLine(QStringLiteral("[boot] Qt 한국어 단추 파일 없음 — 기본 단추는 영어"));
+  delete translator;
 }
 
 static bool prepareSessionTempDirectory() {
@@ -704,6 +740,7 @@ int KaApplication::run(int argc, char** argv) {
   QgsApplication::setPluginPath(prefix + QStringLiteral("/plugins"));
   QgsApplication::setPkgDataPath(prefix);
   QgsApplication::initQgis();
+  installQtKoreanTranslator(app, prefix);
   // GDAL failures reach the session log too; a desktop launch has no console.
   KaGdalErrorLog::install();
   {

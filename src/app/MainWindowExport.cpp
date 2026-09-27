@@ -411,8 +411,17 @@ void MainWindow::openLayoutDesigner() {
     // 도면 탭의 안내는 메인 상태줄 한 줄에 보인다. 탭 안에 두 번째 줄을 두지 않는다.
     connect(m_drawingStudio, &KaDrawingStudio::statusMessage, this, [this](const QString& text) {
       if (!m_viewTabs || m_viewTabs->currentWidget() != m_drawingStudio) return;
+      m_drawingStudio->setProperty("kaLastStatus", text);
       statusBar()->showMessage(text);
       statusBar()->repaint();
+    });
+    // 도면 안내는 도면 탭의 것이다. 떠나면 지운다. 「축척을 1 : 25000 로 맞췄습니다」가
+    // 지도 탭(1:469)과 홈에 남아 지금 축척처럼 읽혔다.
+    connect(m_viewTabs, &QTabWidget::currentChanged, this, [this](int) {
+      if (!m_drawingStudio || m_viewTabs->currentWidget() == m_drawingStudio) return;
+      const QString last = m_drawingStudio->property("kaLastStatus").toString();
+      if (!last.isEmpty() && statusBar()->currentMessage() == last) statusBar()->clearMessage();
+      m_drawingStudio->setProperty("kaLastStatus", QString());
     });
   } else {
     m_drawingStudio->resetPaper(w, h);
@@ -426,7 +435,9 @@ void MainWindow::openLayoutDesigner() {
   m_drawingStudio->showSheetPage();
   m_drawingStudio->refreshMapFromProject();
   m_drawingStudio->centerOnMapCanvas();
-  statusBar()->showMessage(QStringLiteral("도면 화면입니다. 좌표점은 용지 아래 아이콘으로 찍습니다."));
+  const QString welcome = QStringLiteral("도면 화면입니다. 좌표점은 용지 아래 아이콘으로 찍습니다.");
+  m_drawingStudio->setProperty("kaLastStatus", welcome);
+  statusBar()->showMessage(welcome);
 #endif
 }
 

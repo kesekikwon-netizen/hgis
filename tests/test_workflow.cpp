@@ -28,6 +28,7 @@
 #include <QUrlQuery>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTranslator>
 
 #include <qgsvectorfilewriter.h>
 
@@ -234,6 +235,7 @@ private slots:
   void layoutLayerPanel_hasCheckAllToggle();
   void layoutLegend_deletableAndStaysDeleted();
   void opacityRail_hasBrightnessForRasters();
+  void qtStandardButtons_followKoreanUi();
   void measureHudSitsBesideOpacityRail();
   void labelsFollowLayerStackOrder();
   void redLineDrawsOverLowerLayerLabels_map();
@@ -4437,6 +4439,34 @@ void TestWorkflow::opacityRail_hasBrightnessForRasters() {
                     QStringLiteral("memory"));
   QVERIFY(vl.isValid());
   QVERIFY2(!LayerOps::canAdjustBrightness(&vl), "도형 레이어에는 밝기가 없다");
+}
+
+void TestWorkflow::qtStandardButtons_followKoreanUi() {
+  // 닫기 질문이 「저장할까요?」인데 단추는 Save/Discard/Cancel 이었다.
+  QFile c(QStringLiteral("src/app/KaApplication.cpp"));
+  QVERIFY2(c.open(QIODevice::ReadOnly | QIODevice::Text), "KaApplication.cpp");
+  const QString boot = QString::fromUtf8(c.readAll());
+  const qsizetype init = boot.indexOf(QLatin1String("QgsApplication::initQgis();"));
+  const qsizetype install = boot.indexOf(QLatin1String("installQtKoreanTranslator(app, prefix);"));
+  QVERIFY2(init >= 0 && install > init, "QGIS 경로를 안 뒤에 Qt 한국어 번역을 올려야 한다");
+  // Qt's file says 「무시」 for Discard; the save prompt must say 「저장 안 함」.
+  QVERIFY2(boot.contains(QLatin1String("\"Discard\"")) && boot.contains(QString::fromUtf8("\"저장 안 함\"")),
+           "Discard 단추는 「저장 안 함」이어야 한다");
+
+  // The app looks beside qgis-dev; the SDK must really ship the file there.
+  const QString dir = QDir(QgsApplication::prefixPath()).absoluteFilePath(QStringLiteral("../Qt6/translations"));
+  QTranslator korean;
+  QVERIFY2(korean.load(QStringLiteral("qtbase_ko"), dir), qPrintable(dir));
+  QVERIFY(QCoreApplication::installTranslator(&korean));
+  // QPlatformTheme supplies QMessageBox/QDialogButtonBox standard button text.
+  const QString save = QCoreApplication::translate("QPlatformTheme", "Save");
+  const QString discard = QCoreApplication::translate("QPlatformTheme", "Discard");
+  const QString cancel = QCoreApplication::translate("QPlatformTheme", "Cancel");
+  QCoreApplication::removeTranslator(&korean);
+  for (const QString& text : {save, discard, cancel}) {
+    static const QRegularExpression latin(QStringLiteral("[A-Za-z]"));
+    QVERIFY2(!text.isEmpty() && !text.contains(latin), qPrintable(text));
+  }
 }
 
 void TestWorkflow::measureHudSitsBesideOpacityRail() {

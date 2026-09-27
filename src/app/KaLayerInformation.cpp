@@ -19,6 +19,7 @@
 #include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <cmath>
 #include <qgslayertree.h>
 #include <qgslayertreeview.h>
 #include <qgsproject.h>
@@ -30,6 +31,20 @@ int labelColumnWidth(const QgsLayerTreeView* view) {
       view->style()->pixelMetric(QStyle::PM_IndicatorWidth, nullptr, view) + 18);
 }
 
+double relativeLuminance(const QColor& c) {
+  const auto channel = [](double v) { return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+  return 0.2126 * channel(c.redF()) + 0.7152 * channel(c.greenF()) + 0.0722 * channel(c.blueF());
+}
+
+// Heritage colors are map-symbol colors; as 10 px list text on white, yellow
+// (#D4AA00) reads at 2.2:1. Keep the hue, darken until 4.5:1 on the darkest row
+// tint (hover, KaTheme pressedBottom #E1ECF7).
+QColor readableListInk(QColor ink) {
+  const double limit = (relativeLuminance(QColor(0xE1, 0xEC, 0xF7)) + 0.05) / 4.5 - 0.05;
+  for (int i = 0; i < 24 && relativeLuminance(ink) > limit; ++i) ink = ink.darker(106);
+  return ink;
+}
+
 // 목록 이름은 종류 색으로 찾는다. 색은 HeritageStyle 한 곳만 쓴다.
 // 오른쪽 글자 칸은 그대로 둔다. 꺼진 줄은 종류와 상관없이 흐리게 둔다.
 QColor layerListInk(QgsLayerTreeNode* node, int column) {
@@ -37,7 +52,7 @@ QColor layerListInk(QgsLayerTreeNode* node, int column) {
   if (column == 0) {
     for (QgsLayerTreeNode* n = node; n; n = n->parent()) {
       if (const auto dataset = HeritageStyle::fromLayerName(n->name()))
-        return HeritageStyle::color(*dataset);
+        return readableListInk(HeritageStyle::color(*dataset));
     }
   }
   if (column == 1) return QColor(QStringLiteral("#52606d"));

@@ -13,6 +13,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QDir>
+#include <cmath>
 #include <qgsapplication.h>
 #include <qgslayertree.h>
 #include <qgslayertreeview.h>
@@ -266,6 +267,37 @@ private slots:
     QCoreApplication::processEvents();
     QCOMPARE(model.data(model.node2index(designated), Qt::ForegroundRole).value<QBrush>().color(),
              QColor(QStringLiteral("#64727e")));
+  }
+
+  void heritageNamesStayReadableOnEveryRowTint() {
+    // Raw symbol colors read at 2.2:1 (지표조사구역 #D4AA00) on a white row.
+    const auto luminance = [](const QColor& c) {
+      const auto ch = [](double v) { return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+      return 0.2126 * ch(c.redF()) + 0.7152 * ch(c.greenF()) + 0.0722 * ch(c.blueF());
+    };
+    QgsProject project;
+    auto* refs = project.layerTreeRoot()->addGroup(QStringLiteral("참조 지도"));
+    const HeritageDataset kinds[] = {
+        HeritageDataset::DesignatedHeritage, HeritageDataset::AlterationStandard,
+        HeritageDataset::BuriedHeritageArea, HeritageDataset::HeritageDistributionMap,
+        HeritageDataset::SurfaceSurveyArea, HeritageDataset::ExcavationSurveyArea};
+    QList<QgsLayerTreeGroup*> groups;
+    for (HeritageDataset kind : kinds) groups.append(refs->addGroup(HeritageStyle::layerName(kind)));
+    KaLayerInformationModel model(&project, false);
+    // White, alternate, selected and hover rows of the layer list.
+    const QColor rows[] = {QColor(0xFF, 0xFF, 0xFF), QColor(0xF2, 0xF6, 0xFA), QColor(0xE6, 0xF0, 0xFA),
+                           QColor(0xE1, 0xEC, 0xF7)};
+    for (int i = 0; i < groups.size(); ++i) {
+      const QColor ink = model.data(model.node2index(groups[i]), Qt::ForegroundRole).value<QBrush>().color();
+      const QColor symbol = HeritageStyle::color(kinds[i]);
+      QVERIFY2(qAbs(ink.hsvHue() - symbol.hsvHue()) <= 2,
+               qPrintable(groups[i]->name() + QStringLiteral(" hue ") + ink.name() + QLatin1Char('/') + symbol.name()));
+      for (const QColor& row : rows) {
+        const double ratio = (luminance(row) + 0.05) / (luminance(ink) + 0.05);
+        QVERIFY2(ratio >= 4.5, qPrintable(groups[i]->name() + QStringLiteral(" %1 on %2 = %3")
+                                              .arg(ink.name(), row.name()).arg(ratio, 0, 'f', 2)));
+      }
+    }
   }
 
   void unknownFieldsRequireExplicitChoice() {
