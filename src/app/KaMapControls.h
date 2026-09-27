@@ -48,3 +48,21 @@ private:
   double m_metres = 0.0;
   double m_pixels = 0.0;
 };
+
+// A small bar floating in the bottom-right corner of the map, for map-wide
+// toggles such as the coordinate grid. It grows to the left when its content
+// widens (grid details appear only while the grid is on).
+class KaMapCornerBar final : public QFrame {
+  Q_OBJECT
+public:
+  explicit KaMapCornerBar(QWidget* host);
+
+protected:
+  bool eventFilter(QObject* watched, QEvent* event) override;
+  bool event(QEvent* event) override;
+
+private:
+  void reposition();
+
+  QWidget* m_host = nullptr;
+};

@@ -1,5 +1,6 @@
 ﻿#include "KaSectionDrawingStudio.h"
 
+#include "KaIcons.h"
 #include "KaTheme.h"
 #include "core/LayerOps.h"
 #include "core/LayoutService.h"
@@ -15,6 +16,7 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QFrame>
+#include <QGridLayout>
 #include <QGraphicsView>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -32,11 +34,12 @@
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QTimer>
-#include <QToolBar>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QVBoxLayout>
+
+#include <utility>
 
 #include <qgis.h>
 #include <qgscoordinatereferencesystem.h>
@@ -90,6 +93,18 @@ QIcon scaleBarPreviewIcon(const char* style) {
             }
         }
     }
+    return QIcon(pm);
+}
+
+// 기준선 색 견본: 둥근 네모 하나. 단추 전체를 그 색으로 칠하지 않는다.
+QIcon colorSwatchIcon(const QColor& color) {
+    QPixmap pm(32, 32);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QPen(KaTheme::tokens().bevelDark, 1.2));
+    p.setBrush(color.isValid() ? color : QColor(QStringLiteral("#D7191C")));
+    p.drawRoundedRect(QRectF(3, 3, 26, 26), 6, 6);
     return QIcon(pm);
 }
 
@@ -166,11 +181,10 @@ QWidget* KaSectionDrawingStudio::buildLeftPanel()
     frame->setObjectName(QStringLiteral("sectionLayersPanel"));
     frame->setMinimumWidth(240);
     frame->setMaximumWidth(300);
-    frame->setFrameShape(QFrame::StyledPanel);
 
     auto* vl = new QVBoxLayout(frame);
-    vl->setContentsMargins(4, 4, 4, 4);
-    vl->setSpacing(4);
+    vl->setContentsMargins(10, 10, 10, 10);
+    vl->setSpacing(8);
 
     auto* caption = new QLabel(QStringLiteral("단면 GeoTIFF"), frame);
     caption->setObjectName(QStringLiteral("cardCaption"));
@@ -182,20 +196,21 @@ QWidget* KaSectionDrawingStudio::buildLeftPanel()
         "단면 GeoTIFF만 이 도면에 넣습니다. 위성·지적은 쓰지 않습니다."));
     vl->addWidget(btnAddGeo);
 
+    // 지도 탭 레이어 칸의 「파일함」「전체 끄기」와 같은 작은 테 단추다.
     auto* btnRow = new QHBoxLayout();
-    btnRow->setSpacing(2);
+    btnRow->setSpacing(4);
 
     auto makeBtn = [&](const QString& text, const QString& tip) {
         auto* b = new QToolButton(frame);
         b->setText(text);
         b->setToolTip(tip);
-        b->setAutoRaise(true);
+        b->setCursor(Qt::PointingHandCursor);
         return b;
     };
 
     auto* btnRefresh = makeBtn(QStringLiteral("새로고침"), QStringLiteral("목록 새로고침"));
-    auto* btnUp      = makeBtn(QStringLiteral("위"), QStringLiteral("위로 이동"));
-    auto* btnDown    = makeBtn(QStringLiteral("아래"), QStringLiteral("아래로 이동"));
+    auto* btnUp      = makeBtn(QStringLiteral("위로"), QStringLiteral("위로 이동"));
+    auto* btnDown    = makeBtn(QStringLiteral("아래로"), QStringLiteral("아래로 이동"));
     auto* btnRemove  = makeBtn(QStringLiteral("빼기"), QStringLiteral("목록에서 제거 (프로젝트에서는 지우지 않음)"));
 
     btnRow->addWidget(btnRefresh);
@@ -213,12 +228,15 @@ QWidget* KaSectionDrawingStudio::buildLeftPanel()
     m_layerTree->setSelectionMode(QAbstractItemView::SingleSelection);
     vl->addWidget(m_layerTree, 1);
 
+    // 빈 목록 안내는 목록 한가운데에 둔다. 예전에는 패널 바닥에 붙어 목록과 떨어져 보였다.
+    auto* emptyLay = new QVBoxLayout(m_layerTree->viewport());
+    emptyLay->setContentsMargins(12, 12, 12, 12);
     auto* empty = new QLabel(
-        QStringLiteral("단면 사진(GeoTIFF)을 추가하면 이 목록에 나타납니다."), frame);
+        QStringLiteral("단면 사진(GeoTIFF)을 추가하면 이 목록에 나타납니다."), m_layerTree->viewport());
     empty->setObjectName(QStringLiteral("emptyState"));
     empty->setWordWrap(true);
     empty->setAlignment(Qt::AlignCenter);
-    vl->addWidget(empty);
+    emptyLay->addWidget(empty, 0, Qt::AlignCenter);
 
     connect(btnAddGeo,  &QPushButton::clicked, this, &KaSectionDrawingStudio::addGeoTiff);
     connect(btnRefresh, &QToolButton::clicked, this, &KaSectionDrawingStudio::refreshLayers);
@@ -233,29 +251,229 @@ QWidget* KaSectionDrawingStudio::buildLeftPanel()
 
 QWidget* KaSectionDrawingStudio::buildCenterPanel()
 {
-    auto* container = new QWidget(this);
-    auto* vl = new QVBoxLayout(container);
-    vl->setContentsMargins(0, 0, 0, 0);
-    vl->setSpacing(0);
+    // 도면 탭과 같은 배치: 용지 화면 위 아래쪽 가운데에 도구 줄이 떠 있다.
+    auto* desk = new QWidget(this);
+    auto* deskGrid = new QGridLayout(desk);
+    deskGrid->setContentsMargins(0, 0, 0, 0);
+    deskGrid->setSpacing(0);
 
-    auto* toolbar = new QToolBar(container);
-    toolbar->setIconSize(QSize(16, 16));
-    toolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_view = new QgsLayoutView(desk);
+    m_view->setObjectName(QStringLiteral("sectionLayoutView"));
+    m_view->setBackgroundBrush(QBrush(KaTheme::tokens().desk));
+    deskGrid->addWidget(m_view, 0, 0);
 
-    auto* actSelect = toolbar->addAction(QStringLiteral("\uc120\ud0dd"));
-    auto* actPan    = toolbar->addAction(QStringLiteral("\uc774\ub3d9"));
-    auto* actZoom   = toolbar->addAction(QStringLiteral("\uc804\uccb4\ubcf4\uae30"));
+    m_toolSelect = new QgsLayoutViewToolSelect(m_view);
+    m_toolPan    = new QgsLayoutViewToolPan(m_view);
+    // Do not setTool here. QgsLayoutViewToolSelect::setLayout() creates
+    // QgsLayoutMouseHandles and QGraphicsScene::addItem() crashes if the
+    // select tool is already active on a view with no layout (0xc0000005).
+    // Activate the tool only after setCurrentLayout + setLayout.
 
-    vl->addWidget(toolbar);
+    auto* bottomTools = new QWidget(desk);
+    bottomTools->setObjectName(QStringLiteral("layoutBottomTools"));
+    bottomTools->setAttribute(Qt::WA_StyledBackground, true);
+    auto* btLay = new QHBoxLayout(bottomTools);
+    btLay->setContentsMargins(14, 6, 14, 6);
+    btLay->setSpacing(22);
+    deskGrid->addWidget(bottomTools, 0, 0, Qt::AlignHCenter | Qt::AlignBottom);
+    bottomTools->raise();
+    auto addBottom = [bottomTools](const QString& iconId, const QString& text, const QString& tip) {
+        auto* b = new QToolButton(bottomTools);
+        b->setIcon(KaIcons::icon(iconId));
+        b->setText(text);
+        b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        b->setIconSize(QSize(22, 22));
+        b->setToolTip(tip);
+        b->setAutoRaise(true);
+        return b;
+    };
+    auto* btnSelect = addBottom(QStringLiteral("layout_select"), QStringLiteral("항목 이동"),
+                                QStringLiteral("용지 위 항목을 골라 끌어 옮깁니다"));
+    auto* btnPan = addBottom(QStringLiteral("layout_pan"), QStringLiteral("화면 이동"),
+                             QStringLiteral("용지를 끌어 화면을 옮깁니다"));
+    auto* btnZoom = addBottom(QStringLiteral("layout_zoom_full"), QStringLiteral("전체 보기"),
+                              QStringLiteral("용지 전체가 보이게 맞춥니다"));
+    btLay->addWidget(btnSelect);
+    btLay->addWidget(btnPan);
+    btLay->addWidget(btnZoom);
 
-    auto* strip = new QWidget(container);
+    // 안내는 메인 창 상태줄 한 줄로 보낸다. 이 칸은 마지막 안내를 기억만 한다.
+    m_statusLabel = new QLabel(desk);
+    m_statusLabel->setObjectName(QStringLiteral("studioStatus"));
+    m_statusLabel->hide();
+
+    connect(btnSelect, &QToolButton::clicked, this, [this]() {
+        if (m_view && m_toolSelect) m_view->setTool(m_toolSelect);
+    });
+    connect(btnPan, &QToolButton::clicked, this, [this]() {
+        if (m_view && m_toolPan) m_view->setTool(m_toolPan);
+    });
+    connect(btnZoom, &QToolButton::clicked, this, [this]() {
+        if (!m_view) return;
+        auto* ly = currentLayout();
+        if (!ly) return;
+        auto* pc = ly->pageCollection();
+        if (!pc || pc->pageCount() == 0) return;
+        auto* pg = pc->page(0);
+        if (!pg) return;
+        const QRectF pr = pg->mapRectToScene(pg->rect());
+        const qreal pad = std::max(pr.width(), pr.height()) * 0.10;
+        m_view->fitInView(pr.adjusted(-pad, -pad, pad, pad), Qt::KeepAspectRatio);
+    });
+
+    return desk;
+}
+
+QWidget* KaSectionDrawingStudio::buildRightPanel()
+{
+    // 도면 탭 오른쪽 칸과 같은 문법: 제목 달린 카드, 콜론 없는 라벨,
+    // 만들기·PDF 단추는 스크롤 밖 맨 아래에 붙박이.
+    auto* column = new QWidget(this);
+    column->setObjectName(QStringLiteral("sectionInspectorColumn"));
+    auto* columnLay = new QVBoxLayout(column);
+    columnLay->setContentsMargins(0, 0, 0, 0);
+    columnLay->setSpacing(0);
+
+    auto* scroll = new QScrollArea(column);
+    scroll->setObjectName(QStringLiteral("sectionInspectorScroll"));
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    auto* panel = new QWidget();
+    panel->setObjectName(QStringLiteral("sectionPropertiesPanel"));
+    auto* panelLay = new QVBoxLayout(panel);
+    panelLay->setContentsMargins(12, 8, 12, 8);
+    panelLay->setSpacing(8);
+
+    auto makeCard = [panel, panelLay](const QString& title) {
+        auto* card = new QFrame(panel);
+        card->setObjectName(QStringLiteral("itemInspector"));
+        card->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+        auto* lay = new QVBoxLayout(card);
+        lay->setContentsMargins(10, 10, 10, 10);
+        lay->setSpacing(6);
+        auto* cap = new QLabel(title, card);
+        cap->setObjectName(QStringLiteral("cardCaption"));
+        lay->addWidget(cap);
+        auto* form = new QFormLayout();
+        form->setRowWrapPolicy(QFormLayout::DontWrapRows);
+        form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        form->setHorizontalSpacing(10);
+        form->setVerticalSpacing(6);
+        lay->addLayout(form);
+        panelLay->addWidget(card);
+        return std::make_pair(card, form);
+    };
+
+    // ---- 도면 ----
+    auto [sheetCard, sheetForm] = makeCard(QStringLiteral("도면"));
+    m_paperCombo = new QComboBox(sheetCard);
+    m_paperCombo->setObjectName(QStringLiteral("paperCombo"));
+    m_paperCombo->addItem(QStringLiteral("A3"));
+    m_paperCombo->addItem(QStringLiteral("A4"));
+    sheetForm->addRow(QStringLiteral("용지"), m_paperCombo);
+
+    m_titleEdit = new QLineEdit(sheetCard);
+    m_titleEdit->setObjectName(QStringLiteral("titleEdit"));
+    m_titleEdit->setText(QStringLiteral("단면도"));
+    m_titleEdit->setPlaceholderText(QStringLiteral("단면도"));
+    sheetForm->addRow(QStringLiteral("도면명"), m_titleEdit);
+
+    m_scaleCombo = new QComboBox(sheetCard);
+    m_scaleCombo->setObjectName(QStringLiteral("scaleCombo"));
+    m_scaleCombo->setEditable(true);
+    m_scaleCombo->addItem(QStringLiteral("자동 맞춤"));
+    m_scaleCombo->addItem(QStringLiteral("1:10"));
+    m_scaleCombo->addItem(QStringLiteral("1:20"));
+    m_scaleCombo->addItem(QStringLiteral("1:25"));
+    m_scaleCombo->addItem(QStringLiteral("1:40"));
+    m_scaleCombo->addItem(QStringLiteral("1:50"));
+    m_scaleCombo->addItem(QStringLiteral("1:100"));
+    m_scaleCombo->addItem(QStringLiteral("1:200"));
+    m_scaleCombo->addItem(QStringLiteral("1:250"));
+    sheetForm->addRow(QStringLiteral("축척"), m_scaleCombo);
+
+    m_crsCombo = new QComboBox(sheetCard);
+    m_crsCombo->setObjectName(QStringLiteral("crsCombo"));
+    m_crsCombo->addItem(QStringLiteral("EPSG:5187 (동부원점)"), QStringLiteral("EPSG:5187"));
+    m_crsCombo->addItem(QStringLiteral("EPSG:5186 (중부원점)"), QStringLiteral("EPSG:5186"));
+    m_crsCombo->setCurrentIndex(0);
+    sheetForm->addRow(QStringLiteral("좌표계"), m_crsCombo);
+
+    // ---- 표고·거리 눈금 ----
+    auto [tickCard, tickForm] = makeCard(QStringLiteral("표고·거리 눈금"));
+    m_elevOffsetSpin = new QDoubleSpinBox(tickCard);
+    m_elevOffsetSpin->setObjectName(QStringLiteral("elevationOffsetSpin"));
+    m_elevOffsetSpin->setRange(-9999.0, 9999.0);
+    m_elevOffsetSpin->setDecimals(2);
+    m_elevOffsetSpin->setValue(0.00);
+    m_elevOffsetSpin->setSuffix(QStringLiteral(" m"));
+    m_elevOffsetSpin->setToolTip(QStringLiteral("표고 보정값 (rasterY + offset = 표시 표고)"));
+    tickForm->addRow(QStringLiteral("표고 보정"), m_elevOffsetSpin);
+
+    m_elevIntervalSpin = new QDoubleSpinBox(tickCard);
+    m_elevIntervalSpin->setObjectName(QStringLiteral("elevationIntervalSpin"));
+    m_elevIntervalSpin->setRange(0.01, 10.0);
+    m_elevIntervalSpin->setDecimals(2);
+    m_elevIntervalSpin->setSingleStep(0.01);
+    m_elevIntervalSpin->setValue(0.10);
+    m_elevIntervalSpin->setSuffix(QStringLiteral(" m"));
+    tickForm->addRow(QStringLiteral("표고 간격"), m_elevIntervalSpin);
+
+    m_distAutoCheck = new QCheckBox(QStringLiteral("자동 (1-2-5)"), tickCard);
+    m_distAutoCheck->setObjectName(QStringLiteral("distanceAutoCheck"));
+    m_distAutoCheck->setChecked(true);
+    m_distAutoCheck->setToolTip(QStringLiteral("거리 눈금 간격 자동 (1-2-5 계열)"));
+    tickForm->addRow(QStringLiteral("거리 간격"), m_distAutoCheck);
+
+    m_distManualSpin = new QDoubleSpinBox(tickCard);
+    m_distManualSpin->setObjectName(QStringLiteral("distanceManualSpin"));
+    m_distManualSpin->setRange(0.01, 9999.0);
+    m_distManualSpin->setDecimals(2);
+    m_distManualSpin->setValue(0.50);
+    m_distManualSpin->setSuffix(QStringLiteral(" m"));
+    m_distManualSpin->setEnabled(false);
+    m_distManualSpin->setVisible(false);
+    tickForm->addRow(QString(), m_distManualSpin);
+
+    // ---- 기준선 ----
+    auto [lineCard, lineForm] = makeCard(QStringLiteral("기준선"));
+    m_refLineCheck = new QCheckBox(QStringLiteral("용지에 그리기"), lineCard);
+    m_refLineCheck->setObjectName(QStringLiteral("referenceLineCheck"));
+    m_refLineCheck->setChecked(true);
+    lineForm->addRow(QStringLiteral("표시"), m_refLineCheck);
+
+    m_refWidthSpin = new QDoubleSpinBox(lineCard);
+    m_refWidthSpin->setObjectName(QStringLiteral("referenceLineWidthSpin"));
+    m_refWidthSpin->setRange(0.05, 2.0);
+    m_refWidthSpin->setDecimals(2);
+    m_refWidthSpin->setSingleStep(0.05);
+    m_refWidthSpin->setValue(0.20);
+    m_refWidthSpin->setSuffix(QStringLiteral(" mm"));
+    lineForm->addRow(QStringLiteral("굵기"), m_refWidthSpin);
+
+    // 색은 작은 견본과 값으로 보인다. 단추 전체를 빨갛게 칠하면 주 단추보다 눈에 띄었다.
+    m_refColorBtn = new QPushButton(QStringLiteral("#D7191C"), lineCard);
+    m_refColorBtn->setObjectName(QStringLiteral("referenceLineColorBtn"));
+    m_refColorBtn->setProperty("lineColor", QStringLiteral("#D7191C"));
+    m_refColorBtn->setIcon(colorSwatchIcon(QColor(QStringLiteral("#D7191C"))));
+    m_refColorBtn->setToolTip(QStringLiteral("기준선 색상 — 눌러서 고릅니다"));
+    lineForm->addRow(QStringLiteral("색"), m_refColorBtn);
+
+    // ---- 축척자 ----
+    auto* strip = new QFrame(panel);
     strip->setObjectName(QStringLiteral("sampleStrip"));
-    auto* stripLay = new QHBoxLayout(strip);
-    stripLay->setContentsMargins(10, 4, 10, 4);
-    stripLay->setSpacing(8);
-    auto* stripCap = new QLabel(QStringLiteral("축척자 샘플"), strip);
+    strip->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+    auto* stripOuter = new QVBoxLayout(strip);
+    stripOuter->setContentsMargins(10, 10, 10, 10);
+    stripOuter->setSpacing(6);
+    auto* stripCap = new QLabel(QStringLiteral("축척자"), strip);
     stripCap->setObjectName(QStringLiteral("cardCaption"));
-    stripLay->addWidget(stripCap);
+    stripOuter->addWidget(stripCap);
+    auto* stripLay = new QHBoxLayout();
+    stripLay->setSpacing(6);
     struct BarSample { const char* style; const char* tip; const char* id; };
     const BarSample bars[] = {
         {"Double Box", "쌍칸", "sampleScaleBarDouble"},
@@ -272,185 +490,49 @@ QWidget* KaSectionDrawingStudio::buildCenterPanel()
             b->setChecked(true);
     }
     stripLay->addStretch(1);
-    vl->addWidget(strip);
+    stripOuter->addLayout(stripLay);
+    panelLay->addWidget(strip);
+    panelLay->addStretch(1);
 
-    m_view = new QgsLayoutView(container);
-    m_view->setObjectName(QStringLiteral("sectionLayoutView"));
-    m_view->setBackgroundBrush(QBrush(KaTheme::tokens().desk));
-    vl->addWidget(m_view, 1);
-
-    m_toolSelect = new QgsLayoutViewToolSelect(m_view);
-    m_toolPan    = new QgsLayoutViewToolPan(m_view);
-    // Do not setTool here. QgsLayoutViewToolSelect::setLayout() creates
-    // QgsLayoutMouseHandles and QGraphicsScene::addItem() crashes if the
-    // select tool is already active on a view with no layout (0xc0000005).
-    // Activate the tool only after setCurrentLayout + setLayout.
-
-    m_statusLabel = new QLabel(container);
-    m_statusLabel->setObjectName(QStringLiteral("studioStatus"));
-    m_statusLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    m_statusLabel->setContentsMargins(4, 2, 4, 2);
-    vl->addWidget(m_statusLabel);
-
-    connect(actSelect, &QAction::triggered, this, [this]() {
-        if (m_view && m_toolSelect) m_view->setTool(m_toolSelect);
-    });
-    connect(actPan, &QAction::triggered, this, [this]() {
-        if (m_view && m_toolPan) m_view->setTool(m_toolPan);
-    });
-    connect(actZoom, &QAction::triggered, this, [this]() {
-        if (!m_view) return;
-        auto* ly = currentLayout();
-        if (!ly) return;
-        auto* pc = ly->pageCollection();
-        if (!pc || pc->pageCount() == 0) return;
-        auto* pg = pc->page(0);
-        if (!pg) return;
-        const QRectF pr = pg->mapRectToScene(pg->rect());
-        const qreal pad = std::max(pr.width(), pr.height()) * 0.10;
-        m_view->fitInView(pr.adjusted(-pad, -pad, pad, pad), Qt::KeepAspectRatio);
-    });
-
-    return container;
-}
-
-QWidget* KaSectionDrawingStudio::buildRightPanel()
-{
-    auto* scroll = new QScrollArea(this);
-    scroll->setWidgetResizable(true);
-    scroll->setMinimumWidth(200);
-    scroll->setMaximumWidth(300);
-    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-
-    auto* panel = new QWidget();
-    panel->setObjectName(QStringLiteral("sectionPropertiesPanel"));
-    auto* form = new QFormLayout(panel);
-    form->setRowWrapPolicy(QFormLayout::WrapLongRows);
-    form->setLabelAlignment(Qt::AlignRight);
-    form->setContentsMargins(8, 8, 8, 8);
-    form->setSpacing(6);
-
-    // Paper
-    m_paperCombo = new QComboBox(panel);
-    m_paperCombo->setObjectName(QStringLiteral("paperCombo"));
-    m_paperCombo->addItem(QStringLiteral("A3"));
-    m_paperCombo->addItem(QStringLiteral("A4"));
-    form->addRow(QStringLiteral("\uc6a9\uc9c0:"), m_paperCombo);
-
-    // Title
-    m_titleEdit = new QLineEdit(panel);
-    m_titleEdit->setObjectName(QStringLiteral("titleEdit"));
-    m_titleEdit->setText(QStringLiteral("\ub2e8\uba74\ub3c4"));
-    m_titleEdit->setPlaceholderText(QStringLiteral("\ub2e8\uba74\ub3c4"));
-    form->addRow(QStringLiteral("\ub3c4\uba74\uba85:"), m_titleEdit);
-
-    // Scale
-    m_scaleCombo = new QComboBox(panel);
-    m_scaleCombo->setObjectName(QStringLiteral("scaleCombo"));
-    m_scaleCombo->setEditable(true);
-    m_scaleCombo->addItem(QStringLiteral("\uc790\ub3d9 \ub9de\ucda4"));
-    m_scaleCombo->addItem(QStringLiteral("1:10"));
-    m_scaleCombo->addItem(QStringLiteral("1:20"));
-    m_scaleCombo->addItem(QStringLiteral("1:25"));
-    m_scaleCombo->addItem(QStringLiteral("1:40"));
-    m_scaleCombo->addItem(QStringLiteral("1:50"));
-    m_scaleCombo->addItem(QStringLiteral("1:100"));
-    m_scaleCombo->addItem(QStringLiteral("1:200"));
-    m_scaleCombo->addItem(QStringLiteral("1:250"));
-    form->addRow(QStringLiteral("\ucd95\ucca9:"), m_scaleCombo);
-
-    m_crsCombo = new QComboBox(panel);
-    m_crsCombo->setObjectName(QStringLiteral("crsCombo"));
-    m_crsCombo->addItem(QStringLiteral("EPSG:5187 (동부원점)"), QStringLiteral("EPSG:5187"));
-    m_crsCombo->addItem(QStringLiteral("EPSG:5186 (중부원점)"), QStringLiteral("EPSG:5186"));
-    m_crsCombo->setCurrentIndex(0);
-    form->addRow(QStringLiteral("좌표계:"), m_crsCombo);
-
-    // Elevation offset
-    m_elevOffsetSpin = new QDoubleSpinBox(panel);
-    m_elevOffsetSpin->setObjectName(QStringLiteral("elevationOffsetSpin"));
-    m_elevOffsetSpin->setRange(-9999.0, 9999.0);
-    m_elevOffsetSpin->setDecimals(2);
-    m_elevOffsetSpin->setValue(0.00);
-    m_elevOffsetSpin->setSuffix(QStringLiteral("m"));
-    m_elevOffsetSpin->setToolTip(QStringLiteral("\ud45c\uace0 \ubcf4\uc815\uac12 (rasterY + offset = \ud45c\uc2dc \ud45c\uace0)"));
-    form->addRow(QStringLiteral("\ud45c\uace0 \ubcf4\uc815:"), m_elevOffsetSpin);
-
-    // Elevation interval
-    m_elevIntervalSpin = new QDoubleSpinBox(panel);
-    m_elevIntervalSpin->setObjectName(QStringLiteral("elevationIntervalSpin"));
-    m_elevIntervalSpin->setRange(0.01, 10.0);
-    m_elevIntervalSpin->setDecimals(2);
-    m_elevIntervalSpin->setSingleStep(0.01);
-    m_elevIntervalSpin->setValue(0.10);
-    m_elevIntervalSpin->setSuffix(QStringLiteral("m"));
-    form->addRow(QStringLiteral("\ud45c\uace0 \uac04\uaca9:"), m_elevIntervalSpin);
-
-    // Distance auto / manual
-    m_distAutoCheck = new QCheckBox(QStringLiteral("\uc790\ub3d9"), panel);
-    m_distAutoCheck->setObjectName(QStringLiteral("distanceAutoCheck"));
-    m_distAutoCheck->setChecked(true);
-    m_distAutoCheck->setToolTip(QStringLiteral("\uac70\ub9ac \ub208\uae08 \uac04\uaca9 \uc790\ub3d9 (1-2-5 \uacc4\uc5f4)"));
-    form->addRow(QStringLiteral("\uac70\ub9ac \uac04\uaca9:"), m_distAutoCheck);
-
-    m_distManualSpin = new QDoubleSpinBox(panel);
-    m_distManualSpin->setObjectName(QStringLiteral("distanceManualSpin"));
-    m_distManualSpin->setRange(0.01, 9999.0);
-    m_distManualSpin->setDecimals(2);
-    m_distManualSpin->setValue(0.50);
-    m_distManualSpin->setSuffix(QStringLiteral("m"));
-    m_distManualSpin->setEnabled(false);
-    m_distManualSpin->setVisible(false);
-    form->addRow(QStringLiteral(""), m_distManualSpin);
-
-    // Reference line
-    m_refLineCheck = new QCheckBox(QStringLiteral("\ud45c\uc2dc"), panel);
-    m_refLineCheck->setObjectName(QStringLiteral("referenceLineCheck"));
-    m_refLineCheck->setChecked(true);
-    form->addRow(QStringLiteral("\uae30\uc900\uc120:"), m_refLineCheck);
-
-    m_refWidthSpin = new QDoubleSpinBox(panel);
-    m_refWidthSpin->setObjectName(QStringLiteral("referenceLineWidthSpin"));
-    m_refWidthSpin->setRange(0.05, 2.0);
-    m_refWidthSpin->setDecimals(2);
-    m_refWidthSpin->setSingleStep(0.05);
-    m_refWidthSpin->setValue(0.20);
-    m_refWidthSpin->setSuffix(QStringLiteral("mm"));
-    form->addRow(QStringLiteral("\uae30\uc900\uc120 \uad75\uae30:"), m_refWidthSpin);
-
-    m_refColorBtn = new QPushButton(QStringLiteral("#D7191C"), panel);
-    m_refColorBtn->setObjectName(QStringLiteral("referenceLineColorBtn"));
-    m_refColorBtn->setProperty("lineColor", QStringLiteral("#D7191C"));
-    m_refColorBtn->setStyleSheet(QStringLiteral(
-        "background:#D7191C; color:white; padding:2px 6px; border-radius:3px;"));
-    m_refColorBtn->setToolTip(QStringLiteral("기준선 색상"));
-    form->addRow(QStringLiteral("색상:"), m_refColorBtn);
-
-    // Separator
-    auto* sep = new QFrame(panel);
-    sep->setFrameShape(QFrame::HLine);
-    sep->setFrameShadow(QFrame::Sunken);
-    form->addRow(sep);
-
-    // Build button
-    m_buildBtn = new QPushButton(QStringLiteral("\ub2e8\uba74\ub3c4 \ub9cc\ub4e4\uae30"), panel);
-    m_buildBtn->setObjectName(QStringLiteral("btnPrimary"));
-    m_buildBtn->setToolTip(QStringLiteral("\uccb4\ud06c\ub41c \ub808\uc774\uc5b4\ub85c \ub2e8\uba74\ub3c4 \uc870\ud310\uc744 \uc0dd\uc131\ud569\ub2c8\ub2e4"));
-    form->addRow(m_buildBtn);
-
-    // PDF button
-    m_pdfBtn = new QPushButton(QStringLiteral("PDF \uc800\uc7a5"), panel);
-    m_pdfBtn->setObjectName(QStringLiteral("pdfSaveBtn"));
-    m_pdfBtn->setEnabled(false);
-    m_pdfBtn->setToolTip(QStringLiteral("\ub2e8\uba74\ub3c4\ub97c PDF\ub85c \ub0b4\ubcf4\ub0c5\ub2c8\ub2e4 (\ub2e8\uba74\ub3c4 \ub9cc\ub4e4\uae30 \ud6c4 \ud65c\uc131\ud654)"));
-    form->addRow(m_pdfBtn);
+    // 라벨을 칸 높이 가운데에 맞춘다. QFormLayout 은 키 큰 칸 옆 라벨을 위로 붙였다.
+    for (QFormLayout* form : {sheetForm, tickForm, lineForm}) {
+        for (int row = 0; row < form->rowCount(); ++row) {
+            auto* labelItem = form->itemAt(row, QFormLayout::LabelRole);
+            auto* fieldItem = form->itemAt(row, QFormLayout::FieldRole);
+            auto* rowLabel = labelItem ? qobject_cast<QLabel*>(labelItem->widget()) : nullptr;
+            QWidget* field = fieldItem ? fieldItem->widget() : nullptr;
+            if (!rowLabel || !field) continue;
+            rowLabel->setMinimumHeight(field->sizeHint().height());
+            rowLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        }
+    }
 
     scroll->setWidget(panel);
+    columnLay->addWidget(scroll, 1);
+
+    auto* output = new QFrame(column);
+    output->setObjectName(QStringLiteral("studioOutputBar"));
+    auto* outputLay = new QHBoxLayout(output);
+    outputLay->setContentsMargins(12, 10, 12, 10);
+    outputLay->setSpacing(8);
+
+    m_buildBtn = new QPushButton(QStringLiteral("단면도 만들기"), output);
+    m_buildBtn->setObjectName(QStringLiteral("btnPrimary"));
+    m_buildBtn->setToolTip(QStringLiteral("체크된 레이어로 단면도 조판을 생성합니다"));
+    outputLay->addWidget(m_buildBtn, 1);
+
+    m_pdfBtn = new QPushButton(QStringLiteral("PDF 저장"), output);
+    m_pdfBtn->setObjectName(QStringLiteral("pdfSaveBtn"));
+    m_pdfBtn->setEnabled(false);
+    m_pdfBtn->setToolTip(QStringLiteral("단면도를 PDF로 내보냅니다 (단면도 만들기 후 활성화)"));
+    outputLay->addWidget(m_pdfBtn, 1);
+    columnLay->addWidget(output);
+
     panel->ensurePolished();
     const int requiredWidth = panel->minimumSizeHint().width() +
         scroll->style()->pixelMetric(QStyle::PM_ScrollBarExtent) + 2 * scroll->frameWidth();
-    scroll->setMinimumWidth(std::max(200, requiredWidth));
-    scroll->setMaximumWidth(std::max(300, requiredWidth));
+    column->setMinimumWidth(std::max(240, requiredWidth));
+    column->setMaximumWidth(std::max(320, requiredWidth));
 
     connect(m_paperCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &KaSectionDrawingStudio::onPaperChanged);
@@ -467,7 +549,7 @@ QWidget* KaSectionDrawingStudio::buildRightPanel()
     connect(m_pdfBtn, &QPushButton::clicked,
             this, &KaSectionDrawingStudio::exportPdf);
 
-    return scroll;
+    return column;
 }
 
 void KaSectionDrawingStudio::applyScaleBarStyle(const QString& style)
@@ -801,8 +883,7 @@ void KaSectionDrawingStudio::onReferenceColorClicked()
     const QString hex = picked.name(QColor::HexRgb).toUpper();
     m_refColorBtn->setProperty("lineColor", hex);
     m_refColorBtn->setText(hex);
-    m_refColorBtn->setStyleSheet(QStringLiteral(
-        "background:%1; color:white; padding:2px 6px; border-radius:3px;").arg(hex));
+    m_refColorBtn->setIcon(colorSwatchIcon(picked));
     rebuildSheet(false);
 }
 
@@ -895,4 +976,5 @@ void KaSectionDrawingStudio::setStatus(const QString& msg)
 {
     if (m_statusLabel)
         m_statusLabel->setText(msg);
+    emit statusMessage(msg);
 }

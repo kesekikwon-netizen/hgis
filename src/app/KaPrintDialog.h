@@ -11,6 +11,7 @@
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QFormLayout;
 class QLabel;
 class QPushButton;
 class QRadioButton;
@@ -87,6 +88,10 @@ private:
   QComboBox* m_printer = nullptr;
   QRadioButton* m_modeTiles = nullptr;
   QRadioButton* m_modeFit = nullptr;
+  // 나눠 찍기에만 쓰는 칸들. 한 장 인쇄에서는 회색으로 두지 않고 숨긴다.
+  QFormLayout* m_form = nullptr;
+  QWidget* m_checksRow = nullptr;
+  QLabel* m_overlapLabel = nullptr;
   QLabel* m_outputLabel = nullptr;
   QComboBox* m_output = nullptr;
   QComboBox* m_sheet = nullptr;

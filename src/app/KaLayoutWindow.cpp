@@ -100,7 +100,7 @@ void KaLayoutWindow::refreshLayoutList() {
     m_layoutCombo->addItem(label, name);
   }
   if (m_layoutCombo->count() == 0) {
-    m_status->setText(QStringLiteral("도면이 없습니다. 메인 창에서 「도면 만들기」(Ctrl+L)를 실행하세요."));
+    m_status->setText(QStringLiteral("도면이 없습니다. 메인 창 리본의 「도면」(Ctrl+L)을 누르세요."));
     return;
   }
   int idx = 0;

@@ -60,6 +60,7 @@ class KaAlignPickTool;
 class KaImageView;
 class KaAlignLinkOverlay;
 class KaDrawingStudio;
+class KaMapCornerBar;
 class KaSectionDrawingStudio;
 class KaTerrain3dStudio;
 class KaTerrain3dLayoutStudio;
@@ -448,6 +449,7 @@ private:
   int m_aboveLabelsCount = -1;
   bool m_labelOrderQueued = false;
   QCheckBox* m_mapGridCheck = nullptr;
+  KaMapCornerBar* m_mapGridBar = nullptr;
   QDoubleSpinBox* m_mapGridStep = nullptr;
   QDoubleSpinBox* m_mapGridRot = nullptr;
   QDoubleSpinBox* m_mapGridWidth = nullptr;
@@ -535,6 +537,8 @@ private:
   KaAppBar* m_appBar = nullptr;
   QWidget* m_mapPage = nullptr;
   KaBeginnerRibbon* m_ribbon = nullptr;
+  static QStringList mapOnlyRibbonGroups();
+  void showMapTabFromStudio();
   struct KaUndoAction {
     enum Type { FeatureAdded, FeatureDeleted, FeatureChanged, AttributesChanged, LayerAdded, LayersRemoved };
     Type type = FeatureAdded;

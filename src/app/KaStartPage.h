@@ -25,6 +25,7 @@ signals:
 private:
   QWidget* buildHero();
   QWidget* buildRecentCard();
+  QWidget* buildGuideCard();
   void openRow(int row);
   void showRecentMenu(const QPoint& pos);
   void applyFilter(const QString& text);

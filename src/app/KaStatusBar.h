@@ -23,9 +23,14 @@ public:
   void setUploadCrs(const QString& authId);
   void setRenderingEnabled(bool on);
   bool isRenderingEnabled() const;
-  // Cursor position, scale and the render switch only mean something on a map;
-  // the home page hides them and keeps the work/upload CRS.
+  // Cursor position, scale and the render switch only mean something on the map
+  // tab; the home page and the drawing tabs hide them.
   void setMapInstrumentsVisible(bool visible);
+  // The drawing tab shares the scale field with the map (it edits the paper
+  // scale there) but has no cursor position or render switch.
+  void setInstrumentsVisible(bool mapReadout, bool scale);
+  // Work/upload CRS belong to an open survey, not to the home page.
+  void setCrsChipsVisible(bool visible);
 
 signals:
   void crsClicked();
@@ -41,6 +46,8 @@ private:
   QLabel* m_uploadChip = nullptr;
   QToolButton* m_renderButton = nullptr;
   QList<QWidget*> m_mapOnly;
+  QList<QWidget*> m_scaleOnly;
+  QList<QWidget*> m_surveyOnly;
   QString m_workCrs;
   QString m_uploadCrs;
 };

@@ -1,0 +1,175 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Strata final design: one field face, one status line",
+    "subtitle": "Source at fc63855 + working tree, 2026-09-27",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "theme",
+      "label": "Theme"
+    },
+    {
+      "id": "main",
+      "label": "Main window"
+    },
+    {
+      "id": "studio",
+      "label": "Studios"
+    }
+  ],
+  "phases": [
+    {
+      "id": "paint",
+      "label": "Paint",
+      "fromCol": 0,
+      "toCol": 1,
+      "variant": "emphasis"
+    },
+    {
+      "id": "route",
+      "label": "Route",
+      "fromCol": 2,
+      "toCol": 3
+    },
+    {
+      "id": "show",
+      "label": "Show",
+      "fromCol": 4,
+      "toCol": 4
+    }
+  ],
+  "mainPath": [
+    "qss",
+    "chrome",
+    "fields"
+  ],
+  "nodes": [
+    {
+      "id": "qss",
+      "lane": "theme",
+      "col": 0,
+      "type": "frontend",
+      "label": "ka-hgis.qss",
+      "sublabel": "no field border"
+    },
+    {
+      "id": "chrome",
+      "lane": "theme",
+      "col": 1,
+      "type": "backend",
+      "label": "ChromeStyle",
+      "sublabel": "face · chevrons"
+    },
+    {
+      "id": "fields",
+      "lane": "theme",
+      "col": 2,
+      "type": "frontend",
+      "label": "Combo · spin",
+      "sublabel": "arrow, no bevel"
+    },
+    {
+      "id": "ribbon",
+      "lane": "main",
+      "col": 1,
+      "type": "frontend",
+      "label": "Ribbon",
+      "sublabel": "map-only groups"
+    },
+    {
+      "id": "tabs",
+      "lane": "main",
+      "col": 2,
+      "type": "backend",
+      "label": "Tab change",
+      "sublabel": "currentChanged"
+    },
+    {
+      "id": "status",
+      "lane": "main",
+      "col": 4,
+      "type": "frontend",
+      "label": "KaStatusBar",
+      "sublabel": "one line · pills by tab"
+    },
+    {
+      "id": "drawing",
+      "lane": "studio",
+      "col": 2,
+      "type": "backend",
+      "label": "Drawing",
+      "sublabel": "showStatus"
+    },
+    {
+      "id": "section",
+      "lane": "studio",
+      "col": 3,
+      "type": "backend",
+      "label": "Section",
+      "sublabel": "cards · tools"
+    }
+  ],
+  "edges": [
+    {
+      "from": "qss",
+      "to": "chrome",
+      "label": "native border",
+      "variant": "emphasis"
+    },
+    {
+      "from": "chrome",
+      "to": "fields",
+      "label": "drawComplexControl",
+      "variant": "emphasis"
+    },
+    {
+      "from": "ribbon",
+      "to": "tabs",
+      "label": "pressed → map tab"
+    },
+    {
+      "from": "tabs",
+      "to": "status",
+      "label": "instruments · CRS chips"
+    },
+    {
+      "from": "drawing",
+      "to": "status",
+      "label": "statusMessage"
+    },
+    {
+      "from": "section",
+      "to": "status",
+      "label": "statusMessage"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Was",
+      "items": [
+        "Combo/spin QSS border: no arrow, Win95 bevel",
+        "Studios had a second status line"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Now",
+      "items": [
+        "ka-hgis.qss:442 · KaTheme.cpp:124",
+        "MainWindow.cpp:1133 · MainWindowExport.cpp:412"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Keep",
+      "items": [
+        "No url() in QSS",
+        "Drawing keeps the map scale exactly"
+      ]
+    }
+  ]
+}

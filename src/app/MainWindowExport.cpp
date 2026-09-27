@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "KaCrashGuard.h"
 #include "KaIcons.h"
+#include "KaTheme.h"
 #include "core/ChecklistEngine.h"
 #include "core/ExportService.h"
 #include "core/LayerOps.h"
@@ -407,19 +408,25 @@ void MainWindow::openLayoutDesigner() {
       if (m_viewTabs && m_viewTabs->currentWidget() == m_drawingStudio)
         onCanvasScaleChanged(scale);
     });
+    // 도면 탭의 안내는 메인 상태줄 한 줄에 보인다. 탭 안에 두 번째 줄을 두지 않는다.
+    connect(m_drawingStudio, &KaDrawingStudio::statusMessage, this, [this](const QString& text) {
+      if (!m_viewTabs || m_viewTabs->currentWidget() != m_drawingStudio) return;
+      statusBar()->showMessage(text);
+      statusBar()->repaint();
+    });
   } else {
     m_drawingStudio->resetPaper(w, h);
   }
   m_drawingStudio->setParent(m_viewTabs, Qt::Widget);
   if (m_viewTabs->indexOf(m_drawingStudio) < 0)
-    m_viewTabs->addTab(m_drawingStudio, KaIcons::icon(QStringLiteral("pdf")),
+    m_viewTabs->addTab(m_drawingStudio, KaIcons::icon(QStringLiteral("pdf"), KaTheme::tokens().inkMuted),
                        QStringLiteral("도면"));
   m_viewTabs->setCurrentWidget(m_drawingStudio);
   hideSubTools();
   m_drawingStudio->showSheetPage();
   m_drawingStudio->refreshMapFromProject();
   m_drawingStudio->centerOnMapCanvas();
-  statusBar()->showMessage(QStringLiteral("도면 화면입니다. 좌표점은 용지 아래 아이콘으로 찍습니다."), 6000);
+  statusBar()->showMessage(QStringLiteral("도면 화면입니다. 좌표점은 용지 아래 아이콘으로 찍습니다."));
 #endif
 }
 
@@ -439,7 +446,7 @@ int MainWindow::runUiStressLoop(int iterations) {
   }
   m_drawingStudio->setParent(m_viewTabs, Qt::Widget);
   if (m_viewTabs->indexOf(m_drawingStudio) < 0)
-    m_viewTabs->addTab(m_drawingStudio, KaIcons::icon(QStringLiteral("pdf")),
+    m_viewTabs->addTab(m_drawingStudio, KaIcons::icon(QStringLiteral("pdf"), KaTheme::tokens().inkMuted),
                        QStringLiteral("도면"));
 
   auto toggleBasemaps = []() {
@@ -538,7 +545,7 @@ void MainWindow::openTerrain3dLayout() {
   }
   m_terrain3dLayoutStudio->setParent(m_viewTabs, Qt::Widget);
   if (m_viewTabs->indexOf(m_terrain3dLayoutStudio) < 0)
-    m_viewTabs->addTab(m_terrain3dLayoutStudio, KaIcons::icon(QStringLiteral("terrain_3d")),
+    m_viewTabs->addTab(m_terrain3dLayoutStudio, KaIcons::icon(QStringLiteral("terrain_3d"), KaTheme::tokens().inkMuted),
                        QStringLiteral("입체지형 도면"));
   m_viewTabs->setCurrentWidget(m_terrain3dLayoutStudio);
   hideSubTools();
@@ -621,6 +628,10 @@ void MainWindow::openSectionDesigner() {
   if (!m_sectionStudio) {
     m_sectionStudio = new KaSectionDrawingStudio(QgsProject::instance(), this);
     m_sectionStudio->setAttribute(Qt::WA_DeleteOnClose, false);
+    connect(m_sectionStudio, &KaSectionDrawingStudio::statusMessage, this, [this](const QString& text) {
+      if (!m_viewTabs || m_viewTabs->currentWidget() != m_sectionStudio) return;
+      statusBar()->showMessage(text);
+    });
     connect(m_sectionStudio, &KaSectionDrawingStudio::geoTiffAddRequested, this,
             [this](const QString& path) {
               if (path.isEmpty()) return;
@@ -636,7 +647,7 @@ void MainWindow::openSectionDesigner() {
   }
   m_sectionStudio->setParent(m_viewTabs, Qt::Widget);
   if (m_viewTabs->indexOf(m_sectionStudio) < 0)
-    m_viewTabs->addTab(m_sectionStudio, KaIcons::icon(QStringLiteral("section")),
+    m_viewTabs->addTab(m_sectionStudio, KaIcons::icon(QStringLiteral("section"), KaTheme::tokens().inkMuted),
                        QStringLiteral("단면도"));
   m_viewTabs->setCurrentWidget(m_sectionStudio);
   hideSubTools();

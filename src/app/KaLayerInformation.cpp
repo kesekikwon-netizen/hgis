@@ -168,7 +168,9 @@ QVariant KaLayerInformationModel::data(const QModelIndex& item, int role) const 
         return QBrush(layerListInk(node, item.column()));
       QFont font = layerTreeNodeFont(node->nodeType());
       font.setBold(group);
-      if (!node->isVisible()) font.setItalic(true);
+      // 꺼진 레이어는 위의 옅은 글자색으로 구분한다. 맑은 고딕에는 기울임꼴이 없어
+      // setItalic 은 한글을 억지로 비틀어 그렸다.
+      font.setItalic(false);
       return font;
     }
   }

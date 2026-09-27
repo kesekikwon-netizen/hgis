@@ -113,6 +113,8 @@ public slots:
 
 signals:
   void drawingScaleChanged(double denominator);
+  // One-line guidance for the main window status bar.
+  void statusMessage(const QString& text);
 
 private slots:
   void beginDrawMapFrame();
@@ -220,6 +222,7 @@ private:
   bool m_gridShowNums = false;
   double m_gridIntervalM = 0.0;
   QLabel* m_status = nullptr;
+  void showStatus(const QString& text);
   QFrame* m_adjustBar = nullptr;
   QFrame* m_scaleBar = nullptr;
   QAction* m_actEndAdjust = nullptr;

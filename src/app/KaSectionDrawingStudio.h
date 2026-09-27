@@ -40,6 +40,8 @@ public:
 
 signals:
     void geoTiffAddRequested(const QString& path);
+    // One-line guidance for the main window status bar.
+    void statusMessage(const QString& text);
 
 protected:
     void showEvent(QShowEvent* event) override;

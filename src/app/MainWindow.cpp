@@ -369,6 +369,20 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 // 작업공간을 읽은 뒤 화면·범례·창 제목을 한 번에 맞춘다. 내장(.gpkg)과 동반(.qgz)
 // 두 경로가 같은 마무리를 쓰도록 한곳에 모았다.
 
+QStringList MainWindow::mapOnlyRibbonGroups() {
+  return {QStringLiteral("record"), QStringLiteral("fetch"), QStringLiteral("basemap"),
+          QStringLiteral("align")};
+}
+
+// 도면·단면도 같은 작업 탭에서 지도 전용 단추를 눌렀을 때만 지도 탭으로 넘긴다.
+// 홈에서는 넘기지 않는다: 조사를 열기 전에 지도 화면을 여는 것은 사용자가 고른다.
+void MainWindow::showMapTabFromStudio() {
+  if (!m_viewTabs || !m_mapPage) return;
+  QWidget* page = m_viewTabs->currentWidget();
+  if (page == m_mapPage || page == m_startPage) return;
+  m_viewTabs->setCurrentWidget(m_mapPage);
+}
+
 void MainWindow::updateNextActionStatus() {
   QString msg;
   if (m_surveyPath.isEmpty()) {
@@ -386,7 +400,7 @@ void MainWindow::updateNextActionStatus() {
     else if (!hasDraw)
       msg = QStringLiteral("「그리기」로 구역을 그리세요.");
     else
-      msg = QStringLiteral("다 그렸으면 「도면 만들기」로 종이에 옮기세요.");
+      msg = QStringLiteral("다 그렸으면 리본의 「도면」으로 종이에 옮기세요.");
   }
   statusBar()->showMessage(msg);
 }
@@ -921,6 +935,9 @@ void MainWindow::buildUi() {
         LayerOps::zoomToLayerMax(m_canvas, m_layerTree->currentLayer());
     });
     new KaMapScaleBar(m_canvas, railHost);
+    // 좌표격자는 지도 오른쪽 아래에 떠 있는 작은 막대다. 지도 아래 따로 떨어진 띠에
+    // 체크 상자 하나만 두면 한 줄을 통째로 차지했다. 세부 칸은 켰을 때만 옆으로 펼친다.
+    m_mapGridBar = new KaMapCornerBar(railHost);
   }
   connect(m_layerOpacityRail, &KaLayerOpacityRail::brightnessChanged, this, [this](int value) {
     if (!m_layerTree) return;
@@ -944,8 +961,9 @@ void MainWindow::buildUi() {
   });
   updateLayerOpacityControl();
 
-  auto* scaleBar = new QHBoxLayout();
-  scaleBar->setSpacing(4);
+  auto* scaleBar = new QHBoxLayout(m_mapGridBar);
+  scaleBar->setContentsMargins(10, 4, 10, 4);
+  scaleBar->setSpacing(6);
   m_scaleEdit = m_status->scaleEdit();
   m_scaleCombo = m_status->scaleCombo();
   connect(m_scaleEdit, &QLineEdit::returnPressed, this, &MainWindow::applyMapScaleFromUi);
@@ -1055,10 +1073,8 @@ void MainWindow::buildUi() {
   syncMapGridColorButtons();
   gridDetail->setVisible(false);
   connect(m_mapGridCheck, &QCheckBox::toggled, gridDetail, &QWidget::setVisible);
-  scaleBar->addWidget(m_mapGridCheck);
   scaleBar->addWidget(gridDetail);
-  scaleBar->addStretch(1);
-  mapLay->addLayout(scaleBar);
+  scaleBar->addWidget(m_mapGridCheck);
 
   // 왼쪽 패널 ↔ 지도 사이를 끌어서 나눌 수 있게 한다. 나눈 폭은 창 상태와
   // 같이 저장돼 다음에 열 때 그대로 온다(MainWindow/mainSplit).
@@ -1092,9 +1108,11 @@ void MainWindow::buildUi() {
     if (m_startPage) m_startPage->reload();
   });
   m_mapPage = central;
-  const int homeIdx = m_viewTabs->addTab(m_startPage, KaIcons::icon(QStringLiteral("new")),
+  // 탭 아이콘은 타일 없는 한 색 그림이다. 16px 타일은 뭉개져 무엇인지 안 보였다.
+  const QColor tabInk = KaTheme::tokens().inkMuted;
+  const int homeIdx = m_viewTabs->addTab(m_startPage, KaIcons::icon(QStringLiteral("new"), tabInk),
                                          QStringLiteral("홈"));
-  const int mapIdx = m_viewTabs->addTab(central, KaIcons::icon(QStringLiteral("map")),
+  const int mapIdx = m_viewTabs->addTab(central, KaIcons::icon(QStringLiteral("map"), tabInk),
                                         QStringLiteral("지도"));
   if (QTabBar* bar = m_viewTabs->tabBar()) {
     bar->setTabButton(homeIdx, QTabBar::RightSide, nullptr);
@@ -1107,7 +1125,27 @@ void MainWindow::buildUi() {
     if (m_actMapGeoTiff) m_actMapGeoTiff->setEnabled(page == m_mapPage);
     if (m_startPage && page == m_startPage)
       m_startPage->reload();
-    if (m_status) m_status->setMapInstrumentsVisible(page != m_startPage);
+    if (m_status) {
+      // 지도 탭만 커서 좌표와 지도갱신을 쓴다. 도면 탭은 아래 축척칸으로 용지 축척을
+      // 고치므로 축척만 남긴다. 좌표계 알약은 조사가 있는 탭에서만 보인다.
+      const bool onMap = page == m_mapPage;
+      const bool onDrawing = m_drawingStudio && page == m_drawingStudio;
+      m_status->setInstrumentsVisible(onMap, onMap || onDrawing);
+      m_status->setCrsChipsVisible(page != m_startPage);
+    }
+    if (m_ribbon) {
+      // 작업 탭에서는 지도 전용 묶음 제목을 옅게 해 「지금 탭의 일이 아님」을 보인다.
+      const bool studio = page != m_mapPage && page != m_startPage;
+      for (const QString& id : mapOnlyRibbonGroups()) {
+        QFrame* group = m_ribbon->group(id);
+        if (!group || group->property("offContext").toBool() == studio) continue;
+        group->setProperty("offContext", studio);
+        for (QWidget* w : group->findChildren<QLabel*>(QStringLiteral("ribbonGroupCaption"))) {
+          w->style()->unpolish(w);
+          w->style()->polish(w);
+        }
+      }
+    }
     if (m_mapPage && page == m_mapPage) {
       QTimer::singleShot(0, this, [this]() { ensureStartupViewReady(); });
     } else {
@@ -1125,7 +1163,10 @@ void MainWindow::buildUi() {
     if (m_canvas) onCanvasScaleChanged(m_canvas->scale());
   });
   m_viewTabs->setCurrentWidget(m_startPage);
-  if (m_status) m_status->setMapInstrumentsVisible(false);
+  if (m_status) {
+    m_status->setMapInstrumentsVisible(false);
+    m_status->setCrsChipsVisible(false);
+  }
   setCentralWidget(m_viewTabs);
   // 자동 저장 없음. 저장은 사용자가 「저장」(Ctrl+S)을 누를 때만 일어난다.
   // 저장 안 한 작업은 창 제목의 * 로 보이고, 닫을 때 한 번 물어본다.
@@ -1170,7 +1211,7 @@ void MainWindow::openTerrain3dStudio() {
   }
   m_terrain3dStudio->setParent(m_viewTabs, Qt::Widget);
   if (m_viewTabs->indexOf(m_terrain3dStudio) < 0)
-    m_viewTabs->addTab(m_terrain3dStudio, KaIcons::icon(QStringLiteral("terrain_3d")),
+    m_viewTabs->addTab(m_terrain3dStudio, KaIcons::icon(QStringLiteral("terrain_3d"), KaTheme::tokens().inkMuted),
                        QStringLiteral("입체지형"));
   m_viewTabs->setCurrentWidget(m_terrain3dStudio);
   hideSubTools();
@@ -1303,6 +1344,8 @@ void MainWindow::updateLayerOpacityControl() {
   // 밝기는 그림(래스터)에만 있다. 항공사진·위성·지형맵이 대상이다.
   const bool bright = LayerOps::canAdjustBrightness(cur);
   m_layerOpacityRail->setBrightness(bright ? LayerOps::mapLayerBrightness(cur) : 0, bright);
+  m_layerOpacityRail->setTarget(cur ? cur->name() : QString(),
+                cur && (bright || LayerOps::isReferenceOrBasemapLayer(cur)));
   if (m_drawingStudio)
     m_drawingStudio->updateLayerOpacityControl();
 #endif
@@ -1840,6 +1883,10 @@ void MainWindow::startTrenchGrid() {
   }
   m_trenchDlg->setArea(areaWkb, areaM2);
   m_trenchDlg->setTerrainAspect(terrainAspectForArea(areaWkb, areaCrs));
+  {
+    auto* trenchVl = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("trial_trench"));
+    m_trenchDlg->setGridPlaced(trenchVl && trenchVl->featureCount() > 0);
+  }
   m_trenchDlg->show();
   m_trenchDlg->raise();
   if (m_trenchDlg->autoFill()) {
@@ -2134,6 +2181,7 @@ bool MainWindow::applyTrenchCells(const std::vector<TrenchGridGenerator::Cell>& 
   msg += QStringLiteral(" — 격자를 끌어 옮기세요. 우클릭 = 개별 삭제");
   statusBar()->showMessage(msg, 0);
   notify(Notice::Success, QStringLiteral("시굴격자"), msg);
+  if (m_trenchDlg) m_trenchDlg->setGridPlaced(true);
   startTrenchGridMove();
   return true;
 #else

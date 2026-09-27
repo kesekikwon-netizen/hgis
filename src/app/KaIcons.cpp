@@ -47,17 +47,15 @@ QColor groupColor(const QString& id) {
       id == QLatin1String("export") || id == QLatin1String("upload") ||
       id == QLatin1String("check") || id == QLatin1String("section") ||
       id == QLatin1String("section_layout")) return palette.output;
+  // Tile colour follows the ribbon group: 버퍼 sits in 기록, 유산 in 자료 받기, and
+  // 토양·지질·수계 in 배경 지도. Their glyphs keep water, earth and rock fills.
   if (id == QLatin1String("georef") || id == QLatin1String("transform") ||
-      id == QLatin1String("crs") || id == QLatin1String("buffer") ||
-      id == QLatin1String("heritage")) return palette.align;
-  if (id == QLatin1String("river") || id == QLatin1String("hydro")) return palette.water;
-  if (id == QLatin1String("soil")) return palette.earth;
-  if (id == QLatin1String("geology")) return palette.rock;
+      id == QLatin1String("crs")) return palette.align;
   if (id == QLatin1String("polygon") || id == QLatin1String("survey_area") ||
       id.startsWith(QLatin1String("feature_")) || id.startsWith(QLatin1String("draw_")) ||
       id == QLatin1String("line") || id == QLatin1String("gps") ||
       id == QLatin1String("measure") || id == QLatin1String("tape") ||
-      id == QLatin1String("artifact") ||
+      id == QLatin1String("artifact") || id == QLatin1String("buffer") ||
       id == QLatin1String("trench") || id == QLatin1String("trench_grid") ||
       id == QLatin1String("easy_draw") || id == QLatin1String("saveedit") ||
       id == QLatin1String("snap") || id == QLatin1String("select") ||
@@ -530,10 +528,34 @@ void dPavilion(QPainter& p) {
   p.drawPath(roof);
 }
 
+// 지형: 위에서 본 언덕. 한쪽으로 치우친 닫힌 등고선 세 겹과 꼭대기 삼각점.
+// 두 호만 있으면 무선 신호로, 동심원이면 과녁으로 읽혔다.
 void dContour(QPainter& p) {
-  prep(p, 2.4);
-  p.drawArc(QRectF(14, 18, 36, 28), 20 * 16, 140 * 16);
-  p.drawArc(QRectF(20, 26, 24, 20), 20 * 16, 140 * 16);
+  prep(p, 2.6);
+  p.setBrush(Qt::NoBrush);
+  QPainterPath outer;
+  outer.moveTo(8, 42);
+  outer.cubicTo(6, 24, 26, 10, 44, 12);
+  outer.cubicTo(58, 14, 60, 38, 46, 48);
+  outer.cubicTo(34, 56, 10, 56, 8, 42);
+  p.drawPath(outer);
+  QPainterPath middle;
+  middle.moveTo(20, 40);
+  middle.cubicTo(18, 28, 32, 19, 42, 21);
+  middle.cubicTo(51, 23, 51, 37, 42, 41);
+  middle.cubicTo(34, 45, 21, 47, 20, 40);
+  p.drawPath(middle);
+  QPainterPath inner;
+  inner.moveTo(32, 33);
+  inner.cubicTo(32, 27, 40, 25, 43, 29);
+  inner.cubicTo(45, 33, 40, 36, 36, 36);
+  inner.cubicTo(33, 36, 32, 35, 32, 33);
+  p.drawPath(inner);
+  QPolygonF summit;
+  summit << QPointF(38, 27.5) << QPointF(41.5, 33) << QPointF(34.5, 33);
+  p.setPen(Qt::NoPen);
+  p.setBrush(tAccent.darker(125));
+  p.drawPolygon(summit);
 }
 
 void dDark(QPainter& p) {
@@ -642,25 +664,20 @@ void dNorth(QPainter& p) {
 }
 
 void dDem(QPainter& p) {
-  // Shaded elevation faces and contour lines distinguish DEM from a basemap.
-  prep(p, 3.2);
+  // One shaded peak in the group green; the ridge line marks it as elevation data.
+  prep(p, 2.8);
   const auto& colors = KaTheme::iconPalette();
-  QPolygonF low;
-  low << QPointF(7, 47) << QPointF(22, 25) << QPointF(33, 37) << QPointF(47, 49)
-      << QPointF(31, 57);
+  QPolygonF peak;
+  peak << QPointF(7, 50) << QPointF(26, 20) << QPointF(33, 29) << QPointF(41, 13)
+       << QPointF(57, 50);
   p.setBrush(stateColor(colors.map));
-  p.drawPolygon(low);
-  QPolygonF high;
-  high << QPointF(23, 43) << QPointF(40, 9) << QPointF(57, 43) << QPointF(43, 52);
-  p.setBrush(stateColor(colors.earthLight));
-  p.drawPolygon(high);
-  QPolygonF shadow;
-  shadow << QPointF(40, 9) << QPointF(57, 43) << QPointF(43, 52) << QPointF(40, 33);
-  p.setBrush(stateColor(colors.rock));
-  p.drawPolygon(shadow);
+  p.drawPolygon(peak);
+  QPolygonF shade;
+  shade << QPointF(41, 13) << QPointF(57, 50) << QPointF(40, 50) << QPointF(43, 31);
+  p.setBrush(stateColor(colors.map).darker(135));
+  p.drawPolygon(shade);
   p.setBrush(Qt::NoBrush);
-  p.drawLine(QPointF(31, 29), QPointF(40, 33));
-  p.drawLine(QPointF(27, 37), QPointF(42, 43));
+  p.drawLine(QPointF(17, 41), QPointF(47, 41));
 }
 
 void dMapGrid(QPainter& p) {
@@ -679,65 +696,48 @@ void dTrenchGrid(QPainter& p) {
 }
 
 void dPaleo(QPainter& p) {
-  // Relict meander in a floodplain, with a dashed former river course.
-  prep(p, 3.2);
+  // Stepped river terraces in one sand tone with the dashed scar of an old channel.
+  prep(p, 2.8);
   const auto& colors = KaTheme::iconPalette();
+  QPolygonF terraces;
+  terraces << QPointF(8, 52) << QPointF(8, 20) << QPointF(22, 20) << QPointF(22, 31)
+           << QPointF(38, 31) << QPointF(38, 41) << QPointF(56, 41) << QPointF(56, 52);
   p.setBrush(stateColor(colors.earthLight));
-  p.drawRoundedRect(QRectF(7, 11, 50, 44), 5, 5);
-  QPainterPath ridge;
-  ridge.moveTo(9, 28);
-  ridge.quadTo(19, 13, 30, 23);
-  ridge.quadTo(44, 11, 55, 21);
-  p.setBrush(Qt::NoBrush);
-  p.setPen(QPen(stateColor(colors.vegetation), 4, Qt::SolidLine, Qt::RoundCap));
-  p.drawPath(ridge);
-  QPainterPath river;
-  river.moveTo(9, 43);
-  river.cubicTo(22, 30, 27, 53, 39, 40);
-  river.cubicTo(46, 33, 49, 37, 55, 31);
-  p.setPen(QPen(tInk, 7, Qt::SolidLine, Qt::RoundCap));
-  p.drawPath(river);
-  p.setPen(QPen(stateColor(colors.water), 4, Qt::SolidLine, Qt::RoundCap));
-  p.drawPath(river);
+  p.drawPolygon(terraces);
   QPainterPath former;
-  former.moveTo(15, 38);
-  former.cubicTo(11, 23, 31, 23, 29, 38);
-  p.setPen(QPen(stateColor(colors.earth).darker(145), 3.2, Qt::DashLine, Qt::RoundCap));
+  former.moveTo(12, 15);
+  former.cubicTo(30, 6, 26, 24, 44, 18);
+  former.cubicTo(52, 15, 54, 26, 56, 30);
+  p.setBrush(Qt::NoBrush);
+  p.setPen(QPen(tInk, 2.8, Qt::DashLine, Qt::RoundCap));
   p.drawPath(former);
 }
 
 void dSoil(QPainter& p) {
-  prep(p, 3.2);
+  // Soil profile: three horizons in one earth hue, light to dark.
+  prep(p, 2.8);
   const auto& colors = KaTheme::iconPalette();
-  p.setBrush(stateColor(colors.earthLight));
-  p.drawRect(QRectF(9, 19, 46, 12));
-  p.setBrush(stateColor(colors.earth));
-  p.drawRect(QRectF(9, 31, 46, 11));
-  p.setBrush(stateColor(colors.earth).darker(145));
-  p.drawRect(QRectF(9, 42, 46, 12));
-  p.setPen(QPen(stateColor(colors.vegetation), 3.5, Qt::SolidLine, Qt::RoundCap));
-  for (int x : {19, 32, 45}) {
-    p.drawLine(x, 17, x, 9);
-    p.drawLine(x, 13, x - 4, 10);
-  }
-  p.setPen(QPen(tInk, 2.4));
-  p.setBrush(stateColor(colors.earthLight));
-  p.drawEllipse(QPointF(20, 48), 2.6, 2.0);
-  p.drawEllipse(QPointF(33, 48), 2.6, 2.0);
-  p.drawEllipse(QPointF(45, 48), 2.6, 2.0);
+  const QColor earth = stateColor(colors.earth);
+  p.setBrush(earth.lighter(150));
+  p.drawRect(QRectF(10, 12, 44, 13));
+  p.setBrush(earth);
+  p.drawRect(QRectF(10, 25, 44, 13));
+  p.setBrush(earth.darker(140));
+  p.drawRect(QRectF(10, 38, 44, 14));
 }
 
 void dGeology(QPainter& p) {
-  // Dipping rock beds are offset across a single bold fault.
-  prep(p, 3.2);
+  // Dipping beds offset across one fault, in warm stone tones only.
+  prep(p, 2.8);
   const auto& colors = KaTheme::iconPalette();
-  p.setBrush(stateColor(colors.rock).lighter(160));
+  const QColor rock = stateColor(colors.rock);
+  p.setBrush(rock.lighter(165));
   p.drawRect(QRectF(8, 12, 48, 42));
   p.save();
   p.setClipRect(QRectF(8, 12, 48, 42));
   QPolygonF leftBed;
   leftBed << QPointF(8, 34) << QPointF(34, 19) << QPointF(31, 33) << QPointF(8, 47);
-  p.setBrush(stateColor(colors.earth));
+  p.setBrush(rock);
   p.drawPolygon(leftBed);
   QPolygonF rightBed;
   rightBed << QPointF(34, 31) << QPointF(56, 18) << QPointF(56, 31) << QPointF(31, 46);
@@ -745,31 +745,29 @@ void dGeology(QPainter& p) {
   p.restore();
   p.setBrush(Qt::NoBrush);
   p.drawRect(QRectF(8, 12, 48, 42));
-  p.setPen(QPen(tInk, 4.2, Qt::SolidLine, Qt::RoundCap));
+  p.setPen(QPen(tInk, 3.4, Qt::SolidLine, Qt::RoundCap));
   p.drawLine(QPointF(37, 9), QPointF(28, 57));
 }
 
 void dRiver(QPainter& p) {
-  // Main stream is wider than its tributaries, with a dark bank outline.
-  prep(p, 3.2);
+  // Main stream wider than its tributary, water blue inside a thin bank line.
+  prep(p, 2.8);
   p.setBrush(Qt::NoBrush);
   QPainterPath main;
-  main.moveTo(26, 7);
+  main.moveTo(26, 8);
   main.cubicTo(40, 18, 15, 27, 27, 38);
   main.cubicTo(39, 47, 28, 51, 33, 57);
   QPainterPath trib;
-  trib.moveTo(54, 14);
-  trib.cubicTo(43, 18, 47, 33, 27, 38);
-  trib.moveTo(9, 19);
-  trib.cubicTo(10, 25, 18, 28, 23, 31);
-  p.setPen(QPen(tInk, 6.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  trib.moveTo(54, 15);
+  trib.cubicTo(43, 19, 47, 33, 27, 38);
+  p.setPen(QPen(tInk, 6.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
   p.drawPath(trib);
-  p.setPen(QPen(tInk, 9, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.setPen(QPen(tInk, 8.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
   p.drawPath(main);
   const QColor water = stateColor(KaTheme::iconPalette().water);
-  p.setPen(QPen(water, 3.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.setPen(QPen(water, 3.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
   p.drawPath(trib);
-  p.setPen(QPen(water, 6.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.setPen(QPen(water, 5.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
   p.drawPath(main);
 }
 
@@ -907,7 +905,9 @@ QIcon icon(const QString& id) {
                                                : QStringLiteral("/glossy"));
   if (cache.contains(cacheKey)) return cache.value(cacheKey);
 
-  const QColor accent = groupColor(id);
+  // Solid tiles (저장·도면·인쇄) share the chrome's one blue accent; two dark tile
+  // colours in one ribbon row read as two different kinds of button.
+  const QColor accent = tStrongTile ? KaTheme::tokens().sky1 : groupColor(id);
   const auto bake = [&accent](void (*draw)(QPainter&)) { return bakeIcon(draw, accent); };
   QIcon ic;
   if (id == QLatin1String("new")) ic = bake(dDocPlus);

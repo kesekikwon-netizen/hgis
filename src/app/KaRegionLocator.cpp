@@ -37,25 +37,33 @@ QWidget* hostOutsideMenu(QWidget* widget) {
 
 KaRegionLocator::KaRegionLocator(QWidget* parent) : QWidget(parent) {
   setObjectName(QStringLiteral("regionLocator"));
-  setMinimumWidth(230);
+  setMinimumWidth(204);
   setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
   setToolTip(QStringLiteral("시·도를 누르면 시·동·번지로 찾습니다"));
 
   auto* grid = new QGridLayout(this);
-  grid->setContentsMargins(1, 1, 1, 1);
-  grid->setHorizontalSpacing(2);
-  grid->setVerticalSpacing(2);
+  grid->setContentsMargins(4, 4, 4, 4);
+  grid->setHorizontalSpacing(4);
+  grid->setVerticalSpacing(4);
   m_group = new QButtonGroup(this);
   // 배타 그룹이면 한 번 누른 칩을 놓을 수가 없어 취소가 막힌다.
   // 규칙 하나로 통일: 팝업 열림 == 칩 눌림. 같은 칩을 다시 누르면 닫고 해제.
   m_group->setExclusive(false);
 
-  const QStringList labels = {QStringLiteral("인천"), QStringLiteral("서울"), QStringLiteral("경기"),
-                              QStringLiteral("강원"), QStringLiteral("충북"), QStringLiteral("경북"),
-                              QStringLiteral("세종"), QStringLiteral("대전"), QStringLiteral("충남"),
-                              QStringLiteral("전북"), QStringLiteral("광주"), QStringLiteral("대구"),
-                              QStringLiteral("전남"), QStringLiteral("제주"), QStringLiteral("경남"),
-                              QStringLiteral("울산"), QStringLiteral("부산")};
+  // 칸은 겹치지 않는 격자 그대로 두고, 자리만 한반도 모양으로 놓는다(타일 지도).
+  // 서울이 맨 위, 서해안은 왼쪽 열, 동해안은 오른쪽 열, 제주가 맨 아래다.
+  // 예전에는 한 줄 여섯 칸에 흘려 넣어 지도 모양도 행정 순서도 아니었다.
+  struct Tile { const char* name; int row; int col; };
+  const Tile tiles[] = {
+      {"서울", 0, 1},
+      {"인천", 1, 0}, {"경기", 1, 1}, {"강원", 1, 2},
+      {"충남", 2, 0}, {"세종", 2, 1}, {"충북", 2, 2}, {"경북", 2, 3},
+      {"전북", 3, 0}, {"대전", 3, 1}, {"대구", 3, 2}, {"울산", 3, 3},
+      {"광주", 4, 0}, {"전남", 4, 1}, {"경남", 4, 2}, {"부산", 4, 3},
+      {"제주", 5, 1},
+  };
+  QStringList labels;
+  for (const Tile& tile : tiles) labels.append(QString::fromUtf8(tile.name));
   for (int i = 0; i < labels.size(); ++i) {
     auto* b = new QToolButton(this);
     b->setObjectName(QStringLiteral("regionChip"));
@@ -63,13 +71,13 @@ KaRegionLocator::KaRegionLocator(QWidget* parent) : QWidget(parent) {
     b->setCheckable(true);
     b->setToolButtonStyle(Qt::ToolButtonTextOnly);
     b->setAutoRaise(false);
-    b->setFixedHeight(22);
-    b->setMinimumWidth(32);
-    b->setMaximumWidth(38);
+    b->setFixedHeight(28);
+    b->setMinimumWidth(42);
+    b->setMaximumWidth(46);
     b->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     b->setCursor(Qt::PointingHandCursor);
     m_group->addButton(b, i);
-    grid->addWidget(b, i / 6, i % 6);
+    grid->addWidget(b, tiles[i].row, tiles[i].col);
     const QString sido = KoreaRegionCatalog::canonicalSido(labels.at(i));
     connect(b, &QToolButton::clicked, this, [this, b, sido]() {
       if (m_activeChip == b && m_popup && m_popup->isVisible()) {
@@ -86,7 +94,10 @@ KaRegionLocator::KaRegionLocator(QWidget* parent) : QWidget(parent) {
   }
 }
 
-QSize KaRegionLocator::sizeHint() const { return QSize(234, 74); }
+QSize KaRegionLocator::sizeHint() const {
+  // 4열 6행 타일 지도: 칩 46×28, 간격 4, 여백 4.
+  return layout() ? layout()->sizeHint().expandedTo(QSize(204, 196)) : QSize(204, 196);
+}
 
 void KaRegionLocator::closePanel() {
   if (m_popup) m_popup->hide();

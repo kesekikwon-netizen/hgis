@@ -968,7 +968,7 @@ void KaDrawingStudio::resetPaper(double widthMm, double heightMm, bool preserveE
     zoomPaperVisible();
     autoPlaceDefaultSheet();
     if (m_status)
-      m_status->setText(QStringLiteral("용지에 지도를 올려 두었습니다. 축척을 맞추거나 그린곳 가운데를 누르세요."));
+      showStatus(QStringLiteral("용지에 지도를 올려 두었습니다. 축척을 맞추거나 그린곳 가운데를 누르세요."));
     return;
   }
 
@@ -1057,7 +1057,7 @@ void KaDrawingStudio::resetPaper(double widthMm, double heightMm, bool preserveE
   ly->refresh();
 
   if (m_status) {
-    m_status->setText(QStringLiteral("용지 전환 완료: %1×%2 mm — 기존 지도 범위와 배치가 유지되었습니다.")
+    showStatus(QStringLiteral("용지 전환 완료: %1×%2 mm — 기존 지도 범위와 배치가 유지되었습니다.")
                           .arg(qRound(m_paperW))
                           .arg(qRound(m_paperH)));
   }
@@ -1298,7 +1298,7 @@ void KaDrawingStudio::buildUi() {
     }
   });
   connect(m_filesPanel, &KaFileBrowserPanel::statusMessage, this, [this](const QString& msg) {
-    if (m_status) m_status->setText(msg);
+    if (m_status) showStatus(msg);
   });
   leftSplit->addWidget(filesScroll);
 
@@ -1397,43 +1397,25 @@ void KaDrawingStudio::buildUi() {
   auto* legendCap = new QLabel(QStringLiteral("조판 항목"), m_cardLegend);
   legendCap->setObjectName(QStringLiteral("cardCaption"));
   legendLay->addWidget(legendCap);
+  // 이 카드는 용지에 올릴 항목(범례)과 그 글자만 다룬다. 용지/방향은 용지 아래 도구 줄,
+  // PDF·인쇄는 오른쪽 칸 맨 아래 고정 줄에 하나씩만 둔다.
   auto* legendRow = new QHBoxLayout;
   legendRow->setSpacing(14);
   auto* legendBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("layout_legend")),
                                  QStringLiteral("범례"), QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
+  legendBtn->setToolTip(QStringLiteral("범례를 용지에 넣습니다. 넣은 뒤 끌어 옮깁니다"));
   connect(legendBtn, &QToolButton::clicked, this, [this]() {
     beginPlaceLegend();
     if (m_cardLegend) m_cardLegend->setFocus();
   });
-  auto* pdfBtn = makeRailTile(m_cardLegend, KaIcons::strongIcon(QStringLiteral("pdf")),
-                              QStringLiteral("PDF 내보내기"), QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
-  pdfBtn->setObjectName(QStringLiteral("btnPrimary"));
-  pdfBtn->setToolTip(QStringLiteral("지금 용지를 PDF 파일로 저장합니다"));
-  connect(pdfBtn, &QToolButton::clicked, this, &KaDrawingStudio::savePdf);
-  auto* paperBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("layout_map_frame")),
-                                QStringLiteral("용지/방향"), QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
-  paperBtn->setToolTip(QStringLiteral("A4/A3 용지 크기 및 가로/세로 방향을 전환합니다"));
-  connect(paperBtn, &QToolButton::clicked, this, &KaDrawingStudio::openPaperSettingsDialog);
-  auto* printBtn = makeRailTile(m_cardLegend, KaIcons::strongIcon(QStringLiteral("print")),
-                                QStringLiteral("인쇄"), QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
-  printBtn->setObjectName(QStringLiteral("btnPrint"));
-  printBtn->setToolTip(QStringLiteral("프린터로 찍거나, 큰 도면을 작은 용지 여러 장으로 나눠 찍습니다 (Ctrl+P)"));
-  // Ctrl+P 는 창 전체의 「인쇄」 동작이 받는다. 여기에 또 두면 같은 키가 둘이라 둘 다 안 먹는다.
-  connect(printBtn, &QToolButton::clicked, this, &KaDrawingStudio::printDrawing);
-  legendRow->addWidget(legendBtn, 1);
-  legendRow->addWidget(paperBtn, 1);
+  legendRow->addWidget(legendBtn);
+  legendRow->addStretch(1);
   legendLay->addLayout(legendRow);
-  // 내보내기와 인쇄는 한 줄에 모은다. 한 줄에 네 칸이면 좁은 창에서 글자가 잘린다.
-  auto* outputRow = new QHBoxLayout;
-  outputRow->setSpacing(14);
-  outputRow->addWidget(pdfBtn, 1);
-  outputRow->addWidget(printBtn, 1);
-  legendLay->addLayout(outputRow);
   m_legendTitle = new QLineEdit(m_cardLegend);
   m_legendTitle->setPlaceholderText(QStringLiteral("제목을 입력하세요"));
   m_legendTitle->setText(QStringLiteral("범례"));
   connect(m_legendTitle, &QLineEdit::textChanged, this, &KaDrawingStudio::applyLegendSettings);
-  legendLay->addWidget(new QLabel(QStringLiteral("제목"), m_cardLegend));
+  legendLay->addWidget(new QLabel(QStringLiteral("범례 제목"), m_cardLegend));
   legendLay->addWidget(m_legendTitle);
   auto* fontRow = new QHBoxLayout;
   m_legendFont = new QSpinBox(m_cardLegend);
@@ -1460,7 +1442,9 @@ void KaDrawingStudio::buildUi() {
   auto* northLay = new QVBoxLayout(m_cardNorth);
   northLay->setContentsMargins(10, 10, 10, 10);
   northLay->setSpacing(6);
-  northLay->addWidget(new QLabel(QStringLiteral("방위"), m_cardNorth));
+  auto* northCap = new QLabel(QStringLiteral("방위"), m_cardNorth);
+  northCap->setObjectName(QStringLiteral("cardCaption"));
+  northLay->addWidget(northCap);
   auto* northRow = new QHBoxLayout;
   northRow->setSpacing(6);
   struct NorthSample { const char* rel; const char* tip; int art; };
@@ -1514,7 +1498,9 @@ void KaDrawingStudio::buildUi() {
     scaleLay->addSpacerItem(new QSpacerItem(0, buttonMetrics.panelMargin,
         QSizePolicy::Minimum, QSizePolicy::MinimumExpanding));
   };
-  scaleLay->addWidget(new QLabel(QStringLiteral("도면 정보"), m_scaleBar));
+  auto* scaleCap = new QLabel(QStringLiteral("도면 정보"), m_scaleBar);
+  scaleCap->setObjectName(QStringLiteral("cardCaption"));
+  scaleLay->addWidget(scaleCap);
   m_scaleSpin = new QSpinBox(m_scaleBar);
   m_scaleSpin->setRange(10, 5000000);
   m_scaleSpin->setSingleStep(10);
@@ -1651,7 +1637,7 @@ void KaDrawingStudio::buildUi() {
       cur = m_layerTree->currentLayer();
     if (!LayerOps::canAdjustBrightness(cur)) {
       if (m_status)
-        m_status->setText(QStringLiteral("밝기를 바꿀 그림 레이어를 왼쪽에서 먼저 고르세요."));
+        showStatus(QStringLiteral("밝기를 바꿀 그림 레이어를 왼쪽에서 먼저 고르세요."));
       return;
     }
     LayerOps::setMapLayerBrightness(cur, value, m_mapCanvas);
@@ -1664,7 +1650,7 @@ void KaDrawingStudio::buildUi() {
     if (m_view && m_view->viewport())
       m_view->viewport()->update();
     if (m_status)
-      m_status->setText(QStringLiteral("「%1」 밝기 %2").arg(cur->name()).arg(value));
+      showStatus(QStringLiteral("「%1」 밝기 %2").arg(cur->name()).arg(value));
   });
   connect(m_opacityRail, &KaLayerOpacityRail::percentChanged, this, [this](int value) {
     QgsMapLayer* cur = m_railLayer.data();
@@ -1732,13 +1718,50 @@ void KaDrawingStudio::buildUi() {
       inspectorScroll->style()->pixelMetric(QStyle::PM_ScrollBarExtent);
   inspectorScroll->setMinimumWidth(std::max(260, inspectorMinWidth));
   inspectorScroll->setMaximumWidth(std::max(420, inspectorMinWidth));
+
+  // 출력은 오른쪽 칸 맨 아래에 붙박이로 둔다. 조판 항목 사이에 섞여 있으면 찾기 어렵다.
+  auto* inspectorColumn = new QWidget(root);
+  inspectorColumn->setObjectName(QStringLiteral("drawingInspectorColumn"));
+  auto* inspectorColumnLay = new QVBoxLayout(inspectorColumn);
+  inspectorColumnLay->setContentsMargins(0, 0, 0, 0);
+  inspectorColumnLay->setSpacing(0);
+  inspectorColumnLay->addWidget(inspectorScroll, 1);
+  auto* outputBar = new QFrame(inspectorColumn);
+  outputBar->setObjectName(QStringLiteral("studioOutputBar"));
+  auto* outputLay = new QHBoxLayout(outputBar);
+  outputLay->setContentsMargins(12, 10, 12, 10);
+  outputLay->setSpacing(8);
+  auto makeOutput = [outputBar](const QString& iconId, const QString& text, const QColor& ink) {
+    auto* b = new QToolButton(outputBar);
+    b->setIcon(KaIcons::icon(iconId, ink));
+    b->setIconSize(QSize(20, 20));
+    b->setText(text);
+    b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    b->setCursor(Qt::PointingHandCursor);
+    return b;
+  };
+  auto* pdfBtn = makeOutput(QStringLiteral("pdf"), QStringLiteral("PDF 내보내기"), KaTheme::tokens().surface);
+  pdfBtn->setObjectName(QStringLiteral("btnPrimary"));
+  pdfBtn->setToolTip(QStringLiteral("지금 용지를 PDF 파일로 저장합니다"));
+  connect(pdfBtn, &QToolButton::clicked, this, &KaDrawingStudio::savePdf);
+  auto* printBtn = makeOutput(QStringLiteral("print"), QStringLiteral("인쇄"), KaTheme::tokens().ink);
+  printBtn->setObjectName(QStringLiteral("btnPrint"));
+  printBtn->setToolTip(QStringLiteral("프린터로 찍거나, 큰 도면을 작은 용지 여러 장으로 나눠 찍습니다 (Ctrl+P)"));
+  // Ctrl+P 는 창 전체의 「인쇄」 동작이 받는다. 여기에 또 두면 같은 키가 둘이라 둘 다 안 먹는다.
+  connect(printBtn, &QToolButton::clicked, this, &KaDrawingStudio::printDrawing);
+  outputLay->addWidget(pdfBtn, 1);
+  outputLay->addWidget(printBtn, 1);
+  inspectorColumnLay->addWidget(outputBar);
+  inspectorColumn->setMinimumWidth(inspectorScroll->minimumWidth());
+  inspectorColumn->setMaximumWidth(inspectorScroll->maximumWidth());
   m_studioSplit = new QSplitter(Qt::Horizontal, root);
   m_studioSplit->setObjectName(QStringLiteral("studioMainSplit"));
   m_studioSplit->setHandleWidth(10);
   m_studioSplit->setChildrenCollapsible(false);
   m_studioSplit->addWidget(leftCol);
   m_studioSplit->addWidget(right);
-  m_studioSplit->addWidget(inspectorScroll);
+  m_studioSplit->addWidget(inspectorColumn);
   m_studioSplit->setStretchFactor(0, 0);
   m_studioSplit->setStretchFactor(1, 1);
   m_studioSplit->setStretchFactor(2, 0);
@@ -1746,11 +1769,19 @@ void KaDrawingStudio::buildUi() {
   rootLay->addWidget(m_studioSplit, 1);
   setCentralWidget(root);
 
+  // 안내는 메인 창 상태줄 한 줄로 보낸다. 탭 안에 상태줄을 또 두면 두 줄이 겹쳐 보였다.
+  // m_status 는 마지막 안내를 기억하는 보이지 않는 칸이다.
   m_status = new QLabel(this);
-  statusBar()->addWidget(m_status, 1);
-  m_status->setText(QStringLiteral(
+  m_status->hide();
+  showStatus(QStringLiteral(
       "조판 중 — 항목을 끌어 옮기고, 끝나면 「PDF 내보내기」. 작업 좌표계 → 제출 5179."));
   m_paperFitPending = true;
+}
+
+void KaDrawingStudio::showStatus(const QString& text) {
+  if (m_status)
+    m_status->setText(text);
+  emit statusMessage(text);
 }
 
 void KaDrawingStudio::startPlace(PlaceKind kind) {
@@ -1763,7 +1794,7 @@ void KaDrawingStudio::startPlace(PlaceKind kind) {
 void KaDrawingStudio::beginDrawMapFrame() {
   startPlace(PlaceKind::MapFrame);
   if (m_status)
-    m_status->setText(QStringLiteral("칸을 다시 그리려면 용지 위에서 드래그하세요. 아니면 이미 올라간 지도를 쓰세요."));
+    showStatus(QStringLiteral("칸을 다시 그리려면 용지 위에서 드래그하세요. 아니면 이미 올라간 지도를 쓰세요."));
 }
 
 QRectF KaDrawingStudio::defaultMapRect() const {
@@ -1951,7 +1982,7 @@ void KaDrawingStudio::applyImportedCoordCallouts() {
     m_coordMapPts.append(QPointF(mapPt.x(), mapPt.y()));
   }
   if (m_status)
-    m_status->setText(QStringLiteral("맵에서 찍은 좌표점 %1개를 도면에 올렸습니다.").arg(pts.size()));
+    showStatus(QStringLiteral("맵에서 찍은 좌표점 %1개를 도면에 올렸습니다.").arg(pts.size()));
 }
 
 void KaDrawingStudio::focusGridSettings() {
@@ -1981,7 +2012,7 @@ void KaDrawingStudio::focusGridSettings() {
     if (auto* map = mapItem())
       applyCrsGrid(map);
     if (m_status)
-      m_status->setText(m_gridIntervalM > 0.0
+      showStatus(m_gridIntervalM > 0.0
                             ? QStringLiteral("격자 간격 %1 m").arg(m_gridIntervalM, 0, 'f', 0)
                             : QStringLiteral("격자 간격: 자동(축척에 맞춤)"));
   };
@@ -2012,7 +2043,7 @@ void KaDrawingStudio::beginPlaceLegend() {
   m_placeUndo.append(QString::fromUtf8(kIdLegend));
   finishPlace();
   if (m_status)
-    m_status->setText(QStringLiteral("범례를 넣었습니다. 끌어 옮기세요."));
+    showStatus(QStringLiteral("범례를 넣었습니다. 끌어 옮기세요."));
 }
 
 void KaDrawingStudio::beginPlaceNorth(const QString& svgRel) {
@@ -2022,7 +2053,7 @@ void KaDrawingStudio::beginPlaceNorth(const QString& svgRel) {
   applyNorthNow();
   m_placeUndo.append(QString::fromUtf8(kIdNorth));
   if (m_status)
-    m_status->setText(QStringLiteral("방위표를 넣었습니다. 끌어 옮기세요."));
+    showStatus(QStringLiteral("방위표를 넣었습니다. 끌어 옮기세요."));
 }
 
 void KaDrawingStudio::beginPlaceScaleBar(const QString& style) {
@@ -2032,7 +2063,7 @@ void KaDrawingStudio::beginPlaceScaleBar(const QString& style) {
   applyScaleBarNow();
   m_placeUndo.append(QString::fromUtf8(kIdScaleBar));
   if (m_status)
-    m_status->setText(QStringLiteral("축척자를 넣었습니다. 끌어 옮기세요."));
+    showStatus(QStringLiteral("축척자를 넣었습니다. 끌어 옮기세요."));
 }
 
 void KaDrawingStudio::beginPlaceScaleLabel() {
@@ -2042,7 +2073,7 @@ void KaDrawingStudio::beginPlaceScaleLabel() {
   placeScaleLabel(item ? QRectF(item->pos(), item->rect().size()) : defaultItemRect(kIdScale));
   m_placeUndo.append(QString::fromUtf8(kIdScale));
   if (m_status)
-    m_status->setText(QStringLiteral("축척 글자를 넣었습니다. 끌어 옮기세요."));
+    showStatus(QStringLiteral("축척 글자를 넣었습니다. 끌어 옮기세요."));
 }
 
 void KaDrawingStudio::beginPlaceCrsLabel() {
@@ -2052,14 +2083,14 @@ void KaDrawingStudio::beginPlaceCrsLabel() {
   m_placeUndo.append(QString::fromUtf8(kIdCrs));
   finishPlace();
   if (m_status)
-    m_status->setText(QStringLiteral("좌표계를 넣었습니다. 끌어 옮기세요."));
+    showStatus(QStringLiteral("좌표계를 넣었습니다. 끌어 옮기세요."));
 }
 
 void KaDrawingStudio::beginPlaceCoordPoint() {
   endActivateMap();
   if (!m_view || !m_toolCoordPoint || !mapItem()) {
     if (m_status)
-      m_status->setText(QStringLiteral("먼저 지도 칸을 그리세요."));
+      showStatus(QStringLiteral("먼저 지도 칸을 그리세요."));
     return;
   }
   if (QgsProject* proj = QgsProject::instance()) {
@@ -2077,7 +2108,7 @@ void KaDrawingStudio::beginPlaceCoordPoint() {
   }
   m_view->setTool(m_toolCoordPoint);
   if (m_status)
-    m_status->setText(QStringLiteral(
+    showStatus(QStringLiteral(
         "지도 칸에서 찍으세요. 선·점에 자석이 붙습니다. 우클릭·Delete·Ctrl+Z는 마지막 점 지우기."));
 }
 
@@ -2088,7 +2119,7 @@ bool KaDrawingStudio::isPlacingCoordPoint() const {
 void KaDrawingStudio::endPlaceCoordPoint() {
   useSelectTool();
   if (m_status)
-    m_status->setText(QStringLiteral("좌표점 찍기를 끝냈습니다."));
+    showStatus(QStringLiteral("좌표점 찍기를 끝냈습니다."));
 }
 
 void KaDrawingStudio::placeCoordCallout(const QPointF& layoutPt) {
@@ -2100,7 +2131,7 @@ void KaDrawingStudio::placeCoordCallout(const QPointF& layoutPt) {
   if (ir.width() < 1.0 || ir.height() < 1.0) return;
   if (!LayoutService::layoutMapItemContains(itemPt, ir, 0.8)) {
     if (m_status)
-      m_status->setText(QStringLiteral("지도 칸 안에서 찍으세요. 흰 용지에는 점이 안 생깁니다."));
+      showStatus(QStringLiteral("지도 칸 안에서 찍으세요. 흰 용지에는 점이 안 생깁니다."));
     return;
   }
   const QgsRectangle ext = map->extent();
@@ -2262,7 +2293,7 @@ void KaDrawingStudio::placeCoordCallout(const QPointF& layoutPt) {
   m_coordMapPts.append(QPointF(mapPt.x(), mapPt.y()));
   updateCoordFrame();
   if (m_status)
-    m_status->setText(QStringLiteral("%1점  X=%2  Y=%3%4")
+    showStatus(QStringLiteral("%1점  X=%2  Y=%3%4")
                           .arg(tag)
                           .arg(mapPt.y(), 0, 'f', 3)
                           .arg(mapPt.x(), 0, 'f', 3)
@@ -2272,7 +2303,7 @@ void KaDrawingStudio::placeCoordCallout(const QPointF& layoutPt) {
 void KaDrawingStudio::undoLastCoordCallout() {
   if (m_coordMapPts.isEmpty()) {
     if (m_status)
-      m_status->setText(QStringLiteral("지울 좌표점이 없습니다."));
+      showStatus(QStringLiteral("지울 좌표점이 없습니다."));
     return;
   }
   m_coordMapPts.removeLast();
@@ -2280,7 +2311,7 @@ void KaDrawingStudio::undoLastCoordCallout() {
     m_placeUndo.removeLast();
   relayoutCoordCallouts();
   if (m_status)
-    m_status->setText(m_coordMapPts.isEmpty()
+    showStatus(m_coordMapPts.isEmpty()
                           ? QStringLiteral("좌표점을 모두 지웠습니다.")
                           : QStringLiteral("마지막 좌표점을 지웠습니다. 남은 점 %1개.")
                                 .arg(m_coordMapPts.size()));
@@ -2368,7 +2399,7 @@ void KaDrawingStudio::useSelectTool() {
   if (m_view && m_toolSelect)
     m_view->setTool(m_toolSelect);
   if (m_status)
-    m_status->setText(QStringLiteral("항목을 눌러 옮기거나, 모서리를 끌어 가로·세로를 바꾸세요."));
+    showStatus(QStringLiteral("항목을 눌러 옮기거나, 모서리를 끌어 가로·세로를 바꾸세요."));
 }
 
 void KaDrawingStudio::usePanTool() {
@@ -2377,7 +2408,7 @@ void KaDrawingStudio::usePanTool() {
   if (m_view && m_toolPan)
     m_view->setTool(m_toolPan);
   if (m_status)
-    m_status->setText(QStringLiteral("용지를 잡아 옮기세요. 휠 버튼을 누른 채 끌어도 됩니다."));
+    showStatus(QStringLiteral("용지를 잡아 옮기세요. 휠 버튼을 누른 채 끌어도 됩니다."));
 }
 
 void KaDrawingStudio::zoomFull() {
@@ -2816,7 +2847,7 @@ void KaDrawingStudio::createOrResizeMap(const QRectF& layoutRect) {
     if (auto* ly = layout())
       ly->setSelectedItem(held);
     if (m_status)
-      m_status->setText(QStringLiteral(
+      showStatus(QStringLiteral(
           "지도 칸을 만들었습니다. 나침반·좌표계·축척자·축척이 들어갔습니다."));
   });
 }
@@ -3056,7 +3087,7 @@ void KaDrawingStudio::placeScaleLabel(const QRectF& layoutRect, bool selectAfter
   if (selectAfter) {
     finishPlace();
     if (m_status)
-      m_status->setText(QStringLiteral("축척 글자를 넣었습니다."));
+      showStatus(QStringLiteral("축척 글자를 넣었습니다."));
   }
 }
 
@@ -3073,6 +3104,8 @@ void KaDrawingStudio::updateLayerOpacityControl() {
   // 밝기는 그림(래스터)에만 있다. 어두운 옛 항공사진을 조판에서 바로 밝힌다.
   const bool bright = LayerOps::canAdjustBrightness(cur);
   m_opacityRail->setBrightness(bright ? LayerOps::mapLayerBrightness(cur) : 0, bright);
+  m_opacityRail->setTarget(cur ? cur->name() : QString(),
+                cur && (bright || LayerOps::isReferenceOrBasemapLayer(cur)));
 }
 
 void KaDrawingStudio::repaintMapLayers() {
@@ -3438,7 +3471,7 @@ bool KaDrawingStudio::syncHeritageNumbers(bool force) {
   const quint64 previous = m_heritageNumbers.revision();
   m_heritageNumbers.followRenderedLabels(map);
   if (!m_heritageNumbers.update(map, force)) {
-    if (m_status) m_status->setText(m_heritageNumbers.error());
+    if (m_status) showStatus(m_heritageNumbers.error());
     return false;
   }
   if (previous == m_heritageNumbers.revision()) return true;
@@ -3603,7 +3636,7 @@ void KaDrawingStudio::applyOnScreenScale() {
   auto* ly = layout();
   if (!map || !ly || !m_scaleSpin) {
     if (m_status)
-      m_status->setText(QStringLiteral("먼저 지도 칸을 그리세요."));
+      showStatus(QStringLiteral("먼저 지도 칸을 그리세요."));
     return;
   }
   const int wanted = std::max(10, m_scaleSpin->value());
@@ -3611,7 +3644,7 @@ void KaDrawingStudio::applyOnScreenScale() {
   map->setScale(static_cast<double>(wanted));
   syncScaleDecorations();
   if (m_status)
-    m_status->setText(QStringLiteral("축척을 1 : %1 로 맞췄습니다.").arg(wanted));
+    showStatus(QStringLiteral("축척을 1 : %1 로 맞췄습니다.").arg(wanted));
 }
 
 QgsRectangle KaDrawingStudio::surveyExtentOnMap(QgsLayoutItemMap* map) const {
@@ -3675,7 +3708,7 @@ void KaDrawingStudio::beginActivateMap() {
   auto* ly = layout();
   if (!map || !ly || !m_view || !m_toolMoveContent) {
     if (m_status)
-      m_status->setText(QStringLiteral("먼저 지도 칸을 그리세요."));
+      showStatus(QStringLiteral("먼저 지도 칸을 그리세요."));
     return;
   }
   m_adjustingMap = true;
@@ -3685,7 +3718,7 @@ void KaDrawingStudio::beginActivateMap() {
   ly->setSelectedItem(map);
   m_view->setTool(m_toolMoveContent);
   if (m_status)
-    m_status->setText(QStringLiteral("지도 조정: 드래그로 이동, 휠로 확대. 끝나면 「지도조정끝」."));
+    showStatus(QStringLiteral("지도 조정: 드래그로 이동, 휠로 확대. 끝나면 「지도조정끝」."));
 }
 
 void KaDrawingStudio::deleteSelectedItems() {
@@ -3727,9 +3760,9 @@ void KaDrawingStudio::deleteSelectedItems() {
   updateInspector(nullptr);
   if (m_status) {
     if (n > 0)
-      m_status->setText(QStringLiteral("선택한 항목 %1개를 지웠습니다.").arg(n));
+      showStatus(QStringLiteral("선택한 항목 %1개를 지웠습니다.").arg(n));
     else
-      m_status->setText(QStringLiteral("지울 항목을 먼저 선택하세요."));
+      showStatus(QStringLiteral("지울 항목을 먼저 선택하세요."));
   }
 }
 
@@ -3761,7 +3794,7 @@ void KaDrawingStudio::removeSelectedLayers() {
   }
   if (ids.isEmpty()) {
     if (m_status)
-      m_status->setText(QStringLiteral("삭제할 레이어를 먼저 선택하세요."));
+      showStatus(QStringLiteral("삭제할 레이어를 먼저 선택하세요."));
     return;
   }
 
@@ -3779,7 +3812,7 @@ void KaDrawingStudio::removeSelectedLayers() {
   }
   syncMapFromLayers();
   if (m_status)
-    m_status->setText(QStringLiteral("레이어 %1개를 삭제했습니다.").arg(ids.size()));
+    showStatus(QStringLiteral("레이어 %1개를 삭제했습니다.").arg(ids.size()));
 }
 
 bool KaDrawingStudio::eventFilter(QObject* watched, QEvent* event) {
@@ -3940,7 +3973,7 @@ void KaDrawingStudio::undoLastChange() {
     ly->undoStack()->stack()->undo();
     updateInspector(nullptr);
     if (m_status)
-      m_status->setText(QStringLiteral("한 단계 되돌렸습니다."));
+      showStatus(QStringLiteral("한 단계 되돌렸습니다."));
     return;
   }
   while (!m_placeUndo.isEmpty()) {
@@ -3950,12 +3983,12 @@ void KaDrawingStudio::undoLastChange() {
       ly->removeLayoutItem(it);
       updateInspector(nullptr);
       if (m_status)
-        m_status->setText(QStringLiteral("방금 넣은 항목을 되돌렸습니다."));
+        showStatus(QStringLiteral("방금 넣은 항목을 되돌렸습니다."));
       return;
     }
   }
   if (m_status)
-    m_status->setText(QStringLiteral("되돌릴 것이 없습니다."));
+    showStatus(QStringLiteral("되돌릴 것이 없습니다."));
 }
 
 // Delete 를 눌렀을 때 이 화면이 할 일. 창 단축키가 키를 먼저 가로채므로
@@ -3988,11 +4021,11 @@ void KaDrawingStudio::handleRedoKey() {
     ly->undoStack()->stack()->redo();
     updateInspector(nullptr);
     if (m_status)
-      m_status->setText(QStringLiteral("다시 실행했습니다."));
+      showStatus(QStringLiteral("다시 실행했습니다."));
     return;
   }
   if (m_status)
-    m_status->setText(QStringLiteral("다시 실행할 것이 없습니다."));
+    showStatus(QStringLiteral("다시 실행할 것이 없습니다."));
 }
 
 void KaDrawingStudio::keyPressEvent(QKeyEvent* event) {
@@ -4113,15 +4146,18 @@ void KaDrawingStudio::centerOnMapCanvas() {
     applyNiceScaleBar(sb);
   if (!m_coordMapPts.isEmpty())
     relayoutCoordCallouts();
+  // 아래 상태줄 축척칸도 도면 축척을 보여 준다. 예전에는 여기서 알리지 않아
+  // 도면은 1:14172인데 아래 칸은 지도 탭의 1:25000으로 남았다.
+  emit drawingScaleChanged(map->scale());
   if (m_status)
-    m_status->setText(QStringLiteral("지도 화면과 같은 범위·축척으로 맞췄습니다."));
+    showStatus(QStringLiteral("지도 화면과 같은 범위·축척으로 맞췄습니다. 표준 축척은 오른쪽 숫자 단추로 고르세요."));
 }
 
 void KaDrawingStudio::centerSurveyInMap() {
   auto* map = mapItem();
   if (!map) {
     if (m_status)
-      m_status->setText(QStringLiteral("먼저 지도 칸을 그리세요."));
+      showStatus(QStringLiteral("먼저 지도 칸을 그리세요."));
     return;
   }
   QgsPointXY c;
@@ -4157,12 +4193,12 @@ void KaDrawingStudio::centerSurveyInMap() {
   }
   if (!have) {
     if (m_status)
-      m_status->setText(QStringLiteral("가운데로 둘 레이어를 왼쪽에서 고르세요."));
+      showStatus(QStringLiteral("가운데로 둘 레이어를 왼쪽에서 고르세요."));
     return;
   }
   panLayoutMapTo(c);
   if (m_status)
-    m_status->setText(QStringLiteral("축척 1 : %1 을 유지한 채 조판 가운데로 옮겼습니다.")
+    showStatus(QStringLiteral("축척 1 : %1 을 유지한 채 조판 가운데로 옮겼습니다.")
                           .arg(displayScale(map->scale())));
 }
 
@@ -4221,7 +4257,7 @@ void KaDrawingStudio::savePdf() {
   }
   if (auto* composed = layout())
     LayoutService::markStudioSheetComposed(composed);
-  if (m_status) m_status->setText(QStringLiteral("저장: %1").arg(path));
+  if (m_status) showStatus(QStringLiteral("저장: %1").arg(path));
   QMessageBox::information(this, QStringLiteral("PDF"), QStringLiteral("저장했습니다.\n%1").arg(path));
 }
 
@@ -4239,15 +4275,12 @@ void KaDrawingStudio::printDrawing() {
   const QString pdf = temporary.filePath(QStringLiteral("drawing-print.pdf"));
   // PDF를 만드는 몇 초 동안 멈춘 것처럼 보이지 않게 먼저 알린다. 이벤트 루프는 돌리지 않는다.
   const QString previousStatus = m_status ? m_status->text() : QString();
-  if (m_status) {
-    m_status->setText(QStringLiteral("인쇄할 도면을 만드는 중…"));
-    m_status->repaint();
-  }
+  showStatus(QStringLiteral("인쇄할 도면을 만드는 중…"));
   QString error;
   QApplication::setOverrideCursor(Qt::WaitCursor);
   const bool ok = exportDrawingPdf(pdf, &error);
   QApplication::restoreOverrideCursor();
-  if (m_status) m_status->setText(previousStatus);
+  if (m_status) showStatus(previousStatus);
   if (!ok) {
     QMessageBox::warning(this, QStringLiteral("인쇄"), error);
     return;

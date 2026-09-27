@@ -20,6 +20,8 @@ public:
   // 밝기: -255~255, 0이 원본. 그림(래스터)일 때만 쓴다.
   void setBrightness(int value, bool enabled);
   int brightness() const;
+  // 지금 조절하는 레이어 이름. adjustable=false 면 막대를 접고 안내 한 줄만 둔다.
+  void setTarget(const QString& layerName, bool adjustable);
 
 signals:
   void percentChanged(int percent);
@@ -39,4 +41,6 @@ private:
   QSlider* m_bright = nullptr;
   QLabel* m_brightTitle = nullptr;
   QLabel* m_brightValue = nullptr;
+  QLabel* m_target = nullptr;
+  bool m_adjustable = false;
 };

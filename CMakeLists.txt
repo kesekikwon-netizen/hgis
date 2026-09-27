@@ -506,6 +506,7 @@ if(KA_HGIS_BUILD_TESTS)
   add_executable(ka_section_studio_tests
     tests/test_section_studio.cpp
     src/app/KaSectionDrawingStudio.cpp
+    src/app/KaIcons.cpp
     src/app/KaTheme.cpp
   )
   target_link_libraries(ka_section_studio_tests PRIVATE ${KA_TEST_LIBS})

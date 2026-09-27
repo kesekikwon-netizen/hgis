@@ -11,6 +11,8 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStyle>
+#include <QVBoxLayout>
 
 KaTrenchDialog::KaTrenchDialog(QWidget* parent) : QDialog(parent) {
   setWindowTitle(QStringLiteral("시굴격자 속성"));
@@ -40,8 +42,8 @@ KaTrenchDialog::KaTrenchDialog(QWidget* parent) : QDialog(parent) {
       "따라가 층서를 못 읽습니다. DEM을 올려야 씁니다."));
   form->addRow(m_terrain);
   m_terrainInfo = new QLabel(this);
+  m_terrainInfo->setObjectName(QStringLiteral("dialogHint"));
   m_terrainInfo->setWordWrap(true);
-  m_terrainInfo->setStyleSheet(QStringLiteral("color:#6E757D;"));
   form->addRow(m_terrainInfo);
 
   m_size = new QComboBox(this);
@@ -77,16 +79,34 @@ KaTrenchDialog::KaTrenchDialog(QWidget* parent) : QDialog(parent) {
   m_prefix = new QLineEdit(QStringLiteral("Tr-"), this);
   form->addRow(QStringLiteral("이름 접두"), m_prefix);
 
+  // 계산 결과는 창 안의 결과 칸에 보인다. 초록 굵은 한 줄로 흘려 쓰지 않는다.
   m_ratio = new QLabel(this);
+  m_ratio->setObjectName(QStringLiteral("trenchSummary"));
   m_ratio->setWordWrap(true);
   form->addRow(m_ratio);
 
+  // 깐 뒤에 쓰는 도구는 격자가 생긴 다음에만 보인다. 한 줄에 단추 다섯 개는 좁았다.
+  m_afterPlace = new QWidget(this);
+  auto* afterLay = new QVBoxLayout(m_afterPlace);
+  afterLay->setContentsMargins(0, 0, 0, 0);
+  afterLay->setSpacing(6);
   auto* hint = new QLabel(
-      QStringLiteral("깐 뒤 맵에서 격자를 끌어 옮기세요. 개별 편집은 트렌치 하나 이동·삭제입니다."),
-      this);
+      QStringLiteral("깐 격자는 맵에서 끌어 옮깁니다. 개별 편집은 트렌치 하나 이동·삭제입니다."),
+      m_afterPlace);
+  hint->setObjectName(QStringLiteral("dialogHint"));
   hint->setWordWrap(true);
-  hint->setStyleSheet(QStringLiteral("color:#6E757D;"));
-  form->addRow(hint);
+  afterLay->addWidget(hint);
+  auto* afterRow = new QHBoxLayout();
+  auto* editOne = new QPushButton(QStringLiteral("개별 편집"), m_afterPlace);
+  editOne->setToolTip(QStringLiteral("그래픽처럼 트렌치를 하나씩 선택·이동·삭제합니다."));
+  auto* move = new QPushButton(QStringLiteral("전체 이동"), m_afterPlace);
+  move->setToolTip(QStringLiteral("모서리를 찍고 놓을 곳을 찍어 격자 전체를 옮깁니다."));
+  afterRow->addWidget(editOne);
+  afterRow->addWidget(move);
+  afterRow->addStretch(1);
+  afterLay->addLayout(afterRow);
+  form->addRow(m_afterPlace);
+  m_afterPlace->setVisible(false);
 
   auto* btnRow = new QHBoxLayout();
   auto* apply = new QPushButton(QStringLiteral("구역에 깔기"), this);
@@ -94,15 +114,9 @@ KaTrenchDialog::KaTrenchDialog(QWidget* parent) : QDialog(parent) {
   apply->setToolTip(QStringLiteral("조사구역 위에 격자를 다시 깝니다. 깐 뒤 맵에서 끌어 옮기세요."));
   auto* manual = new QPushButton(QStringLiteral("맵에 찍기"), this);
   manual->setToolTip(QStringLiteral("맵을 한 번 찍어 그 점을 원점으로 놓습니다."));
-  auto* editOne = new QPushButton(QStringLiteral("개별 편집"), this);
-  editOne->setToolTip(QStringLiteral("그래픽처럼 트렌치를 하나씩 선택·이동·삭제합니다."));
-  auto* move = new QPushButton(QStringLiteral("전체 이동"), this);
-  move->setToolTip(QStringLiteral("모서리를 찍고 놓을 곳을 찍어 격자 전체를 옮깁니다."));
   auto* close = new QPushButton(QStringLiteral("닫기"), this);
   btnRow->addWidget(apply);
   btnRow->addWidget(manual);
-  btnRow->addWidget(editOne);
-  btnRow->addWidget(move);
   btnRow->addStretch(1);
   btnRow->addWidget(close);
   form->addRow(btnRow);
@@ -203,21 +217,36 @@ bool KaTrenchDialog::autoFill() const {
   return m_auto->isChecked() && !m_areaWkb.isEmpty();
 }
 
+void KaTrenchDialog::setGridPlaced(bool placed) {
+  if (m_afterPlace)
+    m_afterPlace->setVisible(placed);
+  adjustSize();
+}
+
+void KaTrenchDialog::setSummaryTone(const char* tone) {
+  m_ratio->setProperty("tone", QString::fromLatin1(tone));
+  m_ratio->style()->unpolish(m_ratio);
+  m_ratio->style()->polish(m_ratio);
+}
+
 void KaTrenchDialog::refreshPlan() {
   const bool fill = autoFill();
   const bool ratioMode = fill && surveyKind() != SurveyKind::Manual;
-  m_rows->setEnabled(!fill);
-  m_cols->setEnabled(!fill);
-  // 비율 모드에서는 길이·둑을 프로그램이 정한다. 값은 계산 결과를 되비춘다.
-  m_size->setEnabled(!ratioMode);
-  m_balk->setEnabled(!ratioMode);
+  // 지금 쓰지 않는 칸은 회색으로 두지 않고 숨긴다. 자동 배치에서 행·열 「2」가 보이면
+  // 트렌치 22개와 어긋나 보였다. 비율 모드의 길이·둑은 아래 결과 칸에 적힌다.
+  if (auto* form = qobject_cast<QFormLayout*>(layout())) {
+    form->setRowVisible(m_rows, !fill);
+    form->setRowVisible(m_cols, !fill);
+    form->setRowVisible(m_size, !ratioMode);
+    form->setRowVisible(m_balk, !ratioMode);
+  }
   m_az->setEnabled(!useTerrainAzimuth());
   if (ratioMode) {
     const double az = effectiveAzimuth();
     const auto plan =
         TrenchGridGenerator::buildForTargetRatio(m_areaWkb, targetPct(), 2.0, az);
     if (plan.cells.empty()) {
-      m_ratio->setStyleSheet(QStringLiteral("color:#A33A2E;font-weight:700;"));
+      setSummaryTone("warn");
       m_ratio->setText(plan.error);
       return;
     }
@@ -225,7 +254,7 @@ void KaTrenchDialog::refreshPlan() {
       const QSignalBlocker b1(m_balk);
       m_balk->setValue(plan.balk);
     }
-    m_ratio->setStyleSheet(QStringLiteral("color:#2E7D4F;font-weight:700;"));
+    setSummaryTone("ok");
     m_ratio->setText(
         QStringLiteral("%1 · 트렌치 %2개 · 폭 2 m · 최대 길이 %3 m · 둑 %4 m · 총 %5㎡ · 비율 %6% (목표 %7%) · 방위 %8°")
             .arg(surveyKind() == SurveyKind::Trial ? QStringLiteral("시굴조사")
@@ -242,8 +271,8 @@ void KaTrenchDialog::refreshPlan() {
   if (!fill) {
     const TrenchGridGenerator::Spec sp = spec();
     const double t = sp.rows * sp.cols * sp.trenchWidth * sp.trenchLength;
-    m_ratio->setStyleSheet(QString());
-    m_ratio->setText(QStringLiteral("수동 배치: %1개 · 총 %2㎡ — 「원점 클릭 배치」로 맵에서 위치를 정하세요.")
+    setSummaryTone("plain");
+    m_ratio->setText(QStringLiteral("수동 배치: %1개 · 총 %2㎡ — 「맵에 찍기」로 맵에서 위치를 정하세요.")
                          .arg(sp.rows * sp.cols)
                          .arg(QLocale().toString(t, 'f', 0)));
     return;
@@ -252,8 +281,7 @@ void KaTrenchDialog::refreshPlan() {
   const double t = TrenchGridGenerator::totalArea(cells);
   const double pct = m_areaM2 > 0.0 ? t / m_areaM2 * 100.0 : 0.0;
   const bool over = pct > 10.0;
-  m_ratio->setStyleSheet(over ? QStringLiteral("color:#A33A2E;font-weight:700;")
-                              : QStringLiteral("color:#2E7D4F;font-weight:700;"));
+  setSummaryTone(over ? "warn" : "ok");
   m_ratio->setText(QStringLiteral("트렌치 %1개 · 총 %2㎡ · 시굴 비율 %3% (기준: 시굴 10% · 표본 2%)%4")
                        .arg(cells.size())
                        .arg(QLocale().toString(t, 'f', 0))

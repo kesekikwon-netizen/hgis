@@ -586,7 +586,8 @@ private slots:
     group->setItemVisibilityChecked(false);
     QCoreApplication::processEvents();
     QVERIFY(model.data(baseLayer,Qt::ForegroundRole)!=visibleColor);
-    QVERIFY(model.data(baseLayer,Qt::FontRole).value<QFont>().italic());
+    // 꺼진 레이어는 글자색으로만 구분한다. 한글 기울임꼴은 억지로 비튼 글자다.
+    QVERIFY(!model.data(baseLayer,Qt::FontRole).value<QFont>().italic());
     group->setItemVisibilityChecked(true);
     QCoreApplication::processEvents();
     QCOMPARE(model.data(baseLayer,Qt::ForegroundRole),visibleColor);

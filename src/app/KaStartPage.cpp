@@ -67,7 +67,12 @@ KaStartPage::KaStartPage(QWidget* parent) : QWidget(parent) {
   root->setContentsMargins(22, 20, 22, 20);
   root->setSpacing(18);
   root->addWidget(buildHero());
-  root->addWidget(buildRecentCard(), 1);
+  // 최근 조사 옆에 작업 순서 카드를 둔다. 목록이 짧을 때 아래 절반이 통째로 비었다.
+  auto* lower = new QHBoxLayout;
+  lower->setSpacing(18);
+  lower->addWidget(buildRecentCard(), 1);
+  lower->addWidget(buildGuideCard(), 0);
+  root->addLayout(lower, 1);
   reload();
 }
 
@@ -135,6 +140,41 @@ QWidget* KaStartPage::buildHero() {
   m_continue = card;
   row->addWidget(card, 0, Qt::AlignVCenter);
   return hero;
+}
+
+QWidget* KaStartPage::buildGuideCard() {
+  auto* card = new QFrame(this);
+  card->setObjectName(QStringLiteral("startGuideCard"));
+  card->setFixedWidth(340);
+  auto* col = new QVBoxLayout(card);
+  col->setContentsMargins(20, 16, 20, 18);
+  col->setSpacing(14);
+  col->addWidget(label(QStringLiteral("작업 순서"), "startRecentTitle", card));
+  struct Step { const char* title; const char* body; };
+  const Step steps[] = {
+      {"새 조사", "조사 이름과 좌표계(5186·5187)를 정하면 조사 파일(GPKG)이 만들어집니다."},
+      {"조사구역 그리기", "지도 탭에서 위성·지적을 보며 「그리기」로 구역과 유구를 그립니다."},
+      {"도면 · 제출", "「도면」으로 종이에 옮기고, 「제출 변환」으로 5179 SHP·PDF를 냅니다."},
+  };
+  int number = 1;
+  for (const auto& step : steps) {
+    auto* row = new QHBoxLayout;
+    row->setSpacing(12);
+    auto* badge = label(QString::number(number++), "startStepNumber", card);
+    badge->setAlignment(Qt::AlignCenter);
+    badge->setFixedSize(26, 26);
+    row->addWidget(badge, 0, Qt::AlignTop);
+    auto* text = new QVBoxLayout;
+    text->setSpacing(2);
+    text->addWidget(label(QString::fromUtf8(step.title), "startStepTitle", card));
+    auto* body = label(QString::fromUtf8(step.body), "startStepBody", card);
+    body->setWordWrap(true);
+    text->addWidget(body);
+    row->addLayout(text, 1);
+    col->addLayout(row);
+  }
+  col->addStretch(1);
+  return card;
 }
 
 QWidget* KaStartPage::buildRecentCard() {

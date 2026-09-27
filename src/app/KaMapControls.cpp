@@ -174,3 +174,31 @@ void KaMapScaleBar::paintEvent(QPaintEvent*) {
   const QString end = lengthText(m_metres);
   p.drawText(QPointF(bar.right() - 4, bar.bottom() + 14), end);
 }
+
+KaMapCornerBar::KaMapCornerBar(QWidget* host) : QFrame(host), m_host(host) {
+  setObjectName(QStringLiteral("mapCornerBar"));
+  setAttribute(Qt::WA_StyledBackground, true);
+  if (m_host) m_host->installEventFilter(this);
+}
+
+bool KaMapCornerBar::eventFilter(QObject* watched, QEvent* event) {
+  if (watched == m_host && event && (event->type() == QEvent::Resize || event->type() == QEvent::Show))
+    reposition();
+  return QFrame::eventFilter(watched, event);
+}
+
+bool KaMapCornerBar::event(QEvent* event) {
+  const bool handled = QFrame::event(event);
+  // Children showing or hiding (grid details) change the wanted width.
+  if (event && (event->type() == QEvent::LayoutRequest || event->type() == QEvent::Show))
+    reposition();
+  return handled;
+}
+
+void KaMapCornerBar::reposition() {
+  if (!m_host) return;
+  if (auto* lay = layout()) lay->activate();
+  resize(sizeHint());
+  move(m_host->width() - width() - 12, m_host->height() - height() - 12);
+  raise();
+}

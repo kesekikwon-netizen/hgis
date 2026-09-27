@@ -277,8 +277,9 @@ void MainWindow::buildMenus() {
   auto paintPrimary = [](QAction* a, const QString& iconId) {
     if (a) a->setIcon(KaIcons::strongIcon(iconId));
   };
+  // 홈 화면·안내문이 모두 「새 조사」라고 부르므로 리본도 같은 이름을 쓴다.
   auto [actNew, btnNew] = addIcon(QStringLiteral("survey"), QStringLiteral("new"),
-                                  QStringLiteral("신규"),
+                                  QStringLiteral("새 조사"),
                                   QStringLiteral("현장 조사 프로젝트를 새로 만듭니다"),
                                   &MainWindow::newSurvey);
   auto [actOpen, btnOpen] = addIcon(QStringLiteral("survey"), QStringLiteral("open"),
@@ -293,7 +294,7 @@ void MainWindow::buildMenus() {
   actOpen->setToolTip(QStringLiteral("저장한 조사를 엽니다 (Ctrl+O)"));
   actSave->setShortcut(QKeySequence::Save);
   auto [actSaveAs, btnSaveAs] = addIcon(QStringLiteral("survey"), QStringLiteral("save_as"),
-                                        QStringLiteral("다른이름"),
+                                        QStringLiteral("다른 이름"),
                                         QStringLiteral("작업 중인 모든 레이어를 다른 이름으로 저장합니다 (Ctrl+Shift+S)"),
                                         &MainWindow::saveProjectAs);
   actSaveAs->setShortcut(QKeySequence::SaveAs);
@@ -559,7 +560,7 @@ void MainWindow::buildMenus() {
   actPrint->setShortcut(QKeySequence::Print);
   btnPrint->setObjectName(QStringLiteral("btnRibbonPrint"));
   paintPrimary(actPrint, QStringLiteral("print"));
-  addIcon(QStringLiteral("out"), QStringLiteral("section"), QStringLiteral("단면"),
+  addIcon(QStringLiteral("out"), QStringLiteral("section"), QStringLiteral("단면도"),
           QStringLiteral("단면 GeoTIFF로 표고·거리 눈금 도면을 만듭니다"),
           &MainWindow::openSectionDesigner);
   auto [actMapGeoTiff, btnMapGeoTiff] = addIcon(
@@ -577,6 +578,18 @@ void MainWindow::buildMenus() {
   actExport->setShortcut(QKeySequence(QStringLiteral("Ctrl+E")));
   Q_UNUSED(btnExport);
   ribbon->applyTabOrder();
+
+  // 기록·자료 받기·배경 지도·정합은 지도에서 일한다. 도면·단면도 탭에서 누르면 먼저
+  // 지도 탭으로 넘어간다. 예전에는 보이지 않는 지도에 도구만 걸려 아무 일도 없어 보였다.
+  for (const QString& id : mapOnlyRibbonGroups()) {
+    QFrame* group = ribbon->group(id);
+    if (!group) continue;
+    for (QToolButton* button : group->findChildren<QToolButton*>()) {
+      connect(button, &QAbstractButton::pressed, this, [this]() { showMapTabFromStudio(); });
+      if (QAction* action = button->defaultAction())
+        connect(action, &QAction::triggered, this, [this]() { showMapTabFromStudio(); });
+    }
+  }
 
   auto* region = new KaRegionLocator(m_appBar);
   region->setObjectName(QStringLiteral("regionLocator"));

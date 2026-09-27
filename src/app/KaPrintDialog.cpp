@@ -226,6 +226,7 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, doubl
 
   auto* root = new QVBoxLayout(this);
   auto* form = new QFormLayout;
+  m_form = form;
   m_printer = new QComboBox(this);
   m_printer->setObjectName(QStringLiteral("printPrinter"));
   const QStringList printers = QPrinterInfo::availablePrinterNames();
@@ -261,6 +262,7 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, doubl
   m_sheet->addItem(QStringLiteral("A4"));
   m_sheet->addItem(QStringLiteral("A3"));
   m_sheet->setCurrentIndex(printerSupports(QPageSize::A3) && !printers.isEmpty() ? SheetA3 : SheetA4);
+  m_sheet->setMinimumWidth(110);
   m_overlap = new QDoubleSpinBox(this);
   m_overlap->setObjectName(QStringLiteral("printOverlap"));
   m_overlap->setRange(0.0, 30.0);
@@ -271,7 +273,8 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, doubl
   auto* paperRow = new QHBoxLayout;
   paperRow->addWidget(m_sheet);
   paperRow->addSpacing(12);
-  paperRow->addWidget(new QLabel(QStringLiteral("겹침"), this));
+  m_overlapLabel = new QLabel(QStringLiteral("겹침"), this);
+  paperRow->addWidget(m_overlapLabel);
   paperRow->addWidget(m_overlap);
   paperRow->addStretch(1);
   form->addRow(QStringLiteral("용지"), paperRow);
@@ -282,10 +285,12 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, doubl
   m_overview = new QCheckBox(QStringLiteral("맨 앞에 붙이는 순서 안내 한 장 넣기"), this);
   m_overview->setObjectName(QStringLiteral("printOverview"));
   m_overview->setChecked(true);
-  auto* checks = new QVBoxLayout;
+  m_checksRow = new QWidget(this);
+  auto* checks = new QVBoxLayout(m_checksRow);
+  checks->setContentsMargins(0, 0, 0, 0);
   checks->addWidget(m_marks);
   checks->addWidget(m_overview);
-  form->addRow(QString(), checks);
+  form->addRow(QString(), m_checksRow);
   root->addLayout(form);
 
   m_summary = new QLabel(this);
@@ -507,11 +512,14 @@ TilePrint::Options KaPrintDialog::tileOptions() const {
 
 void KaPrintDialog::rebuild() {
   const bool tiled = isTiled();
-  m_outputLabel->setEnabled(tiled);
-  m_output->setEnabled(tiled);
-  m_overlap->setEnabled(tiled);
-  m_marks->setEnabled(tiled);
-  m_overview->setEnabled(tiled);
+  // 한 장 인쇄에서 쓸 수 없는 칸은 체크된 채 회색으로 남기지 않고 숨긴다.
+  if (m_form) {
+    m_form->setRowVisible(m_output, tiled);
+    m_form->setRowVisible(m_checksRow, tiled);
+  }
+  m_overlapLabel->setVisible(tiled);
+  m_overlap->setVisible(tiled);
+  m_savePdf->setVisible(tiled);
   m_margins = marginsFor(sheetSize());
   m_fit = TilePrint::fit(m_drawingMm, sheetSize(), m_margins);
   m_plan = TilePlan();

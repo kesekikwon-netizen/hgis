@@ -72,7 +72,16 @@ QPushButton#startContinueBtn {
 }
 QPushButton#startContinueBtn:enabled:hover { background: @accentHover@; border-color: @accentHover@; }
 QPushButton#startContinueBtn:enabled:pressed { background: @accentDeep@; border-color: @accentDeep@; }
-QFrame#startRecentCard { background: @surface@; border: 1px solid @border@; border-radius: 10px; }
+QFrame#startRecentCard, QFrame#startGuideCard { background: @surface@; border: 1px solid @border@; border-radius: 10px; }
+QLabel#startStepNumber {
+  color: @surface@;
+  background: @accent@;
+  border-radius: 13px;
+  font-size: 13px;
+  font-weight: 700;
+}
+QLabel#startStepTitle { color: @ink@; font-size: 14px; font-weight: 700; }
+QLabel#startStepBody { color: @inkMuted@; font-size: 12px; }
 QLabel#startRecentTitle { color: @ink@; font-size: 15px; font-weight: 700; }
 QLabel#startRecentCount { color: @inkMuted@; font-size: 12px; }
 QLineEdit#startRecentFilter {
@@ -87,12 +96,15 @@ QTableWidget#recentSurveyList::item { padding: 0 8px; border-bottom: 1px solid @
 QTableWidget#recentSurveyList::item:selected { background: @selectedTop@; color: @ink@; }
 /* ---- Place search: 「지역」 and the address field at the right end of the ribbon row ---- */
 QWidget#appBar { background: transparent; }
+/* min-width keeps 「지역」 readable: the toolbar rule's min-width 0 let a crowded
+   ribbon squeeze this button down to its 30 px of padding and border. */
 QToolBar#mainToolbar QToolButton#appBarRegion {
   color: @ink@;
   background: @surface@;
   border: 1px solid @border@;
   border-radius: 8px;
   padding: 4px 14px;
+  min-width: 36px;
   min-height: 30px;
   font-size: 12px;
   font-weight: 600;
@@ -120,9 +132,11 @@ QMessageBox QLabel, QInputDialog QLabel {
 }
 
 /* ---- Push buttons ---- */
+/* Malgun Gothic has Regular and Bold only; 600 is drawn Bold. Controls stay
+   Regular and only headings and primary buttons are Bold. */
 QPushButton {
   color: @ink@;
-  font-weight: 600;
+  font-weight: 400;
   min-height: 34px;
   padding: 8px 16px;
   border: 1px solid @border@;
@@ -141,6 +155,7 @@ QPushButton:enabled:checked {
 QPushButton:default, QPushButton#btnAdjustDone, QPushButton.primary, QPushButton#btnPrimary {
   background: @accent@;
   color: @surface@;
+  font-weight: 700;
   border: 1px solid @accent@;
   border-bottom: 2px solid @accentDeep@;
 }
@@ -168,7 +183,7 @@ QPushButton:disabled {
 /* ---- Tool buttons ---- */
 QToolButton {
   color: @inkMuted@;
-  font-weight: 600;
+  font-weight: 400;
   font-size: 12px;
   border: 2px solid transparent;
   border-radius: 0;
@@ -182,7 +197,6 @@ QToolButton:enabled:checked {
   color: @accentDeep@;
   border: 2px solid transparent;
   border-bottom: 2px solid @accent@;
-  font-weight: 700;
 }
 QToolButton:enabled:checked:hover {
   background: @selectedTop@;
@@ -288,10 +302,11 @@ QFrame#ribbonGroup {
   border: none;
   border-right: 1px solid @border@;
 }
+QFrame#ribbonGroup[offContext="true"] QLabel#ribbonGroupCaption { color: @edgeDark@; }
 QLabel#ribbonGroupCaption {
   color: @inkMuted@;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   min-height: 18px;
   padding: 0 2px;
   background: transparent;
@@ -348,16 +363,18 @@ QWidget#beginnerRibbon QToolButton::menu-indicator {
   height: 0px;
 }
 QWidget#regionLocator {
-  min-height: 72px;
-  min-width: 230px;
+  min-height: 196px;
+  min-width: 204px;
   background: transparent;
   border: none;
 }
+/* Region chips sit on a small map of the peninsula. 28 x 46 px outside
+   (content + 1 px border + 1 px margin) is the largest the find menu allows. */
 QWidget#regionLocator QToolButton#regionChip {
-  min-width: 32px;
+  min-width: 36px;
   max-width: 38px;
-  min-height: 22px;
-  max-height: 22px;
+  min-height: 24px;
+  max-height: 24px;
   margin: 1px;
   padding: 0 2px;
   font-size: 11px;
@@ -365,7 +382,7 @@ QWidget#regionLocator QToolButton#regionChip {
   color: @accentDeep@;
   background: @surface@;
   border: 1px solid @border@;
-  border-radius: 6px;
+  border-radius: 7px;
 }
 QWidget#regionLocator QToolButton#regionChip:enabled:hover {
   background: @hoverBottom@;
@@ -398,7 +415,6 @@ QToolButton#layerCheckAllBtn, QToolButton#layoutLayerCheckAllBtn {
   padding: 2px 10px;
   color: @inkMuted@;
   font-size: 12px;
-  font-weight: 600;
 }
 QToolButton#layerCheckAllBtn:enabled:hover, QToolButton#layoutLayerCheckAllBtn:enabled:hover {
   border-color: @accent@;
@@ -406,10 +422,10 @@ QToolButton#layerCheckAllBtn:enabled:hover, QToolButton#layoutLayerCheckAllBtn:e
 }
 QToolButton#layerCheckAllBtn:enabled:pressed, QToolButton#layoutLayerCheckAllBtn:enabled:pressed { background: @pressedTop@; }
 QToolButton#layerCheckAllBtn:disabled, QToolButton#layoutLayerCheckAllBtn:disabled { color: @inkDisabled@; border-color: @border@; }
-QLabel#subToolbarCaption { color: @inkMuted@; font-weight: 600; padding: 0 8px; background: transparent; }
+QLabel#subToolbarCaption { color: @inkMuted@; font-weight: 700; padding: 0 8px; background: transparent; }
 
 /* ---- Fields ---- */
-QLineEdit, QComboBox, QAbstractSpinBox, QTextEdit, QPlainTextEdit {
+QLineEdit, QTextEdit, QPlainTextEdit {
   background: @surface@;
   color: @ink@;
   border: 1px solid @border@;
@@ -419,7 +435,27 @@ QLineEdit, QComboBox, QAbstractSpinBox, QTextEdit, QPlainTextEdit {
   selection-background-color: @accent@;
   selection-color: @surface@;
 }
-QLineEdit:focus, QComboBox:focus, QAbstractSpinBox:focus {
+/* Combo and spin boxes carry no QSS border: KaTheme::ChromeStyle paints the same
+   rounded face, the focus edge and the chevrons. A QSS border hands them to
+   QWindowsStyle, which draws no arrow beside a styled drop-down and a Win95 bevel
+   around spin buttons. The feature line lets the style paint this background. */
+QComboBox, QAbstractSpinBox {
+  background: @surface@;
+  color: @ink@;
+  min-height: 32px;
+  padding: 4px 10px;
+  selection-background-color: @accent@;
+  selection-color: @surface@;
+  -qt-style-features: background-color;
+}
+/* The editor inside a combo or spin box lives on that face. */
+QAbstractSpinBox QLineEdit, QComboBox QLineEdit {
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+QLineEdit:focus {
   border-color: @accent@;
 }
 QLineEdit:disabled, QComboBox:disabled, QAbstractSpinBox:disabled {
@@ -454,14 +490,10 @@ QFrame#regionAddressPopup {
 }
 QLabel#regionSidoTitle { color: @accentDeep@; font-weight: 700; }
 
-QAbstractSpinBox { padding-right: 16px; }
-QAbstractSpinBox::up-button { width: 16px; }
-QComboBox::drop-down {
-  subcontrol-origin: border;
-  width: 20px;
-  border-left: 1px solid @border@;
-}
-QComboBox QAbstractItemView, QColorDialog QAbstractSpinBox {
+/* The color dialog's spin boxes use the shared field face above; a border here
+   would hand them back to the Win95 bevel. */
+QColorDialog QAbstractSpinBox { min-height: 26px; }
+QComboBox QAbstractItemView {
   background: @surface@;
   color: @ink@;
   selection-background-color: @selectedBottom@;
@@ -516,7 +548,7 @@ QHeaderView::section {
 
 /* ---- Cards / docks / splitter ---- */
 QFrame#mapCard, QFrame#layersCard, QFrame#filesCard, QFrame#studioFilesPanel,
-QFrame#itemInspector, QFrame#mapAdjustBar, QFrame#drawerCard,
+QFrame#itemInspector, QFrame#sampleStrip, QFrame#mapAdjustBar, QFrame#drawerCard,
 QFrame#studioLeftCol, QFrame#studioBottomBar,
 QFrame#terrainLayersCard, QFrame#terrainFilesCard {
   background: @desk@;
@@ -549,17 +581,55 @@ QFrame#studioBottomBar {
   background: @surface@;
 }
 QFrame#mapCard { background: @surface@; }
-QWidget#sampleStrip {
+/* ---- Studio inspectors: 도면 and 단면도 share cards and a pinned output bar ---- */
+QWidget#sectionPropertiesPanel, QWidget#sectionInspectorColumn, QWidget#drawingInspectorColumn {
+  background: @desk@;
+}
+QFrame#sectionLayersPanel {
+  background: @desk@;
+  border: none;
+  border-right: 1px solid @border@;
+}
+QFrame#sectionLayersPanel QToolButton {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid @border@;
+  border-bottom: 2px solid @edgeDark@;
+  background: @surface@;
+  border-radius: 6px;
+  color: @inkMuted@;
+}
+QFrame#sectionLayersPanel QToolButton:enabled:hover { background: @hoverBottom@; color: @ink@; }
+QFrame#studioOutputBar {
   background: @surface@;
   border: none;
-  border-bottom: 1px solid @border@;
+  border-top: 1px solid @border@;
 }
+QFrame#studioOutputBar QToolButton {
+  min-height: 34px;
+  padding: 4px 12px;
+  font-size: 13px;
+  color: @ink@;
+  background: @surface@;
+  border: 1px solid @border@;
+  border-bottom: 2px solid @edgeDark@;
+  border-radius: 8px;
+}
+QFrame#studioOutputBar QToolButton:enabled:hover { background: @hoverBottom@; }
+QFrame#studioOutputBar QToolButton#btnPrimary {
+  color: @surface@;
+  background: @accent@;
+  border: 1px solid @accent@;
+  border-bottom: 2px solid @accentDeep@;
+  font-weight: 700;
+}
+QFrame#studioOutputBar QToolButton#btnPrimary:enabled:hover { background: @accentHover@; }
+QFrame#studioOutputBar QToolButton#btnPrimary:enabled:pressed { background: @accentDeep@; }
 QToolButton.sampleTile {
   /* Width comes from QWidget::setMinimumWidth. min-width:0 overrode it. */
   min-height: 0;
   padding: @buttonPadding@px;
   font-size: @scaleFontSize@px;
-  font-weight: 600;
   color: @ink@;
   background: @surface@;
   border: 1px solid @border@;
@@ -633,7 +703,7 @@ QWidget#startMain {
   background: @desk@;
   border: none;
 }
-QTabBar { background: transparent; font-weight: 600; }
+QTabBar { background: transparent; font-weight: 400; }
 QTabBar::tab {
   background: transparent;
   color: @inkMuted@;
@@ -675,7 +745,14 @@ QFrame#layerOpacityRail {
 QFrame#layerOpacityRail QLabel {
   color: @inkMuted@;
   font-size: 12px;
-  font-weight: 600;
+}
+QFrame#layerOpacityRail QLabel#layerOpacityTarget {
+  color: @ink@;
+  font-weight: 700;
+}
+QFrame#layerOpacityRail QLabel#layerOpacityTarget[idle="true"] {
+  color: @inkMuted@;
+  font-weight: 400;
 }
 QFrame#layerOpacityRail QSlider::groove:horizontal {
   background: @border@;
@@ -702,6 +779,14 @@ QFrame#mapControls QToolButton {
   padding: 0;
 }
 QFrame#mapControls QToolButton:enabled:hover { background: @hoverBottom@; }
+/* Coordinate grid toggle floating in the map's bottom-right corner. */
+QFrame#mapCornerBar { background: @surface@; border: 1px solid @border@; border-radius: 9px; }
+QFrame#mapCornerBar QLabel { color: @inkMuted@; font-size: 12px; }
+QFrame#mapCornerBar QAbstractSpinBox, QFrame#mapCornerBar QComboBox {
+  min-height: 22px;
+  padding: 1px 6px;
+  font-size: 12px;
+}
 QFrame#mapControls QToolButton:enabled:pressed { background: @pressedTop@; }
 QFrame#layersCard,
 QFrame#filesCard,
@@ -776,7 +861,18 @@ QSplitter#mainSplit::handle:horizontal:hover { background: @edgeDark@; }
 
 QLabel { color: @ink@; background: transparent; }
 QLabel#cardCaption { color: @inkMuted@; font-weight: 700; font-size: 12px; padding: 2px 2px 0 2px; }
-QCheckBox { color: @ink@; spacing: 8px; font-weight: 600; background: transparent; }
+QLabel#dialogHint { color: @inkMuted@; font-size: 12px; }
+/* A calculation result reads as a small card, green when the plan meets its target. */
+QLabel#trenchSummary {
+  color: @ink@;
+  background: @desk@;
+  border: 1px solid @border@;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+QLabel#trenchSummary[tone="ok"] { color: @ok@; background: @successSurface@; font-weight: 700; }
+QLabel#trenchSummary[tone="warn"] { color: @danger@; background: @dangerSurface@; font-weight: 700; }
+QCheckBox { color: @ink@; spacing: 8px; font-weight: 400; background: transparent; }
 QCheckBox:disabled { color: @inkDisabled@; }
 /* Check boxes are drawn by KaTheme::ChromeStyle, which paints the tick; a QSS
    indicator fill has no tick, and image files are not allowed here. */
@@ -808,7 +904,7 @@ QMenu::item:disabled { color: @inkDisabled@; }
 QStatusBar {
   background: @surface@;
   color: @inkMuted@;
-  font-weight: 600;
+  font-weight: 400;
   border-top: 1px solid @border@;
 }
 QStatusBar QLabel { color: @inkMuted@; }
@@ -829,49 +925,36 @@ QLabel#xyReadout {
   padding: 0 8px;
 }
 QLabel#scaleLabel { color: @inkMuted@; padding-left: 4px; }
-QStatusBar#kaStatusBar QLineEdit#scaleEdit,
 QStatusBar#kaStatusBar QComboBox#scaleCombo {
   min-height: 24px;
   padding: 2px 8px;
-  border-radius: 6px;
   font-size: 12px;
-  font-weight: 600;
 }
-QToolButton#crsButton {
-  color: @accentDeep@;
+/* Status pills share one shape. Colour appears only when it means something:
+   the work CRS is a button, the upload CRS is a fact, and the render switch
+   speaks up only while drawing is paused. */
+QToolButton#crsButton, QLabel#uploadCrsChip, QToolButton#renderToggle {
   background: @surface@;
   border: 1px solid @border@;
   border-radius: 11px;
-  padding: 4px 10px;
+  padding: 3px 10px;
   font-size: 12px;
 }
+QToolButton#crsButton { color: @accentDeep@; font-weight: 700; }
 QToolButton#crsButton:enabled:hover { background: @hoverBottom@; border-color: @accent@; }
-QLabel#uploadCrsChip {
-  color: @ok@;
-  background: @successSurface@;
-  border: 1px solid @border@;
-  border-radius: 11px;
-  padding: 4px 10px;
-  font-size: 12px;
-}
-QToolButton#renderToggle {
-  color: @accentDeep@;
-  border: 1px solid transparent;
-  border-radius: 11px;
-  padding: 4px 10px;
-  font-size: 12px;
-}
+QLabel#uploadCrsChip { color: @inkMuted@; }
 QToolButton#renderToggle:enabled:checked {
-  background: @selectedTop@;
-  color: @accentDeep@;
-  border: 1px solid @border@;
+  background: transparent;
+  color: @inkMuted@;
+  border-color: transparent;
 }
 QToolButton#renderToggle:enabled:!checked {
   color: @danger@;
   background: @dangerSurface@;
-  border: 1px solid @border@;
+  border-color: @danger@;
+  font-weight: 700;
 }
-QToolButton#renderToggle:enabled:hover { background: @hoverBottom@; color: @accentDeep@; }
+QToolButton#renderToggle:enabled:hover { background: @hoverBottom@; color: @accentDeep@; border-color: @border@; }
 
 QMenuBar { height: 0px; max-height: 0px; border: none; }
 
@@ -913,11 +996,6 @@ QToolButton:disabled, QToolButton#btnPrimary:disabled,
 QToolButton.sampleTile:disabled, QToolButton#scaleChip:disabled,
 QToolButton#layerCheckAllBtn:disabled, QToolButton#layoutLayerCheckAllBtn:disabled, QToolButton#crsButton:disabled,
 QToolButton#renderToggle:disabled,
-QWidget#beginnerRibbon QToolButton:disabled,
-QToolBar#mainToolbar QToolButton:disabled,
-QToolBar#studioToolbar QToolButton:disabled,
-QToolBar#subToolbar QToolButton:disabled,
-QToolBar#studioToolRail QToolButton:disabled,
 QWidget#regionLocator QToolButton#regionChip:disabled,
 QToolBar#mainToolbar QToolButton#regionChip:disabled,
 QFrame#layersCard QToolButton:disabled,
@@ -926,6 +1004,18 @@ QFrame#studioFilesPanel QToolButton:disabled {
   background: @disabledSurface@;
   color: @inkDisabled@;
   border-color: @border@;
+}
+/* Ribbon and toolbar commands that cannot run yet keep a plain face: a grey
+   slab read as a pressed button. The grey icon and label carry the state. */
+QWidget#beginnerRibbon QToolButton:disabled,
+QToolBar#mainToolbar QToolButton:disabled,
+QToolBar#studioToolbar QToolButton:disabled,
+QToolBar#subToolbar QToolButton:disabled,
+QToolBar#studioToolRail QToolButton:disabled,
+QWidget#layoutBottomTools QToolButton:disabled {
+  background: transparent;
+  color: @inkDisabled@;
+  border-color: transparent;
 }
 
 /* PDF is a sample tile too: its primary ID must not erase the shared face. */

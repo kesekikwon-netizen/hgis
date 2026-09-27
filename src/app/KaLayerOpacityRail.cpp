@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QShowEvent>
 #include <QSlider>
+#include <QStyle>
 
 KaLayerOpacityRail::KaLayerOpacityRail(QWidget* host) : QFrame(host), m_host(host) {
   setObjectName(QStringLiteral("layerOpacityRail"));
@@ -15,6 +16,12 @@ KaLayerOpacityRail::KaLayerOpacityRail(QWidget* host) : QFrame(host), m_host(hos
   lay->setContentsMargins(12, 8, 12, 8);
   lay->setHorizontalSpacing(10);
   lay->setVerticalSpacing(6);
+
+  // 맨 윗줄은 지금 조절하는 레이어 이름이다. 무엇을 바꾸는지 모른 채 밀지 않게 한다.
+  m_target = new QLabel(this);
+  m_target->setObjectName(QStringLiteral("layerOpacityTarget"));
+  m_target->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+  m_target->setTextFormat(Qt::PlainText);
 
   m_title = new QLabel(QStringLiteral("투명도"), this);
   m_title->setObjectName(QStringLiteral("layerOpacityTitle"));
@@ -61,12 +68,13 @@ KaLayerOpacityRail::KaLayerOpacityRail(QWidget* host) : QFrame(host), m_host(hos
     emit brightnessChanged(value);
   });
 
-  lay->addWidget(m_title, 0, 0);
-  lay->addWidget(m_slider, 0, 1);
-  lay->addWidget(m_value, 0, 2);
-  lay->addWidget(m_brightTitle, 1, 0);
-  lay->addWidget(m_bright, 1, 1);
-  lay->addWidget(m_brightValue, 1, 2);
+  lay->addWidget(m_target, 0, 0, 1, 3);
+  lay->addWidget(m_title, 1, 0);
+  lay->addWidget(m_slider, 1, 1);
+  lay->addWidget(m_value, 1, 2);
+  lay->addWidget(m_brightTitle, 2, 0);
+  lay->addWidget(m_bright, 2, 1);
+  lay->addWidget(m_brightValue, 2, 2);
   lay->setColumnStretch(1, 1);
 
   connect(m_slider, &QSlider::valueChanged, this, [this](int value) {
@@ -75,11 +83,33 @@ KaLayerOpacityRail::KaLayerOpacityRail(QWidget* host) : QFrame(host), m_host(hos
     emit percentChanged(value);
   });
 
+  setTarget(QString(), false);
   if (m_host) {
     m_host->installEventFilter(this);
     reposition();
     raise();
   }
+}
+
+void KaLayerOpacityRail::setTarget(const QString& layerName, bool adjustable) {
+  // 조절할 그림이 없으면 「-」 막대 두 줄을 띄워 두지 않고 안내 한 줄로 접는다.
+  m_adjustable = adjustable;
+  if (m_target) {
+    const QString text = adjustable && !layerName.isEmpty()
+                             ? layerName
+                             : QStringLiteral("투명도·밝기: 배경지도를 고르세요");
+    m_target->setText(fontMetrics().elidedText(text, Qt::ElideMiddle, 236));
+    m_target->setToolTip(adjustable ? layerName : QString());
+    m_target->setProperty("idle", !adjustable);
+    m_target->style()->unpolish(m_target);
+    m_target->style()->polish(m_target);
+  }
+  for (QWidget* w : {static_cast<QWidget*>(m_title), static_cast<QWidget*>(m_slider),
+                     static_cast<QWidget*>(m_value), static_cast<QWidget*>(m_brightTitle),
+                     static_cast<QWidget*>(m_bright), static_cast<QWidget*>(m_brightValue)}) {
+    if (w) w->setVisible(adjustable);
+  }
+  reposition();
 }
 
 void KaLayerOpacityRail::setPercent(int percent, bool enabled) {
@@ -140,6 +170,8 @@ void KaLayerOpacityRail::reposition() {
   if (!m_host)
     return;
   move(10, 10);
-  resize(260, 66);
+  if (auto* lay = layout())
+    lay->activate();
+  resize(260, m_adjustable ? qMax(88, sizeHint().height()) : qMax(34, sizeHint().height()));
   raise();
 }

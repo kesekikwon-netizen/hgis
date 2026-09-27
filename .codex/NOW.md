@@ -1,11 +1,21 @@
 <!-- Recent window only. Older entries: docs/archive/NOW-before-2026-09-25.md -->
+## 2026-09-27 최종 디자인 정리
+
+- 콤보·스핀: QSS 테두리가 QWindowsStyle로 넘겨 화살표가 없고 Win95 입체가 났다(qtbase 6.11 `QStyleSheetStyle` 확인). 필드 규칙에서 border를 빼고 `KaTheme::ChromeStyle`이 면·꺾쇠를 그린다. 탭 닫기 ✕도 스타일이 그린다. QSS `url()` 없음 유지.
+- 굵기 600(맑은 고딕엔 없어 Bold) → 본문 400, 제목·주 단추 700. 리본 꺼진 단추 회색 판 제거. 「축척 1:」 → 「축척」. 새 조사·다른 이름·단면도로 이름 통일.
+- 도면·단면도 탭의 두 번째 상태줄 제거(`statusMessage` → 메인 상태줄). 도면 PDF·인쇄는 오른쪽 아래 고정 줄, 단면도도 같은 카드·아래 도구 줄. 도면을 열 때 아래 축척칸이 1:25000에 남던 것 고침.
+- 인쇄 한 장/시굴격자 자동 배치에서 못 쓰는 칸은 숨김. 좌표격자는 지도 오른쪽 아래 막대. 투명도 카드에 대상 레이어 이름. 홈 「작업 순서」 카드. 지역 칩 한반도 타일 배치(28px, 기존 한도 유지). 도면·단면도 탭에서 지도 도구를 누르면 지도 탭으로.
+- 아이콘: 진한 타일은 파랑 하나, 주제도는 한 색조, 「지형」은 등고선. 도면 첫 축척은 지도 그대로(1:1847을 1:2000으로 올리지 않는 기존 계약) 유지.
+- CTest 68개 중 64 통과, 실패 4개(perf_engine, storage_safety, cadastral, save_open_portable)는 수정 전과 같은 함수·메시지. smoke 0. Graft·clangd·Archify(strata-final-design validate·deliver·visual-check 통과) 기록 `build/qa/design-10/`.
+- 20260922-1에 커밋·푸시. 바탕화면 아이콘(D:\hgis) 빌드를 이 판으로 다시 만든다.
+
 ## 2026-09-27 이 PC를 20260922-1에 맞춤
 
 - `D:/hgis` 가 `20260922-1` @ `fc63855` = `origin/20260922-1`.
 - 예전 `main` 로컬은 `72692e1`에 그대로 있음. 워크트리 2개(claude detached `918571b`, recovery `396a3b6`)는 안 옮김.
 - 충돌하던 미추적 `.codex/NOW.md`는 `.codex/NOW.md.local-main-backup-20260927`로 옮김.
 - `dev-env-lock.ps1` 종료 1: 이 PC는 `D:\OSGeo4W` + CMake 4.4.1. 잠금은 `C:\Users\Public\ka-hgis\osgeo4w` + CMake 3.31.5. SDK 번들 없음. 패키지 33개 다름(qgis-dev 1198 vs 1223).
-- 커밋·푸시 없음.
+- 기록 당시 커밋·푸시 없음. 뒤 세션이 cd388c4·ab1091e로 커밋.
 
 ## 2026-09-25 P4-2 오류 메시지 표준
 

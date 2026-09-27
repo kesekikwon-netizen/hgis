@@ -4,7 +4,9 @@
 #include <QAction>
 #include <QApplication>
 #include <QColor>
+#include <QComboBox>
 #include <QCryptographicHash>
+#include <QDoubleSpinBox>
 #include <QDir>
 #include <QFile>
 #include <QFontDatabase>
@@ -60,6 +62,8 @@ private slots:
   void toolbarCheckedHasDistinctTreatment();
   void primaryToolbarIconsRemainReadable();
   void noCheapSpinArrowBlock();
+  void fieldChevrons_drawnWithoutWinBevel();
+  void disabledRibbonButton_hasNoSlab();
   void noCatchAllWidgetRules();
   void chromeFontIsFieldKorean();
   void beginnerChrome_questionLabels();
@@ -898,7 +902,8 @@ void TestTheme::requiredSelectorsPresent() {
       "QDockWidget",
       "QSplitter::handle",
       "QgsLayerTreeView",
-      "QAbstractSpinBox::up-button",
+      "QAbstractSpinBox QLineEdit",
+      "-qt-style-features: background-color",
       "QCheckBox",
       "QToolTip",
       "QPushButton#btnAdjustDone",
@@ -969,6 +974,92 @@ void TestTheme::noCheapSpinArrowBlock() {
   const QString qss = KaTheme::embeddedStyleSheet();
   QVERIFY2(!qss.contains(QLatin1String("QAbstractSpinBox::up-arrow")),
            "spin arrows must be drawn by ChromeStyle, not a QSS black square");
+}
+
+// 2026-09-27: every combo box had lost its arrow and spin buttons showed a Win95
+// bevel, because a QSS border hands both controls to QWindowsStyle. ChromeStyle
+// now paints the field face and the chevrons; count the rendered pixels.
+void TestTheme::fieldChevrons_drawnWithoutWinBevel() {
+  QWidget host;
+  host.setAttribute(Qt::WA_DontShowOnScreen);
+  auto* rows = new QVBoxLayout(&host);
+  auto* combo = new QComboBox(&host);
+  combo->addItems({QStringLiteral("시굴조사 — 전체 면적의 10%"), QStringLiteral("표본조사")});
+  auto* disabledCombo = new QComboBox(&host);
+  disabledCombo->addItem(QStringLiteral("도면 크기 그대로"));
+  disabledCombo->setEnabled(false);
+  auto* spin = new QDoubleSpinBox(&host);
+  spin->setSuffix(QStringLiteral(" mm"));
+  spin->setValue(10.0);
+  rows->addWidget(combo);
+  rows->addWidget(disabledCombo);
+  rows->addWidget(spin);
+  host.resize(360, 200);
+  host.show();
+  QCoreApplication::processEvents();
+
+  const auto& tokens = KaTheme::tokens();
+  const auto near = [](const QColor& a, const QColor& b, int tolerance) {
+    return qAbs(a.red() - b.red()) <= tolerance && qAbs(a.green() - b.green()) <= tolerance &&
+           qAbs(a.blue() - b.blue()) <= tolerance;
+  };
+  const auto countIn = [](const QImage& image, const QRect& area, auto&& match) {
+    int n = 0;
+    for (int y = area.top(); y <= area.bottom(); ++y)
+      for (int x = area.left(); x <= area.right(); ++x)
+        if (image.rect().contains(x, y) && match(image.pixelColor(x, y))) ++n;
+    return n;
+  };
+  for (QWidget* field : {static_cast<QWidget*>(combo), static_cast<QWidget*>(disabledCombo),
+                         static_cast<QWidget*>(spin)}) {
+    const QImage image = field->grab().toImage();
+    const qreal dpr = image.devicePixelRatio();
+    const QRect buttonColumn(qRound((field->width() - 26) * dpr), 0, qRound(24 * dpr), image.height());
+    const QColor ink = field->isEnabled() ? tokens.inkMuted : tokens.bevelDark;
+    const int chevron = countIn(image, buttonColumn, [&](const QColor& c) { return near(c, ink, 28); });
+    // QWindowsStyle's bevel is neutral grey (Dark = bg.darker(150), Shadow = bg.darker(300)).
+    const int bevel = countIn(image, buttonColumn, [](const QColor& c) {
+      return qAbs(c.red() - c.green()) <= 3 && qAbs(c.green() - c.blue()) <= 3 && c.value() < 200;
+    });
+    const QString name = QString::fromLatin1(field->metaObject()->className()) +
+                         (field->isEnabled() ? QString() : QStringLiteral(" (disabled)"));
+    QVERIFY2(chevron >= 6, qPrintable(name + QStringLiteral(": chevron pixels %1").arg(chevron)));
+    QVERIFY2(bevel == 0, qPrintable(name + QStringLiteral(": Win95 bevel pixels %1").arg(bevel)));
+  }
+  // One frame metric for both, so fields in a form line up.
+  QCOMPARE(spin->height(), combo->height());
+  const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+  if (!output.isEmpty() && QDir(output).exists())
+    QVERIFY(host.grab().save(QDir(output).filePath(QStringLiteral("theme-field-chevrons.png"))));
+}
+
+// A command that cannot run yet keeps the ribbon face: a grey slab read as pressed.
+void TestTheme::disabledRibbonButton_hasNoSlab() {
+  // The ribbon sits on the main toolbar's surface, as in the app.
+  QToolBar toolbar;
+  toolbar.setAttribute(Qt::WA_DontShowOnScreen);
+  toolbar.setObjectName(QStringLiteral("mainToolbar"));
+  auto* ribbon = new KaBeginnerRibbon(&toolbar);
+  ribbon->addGroup(QStringLiteral("record"), QStringLiteral("기록"));
+  auto* enabledAction = new QAction(KaIcons::icon(QStringLiteral("select")), QStringLiteral("선택"), ribbon);
+  auto* disabledAction = new QAction(KaIcons::icon(QStringLiteral("draw_poly")), QStringLiteral("그리기"), ribbon);
+  disabledAction->setEnabled(false);
+  QToolButton* on = ribbon->addAction(QStringLiteral("record"), enabledAction);
+  QToolButton* off = ribbon->addAction(QStringLiteral("record"), disabledAction);
+  toolbar.addWidget(ribbon);
+  toolbar.resize(400, toolbar.sizeHint().height());
+  toolbar.show();
+  QCoreApplication::processEvents();
+  const QImage image = toolbar.grab().toImage();
+  // Sample the empty face beside the label, away from icon and text.
+  const QPoint atOn = on->mapTo(&toolbar, QPoint(3, on->height() / 2));
+  const QPoint atOff = off->mapTo(&toolbar, QPoint(3, off->height() / 2));
+  const QColor faceOn = logicalPixel(image, atOn.x(), atOn.y());
+  const QColor faceOff = logicalPixel(image, atOff.x(), atOff.y());
+  QVERIFY2(qAbs(faceOn.lightness() - faceOff.lightness()) <= 3,
+           qPrintable(QStringLiteral("disabled face %1 vs enabled %2").arg(faceOff.name(), faceOn.name())));
+  const QColor label = off->palette().color(QPalette::Disabled, QPalette::ButtonText);
+  QVERIFY(contrastRatio(label, faceOff) >= 4.5);
 }
 
 void TestTheme::noCatchAllWidgetRules() {

@@ -41,7 +41,8 @@ KaStatusBar::KaStatusBar(QWidget* parent) : QStatusBar(parent) {
   QFrame* afterXy = makeSeparator(this);
   addPermanentWidget(afterXy);
 
-  auto* scaleLabel = new QLabel(QStringLiteral("축척 1:"), this);
+  // 입력칸이 「1:1000」으로 보이므로 라벨에는 「1:」을 다시 적지 않는다.
+  auto* scaleLabel = new QLabel(QStringLiteral("축척"), this);
   scaleLabel->setObjectName(QStringLiteral("scaleLabel"));
   addPermanentWidget(scaleLabel);
 
@@ -103,7 +104,9 @@ KaStatusBar::KaStatusBar(QWidget* parent) : QStatusBar(parent) {
     emit renderingToggled(on);
   });
   addPermanentWidget(m_renderButton);
-  m_mapOnly = {m_xy, afterXy, scaleLabel, m_scaleCombo, afterScale, afterCrs, m_renderButton};
+  m_mapOnly = {m_xy, afterXy, afterCrs, m_renderButton};
+  m_scaleOnly = {scaleLabel, m_scaleCombo, afterScale};
+  m_surveyOnly = {m_crsButton, m_uploadChip};
 
   setWorkCrs(QStringLiteral("EPSG:5186"));
   setUploadCrs(QStringLiteral("EPSG:5179"));
@@ -151,6 +154,17 @@ bool KaStatusBar::isRenderingEnabled() const {
 }
 
 void KaStatusBar::setMapInstrumentsVisible(bool visible) {
+  setInstrumentsVisible(visible, visible);
+}
+
+void KaStatusBar::setInstrumentsVisible(bool mapReadout, bool scale) {
   for (QWidget* widget : std::as_const(m_mapOnly))
+    widget->setVisible(mapReadout);
+  for (QWidget* widget : std::as_const(m_scaleOnly))
+    widget->setVisible(scale);
+}
+
+void KaStatusBar::setCrsChipsVisible(bool visible) {
+  for (QWidget* widget : std::as_const(m_surveyOnly))
     widget->setVisible(visible);
 }

@@ -24,6 +24,8 @@ public:
   void setArea(const QByteArray& wkb, double areaM2);
   TrenchGridGenerator::Spec spec() const;
   bool autoFill() const;
+  // 격자를 깐 뒤에만 「개별 편집」「전체 이동」을 보인다.
+  void setGridPlaced(bool placed);
 
   // 조사 종류. 시굴 10% · 표본 2%는 매장유산 조사의 기준 비율이다.
   enum class SurveyKind { Trial, Sample, Manual };
@@ -46,6 +48,7 @@ signals:
 private:
   void refreshPlan();
   double effectiveAzimuth() const;
+  void setSummaryTone(const char* tone);  // ok · warn · plain → QSS 결과 칸 색
 
   QCheckBox* m_auto = nullptr;
   QComboBox* m_kind = nullptr;
@@ -59,6 +62,7 @@ private:
   QDoubleSpinBox* m_az = nullptr;
   QLineEdit* m_prefix = nullptr;
   QLabel* m_ratio = nullptr;
+  QWidget* m_afterPlace = nullptr;
   QByteArray m_areaWkb;
   double m_areaM2 = 0.0;
 };
