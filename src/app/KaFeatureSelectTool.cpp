@@ -68,9 +68,11 @@ void KaFeatureSelectTool::activate() {
   if (mCanvas) {
     mCanvas->setCursor(Qt::ArrowCursor);
   }
+  if (mCanvas) mCanvas->setContextMenuPolicy(Qt::PreventContextMenu);
+  syncVertexTarget();
   emit statusMessage(QStringLiteral(
-      "도형선택: 도형을 클릭하면 수정점이 나옵니다 — 점을 끌어 옮기고, 우클릭하면 "
-      "점추가·점삭제·면적입니다. Shift+클릭은 추가 선택."));
+      "도형선택: 도형을 클릭하면 수정점이 나옵니다. 점을 끌어 옮기세요. "
+      "점 우클릭은 삭제, 선 우클릭은 점추가입니다."));
 }
 
 void KaFeatureSelectTool::deactivate() {
@@ -103,7 +105,8 @@ void KaFeatureSelectTool::canvasPressEvent(QgsMapMouseEvent* e) {
 
 void KaFeatureSelectTool::canvasMoveEvent(QgsMapMouseEvent* e) {
   if (m_vertexDragging && m_vertex) {
-    m_vertex->previewVertexMove(m_vertexIndex, m_vertex->toLayer(m_vertex->snapMapPoint(e)));
+    // 자석이 켜져 있으면 놓은 점이 원래 꼭짓점으로 다시 붙는다. 끄는 동안은 커서 위치를 쓴다.
+    m_vertex->previewVertexMove(m_vertexIndex, m_vertex->toLayer(e->mapPoint()));
     return;
   }
   if (!(e->buttons() & Qt::LeftButton)) return;
@@ -139,7 +142,7 @@ void KaFeatureSelectTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
     m_vertexDragging = false;
     m_vertexIndex = -1;
     if (idx >= 0) {
-      const bool ok = m_vertex->moveVertexTo(idx, m_vertex->toLayer(m_vertex->snapMapPoint(e)));
+      const bool ok = m_vertex->moveVertexTo(idx, m_vertex->toLayer(e->mapPoint()));
       m_vertex->showVertexMarkers();
       if (mCanvas) mCanvas->refresh();
       emit statusMessage(ok ? QStringLiteral("수정점을 옮겼습니다.")
@@ -219,9 +222,10 @@ void KaFeatureSelectTool::handleContextMenu(QgsMapMouseEvent* e) {
   int segAfter = -1;
   QgsPointXY onLine;
   if (hasEditableShapeType && all.size() == 1 && m_vertex && m_vertex->hasTarget()) {
-    const QgsPointXY mapPt = m_vertex->snapMapPoint(e);
+    const QgsPointXY mapPt = e->mapPoint();
     vtxIdx = m_vertex->vertexNear(mapPt, 24);
-    segAfter = m_vertex->segmentNear(mapPt, &onLine, 16);
+    if (vtxIdx < 0)
+      segAfter = m_vertex->segmentNear(mapPt, &onLine, 16);
   }
 
   const auto editReason = [&firstLayer, sameLayer, &isSurveyLayer](Qgis::VectorProviderCapabilities required) {
@@ -257,111 +261,33 @@ void KaFeatureSelectTool::handleContextMenu(QgsMapMouseEvent* e) {
     }
   }
 
-  const double pyeong = totalAreaM2 * 0.3025;
-  QString areaStr;
-  if (polyCount == 0) {
-    areaStr.clear();
-  } else if (polyCount == 1) {
-    areaStr = QStringLiteral("면적: %L1 ㎡ (약 %L2평)")
-                  .arg(totalAreaM2, 0, 'f', 1)
-                  .arg(pyeong, 0, 'f', 1);
-  } else {
-    areaStr = QStringLiteral("선택한 면도형 %1개 총 면적: %L2 ㎡ (약 %L3평)")
-                  .arg(polyCount)
-                  .arg(totalAreaM2, 0, 'f', 1)
-                  .arg(pyeong, 0, 'f', 1);
-  }
-  if (!areaStr.isEmpty())
-    emit statusMessage(areaStr);
-
+  Q_UNUSED(totalAreaM2);
+  Q_UNUSED(polyCount);
   QMenu menu(mCanvas);
-  menu.setToolTipsVisible(true);
-  const auto configure = [](QAction* action, const QString& reason, const QString& help) {
-    action->setEnabled(reason.isEmpty());
-    action->setToolTip(reason.isEmpty() ? help : reason);
-  };
-
-  if (!areaStr.isEmpty()) {
-    auto* actArea = menu.addAction(areaStr);
-    QFont boldFont = actArea->font();
-    boldFont.setBold(true);
-    actArea->setFont(boldFont);
-    actArea->setEnabled(false);
-    actArea->setToolTip(QStringLiteral("선택한 면도형의 면적입니다. 아래의 「면적 복사」를 사용하세요."));
-
-    auto* actCopy = menu.addAction(QStringLiteral("면적 복사"));
-    actCopy->setToolTip(QStringLiteral("선택한 면도형의 면적을 복사합니다."));
-    connect(actCopy, &QAction::triggered, [areaStr]() {
-      QApplication::clipboard()->setText(areaStr);
-    });
-  }
-  auto* actDeselect = menu.addAction(QStringLiteral("선택 해제"));
-  actDeselect->setToolTip(QStringLiteral("선택만 해제합니다. 도형은 그대로 남습니다."));
-  connect(actDeselect, &QAction::triggered, [this]() {
-    for (QgsMapLayer* l : QgsProject::instance()->mapLayers()) {
-      if (auto* vl = qobject_cast<QgsVectorLayer*>(l)) {
-        vl->removeSelection();
-        vl->triggerRepaint();
-      }
+  if (vtxIdx >= 0) {
+    auto* act = menu.addAction(QStringLiteral("점삭제"));
+    act->setEnabled(deleteReason.isEmpty());
+    if (!deleteReason.isEmpty()) act->setToolTip(deleteReason);
+    if (menu.exec(mCanvas->mapToGlobal(e->pos())) == act && m_vertex && m_vertex->deleteVertexAt(vtxIdx)) {
+      m_vertex->showVertexMarkers();
+      if (mCanvas) mCanvas->refresh();
+      emit statusMessage(QStringLiteral("점을 지웠습니다."));
     }
-    if (m_vertex) m_vertex->clearTarget();
-    if (mCanvas) mCanvas->refresh();
-    emit selectionChanged(0);
-    emit statusMessage(QStringLiteral("선택 해제됨"));
-  });
-
-  if (hasEditableShapeType) {
-    menu.addSeparator();
-    auto* actAddVtx = menu.addAction(QStringLiteral("꼭짓점 추가"));
-    configure(actAddVtx, addReason, QStringLiteral("우클릭한 가장자리에 꼭짓점을 넣습니다."));
-    connect(actAddVtx, &QAction::triggered, this, [this, segAfter, onLine]() {
-      if (m_vertex && m_vertex->insertVertexAt(segAfter, onLine)) {
-        m_vertex->showVertexMarkers();
-        if (mCanvas) mCanvas->refresh();
-        emit statusMessage(QStringLiteral("꼭짓점을 넣었습니다."));
-      }
-    });
+    return;
   }
-  if (hasEditablePolygonType) {
-    QString polygonReason = editReason(Qgis::VectorProviderCapability::ChangeGeometries |
-        Qgis::VectorProviderCapability::AddFeatures | Qgis::VectorProviderCapability::DeleteFeatures);
-    if (polygonReason.isEmpty() && polyCount != all.size())
-      polygonReason = QStringLiteral("면도형만 선택해 주세요.");
-    QString mergeReason = editReason(Qgis::VectorProviderCapability::AddFeatures |
-        Qgis::VectorProviderCapability::DeleteFeatures);
-    if (mergeReason.isEmpty() && polyCount != all.size())
-      mergeReason = QStringLiteral("면도형만 선택해 주세요.");
-    if (mergeReason.isEmpty() && polyCount < 2)
-      mergeReason = QStringLiteral("합칠 면도형을 같은 레이어에서 2개 이상 선택해 주세요.");
-    auto* actMerge = menu.addAction(QStringLiteral("면도형 합치기"));
-    configure(actMerge, mergeReason, QStringLiteral("같은 레이어의 선택한 면도형을 하나로 합칩니다."));
-    connect(actMerge, &QAction::triggered, this, [this]() {
-      QTimer::singleShot(0, this, [this]() { emit requestMerge(); });
-    });
-    QString splitReason = polygonReason;
-    if (splitReason.isEmpty() && (polyCount < 1 || polyCount > 2))
-      splitReason = QStringLiteral("면도형 하나 또는 겹친 면도형 두 개를 선택해 주세요.");
-    auto* actSplit = menu.addAction(QStringLiteral("면도형 나누기"));
-    configure(actSplit, splitReason,
-        QStringLiteral("묶인 면은 분리하고, 면 하나는 선으로 자릅니다. 면 두 개는 겹친 부분을 나눕니다."));
-    connect(actSplit, &QAction::triggered, this, [this]() {
-      QTimer::singleShot(0, this, [this]() { emit requestSplit(); });
-    });
+  if (segAfter >= 0) {
+    auto* act = menu.addAction(QStringLiteral("점추가"));
+    act->setEnabled(addReason.isEmpty());
+    if (!addReason.isEmpty()) act->setToolTip(addReason);
+    if (menu.exec(mCanvas->mapToGlobal(e->pos())) == act && m_vertex &&
+        m_vertex->insertVertexAt(segAfter, onLine)) {
+      m_vertex->showVertexMarkers();
+      if (mCanvas) mCanvas->refresh();
+      emit statusMessage(QStringLiteral("점을 넣었습니다."));
+    }
+    return;
   }
-  if (hasEditableShapeType) {
-    menu.addSeparator();
-    auto* actDelVtx = menu.addAction(QStringLiteral("꼭짓점 삭제"));
-    configure(actDelVtx, deleteReason, QStringLiteral("우클릭한 꼭짓점을 지웁니다."));
-    connect(actDelVtx, &QAction::triggered, this, [this, vtxIdx]() {
-      if (m_vertex && m_vertex->deleteVertexAt(vtxIdx)) {
-        m_vertex->showVertexMarkers();
-        if (mCanvas) mCanvas->refresh();
-        emit statusMessage(QStringLiteral("꼭짓점을 지웠습니다."));
-      }
-    });
-  }
-
-  menu.exec(QCursor::pos());
+  emit statusMessage(QStringLiteral("점 위에서 우클릭하면 점삭제, 선 위에서 우클릭하면 점추가입니다."));
 }
 
 void KaFeatureSelectTool::selectAtPoint(const QgsPointXY& mapPt, bool addToSelection) {
@@ -456,7 +382,7 @@ void KaFeatureSelectTool::selectAtPoint(const QgsPointXY& mapPt, bool addToSelec
   if (all.isEmpty()) {
     emit statusMessage(QStringLiteral("선택된 도형 없음"));
   } else if (all.size() == 1) {
-    emit statusMessage(QStringLiteral("도형 1개 선택됨 (%1) — Shift+클릭으로 다른 도형도 선택 가능").arg(all[0].layer->name()));
+    emit statusMessage(QStringLiteral("수정점이 나왔습니다. 점을 끌어 옮기세요. 점 우클릭은 삭제, 선 우클릭은 추가입니다."));
   } else if (all.size() == 2) {
     emit statusMessage(QStringLiteral("도형 2개 선택됨 (%1, %2) — [폴리곤 나누기] 클릭 시 겹치는 구간이 자동 분할됩니다!").arg(all[0].layer->name(), all[1].layer->name()));
   } else {

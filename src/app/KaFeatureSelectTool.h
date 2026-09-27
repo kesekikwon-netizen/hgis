@@ -34,7 +34,7 @@ public:
 
   static QList<SelectedItem> allSelectedFeatures(QgsMapCanvas* canvas);
 
-  // 자석은 꼭짓점을 끌 때도 그대로 걸린다.
+  // 자석은 새 점을 찍을 때 쓴다. 이미 있는 점을 끌 때는 커서 위치를 쓴다.
   void setSnapEnabled(bool on);
   // Update editing handles after an external Undo restores the feature geometry.
   void refreshSelectedGeometry();

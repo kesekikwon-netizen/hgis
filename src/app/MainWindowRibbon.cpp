@@ -836,9 +836,9 @@ void MainWindow::showSubToolsDraw() {
                                         this, &MainWindow::startSelectTool);
   selAct->setProperty("kaSubTool", QStringLiteral("select"));
   selAct->setToolTip(QStringLiteral(
-      "도형을 클릭하면 수정점이 바로 나옵니다.\n"
-      "점을 끌면 그 점만 옮겨지고, 선 위에서 우클릭하면 점추가·점삭제입니다.\n"
-      "Shift+클릭으로 여러 도형을 골라 폴리곤 묶기·나누기에 씁니다."));
+      "도형을 클릭하면 수정점이 나옵니다.\n"
+      "점을 끌면 그 점만 옮겨집니다.\n"
+      "점 위에서 우클릭하면 그 점을 지우고, 선 위에서 우클릭하면 점을 넣습니다."));
   auto* snap = new KaSnapSettingsWidget(m_subToolbar);
   snap->syncFromProject();
   connect(snap, &KaSnapSettingsWidget::settingsChanged, this, [this, snap]() {

@@ -14,6 +14,7 @@
 #include <qgsfeaturerequest.h>
 #include <qgsgeometry.h>
 #include <qgsmapcanvas.h>
+#include <qgsproject.h>
 #include <qgspoint.h>
 #include <qgspointlocator.h>
 #include <qgsrubberband.h>
@@ -161,7 +162,7 @@ void KaVertexEditTool::showVertexMarkers() {
     const QgsPoint p = *it;
     auto* m = new QgsVertexMarker(mCanvas);
     m->setIconType(QgsVertexMarker::ICON_BOX);
-    m->setIconSize(10);
+    m->setIconSize(14);
     m->setPenWidth(2);
     m->setColor(QColor(30, 103, 198));
     m->setFillColor(QColor(255, 255, 255));
@@ -223,31 +224,57 @@ int KaVertexEditTool::segmentNear(const QgsPointXY& mapPt_, QgsPointXY* onLine, 
 }
 
 void KaVertexEditTool::selectAt(const QgsPointXY& mapPt_) {
-  if (!m_layer) return;
-  const QgsPointXY mapPt = toLayer(mapPt_);
-  const double tol = layerTolerance(10);
-  const QgsRectangle box(mapPt.x() - tol, mapPt.y() - tol, mapPt.x() + tol, mapPt.y() + tol);
-  QgsFeatureRequest req;
-  req.setFilterRect(box);
-  QgsFeatureIterator it = m_layer->getFeatures(req);
-  QgsFeature f;
+  const auto editable = [](QgsVectorLayer* layer) {
+    if (!layer || !layer->isValid() || layer->readOnly()) return false;
+    const auto type = layer->geometryType();
+    if (type != Qgis::GeometryType::Line && type != Qgis::GeometryType::Polygon) return false;
+    const QString key = LayerOps::layerKeyOf(layer);
+    return key == QLatin1String("survey_area") || key == QLatin1String("feature_poly") ||
+           key == QLatin1String("feature_line") || key == QLatin1String("section_line") ||
+           key == QLatin1String("trial_trench");
+  };
+  QList<QgsVectorLayer*> layers;
+  if (editable(m_layer)) layers.append(m_layer);
+  if (QgsProject::instance()) {
+    const auto found = QgsProject::instance()->layers<QgsVectorLayer*>();
+    for (QgsVectorLayer* layer : found)
+      if (editable(layer) && !layers.contains(layer)) layers.append(layer);
+  }
+  if (layers.isEmpty()) {
+    emit statusMessage(QStringLiteral("수정할 조사 도형이 없습니다."));
+    return;
+  }
+  QgsVectorLayer* hitLayer = nullptr;
   QgsFeatureId hit = -1;
   double bestD = std::numeric_limits<double>::max();
-  const QgsGeometry probe = QgsGeometry::fromPointXY(mapPt);
-  while (it.nextFeature(f)) {
-    if (!f.hasGeometry()) continue;
-    const double d = f.geometry().distance(probe);
-    if (d <= tol && d < bestD) {
-      bestD = d;
-      hit = f.id();
+  for (QgsVectorLayer* layer : layers) {
+    m_layer = layer;
+    const QgsPointXY mapPt = toLayer(mapPt_);
+    const double tol = layerTolerance(10);
+    const QgsRectangle box(mapPt.x() - tol, mapPt.y() - tol, mapPt.x() + tol, mapPt.y() + tol);
+    QgsFeatureRequest req;
+    req.setFilterRect(box);
+    QgsFeatureIterator it = layer->getFeatures(req);
+    QgsFeature f;
+    const QgsGeometry probe = QgsGeometry::fromPointXY(mapPt);
+    while (it.nextFeature(f)) {
+      if (!f.hasGeometry()) continue;
+      const double d = f.geometry().distance(probe);
+      if (d <= tol && d < bestD) {
+        bestD = d;
+        hit = f.id();
+        hitLayer = layer;
+      }
     }
   }
-  if (hit < 0) {
+  if (hit < 0 || !hitLayer) {
+    if (layers.size() == 1) m_layer = layers.first();
     clearSelection();
     emit statusMessage(QStringLiteral("도형을 찾지 못했습니다. 선이나 면 위를 클릭하세요."));
     return;
   }
   clearSelection();
+  m_layer = hitLayer;
   m_fid = hit;
   showVertexMarkers();
   emit statusMessage(
@@ -363,7 +390,7 @@ void KaVertexEditTool::showLineVertexMenu(QgsMapMouseEvent* e) {
 }
 
 void KaVertexEditTool::canvasPressEvent(QgsMapMouseEvent* e) {
-  if (!e || !m_layer) return;
+  if (!e) return;
   const QgsPointXY mapPt = snapMapPoint(e);
 
   if (e->button() == Qt::RightButton) {

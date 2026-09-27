@@ -18,6 +18,7 @@
 #include <QPainter>
 #include <QPdfDocument>
 #include <QPdfWriter>
+#include <QPrintDialog>
 #include <QPrinter>
 #include <QPrinterInfo>
 #include <QProgressDialog>
@@ -238,7 +239,16 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, doubl
     const int preferred = m_printer->findData(QPrinterInfo::defaultPrinterName());
     if (preferred >= 0) m_printer->setCurrentIndex(preferred);
   }
-  form->addRow(QStringLiteral("프린터"), m_printer);
+  auto* printerRow = new QWidget(this);
+  auto* printerLayout = new QHBoxLayout(printerRow);
+  printerLayout->setContentsMargins(0, 0, 0, 0);
+  printerLayout->addWidget(m_printer, 1);
+  m_properties = new QPushButton(QStringLiteral("프린터 속성…"), printerRow);
+  m_properties->setObjectName(QStringLiteral("printProperties"));
+  m_properties->setToolTip(QStringLiteral(
+      "프린터 속성에서 단면 인쇄를 고르세요. 양면으로 나오면 기본 설정에서 단면을 고릅니다."));
+  printerLayout->addWidget(m_properties);
+  form->addRow(QStringLiteral("프린터"), printerRow);
 
   m_modeTiles = new QRadioButton(QStringLiteral("여러 장으로 나눠 크게 인쇄 (붙여서 큰 도면)"), this);
   m_modeFit = new QRadioButton(QStringLiteral("한 장에 인쇄 (용지에 들어가면 실제 크기로)"), this);
@@ -352,6 +362,7 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, doubl
     rebuild();
   });
   connect(m_print, &QPushButton::clicked, this, &KaPrintDialog::printNow);
+  connect(m_properties, &QPushButton::clicked, this, &KaPrintDialog::printNow);
   connect(m_savePdf, &QPushButton::clicked, this, &KaPrintDialog::saveTilesAs);
   connect(close, &QPushButton::clicked, this, &QDialog::reject);
 
@@ -359,6 +370,7 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, doubl
     m_summary->setText(readError.isEmpty() ? QStringLiteral("도면을 읽지 못했습니다.") : readError);
     m_print->setText(QStringLiteral("인쇄"));
     m_print->setEnabled(false);
+    m_properties->setEnabled(false);
     m_savePdf->setEnabled(false);
     return;
   }
@@ -549,10 +561,14 @@ void KaPrintDialog::rebuild() {
   m_pickAll->setVisible(several && !m_skipped.isEmpty());
   const bool canDraw = !m_drawingMm.isEmpty() && (!tiled || (m_plan.ok && pageCount() > 0));
   m_print->setText(printButtonText());
-  m_print->setEnabled(canDraw && !printerName().isEmpty());
-  m_print->setToolTip(printerName().isEmpty() ? QStringLiteral("설치된 프린터가 없습니다. 나눈 장을 PDF로 저장해 "
-                                                               "다른 PC나 출력소에서 찍으세요.")
-                                              : QString());
+  const bool canPrint = canDraw && !printerName().isEmpty();
+  m_print->setEnabled(canPrint);
+  m_properties->setEnabled(canPrint);
+  const QString printTip = printerName().isEmpty()
+      ? QStringLiteral("설치된 프린터가 없습니다. 나눈 장을 PDF로 저장해 다른 PC나 출력소에서 찍으세요.")
+      : QStringLiteral("프린터 속성이 열립니다. 양면으로 나오면 기본 설정에서 단면을 고르세요.");
+  m_print->setToolTip(printTip);
+  m_properties->setToolTip(printTip);
   m_savePdf->setEnabled(tiled && canDraw);
 }
 
@@ -724,6 +740,16 @@ void KaPrintDialog::printNow() {
   QPrinter printer(QPrinterInfo::printerInfo(name), QPrinter::HighResolution);
   printer.setDocName(m_title);
   printer.setFullPage(false);
+  // 사무실 프린터 기본값이 양면인 경우가 많다. 속성 창은 단면으로 연다.
+  printer.setDuplex(QPrinter::DuplexNone);
+  printer.setPageSize(sheetSize());
+  QPrintDialog systemDialog(&printer, this);
+  systemDialog.setWindowTitle(QStringLiteral("프린터 속성"));
+  systemDialog.setOption(QPrintDialog::PrintToFile, false);
+  systemDialog.setOption(QPrintDialog::PrintSelection, false);
+  systemDialog.setOption(QPrintDialog::PrintPageRange, false);
+  systemDialog.setOption(QPrintDialog::PrintCurrentPage, false);
+  if (systemDialog.exec() != QDialog::Accepted) return;
   QString error;
   bool cancelled = false;
   bool ok = false;

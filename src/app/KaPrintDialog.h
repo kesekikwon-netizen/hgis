@@ -86,6 +86,7 @@ private:
   int m_gridRows = 0;
   int m_gridCols = 0;
   QComboBox* m_printer = nullptr;
+  QPushButton* m_properties = nullptr;
   QRadioButton* m_modeTiles = nullptr;
   QRadioButton* m_modeFit = nullptr;
   // 나눠 찍기에만 쓰는 칸들. 한 장 인쇄에서는 회색으로 두지 않고 숨긴다.

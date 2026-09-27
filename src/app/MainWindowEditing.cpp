@@ -6,6 +6,7 @@
 #include "KaDrawingStudio.h"
 #include "KaFeatureFormDialog.h"
 #include "KaFeatureSelectTool.h"
+#include "KaVertexEditTool.h"
 #include "KaMeasureMapTool.h"
 #include "KaSurveyAreaDialog.h"
 #include "KaTerrain3dLayoutStudio.h"
@@ -208,7 +209,46 @@ void MainWindow::startSelectTool() {
   m_canvas->setMapTool(m_featureSelectTool);
   m_canvas->setFocus(Qt::OtherFocusReason);
   statusBar()->showMessage(
-      QStringLiteral("도형선택 모드 — 지도에서 도형 클릭(Shift=추가선택). 2개 선택 후 [폴리곤 나누기]로 겹침 분할."),
+      QStringLiteral("도형선택 — 도형을 클릭하면 점이 나옵니다. 점 우클릭은 삭제, 선 우클릭은 점추가입니다."),
+      10000);
+#endif
+}
+
+void MainWindow::startVertexEditTool() {
+#if KA_HGIS_HAS_QGIS
+  if (!m_canvas) return;
+  if (m_captureTool && m_canvas->mapTool() == m_captureTool)
+    stopCaptureTool();
+  if (m_actMeasure)
+    m_actMeasure->setChecked(false);
+  if (!m_vertexEditTool) {
+    m_vertexEditTool = new KaVertexEditTool(m_canvas);
+    m_vertexEditTool->setParent(this);
+    connect(m_vertexEditTool, &KaVertexEditTool::statusMessage, this,
+            [this](const QString& text) { statusBar()->showMessage(text, 8000); });
+    connect(m_vertexEditTool, &KaVertexEditTool::featureGeometryEdited, this,
+            [this](QgsVectorLayer* layer, const QgsFeature& before) {
+              if (!layer || !before.isValid()) return;
+              KaUndoAction action;
+              action.type = KaUndoAction::FeatureChanged;
+              action.layerId = layer->id();
+              action.featureId = before.id();
+              action.featureData = before;
+              m_undoActions.append(action);
+              QgsProject::instance()->setDirty(true);
+              updateUndoRedoActions();
+            });
+  }
+  m_vertexEditTool->setSnapEnabled(m_snapEnabled);
+  if (m_canvas->mapTool() == m_vertexEditTool) {
+    if (m_panTool) m_canvas->setMapTool(m_panTool);
+    statusBar()->showMessage(QStringLiteral("도형 수정 종료"), 3000);
+    return;
+  }
+  m_canvas->setMapTool(m_vertexEditTool);
+  m_canvas->setFocus(Qt::OtherFocusReason);
+  statusBar()->showMessage(
+      QStringLiteral("도형 수정 — 도형을 클릭하면 점이 나옵니다. 점을 끌어 옮기고, 선 위에서 우클릭하면 점추가·점삭제입니다."),
       10000);
 #endif
 }

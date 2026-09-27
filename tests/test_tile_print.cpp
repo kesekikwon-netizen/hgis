@@ -5,6 +5,7 @@
 #include <QPainter>
 #include <QPdfDocument>
 #include <QPdfWriter>
+#include <QPushButton>
 #include <QTemporaryDir>
 
 #include "app/KaPrintDialog.h"
@@ -170,6 +171,9 @@ private slots:
     QVERIFY(dir.isValid());
     const QString source = makeQuadrantPdf(dir.filePath(QStringLiteral("drawing.pdf")), QSizeF(297, 420));
     KaPrintDialog dialog(source, QStringLiteral("시험 도면"));
+    auto* properties = dialog.findChild<QPushButton*>(QStringLiteral("printProperties"));
+    QVERIFY2(properties, "프린터 속성 단추가 없습니다.");
+    QCOMPARE(properties->text(), QStringLiteral("프린터 속성…"));
     dialog.setTiled(true);
     dialog.setSheet(KaPrintDialog::SheetA4);
     dialog.setOutput(KaPrintDialog::OutputA0);

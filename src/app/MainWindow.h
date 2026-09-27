@@ -69,6 +69,7 @@ class KaAppBar;
 class KaCoordPointMapTool;
 class KaMeasureMapTool;
 class KaFeatureSelectTool;
+class KaVertexEditTool;
 class KaFoundLocationMark;
 class QSplitter;
 class QListWidget;
@@ -175,6 +176,7 @@ private slots:
   void convertSelected5187To5179();
   void convertShpFileTo5179();
   void startSelectTool();
+  void startVertexEditTool();
   void startMeasureTool();
   void toggleTerrainMap();
   void openTopographicDownload();
@@ -478,6 +480,7 @@ private:
   QgsMapToolPan* m_panTool = nullptr;
   QgsMapToolSelect* m_selectTool = nullptr;
   KaFeatureSelectTool* m_featureSelectTool = nullptr;
+  KaVertexEditTool* m_vertexEditTool = nullptr;
   KaFoundLocationMark* m_locationMark = nullptr;
   QString m_locationMarkTitle;
   QgsVectorLayer* m_editLayer = nullptr;
