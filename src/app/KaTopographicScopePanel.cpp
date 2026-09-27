@@ -254,7 +254,7 @@ Prepared prepareOne(const QString& source, const QJsonObject& metadata, const QS
     }
     return result;
   }
-  if (!resolved.warning.isEmpty()) result.warnings.append(resolved.warning);
+  // 원본 좌표가 지도 위치다. 공식 색인 칸과 수 km 달라도 검토 창을 띄우지 않는다.
   result.evidence=resolved.evidence;
   result.crsNames.append(crsName(resolved.authId));
   for (int i=0;i<records.size();++i) {

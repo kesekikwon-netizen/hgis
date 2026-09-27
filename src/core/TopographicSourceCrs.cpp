@@ -98,11 +98,10 @@ std::optional<FrameMatch> matchSourceFrame(const QgsPolylineXY& points,
     const QgsCoordinateReferenceSystem& crs, const QgsRectangle& officialBounds,
     const QgsCoordinateTransformContext& context) {
   if (points.isEmpty()) return {};
-  // Conservative supported frame geometry: 1:25k, 0.125 degree rectangle with
-  // corners on a 0.025 degree lattice. This is an observed file convention, not
-  // a claimed national rule for all shifted coastal frames. Others need review.
-  constexpr double CornerStep = .025;
+  // 1:25,000 neatline: 7.5 arcmin each side. Jeju sheets such as 126°10' sit
+  // 30 arcsec off a 0.025° lattice, about 773 m, so that lattice is not required.
   constexpr double SheetDegrees = .125;
+  constexpr double SheetDegreeTolerance = 1e-5;
   constexpr double MaxResidualMetres = .25;
   const QgsCoordinateReferenceSystem geographic(QStringLiteral("EPSG:4737"));
   const QgsCoordinateReferenceSystem inventory(QStringLiteral("EPSG:5179"));
@@ -119,20 +118,20 @@ std::optional<FrameMatch> matchSourceFrame(const QgsPolylineXY& points,
     if (!std::isfinite(point.x()) || !std::isfinite(point.y())) return {};
     geographicPoints.append(toGeographic.transform(point));
   }
-  const auto rawBounds = QgsGeometry::fromPolylineXY(geographicPoints).boundingBox();
-  if (!finiteBounds(rawBounds)) return {};
-  const auto snap = [](double value) { return std::round(value / CornerStep) * CornerStep; };
-  const QgsRectangle rectangle(snap(rawBounds.xMinimum()), snap(rawBounds.yMinimum()),
-                               snap(rawBounds.xMaximum()), snap(rawBounds.yMaximum()));
-  if (std::abs(rectangle.width() - SheetDegrees) > 1e-8
-      || std::abs(rectangle.height() - SheetDegrees) > 1e-8
+  const auto rectangle = QgsGeometry::fromPolylineXY(geographicPoints).boundingBox();
+  if (!finiteBounds(rectangle)
+      || std::abs(rectangle.width() - SheetDegrees) > SheetDegreeTolerance
+      || std::abs(rectangle.height() - SheetDegrees) > SheetDegreeTolerance
       || !crs.bounds().contains(rectangle.center())) return {};
   const auto originalCenter = toInventory.transform(rectangle.center());
   const auto indexCenter = officialBounds.center();
-  // Association limit is separate from the 0.25 m CRS evidence. Do not enlarge
-  // the old 100 m extent tolerance or translate source geometry to fit an index.
-  if (std::abs(originalCenter.x() - indexCenter.x()) > officialBounds.width() * .25
-      || std::abs(originalCenter.y() - indexCenter.y()) > officialBounds.height() * .25) return {};
+  // The 0.25 m residual above is the CRS evidence. Jeju 2024 1:25,000 frames are
+  // valid EPSG:5186 rectangles about 4 km from the NGII index, so a quarter of
+  // the sheet (~3 km) rejected them. 50 km matches the official-footprint cap.
+  // Do not enlarge the 100 m extent tolerance or move the source geometry.
+  constexpr double MaxIndexSeparationMetres = 50000.;
+  const double separation = originalCenter.distance(indexCenter);
+  if (!std::isfinite(separation) || separation > MaxIndexSeparationMetres) return {};
 
   FrameMatch match;
   QList<int> edgeMasks;

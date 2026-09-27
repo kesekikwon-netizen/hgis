@@ -34,7 +34,7 @@ private slots:
   void shiftedCoastalFrameIsIndependentCrsEvidence_data() {
     QTest::addColumn<QString>("condition");QTest::addColumn<bool>("accepted");
     for(const auto& name:{"shifted-frame","extra-edge-vertices","damaged-edge","offset-frame","outside-data","duplicate-frame","unclosed-frame","no-frame"})
-      QTest::newRow(name)<<QString::fromLatin1(name)<<(QByteArray(name)=="shifted-frame" || QByteArray(name)=="extra-edge-vertices");
+      QTest::newRow(name)<<QString::fromLatin1(name)<<(QByteArray(name)=="shifted-frame" || QByteArray(name)=="extra-edge-vertices" || QByteArray(name)=="offset-frame");
   }
   void shiftedCoastalFrameIsIndependentCrsEvidence() {
     QFETCH(QString,condition);QFETCH(bool,accepted);
@@ -85,6 +85,90 @@ private slots:
     QVERIFY(result.evidence.contains(QStringLiteral("원본 도곽")));
     QVERIFY(result.evidence.contains(QStringLiteral("색인")));
     QVERIFY(result.unverifiedRecordIndexes.isEmpty());
+  }
+  void jejuFrameSeveralKilometresFromTheIndexSelects5186() {
+    QTemporaryDir dir;
+    QTemporaryDir cache;
+    QVERIFY(dir.isValid());
+    const auto geographic = QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4737"));
+    const auto source = QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186"));
+    QgsCoordinateTransform toSource(geographic, source, QgsCoordinateTransformContext());
+    QgsCoordinateTransform toOfficial(geographic, QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5179")),
+                                      QgsCoordinateTransformContext());
+    const auto official = toOfficial.transformBoundingBox(QgsRectangle(126.375, 33.375, 126.5, 33.5));
+    // About 4.6 km east of the index. A quarter of the sheet is only ~3 km.
+    const QVector<QgsPointXY> corners = {{126.425, 33.375}, {126.55, 33.375}, {126.55, 33.5},
+                                         {126.425, 33.5}, {126.425, 33.375}};
+    QVector<QgsPointXY> points;
+    for (int side = 0; side < 4; ++side) {
+      for (int i = 0; i < 5; ++i) {
+        const double t = double(i) / 5.;
+        points.append(toSource.transform(QgsPointXY(corners[side].x() * (1 - t) + corners[side + 1].x() * t,
+                                                    corners[side].y() * (1 - t) + corners[side + 1].y() * t)));
+      }
+    }
+    points.append(points.first());
+    const QString path = dir.filePath(QStringLiteral("336064.dxf"));
+    GDALAllRegister();
+    auto* driver = GetGDALDriverManager()->GetDriverByName("DXF");
+    QVERIFY(driver);
+    {
+      std::unique_ptr<GDALDataset, decltype(&GDALClose)> ds(
+          driver->Create(path.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr), GDALClose);
+      QVERIFY(ds);
+      auto* layer = ds->CreateLayer("entities", nullptr, wkbUnknown, nullptr);
+      QVERIFY(layer);
+      const auto add = [&](const char* code, const QVector<QgsPointXY>& vertices) {
+        std::unique_ptr<OGRFeature, decltype(&OGRFeature::DestroyFeature)> feature(
+            OGRFeature::CreateFeature(layer->GetLayerDefn()), OGRFeature::DestroyFeature);
+        feature->SetField("Layer", code);
+        OGRLineString line;
+        for (const auto& p : vertices) line.addPoint(p.x(), p.y());
+        return feature->SetGeometry(&line) == OGRERR_NONE && layer->CreateFeature(feature.get()) == OGRERR_NONE;
+      };
+      QVERIFY(add("H0017334", points));
+      QVERIFY(add("F0017111", {toSource.transform(QgsPointXY(126.51, 33.42)),
+                               toSource.transform(QgsPointXY(126.53, 33.46))}));
+    }
+    const auto scan = TopographicCatalog::scan(dir.path(), nullptr, cache.path());
+    QVERIFY2(scan.error.isEmpty(), qPrintable(scan.error));
+    const auto result = TopographicSourceCrs::resolve(QStringLiteral("336064"), QStringLiteral("GRS80"),
+                                                      scan.records, {}, official);
+    QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+    QCOMPARE(result.authId, QStringLiteral("EPSG:5186"));
+    QVERIFY(result.warning.contains(QStringLiteral("336064")));
+    QVERIFY(result.unverifiedRecordIndexes.isEmpty());
+
+    QTemporaryDir farDir;
+    QTemporaryDir farCache;
+    QVERIFY(farDir.isValid());
+    QVERIFY(farCache.isValid());
+    QVector<QgsPointXY> far;
+    for (const auto& point : points) far.append(QgsPointXY(point.x() + 60000., point.y()));
+    const QString farPath = farDir.filePath(QStringLiteral("336064.dxf"));
+    {
+      std::unique_ptr<GDALDataset, decltype(&GDALClose)> ds(
+          driver->Create(farPath.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr), GDALClose);
+      QVERIFY(ds);
+      auto* layer = ds->CreateLayer("entities", nullptr, wkbUnknown, nullptr);
+      QVERIFY(layer);
+      const auto add = [&](const char* code, const QVector<QgsPointXY>& vertices) {
+        std::unique_ptr<OGRFeature, decltype(&OGRFeature::DestroyFeature)> feature(
+            OGRFeature::CreateFeature(layer->GetLayerDefn()), OGRFeature::DestroyFeature);
+        feature->SetField("Layer", code);
+        OGRLineString line;
+        for (const auto& p : vertices) line.addPoint(p.x(), p.y());
+        return feature->SetGeometry(&line) == OGRERR_NONE && layer->CreateFeature(feature.get()) == OGRERR_NONE;
+      };
+      QVERIFY(add("H0017334", far));
+      QVERIFY(add("F0017111", {far.at(1), far.at(6)}));
+    }
+    const auto farScan = TopographicCatalog::scan(farDir.path(), nullptr, farCache.path());
+    QVERIFY2(farScan.error.isEmpty(), qPrintable(farScan.error));
+    const auto rejected = TopographicSourceCrs::resolve(QStringLiteral("336064"), QStringLiteral("GRS80"),
+                                                        farScan.records, {}, official);
+    QVERIFY(!rejected.error.isEmpty());
+    QVERIFY(rejected.authId.isEmpty());
   }
   void choosesNorthingAndZone_data() {
     QTest::addColumn<QString>("sheet"); QTest::addColumn<QString>("auth");

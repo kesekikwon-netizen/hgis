@@ -3,7 +3,7 @@
 #include <qgscoordinatetransformcontext.h>
 
 namespace TopographicSourceCrs {
-inline constexpr int kSolverVersion = 2;
+inline constexpr int kSolverVersion = 4;
 struct Result {
   QString crsWkt;
   QString authId;
