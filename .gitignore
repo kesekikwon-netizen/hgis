@@ -45,6 +45,8 @@ Desktop.ini
 .claude/
 .repowise/
 .mcp.json
+# Per-checkout Graft paths. scripts/setup-dev-paths.ps1 writes this file.
+.codex/config.toml
 .grok/.state/
 .cursor/.state/
 .cursor/hooks/state/

@@ -1,4 +1,12 @@
 <!-- Recent window only. Older entries: docs/archive/NOW-before-2026-09-25.md -->
+## 2026-09-27 이 PC를 20260922-1에 맞춤
+
+- `D:/hgis` 가 `20260922-1` @ `fc63855` = `origin/20260922-1`.
+- 예전 `main` 로컬은 `72692e1`에 그대로 있음. 워크트리 2개(claude detached `918571b`, recovery `396a3b6`)는 안 옮김.
+- 충돌하던 미추적 `.codex/NOW.md`는 `.codex/NOW.md.local-main-backup-20260927`로 옮김.
+- `dev-env-lock.ps1` 종료 1: 이 PC는 `D:\OSGeo4W` + CMake 4.4.1. 잠금은 `C:\Users\Public\ka-hgis\osgeo4w` + CMake 3.31.5. SDK 번들 없음. 패키지 33개 다름(qgis-dev 1198 vs 1223).
+- 커밋·푸시 없음.
+
 ## 2026-09-25 P4-2 오류 메시지 표준
 
 - `KaUserError` what/why/how + 선택 해결 단추. 상위 20곳 적용. 전후표 `docs/user/error-message-standard-p4-2.md`.

@@ -255,9 +255,7 @@ if (-not $OsgeoOnly) {
     } else {
       Write-Host ("[경고] Cursor MCP 에 hgis_graft 가 없다: {0}" -f $mcpFile) -ForegroundColor Yellow
     }
-    $repoJson = $Repo.Replace('\', '\\')
-    Write-Host "    이 PC 경로로 mcpServers 에 넣고 .\scripts\setup-graft.ps1 을 실행한다:"
-    Write-Host ('    "hgis_graft": {{ "type": "stdio", "command": "node", "args": ["{0}\\scripts\\graft-mcp.mjs"], "cwd": "{0}", "env": {{ "DO_NOT_TRACK": "1", "CI": "1" }} }}' -f $repoJson)
+    Write-Host "    이 체크아웃 경로로 넣는다: .\scripts\setup-dev-paths.ps1"
   }
 
   if ($lock.paths -and $lock.paths.osgeo4wRoot -and

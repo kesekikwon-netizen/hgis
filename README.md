@@ -15,6 +15,7 @@ git clone https://github.com/kwonyoungin11/hgis.git
 cd hgis
 # 기준 PC와 같은 OSGeo4W 판을 복사해 온다 (install-deps 는 설치한 날의 qgis-dev 를 받는다)
 .\scripts\osgeo4w-bundle.ps1 -Import E:\ka-hgis-sdk
+.\scripts\setup-dev-paths.ps1    # Graft 경로를 이 체크아웃으로
 
 .\scripts\bootstrap-dev-pc.ps1   # dev-env.lock.json 비교 + build + ctest + smoke
 .\scripts\run-ka-hgis.ps1
@@ -27,15 +28,16 @@ cd hgis
 - 규칙: `AGENTS.md` (Codex + QGIS 매뉴얼 연동) · `.codex/NOW.md` · `HANDOFF.md`
 
 ## 환경 (검증된 구성)
-- CMake (`C:\Program Files\CMake\bin` 또는 PATH, `dev-env.ps1`에서 검색)
-- VS 2022 BuildTools MSVC 19.4x
-- 현재 PC: 저장소 **`A:\qgis`**, SDK **`A:\OSGeo4W`** (`OSGEO4W_ROOT` 우선, C:/D:/A: 설치 경로 검색)
-  - 패키지: `qgis-dev`, `qt6-devel`, `gdal-dev-devel`, `sqlite3-devel`, `pdal-dev`
+- CMake는 `dev-env.lock.json`의 앞 두 자리 (`C:\Program Files\CMake\bin`, `C:\CMake\bin` 또는 PATH)
+- VS 2022 BuildTools MSVC. 도구 모음 앞 두 자리는 `dev-env.lock.json`
+- 체크아웃은 클론한 폴더. SDK는 `scripts/dev-env.ps1`이 `OSGEO4W_ROOT` → `C:\OSGeo4W` → `D:\OSGeo4W` → `A:\OSGeo4W` 순으로 찾는다
+  - 패키지 판: `dev-env.lock.json` (`qgis-dev`, `qt6-devel`, `gdal-dev-devel`, `sqlite3-devel`, `pdal-dev`)
 - 산출물: `build\Release\ka-hgis.exe`, `ka_hgis_tests.exe`, `ka_workflow_tests.exe`
 
 ## 원클릭 빌드·검증
 ```powershell
-cd A:\qgis
+cd <클론한 폴더>
+.\scripts\setup-dev-paths.ps1
 .\scripts\build-all.ps1
 ```
 포함: cmake build → ctest → smoke-quit → e2e. 포터블 생성은 별도 요청 시에만 실행한다.

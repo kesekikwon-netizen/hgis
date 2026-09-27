@@ -1,6 +1,6 @@
 # HGIS 개발 도구
 
-현재 PC의 저장소는 `A:/qgis`, SDK는 `A:/OSGeo4W`다. 도구별로 실제 검증된 작업을 맡기고, 원본 코드와 컴파일러·테스트로 결론을 확인한다.
+체크아웃은 클론한 폴더다. SDK는 `scripts/dev-env.ps1`이 `OSGEO4W_ROOT` → `C:\OSGeo4W` → `D:\OSGeo4W` → `A:\OSGeo4W` 순으로 찾는다. 패키지·MSVC·CMake·Windows SDK 판은 `dev-env.lock.json` 하나다. 도구별로 실제 검증된 작업을 맡기고, 원본 코드와 컴파일러·테스트로 결론을 확인한다.
 
 **2026-09-15 사용자 지정 필수 조합 (harness switched to Cursor 2026-09-18): `Cursor Agent + AGENTS.md + clangd + Graft + Archify + CMake/CTest`.** 제품 코드 구현·수정에는 작은 변경도 이 조합을 모두 사용한다. 도구 이름만 언급하지 말고 실제 조회·산출물·검증 결과를 계획 또는 QA 기록에 남긴다.
 
@@ -16,24 +16,7 @@
 
 ## Cursor 설정
 
-Graft는 저장소 `.cursor/mcp.json`이 아니라 USER-level `%USERPROFILE%\.cursor\mcp.json`의 서버 `hgis_graft`로 Cursor에 연결한다. `.codex/config.toml` 등록은 호환용으로 남긴다.
-
-```json
-{
-  "mcpServers": {
-    "hgis_graft": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["A:\\qgis\\scripts\\graft-mcp.mjs"],
-      "cwd": "A:\\qgis",
-      "env": {
-        "DO_NOT_TRACK": "1",
-        "CI": "1"
-      }
-    }
-  }
-}
-```
+Graft는 저장소 `.cursor/mcp.json`이 아니라 USER-level `%USERPROFILE%\.cursor\mcp.json`의 서버 `hgis_graft`로 Cursor에 연결한다. `.codex/config.toml`은 호환용이며 체크아웃 경로가 들어가므로 커밋하지 않는다. 둘 다 `scripts/setup-dev-paths.ps1`이 이 폴더로 쓴다. 다른 MCP 서버는 유지한다.
 
 clangd는 Cursor clangd 확장과 저장소 `.clangd`의 `CompilationDatabase: build`를 사용한다. Archify는 `scripts/archify.ps1`로 실행한다. CMake는 `CMakePresets.json`의 `vs`(Visual Studio 17 2022 x64)와 기존 `build/`를 유지한다. 워크스페이스 `.vscode/settings.json`은 `cmake.useCMakePresets: always`이고, 폴더를 열 때 자동 구성하지 않는다. `compiledb` 프리셋만 `build-clangd`에 Ninja를 쓴다.
 
@@ -42,6 +25,7 @@ clangd는 Cursor clangd 확장과 저장소 `.clangd`의 `CompilationDatabase: b
 검증한 upstream은 [NanoNets/Graft](https://github.com/NanoNets/Graft/tree/f9e65396e638e517aecae0d731017f53084d70ed), 버전 표기 `0.18.0`, 고정 커밋 `f9e65396e638e517aecae0d731017f53084d70ed`다. npm 최신 패키지와 동일한 소스라는 뜻은 아니다.
 
 ```powershell
+.\scripts\setup-dev-paths.ps1
 .\scripts\setup-graft.ps1
 node --test scripts/graft-mcp.test.mjs
 # 설치된 의존성/생성 파일 손상 시 고정 소스를 유지한 재빌드
@@ -50,7 +34,7 @@ node --test scripts/graft-mcp.test.mjs
 
 Git, Node.js/npm, Python, VS C++ 도구가 필요하다. 설치 스크립트는 `build/tooling/graft-source`에 고정 소스를 받아 lockfile 의존성을 설치하고 필요한 native parser만 빌드한다. 기존 소스가 다른 커밋이거나 수정되어 있으면 중단한다. 인덱스는 `build/tooling/graft-index`에 생성한다. 재실행은 설치된 빌드를 재사용하며 인덱스를 새로 만든다. 두 폴더 모두 기존 build ignore 정책에 포함된다.
 
-Cursor의 현재 연결은 USER-level `%USERPROFILE%\.cursor\mcp.json`의 `hgis_graft`다. `.codex/config.toml`이 같은 프로젝트 서버를 호환용으로 등록한다. 이 PC의 Node와 스크립트 절대 경로를 사용한다. 다른 PC로 옮길 때 command/args/cwd를 새 위치로 바꾸고 설치 스크립트를 실행한다. 전역 설정·모델 선택은 바꾸지 않는다. 과거 Codex 검증은 `config/read(cwd=A:/qgis)`에서 프로젝트 설정 병합을 확인한 기록이다. 이미 진행 중인 턴의 도구 목록 갱신은 별개이므로, Cursor에서 서버가 보이지 않으면 Cursor를 다시 열어 USER MCP를 로드한다.
+Cursor 연결은 USER-level `%USERPROFILE%\.cursor\mcp.json`의 `hgis_graft`다. 경로는 `scripts/setup-dev-paths.ps1`이 이 체크아웃으로 넣는다. 전역 설정·모델 선택은 바꾸지 않는다. Graft는 잠금의 Node 주 판이 같다. 이미 진행 중인 턴의 도구 목록 갱신은 별개이므로, Cursor에서 서버가 보이지 않으면 Cursor를 다시 열어 USER MCP를 로드한다.
 
 서버는 `scripts/graft-mcp.mjs`를 실행한다. upstream MCP 조회 함수와 동일한 줄 단위 JSON-RPC 전송 방식을 사용하며 네 가지 도구만 노출한다.
 

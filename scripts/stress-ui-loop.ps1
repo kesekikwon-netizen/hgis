@@ -21,12 +21,6 @@ if ([string]::IsNullOrWhiteSpace($LogDir)) {
 }
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $env:KA_HGIS_LOG_DIR = $LogDir
-$env:OSGEO4W_ROOT = "C:\Users\Public\ka-hgis\osgeo4w"
-$sdk = $env:OSGEO4W_ROOT
-$env:PATH = "$sdk\apps\Qt6\bin;$sdk\apps\qgis-dev\bin;$sdk\apps\gdal-dev\bin;$sdk\apps\pdal-dev\bin;$sdk\bin;" + $env:PATH
-$env:QGIS_PREFIX_PATH = "$sdk\apps\qgis-dev"
-$env:GDAL_DATA = "$sdk\apps\gdal-dev\share\gdal"
-$env:PROJ_LIB = "$sdk\share\proj"
 
 $MemoryCsv = Join-Path $LogDir "memory-working-set.csv"
 

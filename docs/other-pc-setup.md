@@ -12,13 +12,13 @@ DLL 미포함 → 대상 PC에 **OSGeo4W `qgis-dev`** 필요.
 | 무엇 | 어떻게 맞추나 |
 |------|------|
 | OSGeo4W (qgis-dev, Qt, GDAL, PROJ …) | 기준 PC 폴더를 `osgeo4w-bundle.ps1`로 복사. 패키지 판까지 비교 |
-| MSVC 도구 모음 · Windows SDK · CMake | 같은 판을 설치. MSVC·CMake는 앞 두 자리(14.44, 4.1), SDK는 전체 판을 비교 |
+| MSVC 도구 모음 · Windows SDK · CMake | 같은 판을 설치. MSVC·CMake는 `dev-env.lock.json`의 앞 두 자리, SDK는 전체 판 |
 | Git · Node · Python · clangd | 경고만. Graft는 Node 주 판이 같아야 한다 |
-| Cursor | 모델 Grok 4.7, USER MCP `hgis_graft`를 이 PC 경로로 (비교 스크립트가 넣을 내용을 출력) |
+| Cursor | 모델 Grok 4.7. `.\scripts\setup-dev-paths.ps1`이 USER MCP `hgis_graft`를 이 체크아웃으로 쓴다 |
 | 계정·API 키 | PC마다 앱에서 입력(DPAPI). git·번들로 옮기지 않는다 |
 | 조사 GPKG·SHP | git에 없음. OneDrive/NAS 별도 |
 
-**기준 PC** (지금 `A:\qgis`, `A:\OSGeo4W`). OSGeo4W나 VS를 업데이트할 때마다 1~2를 다시 한다.
+**기준 PC**는 `dev-env.lock.json`을 마지막으로 쓴 컴퓨터다. 폴더 위치는 PC마다 달라도 된다. OSGeo4W나 VS를 업데이트할 때마다 1~2를 다시 한다.
 
 ```powershell
 .\scripts\dev-env-lock.ps1 -Write                  # 1. dev-env.lock.json 갱신 → 커밋·push
@@ -31,13 +31,14 @@ DLL 미포함 → 대상 PC에 **OSGeo4W `qgis-dev`** 필요.
 git clone https://github.com/kwonyoungin11/hgis.git
 cd hgis
 git checkout 20260922-1                               # 지금 작업 브랜치
-.\scripts\osgeo4w-bundle.ps1 -Import E:\ka-hgis-sdk  # 기준 PC와 같은 경로(A:\OSGeo4W)로 복사
+.\scripts\osgeo4w-bundle.ps1 -Import E:\ka-hgis-sdk  # 잠금의 OSGeo 경로. 없으면 -Root
+.\scripts\setup-dev-paths.ps1                         # Graft 경로를 이 체크아웃으로
 .\scripts\dev-env-lock.ps1                            # [다름]이 없어야 한다
 .\scripts\bootstrap-dev-pc.ps1                        # 같은 비교 후 빌드·ctest·smoke
 ```
 
-- `-Import`는 가져올 자리에 폴더가 있으면 지우지 않고 `<폴더>.before-<시각>`으로 이름만 바꿔 둔다.
-- A: 드라이브가 없으면 `subst A: D:\drive-a`처럼 만들거나 `-Root C:\OSGeo4W`로 다른 위치를 준다. 다른 위치면 스크립트가 알려 주는 대로 `OSGEO4W_ROOT`를 설정한다.
+- `-Import`는 잠금에 적힌 OSGeo 경로로 복사한다. 그 드라이브가 없으면 `-Root`로 이 PC의 폴더를 준다. 가져올 자리에 폴더가 있으면 지우지 않고 `<폴더>.before-<시각>`으로 이름만 바꿔 둔다.
+- 가져온 폴더를 `dev-env.ps1`이 못 찾으면 스크립트가 `OSGEO4W_ROOT` 설정 방법을 출력한다. 탐색 순서는 `OSGEO4W_ROOT` → `C:\OSGeo4W` → `D:\OSGeo4W` → `A:\OSGeo4W`다.
 - `dev-env-lock.ps1` 종료 코드: 0 같음, 1 다름, 2 잠금 파일 없음. `bootstrap-dev-pc.ps1`은 1이면 빌드하지 않는다(`-AllowEnvDrift`로 무시).
 - CI의 Windows 빌드(기준 PC runner)도 같은 비교를 한다. 기준 PC를 업데이트하고 잠금을 갱신하지 않으면 CI가 실패한다.
 
@@ -66,9 +67,9 @@ cd hgis
 |------|------|
 | OS | Windows 10/11 x64 |
 | Git | 설치 |
-| CMake | 4.x (`C:\Program Files\CMake\bin`, `C:\CMake\bin` 또는 PATH) |
-| 컴파일러 | **VS 2022** (MSVC C++ 워크로드 / Build Tools) |
-| GIS SDK | **OSGeo4W** `A:\OSGeo4W`, `C:\OSGeo4W`, `D:\OSGeo4W` 또는 `$env:OSGEO4W_ROOT` |
+| CMake | `dev-env.lock.json`의 앞 두 자리 (`C:\Program Files\CMake\bin`, `C:\CMake\bin` 또는 PATH) |
+| 컴파일러 | **VS 2022** (MSVC C++ 워크로드 / Build Tools). 도구 모음 앞 두 자리는 잠금 파일 |
+| GIS SDK | **OSGeo4W**. `dev-env.ps1`이 `OSGEO4W_ROOT` → `C:\OSGeo4W` → `D:\OSGeo4W` → `A:\OSGeo4W` |
 | C++ 분석 | 설치된 clangd + `.clangd` + 실제 CMake 컴파일 DB |
 
 OSGeo4W 패키지:
@@ -126,12 +127,12 @@ ctest --test-dir build -C Release --output-on-failure
 
 또는 `.\scripts\build-all.ps1` (build + test + smoke + e2e). 포터블 생성은 별도 요청 시에만 실행한다.
 
-### 현재 PC 경로와 clangd
+### 이 PC 경로와 clangd
 
-현재 체크아웃은 `A:\qgis`, GIS SDK는 `A:\OSGeo4W`다. 스크립트는 저장소 위치를 기준으로 실행하고 `dev-env.ps1`이 환경 변수 또는 설치 경로에서 SDK와 CMake를 찾는다.
+스크립트는 클론한 폴더에서 실행한다. `dev-env.ps1`이 SDK와 CMake를 찾는다. Graft 경로는 `setup-dev-paths.ps1`이 이 폴더로 쓴다.
 
 ```powershell
-cd A:\qgis
+.\scripts\setup-dev-paths.ps1
 .\scripts\build-now.ps1
 .\scripts\gen-compile-commands.ps1
 ```
