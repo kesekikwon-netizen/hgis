@@ -558,6 +558,15 @@ void dContour(QPainter& p) {
   p.drawPolygon(summit);
 }
 
+// 측량 등고선: 열린 등고선 세 줄. 닫힌 언덕(지형) 그림과 구분한다.
+void dSurveyContour(QPainter& p) {
+  prep(p, 2.4);
+  p.setBrush(Qt::NoBrush);
+  p.drawArc(QRectF(4, 16, 48, 22), 16 * 20, 16 * 150);
+  p.drawArc(QRectF(8, 28, 40, 18), 16 * 20, 16 * 150);
+  p.drawArc(QRectF(14, 38, 30, 14), 16 * 20, 16 * 150);
+}
+
 void dDark(QPainter& p) {
   prep(p, 2.6);
   p.drawEllipse(QRectF(16, 16, 32, 32));
@@ -928,6 +937,7 @@ QIcon icon(const QString& id) {
   else if (id == QLatin1String("satellite") || id == QLatin1String("vworld_sat")) ic = bake(dSatellite);
   else if (id == QLatin1String("vworld_cadastral") || id == QLatin1String("cadastral")) ic = bake(dCadastral);
   else if (id == QLatin1String("vworld_contour") || id == QLatin1String("contour")) ic = bake(dContour);
+  else if (id == QLatin1String("survey_contour")) ic = bake(dSurveyContour);
   else if (id == QLatin1String("dark_mode")) ic = bake(dDark);
   else if (id == QLatin1String("polygon") || id == QLatin1String("survey_area")) ic = bake(dPolygon);
   else if (id == QLatin1String("line") || id == QLatin1String("feature_line")) ic = bake(dLine);

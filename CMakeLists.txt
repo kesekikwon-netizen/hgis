@@ -107,6 +107,12 @@ add_library(ka_core STATIC
   src/core/BasemapOps.cpp
   src/core/LabelOps.cpp
   src/core/ControlPointCsv.cpp
+  src/core/SurveyPointSchema.cpp
+  src/core/SurveyPointReader.cpp
+  src/core/SurveyContourBuilder.cpp
+  src/core/SurveyContourWrite.cpp
+  src/core/SurveyContourClip.cpp
+  src/core/SurveyContourStyle.cpp
   src/core/KaPortableRuntime.cpp
   src/core/DemColorRampLegend.cpp
   src/core/DemPresentation.cpp
@@ -312,6 +318,8 @@ add_executable(ka-hgis
   src/app/KaFoundLocationMark.cpp
   src/app/KaTrenchDialog.cpp
   src/app/KaDemClassDialog.cpp
+  src/app/KaSurveyContourDialog.cpp
+  src/app/MainWindowSurveyContour.cpp
   src/app/KaSurveyAreaDialog.cpp
   src/app/KaStatusBar.cpp
   src/app/KaCrashGuard.cpp
@@ -358,6 +366,7 @@ add_executable(ka-hgis
   src/app/KaFoundLocationMark.h
   src/app/KaTrenchDialog.h
   src/app/KaDemClassDialog.h
+  src/app/KaSurveyContourDialog.h
   src/app/KaStatusBar.h
   src/app/KaRegionLocator.h
   src/app/KaCrashGuard.h
@@ -485,6 +494,17 @@ if(KA_HGIS_BUILD_TESTS)
     target_compile_options(ka_dem_trench_tests PRIVATE /utf-8)
   endif()
   ka_add_qtest(dem_trench_engine ka_dem_trench_tests)
+
+  add_executable(ka_survey_contour_tests tests/test_survey_contour.cpp tests/test_survey_contour_clip.cpp)
+  target_link_libraries(ka_survey_contour_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_survey_contour_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_survey_contour_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_survey_contour_tests PRIVATE ${KA_TEST_DEFS})
+  if (MSVC)
+    target_compile_options(ka_survey_contour_tests PRIVATE /utf-8)
+  endif()
+  ka_add_qtest(survey_contour ka_survey_contour_tests)
+  set_tests_properties(survey_contour PROPERTIES TIMEOUT 180)
 
   add_executable(ka_section_layout_tests tests/test_section_layout.cpp)
   target_link_libraries(ka_section_layout_tests PRIVATE ${KA_TEST_LIBS})

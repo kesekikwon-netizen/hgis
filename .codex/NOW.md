@@ -1,4 +1,14 @@
 <!-- Recent window only. Older entries: docs/archive/NOW-before-2026-09-25.md -->
+## 2026-09-28 측량 등고선이 맞다
+
+- 사용자가 화면의 측량 등고선을 맞다고 확인했다. 이 남북 방향을 되돌리지 않는다.
+- `GDALGridCreate` 첫 줄은 남쪽(`dfYMin`)이다. 북쪽을 위로 두는 GeoTIFF에 쓰기 전에 `flipGridNorthUp`으로 줄을 뒤집는다. `SurveyContourWrite.cpp`.
+- 지도 X는 동쪽, Y는 북쪽. 엑셀 `x(N)`, `y(E)`, `z(h)`는 그 순서로 바꾼다. DXF 점 X·Y는 그대로 둔다. 점 Z가 전부 0인 CAD 레이어는 빼다.
+- 등고선은 조사구역 안에만 남긴다. 조사구역이 없으면 측량점 범위다.
+- `ctest --test-dir build -C Release -R '^survey_contour$'` 41.35초 통과. `northSlopeKeepsHighContoursNorth` 포함.
+- 이 판 포터블은 바탕화면 `HGIS-포터블-개인-20260928-등고선`. EXE SHA256 `7644655F1E7A44C796486ECE9BAA1AFCA48776C2B3087552F3FB014F06593CDC`. Release와 같음. verify 통과. 키·계정은 config에 있고 값은 기록하지 않음. 커밋·푸시 없음.
+- 이 실행 파일보다 먼저 만든 `측량등고선` 파일은 남북이 반대다. 맞는 그림은 이 판으로 다시 만든 것이다.
+
 ## 2026-09-27 최종 디자인 정리
 
 - 콤보·스핀: QSS 테두리가 QWindowsStyle로 넘겨 화살표가 없고 Win95 입체가 났다(qtbase 6.11 `QStyleSheetStyle` 확인). 필드 규칙에서 border를 빼고 `KaTheme::ChromeStyle`이 면·꺾쇠를 그린다. 탭 닫기 ✕도 스타일이 그린다. QSS `url()` 없음 유지.

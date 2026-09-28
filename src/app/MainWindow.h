@@ -186,6 +186,7 @@ private slots:
   void importDemElevationRaster();
   void runDemHillshade();
   void editDemElevationClasses();
+  void createSurveyContours();
   void startPaleoLandform();
   void startTrenchGrid();
   void placeTrenchGridAt(const QgsPointXY& origin);

@@ -1,0 +1,36 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Survey contours",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "file", "label": "File" },
+    { "id": "core", "label": "App" }
+  ],
+  "phases": [
+    { "id": "read", "label": "Read", "fromCol": 0, "toCol": 1 },
+    { "id": "grid", "label": "Grid", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "show", "label": "Legend", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["dxf", "points", "tin", "lines", "legend"],
+  "nodes": [
+    { "id": "dxf", "lane": "file", "col": 0, "type": "external", "label": "DXF Excel", "sublabel": "read only" },
+    { "id": "points", "lane": "core", "col": 1, "type": "backend", "label": "Points", "sublabel": "swap XY" },
+    { "id": "tin", "lane": "core", "col": 2, "type": "backend", "label": "TIN grid", "sublabel": "radius 0" },
+    { "id": "lines", "lane": "core", "col": 3, "type": "database", "label": "Contours", "sublabel": "0.1 m" },
+    { "id": "legend", "lane": "core", "col": 5, "type": "frontend", "label": "Legend", "sublabel": "color bands" }
+  ],
+  "edges": [
+    { "from": "dxf", "to": "points", "label": "OGR" },
+    { "from": "points", "to": "tin", "variant": "emphasis" },
+    { "from": "tin", "to": "lines", "label": "contour" },
+    { "from": "lines", "to": "legend", "label": "style" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Input", "items": ["POINT Z, headers"] },
+    { "dot": "emerald", "title": "Output", "items": ["gpkg and tif"] },
+    { "dot": "cyan", "title": "Keep", "items": ["Inside survey area"] }
+  ]
+}

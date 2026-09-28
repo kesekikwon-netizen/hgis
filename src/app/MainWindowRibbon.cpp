@@ -422,6 +422,8 @@ void MainWindow::buildMenus() {
                      this, &MainWindow::runDemHillshade);
   demMenu->addAction(KaIcons::icon(QStringLiteral("dem")), QStringLiteral("DEM 표현…"), this,
                      &MainWindow::editDemElevationClasses);
+  demMenu->addAction(KaIcons::icon(QStringLiteral("survey_contour")), QStringLiteral("측량점으로 등고선…"),
+                     this, &MainWindow::createSurveyContours);
   m_btnDem->setMenu(demMenu);
   m_btnDem->setContextMenuPolicy(Qt::CustomContextMenu);
   connect(m_btnDem, &QToolButton::customContextMenuRequested, this,
@@ -431,6 +433,14 @@ void MainWindow::buildMenus() {
     QTimer::singleShot(0, this, [this]() { syncThematicButtons(); });
   });
   ribbon->addWidget(QStringLiteral("basemap"), m_btnDem);
+  auto* contour = new QToolButton(ribbon);
+  contour->setObjectName(QStringLiteral("btnSurveyContour"));
+  contour->setIcon(KaIcons::icon(QStringLiteral("survey_contour")));
+  contour->setText(QStringLiteral("등고선"));
+  contour->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+  contour->setToolTip(QStringLiteral("측량 DXF·엑셀 좌표로 등고선과 해발 색 구간을 만듭니다"));
+  connect(contour, &QToolButton::clicked, this, &MainWindow::createSurveyContours);
+  ribbon->addWidget(QStringLiteral("basemap"), contour);
   m_btnSoil = new QToolButton(ribbon);
   m_btnSoil->setObjectName(QStringLiteral("btnSoil"));
   m_btnSoil->setIcon(KaIcons::icon(QStringLiteral("soil")));
