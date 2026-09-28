@@ -622,6 +622,28 @@ QFrame#studioOutputBar QToolButton#btnPrimary {
 }
 QFrame#studioOutputBar QToolButton#btnPrimary:enabled:hover { background: @accentHover@; }
 QFrame#studioOutputBar QToolButton#btnPrimary:enabled:pressed { background: @accentDeep@; }
+QFrame#itemInspector QToolButton#btnPrint,
+QFrame#itemInspector QToolButton#btnPrimary {
+  min-height: 34px;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: @ink@;
+  background: @surface@;
+  border: 1px solid @border@;
+  border-bottom: 2px solid @edgeDark@;
+  border-radius: 8px;
+}
+QFrame#itemInspector QToolButton#btnPrint:enabled:hover,
+QFrame#itemInspector QToolButton#btnPrimary:enabled:hover { background: @hoverBottom@; }
+QFrame#itemInspector QToolButton#btnPrimary {
+  color: @surface@;
+  background: @accent@;
+  border: 1px solid @accent@;
+  border-bottom: 2px solid @accentDeep@;
+  font-weight: 700;
+}
+QFrame#itemInspector QToolButton#btnPrimary:enabled:hover { background: @accentHover@; }
+QFrame#itemInspector QToolButton#btnPrimary:enabled:pressed { background: @accentDeep@; }
 QToolButton.sampleTile {
   /* Width comes from QWidget::setMinimumWidth. min-width:0 overrode it. */
   min-height: 0;

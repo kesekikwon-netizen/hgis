@@ -1397,19 +1397,40 @@ void KaDrawingStudio::buildUi() {
   auto* legendCap = new QLabel(QStringLiteral("조판 항목"), m_cardLegend);
   legendCap->setObjectName(QStringLiteral("cardCaption"));
   legendLay->addWidget(legendCap);
-  // 이 카드는 용지에 올릴 항목(범례)과 그 글자만 다룬다. 용지/방향은 용지 아래 도구 줄,
-  // PDF·인쇄는 오른쪽 칸 맨 아래 고정 줄에 하나씩만 둔다.
+  // 이 카드는 용지에 올릴 범례와, 그 옆의 PDF·인쇄를 둔다.
   auto* legendRow = new QHBoxLayout;
-  legendRow->setSpacing(14);
+  legendRow->setSpacing(8);
   auto* legendBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("layout_legend")),
                                  QStringLiteral("범례"), QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
   legendBtn->setToolTip(QStringLiteral("범례를 용지에 넣습니다. 넣은 뒤 끌어 옮깁니다"));
+  legendBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+  legendBtn->setFixedSize(legendBtn->sizeHint());
   connect(legendBtn, &QToolButton::clicked, this, [this]() {
     beginPlaceLegend();
     if (m_cardLegend) m_cardLegend->setFocus();
   });
+  auto makeOutput = [this](const QString& iconId, const QString& text, const QColor& ink) {
+    auto* b = new QToolButton(m_cardLegend);
+    b->setIcon(KaIcons::icon(iconId, ink));
+    b->setIconSize(QSize(20, 20));
+    b->setText(text);
+    b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    b->setCursor(Qt::PointingHandCursor);
+    return b;
+  };
+  auto* pdfBtn = makeOutput(QStringLiteral("pdf"), QStringLiteral("PDF 내보내기"), KaTheme::tokens().surface);
+  pdfBtn->setObjectName(QStringLiteral("btnPrimary"));
+  pdfBtn->setToolTip(QStringLiteral("지금 용지를 PDF 파일로 저장합니다"));
+  connect(pdfBtn, &QToolButton::clicked, this, &KaDrawingStudio::savePdf);
+  auto* printBtn = makeOutput(QStringLiteral("print"), QStringLiteral("인쇄"), KaTheme::tokens().ink);
+  printBtn->setObjectName(QStringLiteral("btnPrint"));
+  printBtn->setToolTip(QStringLiteral("프린터로 찍거나, 큰 도면을 작은 용지 여러 장으로 나눠 찍습니다 (Ctrl+P)"));
+  // Ctrl+P 는 창 전체의 「인쇄」 동작이 받는다. 여기에 또 두면 같은 키가 둘이라 둘 다 안 먹는다.
+  connect(printBtn, &QToolButton::clicked, this, &KaDrawingStudio::printDrawing);
   legendRow->addWidget(legendBtn);
-  legendRow->addStretch(1);
+  legendRow->addWidget(pdfBtn, 1);
+  legendRow->addWidget(printBtn, 1);
   legendLay->addLayout(legendRow);
   m_legendTitle = new QLineEdit(m_cardLegend);
   m_legendTitle->setPlaceholderText(QStringLiteral("제목을 입력하세요"));
@@ -1719,49 +1740,13 @@ void KaDrawingStudio::buildUi() {
   inspectorScroll->setMinimumWidth(std::max(260, inspectorMinWidth));
   inspectorScroll->setMaximumWidth(std::max(420, inspectorMinWidth));
 
-  // 출력은 오른쪽 칸 맨 아래에 붙박이로 둔다. 조판 항목 사이에 섞여 있으면 찾기 어렵다.
-  auto* inspectorColumn = new QWidget(root);
-  inspectorColumn->setObjectName(QStringLiteral("drawingInspectorColumn"));
-  auto* inspectorColumnLay = new QVBoxLayout(inspectorColumn);
-  inspectorColumnLay->setContentsMargins(0, 0, 0, 0);
-  inspectorColumnLay->setSpacing(0);
-  inspectorColumnLay->addWidget(inspectorScroll, 1);
-  auto* outputBar = new QFrame(inspectorColumn);
-  outputBar->setObjectName(QStringLiteral("studioOutputBar"));
-  auto* outputLay = new QHBoxLayout(outputBar);
-  outputLay->setContentsMargins(12, 10, 12, 10);
-  outputLay->setSpacing(8);
-  auto makeOutput = [outputBar](const QString& iconId, const QString& text, const QColor& ink) {
-    auto* b = new QToolButton(outputBar);
-    b->setIcon(KaIcons::icon(iconId, ink));
-    b->setIconSize(QSize(20, 20));
-    b->setText(text);
-    b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    b->setCursor(Qt::PointingHandCursor);
-    return b;
-  };
-  auto* pdfBtn = makeOutput(QStringLiteral("pdf"), QStringLiteral("PDF 내보내기"), KaTheme::tokens().surface);
-  pdfBtn->setObjectName(QStringLiteral("btnPrimary"));
-  pdfBtn->setToolTip(QStringLiteral("지금 용지를 PDF 파일로 저장합니다"));
-  connect(pdfBtn, &QToolButton::clicked, this, &KaDrawingStudio::savePdf);
-  auto* printBtn = makeOutput(QStringLiteral("print"), QStringLiteral("인쇄"), KaTheme::tokens().ink);
-  printBtn->setObjectName(QStringLiteral("btnPrint"));
-  printBtn->setToolTip(QStringLiteral("프린터로 찍거나, 큰 도면을 작은 용지 여러 장으로 나눠 찍습니다 (Ctrl+P)"));
-  // Ctrl+P 는 창 전체의 「인쇄」 동작이 받는다. 여기에 또 두면 같은 키가 둘이라 둘 다 안 먹는다.
-  connect(printBtn, &QToolButton::clicked, this, &KaDrawingStudio::printDrawing);
-  outputLay->addWidget(pdfBtn, 1);
-  outputLay->addWidget(printBtn, 1);
-  inspectorColumnLay->addWidget(outputBar);
-  inspectorColumn->setMinimumWidth(inspectorScroll->minimumWidth());
-  inspectorColumn->setMaximumWidth(inspectorScroll->maximumWidth());
   m_studioSplit = new QSplitter(Qt::Horizontal, root);
   m_studioSplit->setObjectName(QStringLiteral("studioMainSplit"));
   m_studioSplit->setHandleWidth(10);
   m_studioSplit->setChildrenCollapsible(false);
   m_studioSplit->addWidget(leftCol);
   m_studioSplit->addWidget(right);
-  m_studioSplit->addWidget(inspectorColumn);
+  m_studioSplit->addWidget(inspectorScroll);
   m_studioSplit->setStretchFactor(0, 0);
   m_studioSplit->setStretchFactor(1, 1);
   m_studioSplit->setStretchFactor(2, 0);
@@ -2552,6 +2537,8 @@ void KaDrawingStudio::showEvent(QShowEvent* event) {
     if (button->property("class").toString() != QLatin1String("sampleTile")) continue;
     button->ensurePolished();
     button->setMinimumWidth(std::max(button->minimumWidth(), button->sizeHint().width()));
+    if (button->height() < button->sizeHint().height())
+      button->setFixedHeight(button->sizeHint().height());
   }
   if (auto* scroll = findChild<QScrollArea*>(QStringLiteral("drawingInspectorScroll"))) {
     if (auto* side = scroll->widget()) {
