@@ -260,9 +260,11 @@ void MainWindow::buildMenus() {
   ribbon->addGroup(QStringLiteral("align"), QStringLiteral("정합"));
   ribbon->addGroup(QStringLiteral("out"), QStringLiteral("내보내기"));
   ribbon->addGroup(QStringLiteral("more"), QStringLiteral("기타"));
+  // 배경 지도는 접히면 무슨 단추인지 알 수 없다. 좁은 창에서도 리본에 남긴다.
   ribbon->setKeepPriority({QStringLiteral("survey"), QStringLiteral("out"), QStringLiteral("record"),
-                           QStringLiteral("align"), QStringLiteral("fetch"), QStringLiteral("basemap"),
+                           QStringLiteral("basemap"), QStringLiteral("align"), QStringLiteral("fetch"),
                            QStringLiteral("more")});
+  ribbon->setPinned({QStringLiteral("basemap"), QStringLiteral("fetch")});
 
   auto addIcon = [this, ribbon](const QString& group, const QString& iconId, const QString& text,
                                 const QString& tip, auto slot) -> QPair<QAction*, QToolButton*> {
@@ -374,8 +376,7 @@ void MainWindow::buildMenus() {
           &MainWindow::startTrenchGrid);
   trenchAdded.second->setObjectName(QStringLiteral("btnTrenchGrid"));
 
-  // Reference maps stay one click away on the ribbon. A narrow window folds the whole
-  // group into 「더 많은 작업」 (KaBeginnerRibbon::updateOverflow) instead of hiding it.
+  // 지형·DEM·토양·고지형·지질·수계·옛 지도는 리본에 그대로 둔다.
   m_btnTerrain = new QToolButton(ribbon);
   m_btnTerrain->setObjectName(QStringLiteral("btnTerrain"));
   m_btnTerrain->setIcon(KaIcons::icon(QStringLiteral("contour")));
@@ -630,34 +631,6 @@ void MainWindow::buildMenus() {
   });
   m_appBar->setRegionWidget(region);
 
-  auto* webBtn = new QToolButton(ribbon);
-  webBtn->setObjectName(QStringLiteral("btnWeb"));
-  webBtn->setIcon(KaIcons::icon(QStringLiteral("web")));
-  webBtn->setText(QStringLiteral("웹"));
-  webBtn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-  webBtn->setToolTip(QStringLiteral("인트라넷·토양도·지적도·지형도 웹 자료를 엽니다"));
-  webBtn->setPopupMode(QToolButton::InstantPopup);
-  auto* webMenu = new QMenu(webBtn);
-  auto addWeb = [this, webMenu](const QString& iconId, const QString& text, const QString& url) {
-    QAction* a = webMenu->addAction(KaIcons::icon(iconId), text);
-    QObject::connect(a, &QAction::triggered, this, [url]() {
-      QDesktopServices::openUrl(QUrl(url));
-    });
-  };
-  addWeb(QStringLiteral("upload"), QStringLiteral("문화재 GIS 인트라넷"),
-         QStringLiteral("https://intranet.gis-heritage.go.kr/"));
-  addWeb(QStringLiteral("layer"), QStringLiteral("농진청 토양도"),
-         QStringLiteral("http://soil.rda.go.kr/geoweb/soilmain.do"));
-  addWeb(QStringLiteral("cadastral"), QStringLiteral("VWorld 지적도 자료"),
-         QStringLiteral("https://www.vworld.kr/dtmk/dtmk_ntads_s002.do?dsId=30563"));
-  addWeb(QStringLiteral("contour"), QStringLiteral("국토정보맵 지형도"),
-         QStringLiteral("https://map.ngii.go.kr/ms/map/NlipMap.do"));
-  webMenu->addSeparator();
-  webMenu->addAction(KaIcons::icon(QStringLiteral("layer")),
-                     QStringLiteral("토양도 SHP 불러오기(흙토람 다운로드)…"), this,
-                     &MainWindow::importSoilShapefile);
-  webBtn->setMenu(webMenu);
-
   auto* more = new QToolButton(ribbon);
   more->setIcon(KaIcons::icon(QStringLiteral("more")));
   more->setText(QStringLiteral("더보기"));
@@ -696,9 +669,28 @@ void MainWindow::buildMenus() {
   moreMenu->addAction(QStringLiteral("수치지형도 아이디·비밀번호"), this, &MainWindow::configureTopographicAccount);
   moreMenu->addAction(QStringLiteral("국가유산 인트라넷 아이디·비밀번호"), this, &MainWindow::configureHeritageAccount);
   moreMenu->addAction(QStringLiteral("정보"), this, &MainWindow::showAbout);
+  auto* webMenu = moreMenu->addMenu(KaIcons::icon(QStringLiteral("web")), QStringLiteral("웹 자료"));
+  webMenu->menuAction()->setObjectName(QStringLiteral("actionWebSources"));
+  auto addWeb = [this, webMenu](const QString& iconId, const QString& text, const QString& url) {
+    QAction* action = webMenu->addAction(KaIcons::icon(iconId), text);
+    QObject::connect(action, &QAction::triggered, this, [url]() {
+      QDesktopServices::openUrl(QUrl(url));
+    });
+  };
+  addWeb(QStringLiteral("upload"), QStringLiteral("문화재 GIS 인트라넷"),
+         QStringLiteral("https://intranet.gis-heritage.go.kr/"));
+  addWeb(QStringLiteral("layer"), QStringLiteral("농진청 토양도"),
+         QStringLiteral("http://soil.rda.go.kr/geoweb/soilmain.do"));
+  addWeb(QStringLiteral("cadastral"), QStringLiteral("VWorld 지적도 자료"),
+         QStringLiteral("https://www.vworld.kr/dtmk/dtmk_ntads_s002.do?dsId=30563"));
+  addWeb(QStringLiteral("contour"), QStringLiteral("국토정보맵 지형도"),
+         QStringLiteral("https://map.ngii.go.kr/ms/map/NlipMap.do"));
+  webMenu->addSeparator();
+  webMenu->addAction(KaIcons::icon(QStringLiteral("layer")),
+                     QStringLiteral("토양도 SHP 불러오기(흙토람 다운로드)…"), this,
+                     &MainWindow::importSoilShapefile);
   more->setMenu(moreMenu);
   more->setPopupMode(QToolButton::InstantPopup);
-  ribbon->addWidget(QStringLiteral("fetch"), webBtn);
   ribbon->addWidget(QStringLiteral("more"), more);
   syncRecordTools();
   mainTb->addWidget(ribbon);

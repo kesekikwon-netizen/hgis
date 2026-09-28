@@ -20,7 +20,7 @@
     { "id": "search", "lane": "bar", "col": 0, "type": "frontend", "label": "Search", "sublabel": "KaAppBar" },
     { "id": "chips", "lane": "bar", "col": 1, "type": "frontend", "label": "Region", "sublabel": "KaRegionLocator" },
     { "id": "locate", "lane": "map", "col": 1, "type": "backend", "label": "Locate", "sublabel": "searchLocation" },
-    { "id": "gallery", "lane": "ribbon", "col": 2, "type": "frontend", "label": "Gallery", "sublabel": "KaBasemapGallery" },
+    { "id": "gallery", "lane": "ribbon", "col": 2, "type": "frontend", "label": "Basemap", "sublabel": "ribbon chips" },
     { "id": "toggle", "lane": "ribbon", "col": 3, "type": "backend", "label": "Map toggles", "sublabel": "same buttons" },
     { "id": "fit", "lane": "map", "col": 4, "type": "frontend", "label": "Controls", "sublabel": "KaMapControls" },
     { "id": "survey", "lane": "map", "col": 5, "type": "backend", "label": "Survey fit", "sublabel": "zoomToLayerMax" }
@@ -29,13 +29,13 @@
     { "from": "search", "to": "locate", "label": "lot or address", "variant": "emphasis" },
     { "from": "chips", "to": "locate" },
     { "from": "locate", "to": "gallery" },
-    { "from": "gallery", "to": "toggle", "label": "opens panel" },
+    { "from": "gallery", "to": "toggle", "label": "on the ribbon" },
     { "from": "toggle", "to": "fit" },
     { "from": "fit", "to": "survey", "label": "맞춤" }
   ],
   "cards": [
     { "dot": "rose", "title": "Was", "items": ["17 chips and 10 map buttons filled the ribbon"] },
-    { "dot": "emerald", "title": "Now", "items": ["One search bar and one gallery button"] },
+    { "dot": "emerald", "title": "Now", "items": ["Map and download buttons stay on the ribbon"] },
     { "dot": "cyan", "title": "Keep", "items": ["Every step stays on one ribbon row"] }
   ]
 }

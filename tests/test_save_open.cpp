@@ -951,7 +951,14 @@ private slots:
     QVERIFY(inGroup(QStringLiteral("record"), window.findChild<QToolButton*>(QStringLiteral("btnBuffer"))));
     QVERIFY(inGroup(QStringLiteral("fetch"), window.findChild<QToolButton*>(QStringLiteral("btnHeritageFetch"))));
     QVERIFY(inGroup(QStringLiteral("fetch"), window.findChild<QToolButton*>(QStringLiteral("btnTopographic"))));
-    QVERIFY(inGroup(QStringLiteral("fetch"), window.findChild<QToolButton*>(QStringLiteral("btnWeb"))));
+    QVERIFY(inGroup(QStringLiteral("basemap"), window.findChild<QToolButton*>(QStringLiteral("btnSurveyContour"))));
+    QVERIFY(!window.findChild<QToolButton*>(QStringLiteral("btnWeb")));
+    QToolButton* more = nullptr;
+    for (auto* button : window.findChildren<QToolButton*>()) {
+      if (button->text() == QStringLiteral("더보기")) more = button;
+    }
+    QVERIFY(more && more->menu());
+    QVERIFY(more->menu()->findChild<QAction*>(QStringLiteral("actionWebSources")));
     QToolButton* cadastral = nullptr;
     for (auto* button : window.findChildren<QToolButton*>()) {
       if (button->defaultAction() &&
@@ -963,7 +970,7 @@ private slots:
     QVERIFY(inGroup(QStringLiteral("out"), window.findChild<QToolButton*>(QStringLiteral("btnRibbonPrint"))));
   }
   void narrowWindowKeepsDrawingAndPrintVisible() {
-    for (const int width : {1280, 1536}) {
+    for (const int width : {1280, 1536, 1920}) {
       MainWindow window;
       disableRendering(window);
       window.resize(width, 800);
@@ -975,16 +982,37 @@ private slots:
       auto* print = window.findChild<QToolButton*>(QStringLiteral("btnRibbonPrint"));
       QVERIFY(ribbon && save && draw && print);
       QVERIFY2(save->isVisible() && draw->isVisible() && print->isVisible(),
-               qPrintable(QStringLiteral("%1 폭(창 %2, 리본 %3)에서 저장·그리기·인쇄가 보이지 않는다")
+               qPrintable(QStringLiteral("%1 폭(창 %2, 리본 %3)에서 저장 %4 그리기 %5 인쇄 %6")
                               .arg(width)
                               .arg(window.width())
-                              .arg(ribbon->width())));
+                              .arg(ribbon->width())
+                              .arg(save->isVisible())
+                              .arg(draw->isVisible())
+                              .arg(print->isVisible())));
       auto* basemap = ribbon->group(QStringLiteral("basemap"));
       QVERIFY(basemap);
-      QVERIFY2(basemap->parentWidget() != ribbon,
-               qPrintable(QStringLiteral("%1 폭에서 배경 지도가 리본에 남아 있다").arg(width)));
-      auto* folded = window.findChild<QMenu*>(QStringLiteral("ribbonOverflowGroup_basemap"));
-      QVERIFY(folded && folded->menuAction()->isVisible());
+      if (width >= 1920) {
+        auto* fetch = ribbon->group(QStringLiteral("fetch"));
+        QVERIFY(fetch);
+        QString placed;
+        for (const QString& id : {QStringLiteral("survey"), QStringLiteral("out"), QStringLiteral("record"),
+                                  QStringLiteral("basemap"), QStringLiteral("fetch"), QStringLiteral("align"),
+                                  QStringLiteral("more")}) {
+          auto* group = ribbon->group(id);
+          placed += QStringLiteral("%1:%2/%3 ")
+                        .arg(id)
+                        .arg(group && group->parentWidget() == ribbon ? QStringLiteral("in") : QStringLiteral("out"))
+                        .arg(group ? group->sizeHint().width() : -1);
+        }
+        QVERIFY2(basemap->parentWidget() == ribbon && fetch->parentWidget() == ribbon,
+                 qPrintable(QStringLiteral("%1 ribbon %2 %3").arg(width).arg(ribbon->width()).arg(placed)));
+        for (const char* name : {"btnTerrain", "btnDem", "btnSurveyContour", "btnSoil", "btnPaleo",
+                                 "btnOldMaps", "btnHeritageFetch", "btnTopographic"}) {
+          auto* button = window.findChild<QToolButton*>(QLatin1String(name));
+          QVERIFY2(button && button->isVisible(),
+                   qPrintable(QStringLiteral("%1 폭에서 %2가 리본에 없다").arg(width).arg(QLatin1String(name))));
+        }
+      }
       const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
       if (!output.isEmpty() && width == 1280) {
         QVERIFY(QDir().mkpath(output));

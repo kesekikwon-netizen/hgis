@@ -178,6 +178,11 @@ void KaBeginnerRibbon::setKeepPriority(const QStringList& ids) {
   updateOverflow();
 }
 
+void KaBeginnerRibbon::setPinned(const QStringList& ids) {
+  m_pinned = ids;
+  updateOverflow();
+}
+
 QList<QToolButton*> KaBeginnerRibbon::tabButtons() const {
   QList<QToolButton*> out;
   for (const QString& id : m_groupOrder) {
@@ -247,7 +252,6 @@ void KaBeginnerRibbon::updateOverflow() {
   const bool overflow = sizeHint().width() > width();
   const auto margins = m_row->contentsMargins();
   int available = width() - margins.left() - margins.right();
-  if (overflow) available -= m_overflow->sizeHint().width() + m_row->spacing();
   // 남길 묶음은 우선순위대로 고르고, 화면에는 addGroup 순서로 놓는다.
   const QStringList priority = m_keepPriority.isEmpty() ? m_groupOrder : m_keepPriority;
   QStringList visible;
@@ -258,6 +262,46 @@ void KaBeginnerRibbon::updateOverflow() {
       visible.append(id);
       available -= needed;
     }
+  }
+  const QStringList keepOnRibbon = {QStringLiteral("survey"), QStringLiteral("out"),
+                                    QStringLiteral("record")};
+  for (const QString& id : m_pinned) {
+    if (!m_groups.contains(id) || visible.contains(id)) continue;
+    const int needed = m_groups.value(id)->sizeHint().width() + m_row->spacing();
+    while (needed > available) {
+      int drop = -1;
+      for (int i = visible.size() - 1; i >= 0; --i) {
+        const QString candidate = visible.at(i);
+        if (keepOnRibbon.contains(candidate) || m_pinned.contains(candidate)) continue;
+        drop = i;
+        break;
+      }
+      if (drop < 0) break;
+      available += m_groups.value(visible.at(drop))->sizeHint().width() + m_row->spacing();
+      visible.removeAt(drop);
+    }
+    if (needed <= available) {
+      visible.append(id);
+      available -= needed;
+    }
+  }
+  bool anyHidden = false;
+  for (const QString& id : m_groupOrder) {
+    if (m_groups.contains(id) && !visible.contains(id)) anyHidden = true;
+  }
+  if (anyHidden)
+    available -= m_overflow->sizeHint().width() + m_row->spacing();
+  while (anyHidden && available < 0) {
+    int drop = -1;
+    for (int i = visible.size() - 1; i >= 0; --i) {
+      const QString candidate = visible.at(i);
+      if (keepOnRibbon.contains(candidate) || m_pinned.contains(candidate)) continue;
+      drop = i;
+      break;
+    }
+    if (drop < 0) break;
+    available += m_groups.value(visible.at(drop))->sizeHint().width() + m_row->spacing();
+    visible.removeAt(drop);
   }
   for (const auto& id : m_groupOrder) {
     auto* frame = m_groups.value(id);
