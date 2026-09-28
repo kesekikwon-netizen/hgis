@@ -3007,8 +3007,7 @@ void MainWindow::onLocationResults(const QVector<LocationHit>& hits) {
     zoomToLocation(hits.at(idx));
 }
 
-// 찾은 자리를 십자 표식으로 남긴다. 다음 검색이 오면 그 자리로 옮긴다.
-// 조사 도메인이 아니라 화면 표시일 뿐이라 레이어로 만들지 않는다.
+// 핀과 이름표를 지운다. 검색은 지도만 옮기고 이 표식을 다시 그리지 않는다.
 void MainWindow::markFoundLocation(const QgsPointXY& mapPt, const QString& title) {
 #if KA_HGIS_HAS_QGIS
   if (!m_canvas) return;
@@ -3035,6 +3034,7 @@ void MainWindow::clearFoundLocationMark() {
 
 void MainWindow::zoomToLocation(const LocationHit& hit) {
 #if KA_HGIS_HAS_QGIS
+  clearFoundLocationMark();
   if (!m_canvas) return;
   double lon = hit.lon;
   double lat = hit.lat;
@@ -3077,7 +3077,6 @@ void MainWindow::zoomToLocation(const LocationHit& hit) {
     if (!localParcel && !useBounds && m_canvas->scale() > 8000.0)
       m_canvas->zoomScale(3000.0, true);
     LayerOps::clampCanvasToKorea(m_canvas);
-    markFoundLocation(p, hit.title);
     LayerOps::refreshCanvasIfIdle(m_canvas);
     statusBar()->showMessage(
         QStringLiteral("이동: %1  (lon %2, lat %3 → %4)")

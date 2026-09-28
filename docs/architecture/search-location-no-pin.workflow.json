@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Search moves map",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "user", "label": "Search" },
+    { "id": "map", "label": "Map" }
+  ],
+  "phases": [
+    { "id": "ask", "label": "Query", "fromCol": 0, "toCol": 1 },
+    { "id": "go", "label": "Move", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "stay", "label": "View", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["query", "hit", "extent", "clear"],
+  "nodes": [
+    { "id": "query", "lane": "user", "col": 0, "type": "external", "label": "Place name", "sublabel": "search" },
+    { "id": "hit", "lane": "map", "col": 1, "type": "backend", "label": "Coordinate", "sublabel": "EPSG transform" },
+    { "id": "extent", "lane": "map", "col": 2, "type": "frontend", "label": "Map extent", "sublabel": "zoomToLocation" },
+    { "id": "clear", "lane": "map", "col": 4, "type": "frontend", "label": "No pin", "sublabel": "clear mark" }
+  ],
+  "edges": [
+    { "from": "query", "to": "hit", "label": "hit" },
+    { "from": "hit", "to": "extent", "variant": "emphasis" },
+    { "from": "extent", "to": "clear", "label": "no marker" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Was", "items": ["Pin stayed on the map"] },
+    { "dot": "emerald", "title": "Now", "items": ["Extent only"] },
+    { "dot": "cyan", "title": "Code", "items": ["MainWindow.cpp 3037"] }
+  ]
+}
