@@ -10,6 +10,7 @@
 #include <QList>
 
 class QgsMapCanvas;
+class QgsMapLayer;
 class QgsVectorLayer;
 class QgsRubberBand;
 class KaVertexEditTool;
@@ -52,6 +53,7 @@ private:
   void handleContextMenu(QgsMapMouseEvent* e);
   void selectAtPoint(const QgsPointXY& mapPt, bool addToSelection);
   void selectInRect(const QgsRectangle& mapRect, bool addToSelection);
+  QList<QgsMapLayer*> pickableLayers() const;
   // 도형 하나만 골랐으면 그 도형의 수정점을 띄운다. 여러 개면 지운다.
   void syncVertexTarget();
 

@@ -2344,6 +2344,19 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
       redoLastAction();
       return true;
     }
+    // A = 도형선택. 그리던 점이 남아 있거나 줄자·맞추기처럼 글쇠를 직접 쓰는 도구가 켜져
+    // 있으면 건드리지 않는다. 이미 도형선택이면 그대로 둔다(다시 눌러도 꺼지지 않는다).
+    if (ke && ke->modifiers() == Qt::NoModifier && !ke->isAutoRepeat() &&
+        (ke->key() == Qt::Key_A || ke->nativeVirtualKey() == 0x41)) {
+      QgsMapTool* tool = m_canvas->mapTool();
+      if (m_featureSelectTool && tool == m_featureSelectTool) return true;
+      const bool idle = !tool || tool == m_panTool ||
+                        (m_captureTool && tool == m_captureTool && m_captureTool->pointCount() == 0);
+      if (idle && m_subToolsMode != QLatin1String("align")) {
+        startSelectTool();
+        return true;
+      }
+    }
   }
   if (onCanvas && event->type() == QEvent::MouseButtonDblClick) {
     const bool capturing = m_captureTool && m_canvas->mapTool() == m_captureTool;

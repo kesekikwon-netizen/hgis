@@ -25,6 +25,7 @@ class QComboBox;
 class QCheckBox;
 class QDoubleSpinBox;
 class QEvent;
+class QUndoCommand;
 class KaAboveLabelsOverlay;
 class KaLayerOpacityRail;
 class KaReferenceDownloadJob;
@@ -42,6 +43,9 @@ class QFrame;
 class ChecklistEngine;
 class KaStatusBar;
 class KaBeginnerRibbon;
+namespace PolygonErase {
+struct Plan;
+}
 #if KA_HGIS_HAS_QGIS
 #include <qgsfeature.h>
 class QgsMapCanvas;
@@ -155,6 +159,8 @@ private slots:
   void startEasyDraw();
   void mergeFeaturePolygons();
   void clipOverlappingLayers();
+  // 위에 그린 면 모양대로 아래 면에서 그 자리만 지운다(겹친 곳 지우기).
+  void eraseOverlapWithShape();
   void startSplitPolygonTool();
   void onWorkControlClicked(QListWidgetItem* item);
   void refreshWorkPanel();
@@ -555,6 +561,31 @@ private:
   };
   QVector<KaUndoAction> m_undoActions;
   QSet<QString> m_undoObservedLayers;
+  // 여러 레이어를 한 번에 고친 편집(겹친 곳 지우기). 되돌리기 기록은 레이어마다 따로라서,
+  // 묶어 두지 않으면 Ctrl+Z 한 번에 반만 돌아온다.
+  struct KaLinkedEdit {
+    struct Step {
+      QString layerId;
+      int index = 0;                          // 그 편집 직후의 되돌리기 위치
+      const QUndoCommand* command = nullptr;  // 그 편집이 아직 그 자리에 있는지 확인하는 데 쓴다
+      QString text;
+    };
+    QVector<Step> steps;
+  };
+  QVector<KaLinkedEdit> m_linkedEdits;
+  QVector<KaLinkedEdit> m_linkedRedos;
+  // 계획대로 지우고 결과를 알린다. 지웠으면 true.
+  bool runErasePlan(const PolygonErase::Plan& plan);
+  // 같은 레이어의 도형 위에 겹쳐 그렸으면 그 자리에 선택창(겹친 곳 지우기 / 그대로 두기)을 띄운다.
+  // 지웠으면 true.
+  bool offerEraseWithDrawnShape(QgsVectorLayer* layer, QgsFeatureId fid);
+  void forgetStaleLinkedEdits();
+  void rememberLinkedEdit(const QList<QPointer<QgsVectorLayer>>& layers);
+  bool undoLinkedEdit(QgsVectorLayer* layer);
+  bool redoLinkedEdit(QgsVectorLayer* layer);
+  // 방금 그린 면. 「겹친 곳 지우기」를 아무것도 고르지 않고 누르면 이 면을 골라 보여 준다.
+  QPointer<QgsVectorLayer> m_lastDrawnLayer;
+  QgsFeatureId m_lastDrawnFid = FID_NULL;
   QPointer<QProgressDialog> m_boundaryProgress;
   QPointer<QProgressDialog> m_searchProgress;
 #endif

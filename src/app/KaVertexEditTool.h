@@ -49,7 +49,7 @@ public:
   // 요구에 맞춰, 선택 도구가 이 기능들을 그대로 불러 쓴다.
   void setTarget(QgsVectorLayer* layer, QgsFeatureId fid);
   void clearTarget();
-  bool hasTarget() const { return !m_layer.isNull() && m_fid >= 0; }
+  bool hasTarget() const { return !m_layer.isNull() && !FID_IS_NULL(m_fid); }
   void showVertexMarkers();
   // 끄는 동안 화면만 미리 보여 준다. 저장은 놓을 때 moveVertexTo 에서 한 번.
   void previewVertexMove(int index, const QgsPointXY& toLayerPt);
@@ -81,7 +81,7 @@ private:
   bool applyGeometryChange(QgsGeometry geom, const QString& commandText);
 
   QPointer<QgsVectorLayer> m_layer;
-  QgsFeatureId m_fid = -1;
+  QgsFeatureId m_fid = FID_NULL;
   QgsRubberBand* m_outline = nullptr;
   QVector<QgsVertexMarker*> m_marks;
   int m_dragIndex = -1;

@@ -20,6 +20,7 @@
 #include <qgsrubberband.h>
 #include <qgssnappingutils.h>
 #include <qgsvectorlayer.h>
+#include <qgsvertexid.h>
 #include <qgsvertexmarker.h>
 #include <qgswkbtypes.h>
 
@@ -48,7 +49,7 @@ void KaVertexEditTool::setTarget(QgsVectorLayer* layer, QgsFeatureId fid) {
   clearSelection();
   m_layer = layer;
   m_fid = fid;
-  if (m_layer && m_fid >= 0) showVertexMarkers();
+  if (m_layer && !FID_IS_NULL(m_fid)) showVertexMarkers();
 }
 
 void KaVertexEditTool::clearTarget() {
@@ -59,13 +60,10 @@ void KaVertexEditTool::previewVertexMove(int index, const QgsPointXY& toLayerPt)
   if (index < 0) return;
   QgsGeometry geom = selectedGeometry();
   if (geom.isNull()) return;
-  const int count = geom.constGet() ? static_cast<int>(geom.constGet()->nCoordinates()) : 0;
+  // 면의 첫 점과 닫는 점은 같은 자리여야 한다. 하나를 옮기면 같은 고리의 짝도 옮긴다.
+  const int partner = LayerOps::ringClosingVertex(geom, index);
   geom.moveVertex(toLayerPt.x(), toLayerPt.y(), index);
-  // 면의 첫 점과 닫는 점은 같은 자리여야 한다. 하나를 옮기면 짝도 옮긴다.
-  if (geom.type() == Qgis::GeometryType::Polygon && count > 1) {
-    if (index == 0) geom.moveVertex(toLayerPt.x(), toLayerPt.y(), count - 1);
-    if (index == count - 1) geom.moveVertex(toLayerPt.x(), toLayerPt.y(), 0);
-  }
+  if (partner >= 0) geom.moveVertex(toLayerPt.x(), toLayerPt.y(), partner);
   refreshRubber(geom);
   if (index < m_marks.size() && m_marks[index])
     m_marks[index]->setCenter(toMap(toLayerPt));
@@ -120,7 +118,7 @@ double KaVertexEditTool::layerTolerance(int px) const {
 }
 
 QgsGeometry KaVertexEditTool::selectedGeometry() const {
-  if (!m_layer || m_fid < 0) return QgsGeometry();
+  if (!m_layer || FID_IS_NULL(m_fid)) return QgsGeometry();
   QgsFeature f;
   if (!m_layer->getFeatures(QgsFeatureRequest(m_fid)).nextFeature(f)) return QgsGeometry();
   return f.geometry();
@@ -133,7 +131,9 @@ void KaVertexEditTool::clearSelection() {
     delete m_outline;
     m_outline = nullptr;
   }
-  m_fid = -1;
+  // 없음은 FID_NULL 로 적는다. 그려 놓고 아직 저장하지 않은 도형은 번호가 음수라서,
+  // 음수를 「없음」으로 읽으면 그런 도형은 수정점이 나오지 않는다.
+  m_fid = FID_NULL;
   m_dragIndex = -1;
   m_dragging = false;
 }
@@ -245,7 +245,7 @@ void KaVertexEditTool::selectAt(const QgsPointXY& mapPt_) {
     return;
   }
   QgsVectorLayer* hitLayer = nullptr;
-  QgsFeatureId hit = -1;
+  QgsFeatureId hit = FID_NULL;
   double bestD = std::numeric_limits<double>::max();
   for (QgsVectorLayer* layer : layers) {
     m_layer = layer;
@@ -267,7 +267,7 @@ void KaVertexEditTool::selectAt(const QgsPointXY& mapPt_) {
       }
     }
   }
-  if (hit < 0 || !hitLayer) {
+  if (FID_IS_NULL(hit) || !hitLayer) {
     if (layers.size() == 1) m_layer = layers.first();
     clearSelection();
     emit statusMessage(QStringLiteral("도형을 찾지 못했습니다. 선이나 면 위를 클릭하세요."));
@@ -283,7 +283,7 @@ void KaVertexEditTool::selectAt(const QgsPointXY& mapPt_) {
 
 bool KaVertexEditTool::moveVertexTo(int index, const QgsPointXY& to) {
   m_lastEditError.clear();
-  if (!m_layer || m_fid < 0 || index < 0) return false;
+  if (!m_layer || FID_IS_NULL(m_fid) || index < 0) return false;
   QgsFeature before;
   if (!m_layer->getFeatures(QgsFeatureRequest(m_fid)).nextFeature(before)) {
     m_lastEditError = QStringLiteral("수정할 도형을 찾지 못했습니다. 도형을 다시 선택하세요.");
@@ -306,10 +306,14 @@ bool KaVertexEditTool::moveVertexTo(int index, const QgsPointXY& to) {
 
 bool KaVertexEditTool::deleteVertexAt(int index) {
   m_lastEditError.clear();
-  if (!m_layer || m_fid < 0 || index < 0) return false;
+  if (!m_layer || FID_IS_NULL(m_fid) || index < 0) return false;
   QgsGeometry geom = selectedGeometry();
   if (geom.isNull() || !geom.constGet()) return false;
-  const int count = static_cast<int>(geom.constGet()->nCoordinates());
+  // 구멍이 있는 면은 점이 든 고리 하나만 센다. 전체로 세면 세모난 바깥 고리에서도 점이 지워진다.
+  QgsVertexId ring;
+  const int count = geom.vertexIdFromVertexNr(index, ring)
+                        ? geom.constGet()->vertexCount(ring.part, ring.ring)
+                        : static_cast<int>(geom.constGet()->nCoordinates());
   // 면은 닫는 점을 빼고 3점, 선은 2점이 최소다. 그 아래로는 도형이 깨진다.
   const int minCount = geom.type() == Qgis::GeometryType::Polygon ? 5 : 3;
   if (count < minCount) {
@@ -324,7 +328,7 @@ bool KaVertexEditTool::deleteVertexAt(int index) {
 
 bool KaVertexEditTool::insertVertexAt(int index, const QgsPointXY& at) {
   m_lastEditError.clear();
-  if (!m_layer || m_fid < 0 || index < 0) return false;
+  if (!m_layer || FID_IS_NULL(m_fid) || index < 0) return false;
   QgsGeometry geom = selectedGeometry();
   if (geom.isNull()) return false;
   if (!geom.insertVertex(at.x(), at.y(), index)) return false;
@@ -360,13 +364,13 @@ bool KaVertexEditTool::applyGeometryChange(QgsGeometry geom, const QString& comm
 void KaVertexEditTool::showLineVertexMenu(QgsMapMouseEvent* e) {
   if (!e || !m_layer || !mCanvas) return;
   const QgsPointXY mapPt = snapMapPoint(e);
-  if (m_fid < 0)
+  if (FID_IS_NULL(m_fid))
     selectAt(mapPt);
   const int vIdx = vertexNear(mapPt, 20);
   QgsPointXY onLine;
   const int segAfter = segmentNear(mapPt, &onLine, 16);
   const int nearDel = vIdx >= 0 ? vIdx : vertexNear(mapPt, 28);
-  if (m_fid < 0 && vIdx < 0 && segAfter < 0) {
+  if (FID_IS_NULL(m_fid) && vIdx < 0 && segAfter < 0) {
     emit statusMessage(QStringLiteral("선이나 면 위에서 우클릭하세요."));
     return;
   }
@@ -374,8 +378,8 @@ void KaVertexEditTool::showLineVertexMenu(QgsMapMouseEvent* e) {
   QMenu menu;
   QAction* addAct = menu.addAction(QStringLiteral("점추가"));
   QAction* delAct = menu.addAction(QStringLiteral("점삭제"));
-  addAct->setEnabled(m_fid >= 0 && segAfter >= 0);
-  delAct->setEnabled(m_fid >= 0 && nearDel >= 0);
+  addAct->setEnabled(!FID_IS_NULL(m_fid) && segAfter >= 0);
+  delAct->setEnabled(!FID_IS_NULL(m_fid) && nearDel >= 0);
   QAction* chosen = menu.exec(mCanvas->mapToGlobal(e->pos()));
   if (!chosen) return;
   if (chosen == addAct && segAfter >= 0 && insertVertexAt(segAfter, onLine)) {
@@ -399,7 +403,7 @@ void KaVertexEditTool::canvasPressEvent(QgsMapMouseEvent* e) {
   }
   if (e->button() != Qt::LeftButton) return;
 
-  if (m_fid >= 0) {
+  if (!FID_IS_NULL(m_fid)) {
     const int idx = vertexNear(mapPt, 20);
     if (idx >= 0) {
       m_dragIndex = idx;
@@ -434,7 +438,7 @@ void KaVertexEditTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
 }
 
 void KaVertexEditTool::canvasDoubleClickEvent(QgsMapMouseEvent* e) {
-  if (!e || m_fid < 0 || e->button() != Qt::LeftButton) return;
+  if (!e || FID_IS_NULL(m_fid) || e->button() != Qt::LeftButton) return;
   QgsPointXY onLine;
   const int after = segmentNear(snapMapPoint(e), &onLine);
   if (after < 0) return;
@@ -452,7 +456,7 @@ void KaVertexEditTool::keyPressEvent(QKeyEvent* e) {
     return;
   }
   if (e->key() != Qt::Key_Delete && e->key() != Qt::Key_Backspace) return;
-  if (m_fid < 0 || !mCanvas) return;
+  if (FID_IS_NULL(m_fid) || !mCanvas) return;
   // 마우스가 얹힌 꼭짓점을 지운다.
   const QPoint cursor = mCanvas->mapFromGlobal(QCursor::pos());
   const QgsPointXY mapPt = mCanvas->getCoordinateTransform()->toMapCoordinates(cursor);

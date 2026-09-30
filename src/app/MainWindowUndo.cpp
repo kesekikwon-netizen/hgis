@@ -310,7 +310,7 @@ void MainWindow::undoMapAction() {
   }
   auto* project = QgsProject::instance();
   if (auto* layer = LayerOps::preferredUndoLayer(project, preferredMapLayer(this, m_layerTree, m_editLayer))) {
-    if (LayerOps::undoLayerEdits(layer)) {
+    if (undoLinkedEdit(layer) || LayerOps::undoLayerEdits(layer)) {
       project->setDirty(true);
       if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
       if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
@@ -424,7 +424,7 @@ void MainWindow::redoMapAction() {
   if (editingText() || m_isOpeningSurvey || m_closingWindow) return;
   auto* project = QgsProject::instance();
   if (auto* layer = LayerOps::preferredRedoLayer(project, preferredMapLayer(this, m_layerTree, m_editLayer))) {
-    if (LayerOps::redoLayerEdits(layer)) {
+    if (redoLinkedEdit(layer) || LayerOps::redoLayerEdits(layer)) {
       project->setDirty(true);
       if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
       if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);

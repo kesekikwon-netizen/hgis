@@ -908,6 +908,14 @@ void MainWindow::showSubToolsDraw() {
                                           this, &MainWindow::clipOverlappingLayers);
   clipAct->setToolTip(QStringLiteral(
       "겹쳐 있는 두 레이어에서 겹치는 구간만 새 레이어로 떼어 냅니다. 원본은 그대로 남습니다."));
+  auto* eraseAct = m_subToolbar->addAction(QStringLiteral("겹친 곳 지우기"),
+                                           this, &MainWindow::eraseOverlapWithShape);
+  eraseAct->setObjectName(QStringLiteral("actEraseOverlap"));
+  eraseAct->setToolTip(QStringLiteral(
+      "위에 그린 도형 모양대로 아래 도형에서 그 자리만 지웁니다(클립).\n"
+      "쓰는 법: 같은 레이어의 도형 위에 겹쳐 그리고 우클릭으로 마치면 선택창에서 고를 수 있습니다.\n"
+      "이미 그린 도형은 [도형선택](A)으로 고른 뒤 이 단추를 누릅니다.\n"
+      "아래 도형에 구멍이 나고 위에 그린 도형은 없어집니다. Ctrl+Z로 되돌립니다."));
   auto* closeAct = m_subToolbar->addAction(QStringLiteral("닫기"));
   closeAct->setToolTip(QStringLiteral("그리기 도구 모음을 닫고 지도 이동으로 돌아갑니다"));
   connect(closeAct, &QAction::triggered, this, &MainWindow::hideSubTools);

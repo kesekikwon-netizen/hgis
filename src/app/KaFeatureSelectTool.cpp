@@ -2,6 +2,7 @@
 #include "KaFeatureSelectTool.h"
 
 #include "KaVertexEditTool.h"
+#include "core/FeaturePick.h"
 #include "core/LayerOps.h"
 #include "core/MeasureOps.h"
 
@@ -304,73 +305,17 @@ void KaFeatureSelectTool::selectAtPoint(const QgsPointXY& mapPt, bool addToSelec
     }
   }
 
-  QList<QgsMapLayer*> layers = mCanvas->layers();
-  QgsVectorLayer* hitLayer = nullptr;
-  QgsFeatureId hitFid = -1;
-
-  const double mapTol = mCanvas->mapUnitsPerPixel() * 10.0;
-
-  for (QgsMapLayer* ml : layers) {
-    auto* vl = qobject_cast<QgsVectorLayer*>(ml);
-    if (!vl || !vl->isValid()) continue;
-
-    QgsCoordinateTransform xf;
-    const bool needXf = (mCanvas->mapSettings().destinationCrs() != vl->crs());
-    if (needXf) {
-      xf = QgsCoordinateTransform(mCanvas->mapSettings().destinationCrs(), vl->crs(),
-                                  QgsProject::instance()->transformContext());
-      xf.setBallparkTransformsAreAppropriate(true);
-    }
-
-    QgsPointXY layerPt = mapPt;
-    if (needXf) {
-      try {
-        layerPt = xf.transform(mapPt);
-      } catch (...) {
-        KaCrashGuard::logLine(QStringLiteral("[except] app/KaFeatureSelectTool.cpp:405"));
-        continue;
-      }
-    }
-
-    const double layerTol = needXf ? (mapTol * (vl->crs().mapUnits() == Qgis::DistanceUnit::Degrees ? 0.00001 : 1.0)) : mapTol;
-    const QgsRectangle searchBox(layerPt.x() - layerTol, layerPt.y() - layerTol,
-                                 layerPt.x() + layerTol, layerPt.y() + layerTol);
-
-    QgsFeatureRequest req;
-    req.setFilterRect(searchBox);
-    QgsFeatureIterator it = vl->getFeatures(req);
-    QgsFeature f;
-    const QgsGeometry layerProbe = QgsGeometry::fromPointXY(layerPt);
-
-    while (it.nextFeature(f)) {
-      if (!f.hasGeometry() || f.geometry().isEmpty()) continue;
-      QgsGeometry g = f.geometry();
-
-      if (vl->geometryType() == Qgis::GeometryType::Polygon) {
-        if (g.contains(layerProbe) || g.distance(layerProbe) <= layerTol) {
-          hitLayer = vl;
-          hitFid = f.id();
-          break;
-        }
-      } else {
-        if (g.distance(layerProbe) <= layerTol) {
-          hitLayer = vl;
-          hitFid = f.id();
-          break;
-        }
-      }
-    }
-
-    if (hitLayer && hitFid >= 0) break;
-  }
-
-  if (hitLayer && hitFid >= 0) {
-    if (addToSelection && hitLayer->selectedFeatureIds().contains(hitFid)) {
-      hitLayer->deselect(hitFid);
+  // 큰 면 위에 그린 작은 면, 아직 저장하지 않은 도형도 찍은 자리에서 잡혀야 한다.
+  const FeaturePick::Hit hit =
+      FeaturePick::at(pickableLayers(), mapPt, mCanvas->mapUnitsPerPixel() * 10.0,
+                      mCanvas->mapSettings().destinationCrs(), QgsProject::instance()->transformContext());
+  if (hit.valid()) {
+    if (addToSelection && hit.layer->selectedFeatureIds().contains(hit.fid)) {
+      hit.layer->deselect(hit.fid);
     } else {
-      hitLayer->select(hitFid);
+      hit.layer->select(hit.fid);
     }
-    hitLayer->triggerRepaint();
+    hit.layer->triggerRepaint();
   }
 
   mCanvas->refresh();
@@ -384,7 +329,9 @@ void KaFeatureSelectTool::selectAtPoint(const QgsPointXY& mapPt, bool addToSelec
   } else if (all.size() == 1) {
     emit statusMessage(QStringLiteral("수정점이 나왔습니다. 점을 끌어 옮기세요. 점 우클릭은 삭제, 선 우클릭은 추가입니다."));
   } else if (all.size() == 2) {
-    emit statusMessage(QStringLiteral("도형 2개 선택됨 (%1, %2) — [폴리곤 나누기] 클릭 시 겹치는 구간이 자동 분할됩니다!").arg(all[0].layer->name(), all[1].layer->name()));
+    emit statusMessage(QStringLiteral("도형 2개 선택됨 (%1, %2) — [겹친 곳 지우기]는 큰 도형에서 작은 도형 자리를 지우고, "
+                                      "[폴리곤 나누기]는 겹친 자리를 새 도형으로 나눕니다.")
+                           .arg(all[0].layer->name(), all[1].layer->name()));
   } else {
     emit statusMessage(QStringLiteral("도형 %1개 선택됨").arg(all.size()));
   }
@@ -405,7 +352,8 @@ void KaFeatureSelectTool::selectInRect(const QgsRectangle& mapRect, bool addToSe
   }
 
   const QgsGeometry mapGeom = QgsGeometry::fromRect(mapRect);
-  for (QgsMapLayer* ml : mCanvas->layers()) {
+  const QList<QgsMapLayer*> layers = pickableLayers();
+  for (QgsMapLayer* ml : layers) {
     auto* vl = qobject_cast<QgsVectorLayer*>(ml);
     if (!vl || !vl->isValid()) continue;
 
@@ -449,6 +397,19 @@ void KaFeatureSelectTool::selectInRect(const QgsRectangle& mapRect, bool addToSe
   syncVertexTarget();
   emit selectionChanged(all.size());
   emit statusMessage(QStringLiteral("도형 %1개 선택됨").arg(all.size()));
+}
+
+// 글자 위로 올려 그리는 조사 도형은 덧그림이 맡아서 캔버스 목록에 없다. 찍어서 고를 때는
+// 범례에서 켜져 있는 레이어를 모두 본다.
+QList<QgsMapLayer*> KaFeatureSelectTool::pickableLayers() const {
+  QList<QgsMapLayer*> layers = LayerOps::visibleLayersPaintOrder(QgsProject::instance());
+  if (mCanvas) {
+    const QList<QgsMapLayer*> drawn = mCanvas->layers();
+    for (QgsMapLayer* layer : drawn) {
+      if (layer && !layers.contains(layer)) layers.append(layer);
+    }
+  }
+  return layers;
 }
 
 QList<KaFeatureSelectTool::SelectedItem> KaFeatureSelectTool::allSelectedFeatures(QgsMapCanvas* canvas) {

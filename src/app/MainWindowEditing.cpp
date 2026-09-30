@@ -179,7 +179,8 @@ void MainWindow::startSelectTool() {
             [this](int count) {
               if (count == 2) {
                 notify(Notice::Info, QStringLiteral("도형 2개 선택됨"),
-                       QStringLiteral("상단의 [폴리곤 나누기]를 누르면 겹치는 구간을 자동으로 분할합니다."));
+                       QStringLiteral("[겹친 곳 지우기]는 큰 도형에서 작은 도형 자리를 지우고, "
+                                      "[폴리곤 나누기]는 겹친 자리를 새 도형으로 나눕니다."));
               }
             });
     connect(m_featureSelectTool, &KaFeatureSelectTool::requestMapContextMenu, this, &MainWindow::onMapContextMenu);
@@ -850,8 +851,16 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
       return;
     }
     QgsProject::instance()->setDirty(true);
+    // 같은 레이어의 도형 위에 겹쳐 그렸으면 그 자리에서 「겹친 곳 지우기」를 고를 수 있다.
+    // 지웠으면 그린 도형은 없어졌으므로 이름·번호를 묻지 않는다.
+    bool erased = false;
+    if (layer->geometryType() == Qgis::GeometryType::Polygon) {
+      m_lastDrawnLayer = layer;
+      m_lastDrawnFid = feat.id();
+      erased = offerEraseWithDrawnShape(layer, feat.id());
+    }
 
-    if (KaFeatureFormDialog::canOffer(layer)) {
+    if (!erased && KaFeatureFormDialog::canOffer(layer)) {
       KaFeatureFormDialog form(layer, this);
       if (form.exec() == QDialog::Accepted) {
         QString formError;
@@ -894,12 +903,14 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
       m_canvas->setFocus(Qt::OtherFocusReason);
     }
 
-    const long long n = static_cast<long long>(layer->featureCount());
-    statusBar()->showMessage(
-        QStringLiteral("도형을 넣었습니다 (%1, %2개). Ctrl+Z로 되돌리기 · 조사 저장으로 파일에 씁니다")
-            .arg(layer->name())
-            .arg(n),
-        8000);
+    if (!erased) {
+      const long long n = static_cast<long long>(layer->featureCount());
+      statusBar()->showMessage(
+          QStringLiteral("도형을 넣었습니다 (%1, %2개). Ctrl+Z로 되돌리기 · 조사 저장으로 파일에 씁니다")
+              .arg(layer->name())
+              .arg(n),
+          8000);
+    }
     refreshWorkPanel();
   } catch (const std::exception& ex) {
     QMessageBox::critical(this, QStringLiteral("그리기 오류"), QString::fromUtf8(ex.what()));
