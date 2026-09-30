@@ -9,11 +9,14 @@
 #include <QSet>
 #include <QPointer>
 #include <memory>
+#include <optional>
 
 class QgsLayoutItemMap;
 class QgsLayoutItemLegend;
+class QgsMapLayer;
 class QgsVectorLayer;
 class QgsLabelingResults;
+enum class HeritageDataset;
 
 // Numbered heritage presentation belongs only to this layout's style overrides.
 // Source layers, provider data and the main map's labels are never changed.
@@ -26,7 +29,7 @@ public:
     QString layerId;
     QString dataset;
     QString name;
-    int number = 0;  // Current displayed number; zero for omitted entries after compaction.
+    int number = 0;  // Displayed number, 1..N per dataset on this sheet (every on-paper site is numbered).
     int legendIndex = 0;
     QColor color;
     QSet<qint64> featureIds;
@@ -49,8 +52,16 @@ public:
   // Numbers actually drawn on the map. Same set as the sheet legend.
   QSet<QString> legendKeys() const;
   static QString entryKey(const QString& layerId, int number);
+  // Writes the sheet PDF with KaPdfExport::sheetSettings(dpi) — the one PDF
+  // recipe shared by the studio 「PDF 저장」, printing and the submission package.
   bool exportPdf(QgsLayoutItemMap* map, QgsLayoutItemLegend* legend,
-                 const QString& path, double dpi, QString* error = nullptr, bool forceVectorOutput = false);
+                 const QString& path, double dpi, QString* error = nullptr);
+
+  // Logical dataset tag on a heritage reference layer ("ka_hgis/heritage_dataset").
+  // Tree/group titles are labels only; the tag survives a renamed group.
+  static QString datasetPropertyKey();
+  static void tagDataset(QgsMapLayer* layer, HeritageDataset dataset);
+  static std::optional<HeritageDataset> taggedDataset(const QgsMapLayer* layer);
 
 signals:
   void visibleEntriesChanged();
@@ -72,18 +83,8 @@ private:
   void publishNumberPins(QgsLayoutItemMap* map, const QVector<NumberPin>& pins);
   QByteArray renderSignature(QgsLayoutItemMap* map, bool includeStyles = true) const;
   QSet<QString> placedKeys(QgsLayoutItemMap* map, const QgsLabelingResults* results) const;
-  bool compactRenderedNumbers(QgsLayoutItemMap* map, const QgsLabelingResults* results, const QSet<QString>& keys);
-  bool shouldRestoreCandidates(QgsLayoutItemMap* map) const;
-  void restoreCandidates(QgsLayoutItemMap* map);
   void applyBaseStyleOverrides(QgsLayoutItemMap* map);
   void connectNumberPreview(QgsLayoutItemMap* map);
-  QVector<Entry> m_candidateEntries;
-  QMap<QString, QString> m_candidateOverrides;
-  QByteArray m_pinnedSignature;
-  double m_pinnedPaperArea = 0.;
-  bool m_compacted = false;
-  bool m_restorePending = false;
-  int m_restoreSkips = 0;
   bool m_legendPending = false;
   QPointer<QgsLayoutItemMap> m_followedMap;
   QVector<QMetaObject::Connection> m_renderConnections;
@@ -95,7 +96,6 @@ private:
   bool m_previewDirty = false;
   bool m_exporting = false;
   QString m_signature;
-  QByteArray m_contentSignature;
   QString m_error;
   QVector<Entry> m_entries;
   QMap<QString, QString> m_overrides;

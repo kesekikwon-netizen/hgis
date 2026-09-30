@@ -22,6 +22,9 @@ public:
   int brightness() const;
   // 지금 조절하는 레이어 이름. adjustable=false 면 막대를 접고 안내 한 줄만 둔다.
   void setTarget(const QString& layerName, bool adjustable);
+  // 그리기 안내 띠(KaDrawGuideBand)가 보이는 동안 그만큼 아래로 내려 앉는다. 0이면 10,10.
+  void setTopInset(int px);
+  int topInset() const { return m_topInset; }
 
 signals:
   void percentChanged(int percent);
@@ -43,4 +46,5 @@ private:
   QLabel* m_brightValue = nullptr;
   QLabel* m_target = nullptr;
   bool m_adjustable = false;
+  int m_topInset = 0;
 };

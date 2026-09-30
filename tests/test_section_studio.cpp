@@ -18,6 +18,7 @@
 #include <QDir>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPointer>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -33,6 +34,7 @@
 #include <qgslayoutmanager.h>
 #include <qgslayoutpagecollection.h>
 #include <qgslayoutitempage.h>
+#include <qgslayoutpoint.h>
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
@@ -57,6 +59,9 @@ private slots:
     void scaleComboHasMoreSamples();
     void sampleStripHasScaleBarTiles();
     void emptyStateHintGuidesGeoTiffAdd();
+    void standardSectionScalesAndLargerPapers();
+    void lookOnlyChangesKeepSheetAndMoves();
+    void geometryChangeRebuildsAndKeepsMoves();
 
 private:
     QgsProject* m_project = nullptr;
@@ -315,6 +320,75 @@ void TestSectionStudio::emptyStateHintGuidesGeoTiffAdd()
     QVERIFY2(!hint->isHidden(), "empty-state hint must not be hidden before any section raster");
     QVERIFY2(hint->text().contains(QStringLiteral("GeoTIFF")),
              "hint must tell the field user to add a section GeoTIFF");
+}
+
+void TestSectionStudio::standardSectionScalesAndLargerPapers()
+{
+    KaSectionDrawingStudio studio(m_project);
+    auto* scaleCombo = studio.findChild<QComboBox*>(QStringLiteral("scaleCombo"));
+    QVERIFY(scaleCombo);
+    QVERIFY2(scaleCombo->findText(QStringLiteral("1:30")) >= 0, "missing 1:30");
+    QVERIFY2(scaleCombo->findText(QStringLiteral("1:60")) >= 0, "missing 1:60");
+    auto* paperCombo = studio.findChild<QComboBox*>(QStringLiteral("paperCombo"));
+    QVERIFY(paperCombo);
+    QVERIFY(paperCombo->findText(QStringLiteral("A2")) >= 0);
+    QVERIFY(paperCombo->findText(QStringLiteral("A1")) >= 0);
+    paperCombo->setCurrentIndex(paperCombo->findText(QStringLiteral("A2")));
+    auto* ly = dynamic_cast<QgsPrintLayout*>(
+        m_project->layoutManager()->layoutByName(QStringLiteral("section_sheet")));
+    QVERIFY(ly);
+    QVERIFY(std::abs(ly->pageCollection()->page(0)->pageSize().width() - 594.0) < 1.0);
+    // Scale notes live in the panel, not only in the status bar.
+    QVERIFY(studio.findChild<QLabel*>(QStringLiteral("sectionScaleNote")));
+    QVERIFY(studio.findChild<QToolButton*>(QStringLiteral("sectionScaleSuggest")));
+}
+
+void TestSectionStudio::lookOnlyChangesKeepSheetAndMoves()
+{
+    KaSectionDrawingStudio studio(m_project);
+    QPointer<QgsPrintLayout> ly = dynamic_cast<QgsPrintLayout*>(
+        m_project->layoutManager()->layoutByName(QStringLiteral("section_sheet")));
+    QVERIFY(ly);
+    auto* title = qobject_cast<QgsLayoutItemLabel*>(ly->itemById(QStringLiteral("ka_section_title_block")));
+    QVERIFY(title);
+    title->attemptMove(QgsLayoutPoint(40.0, 30.0, Qgis::LayoutUnit::Millimeters));
+    const QPointF moved = title->pos();
+
+    studio.findChild<QLineEdit*>(QStringLiteral("titleEdit"))->setText(QStringLiteral("북벽 단면"));
+    studio.findChild<QDoubleSpinBox*>(QStringLiteral("referenceLineWidthSpin"))->setValue(0.45);
+    studio.findChild<QComboBox*>(QStringLiteral("tickLabelSizeCombo"))->setCurrentIndex(2);
+    studio.findChild<QCheckBox*>(QStringLiteral("elevationPrefixCheck"))->setChecked(true);
+    studio.findChild<QLineEdit*>(QStringLiteral("noteEdit"))->setText(QStringLiteral("A-A' 단면"));
+    QTest::qWait(450);  // past the rebuild debounce: nothing may rebuild
+
+    QVERIFY2(ly && m_project->layoutManager()->layoutByName(QStringLiteral("section_sheet")) == ly.data(),
+             "look-only options must not rebuild the sheet");
+    QCOMPARE(title->pos(), moved);
+    QVERIFY(title->text().contains(QStringLiteral("북벽 단면")));
+    auto* elev0 = qobject_cast<QgsLayoutItemLabel*>(ly->itemById(QStringLiteral("ka_section_elevation_0")));
+    QVERIFY(elev0 && elev0->text().startsWith(QStringLiteral("EL. ")));
+    QVERIFY(ly->itemById(QStringLiteral("ka_section_note")));
+}
+
+void TestSectionStudio::geometryChangeRebuildsAndKeepsMoves()
+{
+    KaSectionDrawingStudio studio(m_project);
+    QPointer<QgsPrintLayout> before = dynamic_cast<QgsPrintLayout*>(
+        m_project->layoutManager()->layoutByName(QStringLiteral("section_sheet")));
+    QVERIFY(before);
+    auto* scale = before->itemById(QStringLiteral("ka_section_scale"));
+    QVERIFY(scale);
+    scale->attemptMove(QgsLayoutPoint(300.0, 250.0, Qgis::LayoutUnit::Millimeters));
+
+    // Elevation spacing used to wait for 「단면도 만들기」; it now rebuilds by itself.
+    studio.findChild<QDoubleSpinBox*>(QStringLiteral("elevationIntervalSpin"))->setValue(0.5);
+    QTRY_VERIFY_WITH_TIMEOUT(before.isNull(), 3000);
+    auto* after = dynamic_cast<QgsPrintLayout*>(
+        m_project->layoutManager()->layoutByName(QStringLiteral("section_sheet")));
+    QVERIFY(after);
+    auto* rebuilt = after->itemById(QStringLiteral("ka_section_scale"));
+    QVERIFY(rebuilt);
+    QCOMPARE(rebuilt->pos(), QPointF(300.0, 250.0));
 }
 
 #include "test_section_studio.moc"

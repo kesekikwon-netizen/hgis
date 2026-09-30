@@ -1,0 +1,161 @@
+{
+ "schema_version": 2,
+ "diagram_type": "workflow",
+ "meta": {
+  "title": "DEM hillshade file",
+  "quality_profile": "showcase"
+ },
+ "lanes": [
+  {
+   "id": "ui",
+   "label": "Ribbon"
+  },
+  {
+   "id": "win",
+   "label": "MainWindow"
+  },
+  {
+   "id": "core",
+   "label": "DemHillshadeFile"
+  }
+ ],
+ "phases": [
+  {
+   "id": "ask",
+   "label": "Ask",
+   "fromCol": 0,
+   "toCol": 1
+  },
+  {
+   "id": "compute",
+   "label": "Compute",
+   "fromCol": 2,
+   "toCol": 3,
+   "variant": "emphasis"
+  },
+  {
+   "id": "write",
+   "label": "Write",
+   "fromCol": 4,
+   "toCol": 5
+  }
+ ],
+ "mainPath": [
+  "chip",
+  "run",
+  "path",
+  "shade",
+  "tiff"
+ ],
+ "nodes": [
+  {
+   "id": "chip",
+   "lane": "ui",
+   "col": 0,
+   "type": "external",
+   "label": "지형분석 chip",
+   "sublabel": "MainWindowRibbon.cpp:416",
+   "width": 110
+  },
+  {
+   "id": "run",
+   "lane": "win",
+   "col": 1,
+   "type": "frontend",
+   "label": "runDemHillshade",
+   "sublabel": "MainWindow.cpp:1687",
+   "width": 150
+  },
+  {
+   "id": "path",
+   "lane": "core",
+   "col": 2,
+   "type": "backend",
+   "label": "hillshadeOutputPath",
+   "sublabel": "DemHillshadeFile.cpp:128-138",
+   "width": 170
+  },
+  {
+   "id": "shade",
+   "lane": "core",
+   "col": 3,
+   "type": "backend",
+   "label": "runHillshadeFile",
+   "sublabel": "DemHillshadeFile.cpp:51-126",
+   "width": 150
+  },
+  {
+   "id": "tiff",
+   "lane": "core",
+   "col": 4,
+   "type": "backend",
+   "label": "writeByteGeoTiff",
+   "sublabel": "DemHillshadeFile.cpp:34-49",
+   "width": 150
+  },
+  {
+   "id": "notify",
+   "lane": "win",
+   "col": 5,
+   "type": "frontend",
+   "label": "notify",
+   "sublabel": "MainWindow.cpp:1735",
+   "width": 110
+  }
+ ],
+ "edges": [
+  {
+   "from": "chip",
+   "to": "run",
+   "label": "clicked"
+  },
+  {
+   "from": "run",
+   "to": "path",
+   "label": "dem, survey"
+  },
+  {
+   "from": "path",
+   "to": "shade",
+   "label": "out path",
+   "variant": "emphasis"
+  },
+  {
+   "from": "shade",
+   "to": "tiff",
+   "label": "strips"
+  },
+  {
+   "from": "tiff",
+   "to": "notify",
+   "label": "ok / error"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "rose",
+   "title": "Was",
+   "items": [
+    "Shade 0 collided with NoData 0",
+    "Whole band in memory",
+    "Output beside the DEM, no ask"
+   ]
+  },
+  {
+   "dot": "emerald",
+   "title": "Now",
+   "items": [
+    "Output NoData 0 reserved; shade 1-255",
+    "Row strips",
+    "조사 폴더/지형분석, unique name"
+   ]
+  },
+  {
+   "dot": "cyan",
+   "title": "Keep",
+   "items": [
+    "Map DEM relief default ON untouched"
+   ]
+  }
+ ]
+}

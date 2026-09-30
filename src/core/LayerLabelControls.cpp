@@ -166,7 +166,7 @@ bool LayerLabelControls::setVisible(QgsMapLayer* layer, bool on, bool layout) {
         vector->geometryType() == Qgis::GeometryType::Polygon)
       return LayerOps::applyAreaM2Labels(vector);
     if (info.field.isEmpty()) return false;
-    return LayerOps::applyNameAttributeLabels(vector, info.field, 8., false);
+    return LayerOps::applyNameAttributeLabels(vector, info.field, LayerOps::kDefaultLabelSizePt, false);
   }
   vector->setLabelsEnabled(on);
   vector->triggerRepaint();
@@ -181,7 +181,7 @@ bool LayerLabelControls::setField(QgsVectorLayer* layer, const QString& field) {
     return replaceManagedContent(layer, field, info.areaEditable && managedArea(layer, layer->labeling()->settings()));
   }
   // An explicit first selection can show the chosen content, never a fallback.
-  return LayerOps::applyNameAttributeLabels(layer, field, 8., false);
+  return LayerOps::applyNameAttributeLabels(layer, field, LayerOps::kDefaultLabelSizePt, false);
 }
 
 bool LayerLabelControls::setArea(QgsVectorLayer* layer, bool on) {

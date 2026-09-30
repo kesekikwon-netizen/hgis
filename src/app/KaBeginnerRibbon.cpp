@@ -1,5 +1,6 @@
 #include "KaBeginnerRibbon.h"
 #include "KaTheme.h"
+#include <QDebug>
 
 #include <algorithm>
 
@@ -157,11 +158,24 @@ void KaBeginnerRibbon::applyTwoLine(QToolButton* button) {
   QFont font = button->font();
   font.setPixelSize(metrics.ribbonFontSize);
   const QString text = button->text();
-  const int textRoom = std::max(8, metrics.ribbonChipWidth - 8);
-  while (font.pixelSize() > 9 &&
-         QFontMetrics(font).boundingRect(text).width() > textRoom)
+  // The style sheet gives the label the chip's whole 56 px content box, so every
+  // current label (widest: 「다른 이름」, 「제출 변환」 at 52 px) stays at 12 px.
+  const int textRoom = std::max(8, metrics.ribbonChipWidth - 2);
+  const auto overflows = [&] { return QFontMetrics(font).horizontalAdvance(text) > textRoom; };
+  // One floor for every chip, so a row never mixes 12 px with 9 px labels.
+  while (font.pixelSize() > metrics.ribbonMinFontSize && overflows())
     font.setPixelSize(font.pixelSize() - 1);
   button->setFont(font);
+  // The application sheet sets every chip's font-size; a smaller size only sticks
+  // as the chip's own sheet.
+  if (font.pixelSize() < metrics.ribbonFontSize)
+    button->setStyleSheet(QStringLiteral("font-size: %1px;").arg(font.pixelSize()));
+  else if (button->styleSheet().startsWith(QLatin1String("font-size:")))
+    button->setStyleSheet(QString());  // only the size this function set earlier
+  // Screen readers already read the label (QAccessibleToolButton uses text()).
+  // A label still too wide at the floor keeps its full wording in the tooltip.
+  if (overflows() && !button->toolTip().contains(text))
+    button->setToolTip(button->toolTip().isEmpty() ? text : text + QStringLiteral(" — ") + button->toolTip());
   button->ensurePolished();
   // One chip size for every ribbon action. Leftover window width is not
   // given to these buttons. https://doc.qt.io/qt-6.8/qwidget.html#setFixedSize
@@ -246,62 +260,89 @@ void KaBeginnerRibbon::showEvent(QShowEvent* event) {
   updateOverflow();
 }
 
+QStringList KaBeginnerRibbon::planGroups(const QStringList& priority, const QStringList& pinned,
+                                         const QHash<QString, int>& widths, int available,
+                                         int overflowWidth) {
+  static const QStringList keep = {QStringLiteral("survey"), QStringLiteral("out"), QStringLiteral("record")};
+  int total = 0;
+  for (const QString& id : priority) total += widths.value(id);
+  if (total <= available) return priority;
+  // Some group folds, so 「더 많은 작업」 needs room first; a clipped overflow
+  // button would hide every folded group.
+  int room = available - overflowWidth;
+  QStringList visible;
+  for (const QString& id : priority) {
+    if (widths.value(id) <= room) {
+      visible.append(id);
+      room -= widths.value(id);
+    }
+  }
+  const auto place = [&](const QString& id, auto&& mayFold) {
+    const int need = widths.value(id);
+    if (visible.contains(id) || !widths.contains(id)) return;
+    int reclaim = 0;
+    for (const QString& other : visible)
+      if (mayFold(other)) reclaim += widths.value(other);
+    // Folding other groups must actually make room; otherwise fold nothing.
+    if (need > room + reclaim) return;
+    for (int i = int(visible.size()) - 1; i >= 0 && need > room; --i) {
+      if (!mayFold(visible.at(i))) continue;
+      room += widths.value(visible.at(i));
+      visible.removeAt(i);
+    }
+    visible.append(id);
+    room -= need;
+  };
+  for (const QString& id : priority)
+    if (keep.contains(id)) place(id, [&](const QString& other) { return !keep.contains(other); });
+  for (const QString& id : pinned)
+    place(id, [&](const QString& other) { return !keep.contains(other) && !pinned.contains(other); });
+  // Give leftover room back to smaller groups that were folded on the way.
+  for (const QString& id : priority) {
+    if (!visible.contains(id) && widths.value(id) <= room) {
+      visible.append(id);
+      room -= widths.value(id);
+    }
+  }
+  QStringList ordered;
+  for (const QString& id : priority)
+    if (visible.contains(id)) ordered.append(id);
+  return ordered;
+}
+
 void KaBeginnerRibbon::updateOverflow() {
   if (m_updatingOverflow) return;
   m_updatingOverflow = true;
-  const bool overflow = sizeHint().width() > width();
   const auto margins = m_row->contentsMargins();
-  int available = width() - margins.left() - margins.right();
   // 남길 묶음은 우선순위대로 고르고, 화면에는 addGroup 순서로 놓는다.
-  const QStringList priority = m_keepPriority.isEmpty() ? m_groupOrder : m_keepPriority;
-  QStringList visible;
-  for (const auto& id : priority) {
-    if (!m_groups.contains(id)) continue;
-    const int needed = m_groups.value(id)->sizeHint().width() + m_row->spacing();
-    if (!overflow || needed <= available) {
-      visible.append(id);
-      available -= needed;
+  QStringList priority = m_keepPriority.isEmpty() ? m_groupOrder : m_keepPriority;
+  for (const QString& id : m_groupOrder)
+    if (!priority.contains(id)) priority.append(id);
+  QHash<QString, int> widths;
+  for (const QString& id : priority)
+    if (m_groups.contains(id)) widths.insert(id, m_groups.value(id)->sizeHint().width() + m_row->spacing());
+  priority.removeIf([&](const QString& id) { return !widths.contains(id); });
+  const QStringList visible =
+      planGroups(priority, m_pinned, widths, width() - margins.left() - margins.right(),
+                 m_overflow->sizeHint().width() + m_row->spacing());
+  const bool overflow = visible.size() < priority.size();
+  // One session-log line per fold change: which groups folded and the widths behind it,
+  // so a 1920 screen that folds 정합·기타 can be measured instead of guessed.
+  if (overflow && width() > 200) {  // skip the pre-layout pass (width 100)
+    QStringList parts;
+    int need = 0;
+    for (const QString& id : priority) {
+      parts << QStringLiteral("%1=%2").arg(id).arg(widths.value(id));
+      need += widths.value(id);
     }
-  }
-  const QStringList keepOnRibbon = {QStringLiteral("survey"), QStringLiteral("out"),
-                                    QStringLiteral("record")};
-  for (const QString& id : m_pinned) {
-    if (!m_groups.contains(id) || visible.contains(id)) continue;
-    const int needed = m_groups.value(id)->sizeHint().width() + m_row->spacing();
-    while (needed > available) {
-      int drop = -1;
-      for (int i = visible.size() - 1; i >= 0; --i) {
-        const QString candidate = visible.at(i);
-        if (keepOnRibbon.contains(candidate) || m_pinned.contains(candidate)) continue;
-        drop = i;
-        break;
-      }
-      if (drop < 0) break;
-      available += m_groups.value(visible.at(drop))->sizeHint().width() + m_row->spacing();
-      visible.removeAt(drop);
+    const QString line = QStringLiteral("[ribbon] 접힘 · 창 %1 · 가용 %2 · 필요 %3 · 더보기 %4 · 표시 [%5] · %6")
+        .arg(width()).arg(width() - margins.left() - margins.right()).arg(need)
+        .arg(m_overflow->sizeHint().width() + m_row->spacing())
+        .arg(visible.join(QLatin1Char(' ')), parts.join(QLatin1Char(' ')));
+    if (line != m_lastFoldLog) {
+      m_lastFoldLog = line;
+      qWarning().noquote() << line;  // the app's message handler files it under [qt/warn]; tests just print it
     }
-    if (needed <= available) {
-      visible.append(id);
-      available -= needed;
-    }
-  }
-  bool anyHidden = false;
-  for (const QString& id : m_groupOrder) {
-    if (m_groups.contains(id) && !visible.contains(id)) anyHidden = true;
-  }
-  if (anyHidden)
-    available -= m_overflow->sizeHint().width() + m_row->spacing();
-  while (anyHidden && available < 0) {
-    int drop = -1;
-    for (int i = visible.size() - 1; i >= 0; --i) {
-      const QString candidate = visible.at(i);
-      if (keepOnRibbon.contains(candidate) || m_pinned.contains(candidate)) continue;
-      drop = i;
-      break;
-    }
-    if (drop < 0) break;
-    available += m_groups.value(visible.at(drop))->sizeHint().width() + m_row->spacing();
-    visible.removeAt(drop);
   }
   for (const auto& id : m_groupOrder) {
     auto* frame = m_groups.value(id);

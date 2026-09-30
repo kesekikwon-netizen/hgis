@@ -29,7 +29,16 @@ public:
   void applyTabOrder();
   // 이름은 예전 두 줄 맞춤. 지금은 줄바꿈을 없애 한 줄로 맞춘다.
   static QString twoLine(const QString& text);
+  // One chip: 56 x 82 content box, one-line label shrunk to fit but never below
+  // ButtonMetrics::ribbonMinFontSize; a label that still does not fit keeps its
+  // full wording in the tooltip (screen readers already read the full text()).
   static void applyTwoLine(QToolButton* button);
+  // Which groups stay on the one-row ribbon, in priority order. survey, out and
+  // record come first and may fold any other group into 「더 많은 작업」; pinned
+  // groups may fold unpinned ones. A group is placed only when folding others
+  // actually makes it fit, and the overflow button always keeps its own room.
+  static QStringList planGroups(const QStringList& priority, const QStringList& pinned,
+                                const QHash<QString, int>& widths, int available, int overflowWidth);
   QSize sizeHint() const override;
   QSize minimumSizeHint() const override;
 
@@ -54,4 +63,5 @@ private:
   QToolButton* m_overflow = nullptr;
   QMenu* m_overflowMenu = nullptr;
   bool m_updatingOverflow = false;
+  QString m_lastFoldLog;  // last "[ribbon] 접힘" line, so the log records changes only
 };

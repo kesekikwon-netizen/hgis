@@ -24,21 +24,28 @@ TopographicSettings::Credentials readIni(const QString& path, bool migrate) {
   return {settings.value(QStringLiteral("ngii/username")).toString(),
           KaSecretStore::readPassword(settings, QStringLiteral("ngii"), migrate)};
 }
+QStringList bundledFiles() {
+  const QDir app(QCoreApplication::applicationDirPath());
+  return {app.filePath(QStringLiteral("config/ngii-local.ini")),
+          app.filePath(QStringLiteral("../../config/ngii-local.ini"))};
+}
 }
 
 TopographicSettings::Credentials TopographicSettings::credentials() {
-  const QDir app(QCoreApplication::applicationDirPath());
-  return readFromFiles(personalPath(), {
-    app.filePath(QStringLiteral("config/ngii-local.ini")),
-    app.filePath(QStringLiteral("../../config/ngii-local.ini"))});
+  return readFromFiles(personalPath(), bundledFiles());
+}
+
+bool TopographicSettings::hasCredentials() {
+  const Credentials c = readFromFiles(personalPath(), bundledFiles(), false);
+  return !c.username.trimmed().isEmpty() && !c.password.isEmpty();
 }
 
 TopographicSettings::Credentials TopographicSettings::readFromFiles(
-    const QString& personalFile, const QStringList& fallbackFiles) {
+    const QString& personalFile, const QStringList& fallbackFiles, bool migrate) {
   // Existence, not a non-empty password, controls priority. Saving empty values
   // disables this PC's default login instead of restoring the bundled account.
   if (!personalFile.isEmpty() && QFileInfo::exists(personalFile)) {
-    const Credentials personal = readIni(personalFile, true);
+    const Credentials personal = readIni(personalFile, migrate);
     if (!personal.password.isEmpty()) return personal;
     QSettings probe(personalFile, QSettings::IniFormat);
     probe.setFallbacksEnabled(false);

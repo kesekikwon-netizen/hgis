@@ -4,17 +4,64 @@
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QStringList>
 #include <QCoreApplication>
 
-static QString orgName() { return QStringLiteral("ka-hgis"); }
-static QString appName() { return QStringLiteral("ka-hgis"); }
+namespace {
+// Current store scope (F037). Guarded: the key is read from worker threads (tile jobs).
+QMutex g_scopeMutex;
+VworldSettings::Scope g_scope;
+}  // namespace
+
+void VworldSettings::setScope(const Scope& scope) {
+  Scope clean = scope;
+  clean.organization = clean.organization.trimmed();
+  clean.application = clean.application.trimmed();
+  clean.folder = clean.folder.trimmed();
+  if (clean.organization.isEmpty()) clean.organization = QStringLiteral("ka-hgis");
+  if (clean.application.isEmpty()) clean.application = QStringLiteral("ka-hgis");
+  if (!clean.folder.isEmpty()) {
+    clean.folder = QDir(clean.folder).absolutePath();
+    QDir().mkpath(clean.folder);
+  }
+  const QMutexLocker lock(&g_scopeMutex);
+  g_scope = clean;
+}
+
+VworldSettings::Scope VworldSettings::scope() {
+  const QMutexLocker lock(&g_scopeMutex);
+  return g_scope;
+}
+
+void VworldSettings::resetScope() { setScope(Scope{}); }
+
 static QString ssotKey() { return QStringLiteral("VWorld/ApiKey"); }
 static QString legacyKey() { return QStringLiteral("vworld/apiKey"); }
 static QString historySsotKey() { return QStringLiteral("HistoryGis/ApiKey"); }
 
 static bool isPortableBundle() {
   return KaPortableRuntime::discover(KaPortableRuntime::resolvedExeDir()).looksBundled();
+}
+
+// Native store: QSettings(organization, application), or an INI file standing in for it
+// when the scope has a folder (tests), so the registry is never written there.
+std::unique_ptr<QSettings> VworldSettings::openNativeStore() {
+  const Scope current = scope();
+  if (current.folder.isEmpty())
+    return std::make_unique<QSettings>(current.organization, current.application);
+  const QString file = QStringLiteral("native-%1-%2.ini").arg(current.organization, current.application);
+  return std::make_unique<QSettings>(QDir(current.folder).filePath(file), QSettings::IniFormat);
+}
+
+// Folder of ka-hgis-vworld.ini: the portable config folder, the scope folder, or AppConfig.
+static QString keyIniFolder() {
+  if (!isPortableBundle()) {
+    const QString folder = VworldSettings::scope().folder;
+    if (!folder.isEmpty()) return folder;
+  }
+  return KaPortableRuntime::userConfigDir();
 }
 
 static QString readKeyFromIni(const QString& path) {
@@ -49,7 +96,7 @@ static QString readRepoSecretsIni() {
 }
 
 static QSettings makeSettings() {
-  const QString ini = QDir(KaPortableRuntime::userConfigDir()).filePath(QStringLiteral("ka-hgis-vworld.ini"));
+  const QString ini = QDir(keyIniFolder()).filePath(QStringLiteral("ka-hgis-vworld.ini"));
   return QSettings(ini, QSettings::IniFormat);
 }
 
@@ -83,13 +130,13 @@ QString VworldSettings::loadApiKey() {
     return key;
 
   {
-    QSettings native(orgName(), appName());
-    key = native.value(ssotKey()).toString().trimmed();
+    const std::unique_ptr<QSettings> native = openNativeStore();
+    key = native->value(ssotKey()).toString().trimmed();
     if (key.isEmpty())
-      key = native.value(legacyKey()).toString().trimmed();
+      key = native->value(legacyKey()).toString().trimmed();
     if (!key.isEmpty()) {
       writeKey(settings, key);
-      writeKey(native, key);
+      writeKey(*native, key);
       return key;
     }
   }
@@ -104,7 +151,8 @@ QString VworldSettings::loadApiKey() {
   }
 
   key = settings.value(legacyKey()).toString().trimmed();
-  if (key.isEmpty()) {
+  if (key.isEmpty() && scope().folder.isEmpty()) {
+    // The application's default store (read only); not consulted in an isolated scope.
     QSettings bare;
     key = bare.value(legacyKey()).toString().trimmed();
   }
@@ -127,8 +175,8 @@ void VworldSettings::saveApiKey(const QString& key) {
     return;
   }
 
-  QSettings native(orgName(), appName());
-  writeKey(native, k);
+  const std::unique_ptr<QSettings> native = openNativeStore();
+  writeKey(*native, k);
 }
 
 static void writeHistoryKey(QSettings& settings, const QString& key) {
@@ -156,11 +204,11 @@ QString VworldSettings::loadHistoryGisApiKey() {
     if (!key.isEmpty())
       return key;
   } else {
-    QSettings native(orgName(), appName());
-    key = native.value(historySsotKey()).toString().trimmed();
+    const std::unique_ptr<QSettings> native = openNativeStore();
+    key = native->value(historySsotKey()).toString().trimmed();
     if (!key.isEmpty()) {
       writeHistoryKey(settings, key);
-      writeHistoryKey(native, key);
+      writeHistoryKey(*native, key);
       return key;
     }
   }
@@ -180,6 +228,6 @@ void VworldSettings::saveHistoryGisApiKey(const QString& key) {
     writeHistoryKey(secrets, k);
     return;
   }
-  QSettings native(orgName(), appName());
-  writeHistoryKey(native, k);
+  const std::unique_ptr<QSettings> native = openNativeStore();
+  writeHistoryKey(*native, k);
 }

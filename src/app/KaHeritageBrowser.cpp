@@ -7,6 +7,8 @@
 #include "core/HeritageIntranetFlow.h"
 
 #include "core/HeritageIntranetSettings.h"
+#include "core/HeritagePledge.h"
+#include "core/HeritageRecentDownloads.h"
 
 #include <QDir>
 #include <QTextStream>
@@ -135,6 +137,8 @@ private:
 };
 
 constexpr int kMaxWaitTicks = 75;  // 수치지형도 창과 같은 여유(약 52초)
+// 재시도는 끝없이 계속한다(사용자 결정). 이 횟수부터는 창에 계속 재시도 중이라고 남긴다.
+constexpr quint64 kRetryNoticeAfter = 3;
 
 void collectFrames(const QWebEngineFrame& frame, QVector<QWebEngineFrame>* out) {
   if (!frame.isValid()) return;
@@ -207,12 +211,17 @@ KaHeritageBrowser::KaHeritageBrowser(QWidget* parent) : QDialog(parent) {
   auto* statusCard = KaDownloadUi::statusCard(this);
   auto* statusLayout = qobject_cast<QVBoxLayout*>(statusCard->layout());
   m_stageLabel = new QLabel(QStringLiteral("대기"), this);
-  m_stageLabel->setStyleSheet(QStringLiteral("font-weight:600;"));
+  m_stageLabel->setStyleSheet(QStringLiteral("font-weight:700;"));
   m_detailLabel = new QLabel(QString(), this);
   m_detailLabel->setWordWrap(true);
   m_stageLabel->setWordWrap(true);
   statusLayout->addWidget(m_stageLabel);
   statusLayout->addWidget(m_detailLabel);
+  m_noticeLabel = new QLabel(QString(), this);
+  m_noticeLabel->setObjectName(QStringLiteral("heritageNotice"));
+  m_noticeLabel->setWordWrap(true);
+  m_noticeLabel->hide();
+  statusLayout->addWidget(m_noticeLabel);
   m_progress = new QProgressBar(this);
   m_progress->setRange(0, 0);
   KaDownloadUi::styleProgress(m_progress);
@@ -275,6 +284,7 @@ KaHeritageBrowser::KaHeritageBrowser(QWidget* parent) : QDialog(parent) {
   buttons->addWidget(detailsButton);
   buttons->addStretch(1);
   m_stopButton = new QPushButton(QStringLiteral("취소"), this);
+  m_stopButton->setObjectName(QStringLiteral("heritageStop"));
   connect(m_stopButton, &QPushButton::clicked, this, &KaHeritageBrowser::stop);
   buttons->addWidget(m_stopButton);
   root->addLayout(buttons);
@@ -293,6 +303,9 @@ void KaHeritageBrowser::ensureProfile() {
     m_requestLog = new HeritageRequestLog(this);
   if (installDefaultInterceptor)
     m_profile->setUrlRequestInterceptor(m_requestLog);
+  // Login cookies live only for this app session, like the NGII browser. The named
+  // profile keeps its disk cache, but no intranet session is written to disk.
+  m_profile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
   connect(m_profile->cookieStore(), &QWebEngineCookieStore::cookieAdded, this,
           [this](const QNetworkCookie& cookie) {
             m_cookies.removeIf([&cookie](const QNetworkCookie& c) { return c.name() == cookie.name(); });
@@ -333,6 +346,16 @@ void KaHeritageBrowser::setTarget(const QString& sido, const QString& city,
   m_city = city.trimmed();
   m_datasets = datasets;
   m_datasetIndex = 0;
+  // A new run: forget the previous run's neighbours and choices.
+  m_planDatasets = datasets;
+  m_followUps.clear();
+  m_targetIndex = 0;
+  m_targetCount = 1;
+  m_reuseRecent = false;
+  m_pendingNext = false;
+  m_pledgeNote.clear();
+  m_retryNote.clear();
+  updateNotice();
 }
 
 void KaHeritageBrowser::logLine(const QString& text) {
@@ -375,7 +398,7 @@ void KaHeritageBrowser::setStage(HeritageStage stage, const QString& message) {
   logLine(QStringLiteral("단계 → %1 : %2")
               .arg(HeritageIntranetFlow::stageName(stage), message));
   m_stageLabel->setText(stage == HeritageStage::Done ? HeritageIntranetFlow::stageName(stage)
-      : QStringLiteral("[%1/%2] %3 — %4")
+      : targetPrefix() + QStringLiteral("[%1/%2] %3 — %4")
             .arg(qMin(m_datasetIndex + 1, static_cast<int>(m_datasets.size()))).arg(m_datasets.size())
             .arg(m_datasetIndex < m_datasets.size() ? HeritageStyle::layerName(m_datasets.at(m_datasetIndex)) : QString(),
                  HeritageIntranetFlow::stageName(stage)));
@@ -422,6 +445,16 @@ QString KaHeritageBrowser::saveRequestLog() {
 void KaHeritageBrowser::fail(const QString& message) {
   logLine(QStringLiteral("실패: %1").arg(message));
   m_running = false;
+  // A failure is not turned into success: the remaining 시·군 are not fetched silently.
+  m_pendingNext = false;
+  if (!m_followUps.isEmpty()) {
+    QStringList skipped;
+    for (const HeritageCity& c : std::as_const(m_followUps)) skipped << c.display();
+    logLine(QStringLiteral("받지 않은 시·군: %1").arg(skipped.join(QStringLiteral(", "))));
+    m_retryNote = QStringLiteral("멈춰서 받지 않은 시·군: %1").arg(skipped.join(QStringLiteral(", ")));
+    updateNotice();
+  }
+  m_followUps.clear();
   ++m_generation;
   m_scriptInFlight = false;
   for (const auto& request : std::as_const(m_downloadRequests))
@@ -444,6 +477,7 @@ void KaHeritageBrowser::fail(const QString& message) {
 }
 
 void KaHeritageBrowser::stop() {
+  m_pendingNext = false;
   if (!m_running) return;
   m_running = false;
   for (const auto& request : std::as_const(m_downloadRequests))
@@ -455,6 +489,11 @@ void KaHeritageBrowser::stop() {
 }
 
 void KaHeritageBrowser::rejectDataset(const QString& message, bool retryableDownload) {
+  if (m_reuseProbe) {  // a reused recent copy did not load: fetch that dataset anew
+    m_reuseRejected = true;
+    logLine(QStringLiteral("최근 자료 적재 실패: %1").arg(message));
+    return;
+  }
   if (!m_running) return;
   if (retryableDownload && m_stage == HeritageStage::Download)
     scheduleDownloadRetry(message);
@@ -473,6 +512,12 @@ void KaHeritageBrowser::scheduleDownloadRetry(const QString& reason, bool respon
   m_progress->setRange(0, 0);
   m_detailLabel->setText(QStringLiteral("%1 · 정상 파일을 다시 받습니다 · 중지 가능").arg(reason));
   logLine(QStringLiteral("재수신 예약 %1회: %2").arg(m_downloadRetryCount).arg(reason));
+  if (m_downloadRetryCount >= kRetryNoticeAfter) {
+    m_retryNote = QStringLiteral("같은 자료를 %1번째 다시 받고 있습니다. 정상 파일을 받을 때까지 계속 "
+                                 "재시도합니다. 서버가 계속 비정상 파일을 보내면 「취소」로 멈추고 "
+                                 "나중에 다시 받으세요.").arg(m_downloadRetryCount);
+    updateNotice();
+  }
 }
 
 void KaHeritageBrowser::closeDownloadPopups(bool includeFormPages) {
@@ -535,17 +580,22 @@ void KaHeritageBrowser::start() {
   m_downloadRetryWait.invalidate();
   m_downloadRetryCount = 0;
   m_downloadNavigation = false;
-  const auto account = HeritageIntranetSettings::credentials();
-  if (account.username.trimmed().isEmpty() || account.password.isEmpty()) {
-    fail(QStringLiteral("국가유산 인트라넷 계정이 없습니다. 더보기 → 국가유산 인트라넷 아이디·비밀번호에서 넣어 주세요."));
-    return;
-  }
+  m_retryNote.clear();
+  updateNotice();
   if (m_sido.isEmpty() || m_city.isEmpty()) {
     fail(QStringLiteral("받을 시·군이 정해지지 않았습니다."));
     return;
   }
   if (m_downloadRoot.isEmpty()) {
     fail(QStringLiteral("저장할 폴더가 정해지지 않았습니다."));
+    return;
+  }
+  // The user chose to reuse recent downloads: load those first, fetch only the rest.
+  // Nothing is sent to the site for a reused dataset, so no login is needed for it.
+  if (m_reuseRecent && reuseRecentDatasets()) return;
+  const auto account = HeritageIntranetSettings::credentials();
+  if (account.username.trimmed().isEmpty() || account.password.isEmpty()) {
+    fail(QStringLiteral("국가유산 인트라넷 계정이 없습니다. 더보기 → 국가유산 인트라넷 아이디·비밀번호에서 넣어 주세요."));
     return;
   }
 
@@ -563,7 +613,8 @@ void KaHeritageBrowser::start() {
   m_agreementRecorded = false;
   m_form = HeritageForm();
   m_outline->clear();
-  logLine(QStringLiteral("=== 시작: %1 %2 · 자료 %3종 ===").arg(m_sido, m_city).arg(m_datasets.size()));
+  logLine(QStringLiteral("=== 시작: %1 %2 · 자료 %3종 · 시·군 %4/%5 ===")
+              .arg(m_sido, m_city).arg(m_datasets.size()).arg(m_targetIndex + 1).arg(m_targetCount));
   setStage(HeritageStage::Login,
            QStringLiteral("%1 로그인 중입니다.").arg(HeritageIntranetSettings::describeForLog()));
   while (m_tabs->count() > 0) {
@@ -938,7 +989,10 @@ void KaHeritageBrowser::runStage() {
         const QJsonObject receipt = QJsonDocument::fromJson(result.toUtf8()).object();
         if (receipt.value(QStringLiteral("status")).toString() == QLatin1String("agreed")) {
           m_agreementSubmitted = true;
-          emit agreementAccepted(QDateTime::currentDateTime(), receipt.value(QStringLiteral("text")).toString());
+          const QString terms = receipt.value(QStringLiteral("text")).toString();
+          emit agreementAccepted(QDateTime::currentDateTime(), terms);
+          m_pledgeNote = HeritagePledge::noticeAfterAgreement(terms);
+          updateNotice();
           m_detailLabel->setText(QStringLiteral("서약서를 제출했습니다. 다운로드 목록 응답을 기다립니다…"));
           return;
         }
@@ -948,10 +1002,7 @@ void KaHeritageBrowser::runStage() {
       return;
     case HeritageStage::SelectDataset: {
       if (m_datasetIndex >= m_datasets.size()) {
-        setStage(HeritageStage::Done, QStringLiteral("모두 마쳤습니다."));
-        m_running = false;
-        m_poll->stop();
-        emit allFinished();
+        finishTarget(QStringLiteral("모두 마쳤습니다."));
         return;
       }
       if (!m_datasetSelectionStarted) {
@@ -1157,6 +1208,8 @@ void KaHeritageBrowser::runStage() {
         m_detailLabel->setText(QStringLiteral("전송 종료 · ZIP 전체 읽기 및 지도 적재 확인 중"));
         emit datasetReady(m_datasets.at(m_datasetIndex), m_currentFiles);
         if (!m_running || m_stage == HeritageStage::Failed || !m_downloadRetryReason.isEmpty()) return;
+        // Checked and on the map: remember it so the user may reuse it next time (F174).
+        HeritageRecentDownloads::record(m_downloadRoot, m_datasets.at(m_datasetIndex), m_currentFiles);
         for (const QString& path : std::as_const(m_currentFiles)) emit fileDownloaded(path);
         advanceDataset();
         return;
@@ -1221,12 +1274,11 @@ void KaHeritageBrowser::advanceDataset() {
   m_downloadRetryReason.clear();
   m_responseOnlyRetry = false;
   m_downloadRetryWait.invalidate();
+  m_retryNote.clear();
+  updateNotice();
   ++m_datasetIndex;
   if (m_datasetIndex >= m_datasets.size()) {
-    setStage(HeritageStage::Done, QStringLiteral("자료 %1종 처리를 마쳤습니다. 자료가 있는 종류는 다운로드와 지도 적재를 완료했습니다.").arg(m_datasets.size()));
-    m_running = false;
-    m_poll->stop();
-    emit allFinished();
+    finishTarget(QStringLiteral("자료 %1종 처리를 마쳤습니다. 자료가 있는 종류는 다운로드와 지도 적재를 완료했습니다.").arg(m_datasets.size()));
     return;
   }
   if (m_downloadPageNeedsRecovery) {

@@ -17,6 +17,8 @@
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
 
+#include "core/LayerOps.h"
+
 namespace {
 const QColor oldTileColor(183, 92, 38);
 const QColor finalTileColor(31, 118, 174);
@@ -113,6 +115,8 @@ class TestMapRender : public QObject {
 private slots:
   void panDuringTileDownload_data();
   void panDuringTileDownload();
+  // Last: installs the app's tile request identity for the rest of the process.
+  void tileRequests_sendRefererToVworldOnly();
 };
 
 void TestMapRender::panDuringTileDownload_data() {
@@ -214,6 +218,39 @@ void TestMapRender::panDuringTileDownload() {
     QVERIFY(image.save(QDir(output).filePath(QStringLiteral("map-render-%1-partial-%2.png")
                           .arg(workCrs.section(QLatin1Char(':'), 1)).arg(partialOutput ? 1 : 0))));
   }
+}
+
+void TestMapRender::tileRequests_sendRefererToVworldOnly() {
+  // F059: the fake localhost Referer authenticates VWorld keys only. Other tile servers
+  // (here a local one standing in for OSM/Google) get the identifying User-Agent, no Referer.
+  LayerOps::ensureTileNetworkIdentity();
+  QTcpServer server;
+  QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+  QByteArray captured;
+  const QByteArray tile = png(finalTileColor);
+  connect(&server, &QTcpServer::newConnection, &server, [&] {
+    while (server.hasPendingConnections()) {
+      QTcpSocket* socket = server.nextPendingConnection();
+      connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+      connect(socket, &QTcpSocket::readyRead, socket, [&captured, &tile, socket] {
+        captured += socket->readAll();
+        if (!captured.contains("\r\n\r\n") || socket->property("answered").toBool()) return;
+        socket->setProperty("answered", true);
+        ControlledTiles::respond(socket, tile);
+      });
+    }
+  });
+  const QUrl url(QStringLiteral("http://127.0.0.1:%1/%2/9/439/202.png")
+                     .arg(server.serverPort())
+                     .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+  QNetworkReply* reply = QgsNetworkAccessManager::instance()->get(QNetworkRequest(url));
+  QVERIFY(reply);
+  QTRY_VERIFY_WITH_TIMEOUT(reply->isFinished(), 10000);
+  reply->deleteLater();
+  QVERIFY2(captured.contains("\r\n\r\n"), captured.constData());
+  const QByteArray lower = captured.toLower();
+  QVERIFY2(!lower.contains("\r\nreferer:"), captured.constData());
+  QVERIFY2(lower.contains("ka-hgis/0.3"), captured.constData());
 }
 
 int main(int argc, char** argv) {

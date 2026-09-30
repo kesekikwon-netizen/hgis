@@ -26,6 +26,8 @@
 #include <qgsrectangle.h>
 
 #include "core/HeritageImport.h"
+#include "core/HeritageLayoutNumbers.h"
+#include "core/HeritagePledge.h"
 #include "core/HeritageSiteLegend.h"
 #include "core/HeritageStyle.h"
 #include "core/LayerOps.h"
@@ -404,6 +406,92 @@ private slots:
     QCOMPARE(kept.attribute(HeritageImport::chooseNameField(imported.layers.first())).toString(),
              QStringLiteral("근처"));
     QVERIFY(QFileInfo::exists(shp));
+  }
+
+  // F120: a neighbouring 시·군 often has no site inside the 5 km scope. That is a valid
+  // result (nothing to put on the map), not a failed download that stops the run.
+  void nothingInsideScopeIsNotAFailure() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString shp = writeFixture(temp.filePath(QStringLiteral("이웃.shp")),
+                                     {{QStringLiteral("멀리"), 230000., 480000.}});
+    QVERIFY(!shp.isEmpty());
+    QgsProject project;
+    addSurveyArea(project);
+    const auto imported = HeritageImport::loadDataset(&project, HeritageDataset::DesignatedHeritage,
+                                                      {shp}, temp.filePath(QStringLiteral("cache")),
+                                                      QStringLiteral("예천군"));
+    QVERIFY2(imported.ok(), qPrintable(imported.error));
+    QVERIFY(imported.emptyInScope);
+    QVERIFY(imported.layers.isEmpty());
+    QCOMPARE(imported.featureCount, 0);
+    QVERIFY(!imported.messages.isEmpty());
+    QVERIFY(imported.messages.first().contains(QStringLiteral("5km")));
+    QVERIFY(imported.messages.first().contains(QStringLiteral("예천군")));
+    QVERIFY(!project.layerTreeRoot()->findGroup(HeritageImport::referenceGroupName()));
+  }
+
+  // F120: layers of different 시·군 of one run are told apart; F169: intranet layers are
+  // marked so the submit checklist can add its guidance.
+  void regionLabelNamesLayersAndMarksIntranetData() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString shp = writeFixture(temp.filePath(QStringLiteral("국가지정유산.shp")),
+                                     {{QStringLiteral("근처"), 200000., 450000.}});
+    QVERIFY(!shp.isEmpty());
+    QgsProject project;
+    addSurveyArea(project);
+    QVERIFY(!HeritagePledge::projectHasIntranetLayers(&project));
+    const auto imported = HeritageImport::loadDataset(&project, HeritageDataset::DesignatedHeritage,
+                                                      {shp}, temp.filePath(QStringLiteral("cache")),
+                                                      QStringLiteral("예천군"));
+    QVERIFY2(imported.ok(), qPrintable(imported.error));
+    QVERIFY(!imported.emptyInScope);
+    QCOMPARE(imported.layers.size(), 1);
+    QCOMPARE(imported.layers.first()->name(), QStringLiteral("국가지정유산 · 예천군"));
+    QVERIFY(HeritagePledge::isIntranetLayer(imported.layers.first()));
+    QVERIFY(HeritagePledge::projectHasIntranetLayers(&project));
+    QVERIFY(!HeritagePledge::checklistPasses(&project));
+    // The intranet mark must not replace the logical dataset tag that layout numbers
+    // read (ka_hgis/heritage_dataset stays the key, never the display name).
+    QVERIFY(HeritageLayoutNumbers::taggedDataset(imported.layers.first()) ==
+            HeritageDataset::DesignatedHeritage);
+    QCOMPARE(imported.layers.first()->customProperty(QStringLiteral("ka_hgis/heritage_region")).toString(),
+             QStringLiteral("예천군"));
+  }
+
+private:
+  struct Site { QString name; double x; double y; };
+  static QString writeFixture(const QString& shp, const QList<Site>& sites) {
+    QgsVectorLayer source(QStringLiteral("Polygon?crs=EPSG:5186&field=nm:string(40)"),
+                          QStringLiteral("fixture"), QStringLiteral("memory"));
+    if (!source.startEditing()) return {};
+    for (const Site& site : sites) {
+      QgsFeature f(source.fields());
+      f.setAttribute(0, site.name);
+      f.setGeometry(QgsGeometry::fromRect(QgsRectangle(site.x, site.y, site.x + 20., site.y + 20.)));
+      if (!source.addFeature(f)) return {};
+    }
+    if (!source.commitChanges()) return {};
+    QgsVectorFileWriter::SaveVectorOptions options;
+    options.driverName = QStringLiteral("ESRI Shapefile");
+    options.fileEncoding = QStringLiteral("UTF-8");
+    return QgsVectorFileWriter::writeAsVectorFormatV3(&source, shp, QgsCoordinateTransformContext(),
+                                                     options) == QgsVectorFileWriter::NoError
+               ? shp
+               : QString();
+  }
+  static void addSurveyArea(QgsProject& project) {
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* survey = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                      QStringLiteral("조사구역"), QStringLiteral("memory"));
+    LayerOps::markSurveyLayer(survey, QStringLiteral("survey_area"));
+    survey->startEditing();
+    QgsFeature sa(survey->fields());
+    sa.setGeometry(QgsGeometry::fromRect(QgsRectangle(200000., 450000., 200010., 450010.)));
+    survey->addFeature(sa);
+    survey->commitChanges();
+    project.addMapLayer(survey);
   }
 };
 

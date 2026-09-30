@@ -1,3 +1,3 @@
-﻿id,x,y,datum,ellipsoid,projection,accuracy_m,pdop,fix_type
-GCP1,200000,450000,세계측지계,GRS80,UTM-K,0.8,1.2,RTK
-GCP2,200050,450020,세계측지계,GRS80,UTM-K,0.9,1.3,RTK
+﻿point_id,x,y,z,datum,ellipsoid,projection,origin,accuracy_m,pdop,fix_type
+GCP1,200000,450000,62.4,세계측지계,GRS80,TM(EPSG:5186 중부원점),중부원점(38N 127E),0.02,1.2,RTK
+GCP2,200050,450020,63.1,세계측지계,GRS80,TM(EPSG:5186 중부원점),중부원점(38N 127E),0.02,1.3,RTK

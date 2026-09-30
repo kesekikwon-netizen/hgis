@@ -155,6 +155,14 @@ const char* const themedIconIds[] = {
     "check", "pdf", "export", "more", "old_map", "old_topo", "topo_download", "geotiff",
     "web", "heritage", "export_convert",
 };
+
+// The tile checks below pin the legacy style for their run; the default is Outline (P2) and
+// KaIcons keys its cache by style, so the two never mix.
+struct TileStyleScope {
+  KaIcons::GlyphStyle previous = KaIcons::glyphStyle();
+  TileStyleScope() { KaIcons::setGlyphStyle(KaIcons::GlyphStyle::Tile); }
+  ~TileStyleScope() { KaIcons::setGlyphStyle(previous); }
+};
 }
 
 void TestTheme::ribbon_tabEnterNewSurveyToSave() {
@@ -462,6 +470,7 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
 }
 
 void TestTheme::domainIcons_useDistinctColors() {
+  const TileStyleScope tile;
   const auto& palette = KaTheme::iconPalette();
   const struct { const char* id; QColor color; } groups[] = {
       {"new", palette.file}, {"draw_poly", palette.record}, {"dem", palette.map},
@@ -490,6 +499,7 @@ void TestTheme::domainIcons_useDistinctColors() {
 }
 
 void TestTheme::flatIcons_keepTransparentCornersAndHighDpi() {
+  const TileStyleScope tile;
   for (const char* id : {"new", "map", "layer", "gps", "georef", "pdf"}) {
     const auto icon = KaIcons::icon(QString::fromLatin1(id));
     const auto normal = icon.pixmap(QSize(64, 64), 1.0).toImage();
@@ -507,6 +517,7 @@ void TestTheme::flatIcons_keepTransparentCornersAndHighDpi() {
 
 // Everyday buttons sit on a pale tint so the map stays loudest; 저장·도면·인쇄 keep a solid tile.
 void TestTheme::primaryIcons_standOutFromLightTiles() {
+  const TileStyleScope tile;
   for (const char* id : {"save", "pdf", "print"}) {
     const QImage light = KaIcons::icon(QString::fromLatin1(id)).pixmap(QSize(64, 64), 1.0).toImage();
     const QImage strong = KaIcons::strongIcon(QString::fromLatin1(id)).pixmap(QSize(64, 64), 1.0).toImage();
@@ -551,6 +562,7 @@ void TestTheme::appIcon_usesNavyTileWithGoldTrowel() {
 }
 
 void TestTheme::iconStates_preserveMeaningAndDisableColor() {
+  const TileStyleScope tile;
   QWidget grid;
   grid.setAttribute(Qt::WA_DontShowOnScreen);
   auto* layout = new QGridLayout(&grid);
@@ -799,12 +811,13 @@ void TestTheme::strataPalette_matchesSpec() {
   QVERIFY(contrastRatio(tokens.railText, tokens.rail) >= 4.5);
   QVERIFY(contrastRatio(tokens.railMuted, tokens.rail) >= 4.5);
   QVERIFY(contrastRatio(tokens.railMuted, tokens.sky3) >= 4.5);
-  // Icon fills keep their softened pre-2026-09-10 intensity.
+  // Icon fills keep their softened pre-2026-09-10 intensity. 배경 지도 green and
+  // 내보내기 teal were 3° apart (F090); their base hues now sit at 140° and 186°.
   const auto& icons = KaTheme::iconPalette();
   const struct { QColor before; QColor after; } fills[] = {
       {QColor(0x32, 0x6B, 0x9B), icons.file}, {QColor(0x95, 0x60, 0x29), icons.record},
-      {QColor(0x39, 0x73, 0x68), icons.map}, {QColor(0x6B, 0x59, 0x96), icons.align},
-      {QColor(0x24, 0x78, 0x6C), icons.output}, {QColor(0x1D, 0x6E, 0xB8), icons.water},
+      {QColor(0x39, 0x73, 0x4C), icons.map}, {QColor(0x6B, 0x59, 0x96), icons.align},
+      {QColor(0x24, 0x70, 0x78), icons.output}, {QColor(0x1D, 0x6E, 0xB8), icons.water},
       {QColor(0x93, 0x60, 0x39), icons.earth},
   };
   for (const auto& fill : fills) {

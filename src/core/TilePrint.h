@@ -79,6 +79,10 @@ public:
     // 한 쪽을 끝낼 때마다 (끝낸 쪽수, 모두)로 부른다. false 를 돌려주면 멈춘다.
     std::function<bool(int, int)> progress;
   };
+  // 인쇄 그림 해상도 상한 선택지. 300 은 도면 PDF 래스터와 같고, 600 은 0.1~0.2 mm 선이
+  // 많은 1:20 실측도용이다. 저장 PDF 와 인쇄는 같은 도면 PDF 를 그리므로 모양은 같다.
+  static QList<int> printDpiChoices();
+  static constexpr double kDefaultPrintDpi = 300.0;
   // pdfPath 첫 쪽을 plan 대로 잘라 device 의 각 쪽에 그린다. 용지·방향·여백은 여기서 맞춘다.
   // dpi 는 그림 해상도의 상한이다. 프린터가 더 높아도 이보다 곱게 그리지 않는다.
   static bool renderTiles(const QString& pdfPath, const TilePlan& plan, QPagedPaintDevice* device,

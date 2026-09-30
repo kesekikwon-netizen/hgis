@@ -1,8 +1,11 @@
 #include "SurveyBundle.h"
 
 #include "KaSessionLog.h"
+#include "SurveyDurability.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -102,6 +105,7 @@ QFileInfoList companions(const QFileInfo& file) {
     const QString other = entry.fileName();
     if (other.compare(name, Qt::CaseInsensitive) == 0) continue;
     if (other.endsWith(QLatin1String("-shm"), Qt::CaseInsensitive)) continue;
+    if (other.endsWith(QLatin1String(".ka-copy"), Qt::CaseInsensitive)) continue;  // interrupted copy
     if (other.startsWith(name, Qt::CaseInsensitive) ||
         other.startsWith(base + QLatin1Char('.'), Qt::CaseInsensitive))
       out << entry;
@@ -109,10 +113,33 @@ QFileInfoList companions(const QFileInfo& file) {
   return out;
 }
 
+// 같은 내용인가. 크기와 수정 시각(FAT 는 2초 단위라 2초 여유)이 같으면 같은 사본이다. 크기만
+// 같고 시각이 다르면(같은 이름으로 다시 받은 캐시 등) 내용을 비교한다.
 bool sameFile(const QString& a, const QString& b) {
   const QFileInfo x(a);
   const QFileInfo y(b);
-  return x.isFile() && y.isFile() && x.size() == y.size();
+  if (!x.isFile() || !y.isFile() || x.size() != y.size()) return false;
+  if (qAbs(x.lastModified().msecsTo(y.lastModified())) <= 2000) return true;
+  const auto hashOf = [](const QString& path) {
+    QFile file(path);
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    return file.open(QIODevice::ReadOnly) && hash.addData(&file) ? hash.result() : QByteArray();
+  };
+  const QByteArray left = hashOf(x.absoluteFilePath());
+  return !left.isEmpty() && left == hashOf(y.absoluteFilePath());
+}
+
+// 옆 임시 이름으로 다 복사하고 수정 시각을 원본과 맞춘 뒤 이름을 바꿔 끼운다. 도중에 끊겨도
+// 기존 target 은 그대로다. 시각을 맞춰 두어야 다음 저장이 같은 파일로 보고 다시 복사하지 않는다.
+bool copyReplacing(const QString& source, const QString& target) {
+  const QString staging = target + QStringLiteral(".ka-copy");
+  QFile::remove(staging);
+  if (!SurveyDurability::copyFileDurably(source, staging)) return false;
+  if (QFile stamped(staging); stamped.open(QIODevice::ReadWrite))
+    stamped.setFileTime(QFileInfo(source).lastModified(), QFileDevice::FileModificationTime);
+  if (SurveyDurability::replaceFileDurably(staging, target)) return true;
+  QFile::remove(staging);
+  return false;
 }
 
 // file 과 곁 파일을 targetDir 에 복사한다. 이미 같은 파일이 있으면 그대로 쓰고,
@@ -134,8 +161,7 @@ QString copyWithCompanions(const QString& file, const QString& targetDir, QStrin
   for (const QFileInfo& part : all) {
     const QString target = QDir(dir).filePath(part.fileName());
     if (sameFile(part.absoluteFilePath(), target)) continue;
-    if (QFileInfo::exists(target)) QFile::remove(target);
-    if (!QFile::copy(part.absoluteFilePath(), target)) {
+    if (!copyReplacing(part.absoluteFilePath(), target)) {
       if (error) *error = QStringLiteral("복사하지 못했습니다: %1").arg(QDir::toNativeSeparators(part.absoluteFilePath()));
       return {};
     }

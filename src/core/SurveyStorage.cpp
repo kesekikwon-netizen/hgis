@@ -1,13 +1,19 @@
 #include "KaSessionLog.h"
+#include "KaLogExcept.h"
 #include "SurveyStorage.h"
 #include "LayerOps.h"
 #include "SurveyBundle.h"
+#include "SurveyDurability.h"
+#include "SurveyFileFingerprint.h"
+#include "SurveyFileHygiene.h"
+#include "SurveySchema.h"
 
 #include <algorithm>
 #include <memory>
 
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
@@ -210,12 +216,16 @@ int remountCopiedSurveyLayers(QgsProject* project, const QString& gpkgPath) {
   return stale.size();
 }
 
-void restoreLayerSources(QgsProject* project, const QHash<QString, QString>& sources) {
+// keepGeneration: a validated generation that holds saved edits the original never received;
+// layers pointing there stay (even an emptied layer), so a failed publish loses nothing.
+void restoreLayerSources(QgsProject* project, const QHash<QString, QString>& sources,
+                         const QString& keepGeneration = QString()) {
   if (!project) return;
   for (QgsMapLayer* ml : project->mapLayers()) {
     auto* vl = qobject_cast<QgsVectorLayer*>(ml);
     if (!vl || !sources.contains(vl->id())) continue;
     if (vl->isValid() && (vl->isModified() || vl->featureCount() > 0)) continue;
+    if (vl->isValid() && !keepGeneration.isEmpty() && livesInGpkg(vl, keepGeneration)) continue;
     const QString want = sources.value(vl->id());
     if (vl->source() == want) continue;
     const bool editing = vl->isEditable();
@@ -380,67 +390,20 @@ bool validateForOpen(const QString& gpkgPath, QString* errorOut) {
 
 // 다 쓴 사본으로 원본을 교체한다. Windows 는 백신·색인이나 방금 닫힌 핸들이 대상
 // 파일을 잠깐 잡고 있으면 첫 시도를 "액세스가 거부되었습니다"로 거부한다. 사본은
-// 그대로 두고 교체만 짧게 다시 시도한다. 잠금과 무관한 실패는 즉시 알린다.
+// 그대로 두고 교체만 다시 시도한다(최대 약 10초). 잠금과 무관한 실패는 즉시 알린다.
+// 교체는 MOVEFILE_WRITE_THROUGH 로 디스크에 기록된 뒤에야 성공으로 본다.
+// 10초: 저장 직전에 취소한 지도 그리기 스레드가 바쁜 PC 에서는 원본 GPKG 핸들을
+// 5~7초 더 잡고 있었다(ctest 부하에서 재현). 그보다 짧으면 저장이 옆 파일로 빠진다.
 bool replaceWithStaged(const QString& staged, const QString& target, QString* errorOut) {
-  for (int attempt = 0; attempt < 20; ++attempt) {
+  for (int attempt = 0; attempt < 40; ++attempt) {
     if (attempt) QThread::msleep(attempt < 10 ? 100 : 300);
+    quint32 code = 0;
+    if (SurveyDurability::replaceFileDurably(staged, target, &code, errorOut)) return true;
 #ifdef Q_OS_WIN
-    const QString from = QDir::toNativeSeparators(staged);
-    const QString to = QDir::toNativeSeparators(target);
-    if (MoveFileExW(reinterpret_cast<LPCWSTR>(from.utf16()), reinterpret_cast<LPCWSTR>(to.utf16()),
-                    MOVEFILE_REPLACE_EXISTING))
-      return true;
-    const DWORD code = GetLastError();
-    if (errorOut) {
-      wchar_t* text = nullptr;
-      FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-                         FORMAT_MESSAGE_IGNORE_INSERTS,
-                     nullptr, code, 0, reinterpret_cast<LPWSTR>(&text), 0, nullptr);
-      *errorOut = text ? QString::fromWCharArray(text).trimmed()
-                       : QStringLiteral("교체 오류 %1").arg(static_cast<int>(code));
-      if (text) LocalFree(text);
-    }
-    if (code != ERROR_ACCESS_DENIED && code != ERROR_SHARING_VIOLATION &&
-        code != ERROR_LOCK_VIOLATION)
-      return false;
-#else
-    if (QFile::exists(target) && !QFile::remove(target)) {
-      if (errorOut) *errorOut = QStringLiteral("기존 파일을 비우지 못했습니다.");
-      continue;
-    }
-    if (QFile::rename(staged, target)) return true;
-    if (errorOut) *errorOut = QStringLiteral("이름을 바꾸지 못했습니다.");
+    if (!SurveyDurability::isTransientLockError(code)) return false;
 #endif
   }
   return false;
-}
-
-// 이름 교체를 끝까지 거부당하면(대상 파일을 잡은 쪽이 쓰기는 허용하는 경우) 같은
-// 파일에 내용을 그대로 덮어쓴다. 사본은 이 쓰기가 끝날 때까지 남겨 두므로, 중간에
-// 끊겨도 옆의 .ka-new 파일에 검증된 새 세대가 온전히 남는다.
-bool overwriteInPlace(const QString& staged, const QString& target, QString* errorOut) {
-  QFile source(staged);
-  QFile destination(target);
-  if (!source.open(QIODevice::ReadOnly) ||
-      !destination.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-    if (errorOut) *errorOut = destination.errorString();
-    return false;
-  }
-  while (!source.atEnd()) {
-    const QByteArray data = source.read(1024 * 1024);
-    if (source.error() != QFileDevice::NoError || destination.write(data) != data.size()) {
-      if (errorOut) *errorOut = destination.errorString();
-      return false;
-    }
-  }
-  const bool flushed = destination.flush();
-  destination.close();
-  source.close();
-  if (!flushed) {
-    if (errorOut) *errorOut = QStringLiteral("덮어쓴 내용을 끝까지 기록하지 못했습니다.");
-    return false;
-  }
-  return QFileInfo(target).size() == QFileInfo(staged).size();
 }
 
 QString siblingSurveyPath(const QFileInfo& target) {
@@ -467,22 +430,14 @@ bool finishStagedSurvey(const QString& staged, const QString& targetPath, QStrin
     if (writtenPath) *writtenPath = QFileInfo(targetPath).absoluteFilePath();
     return true;
   }
-  KaSessionLog::line(QStringLiteral("[save] 이름 교체 거부 — 같은 파일에 덮어쓴다: %1")
+  // 이름 교체를 끝까지 거부당해도 원본을 제자리에서 잘라 덮어쓰지 않는다(도중에 끊기면
+  // 원본이 잘린 채 남는다). 검증된 새 세대는 옆의 -저장.gpkg 로 둔다.
+  KaSessionLog::line(QStringLiteral("[save] 이름 교체 거부 — 원본은 두고 옆 파일에 저장: %1")
                          .arg(replaceError));
-  QString overwriteError;
-  bool journalLeft = false;
-  for (const QString& suffix : {QStringLiteral("-wal"), QStringLiteral("-shm"),
-                                QStringLiteral("-journal")}) {
-    if (QFileInfo::exists(targetPath + suffix)) journalLeft = true;
-  }
-  if (!journalLeft && overwriteInPlace(staged, targetPath, &overwriteError)) {
-    dropIdleJournals(targetPath);
-    if (writtenPath) *writtenPath = QFileInfo(targetPath).absoluteFilePath();
-    return true;
-  }
   const QString alt = siblingSurveyPath(QFileInfo(targetPath));
-  if (QFile::rename(staged, alt) ||
-      (QFile::copy(staged, alt) && QFileInfo(alt).size() == QFileInfo(staged).size())) {
+  QString copyError;
+  if (SurveyDurability::replaceFileDurably(staged, alt) ||
+      SurveyDurability::copyFileDurably(staged, alt, &copyError)) {
     QFile::remove(staged);
     dropIdleJournals(alt);
     if (writtenPath) *writtenPath = alt;
@@ -490,9 +445,10 @@ bool finishStagedSurvey(const QString& staged, const QString& targetPath, QStrin
                            .arg(QDir::toNativeSeparators(alt)));
     return true;
   }
-  return fail(QStringLiteral("저장 파일을 교체하지 못했습니다: %1 · 새로 만든 조사 파일은 "
-                             "%2 에 남겨 두었습니다.")
-                  .arg(overwriteError.isEmpty() ? replaceError : overwriteError,
+  // 새 세대 파일(staged)은 지우지 않는다. 안내한 경로에 실제로 남아 있어야 한다.
+  return fail(QStringLiteral("저장 파일을 교체하지 못했습니다: %1 · 원본 조사 파일은 그대로이고, 새로 "
+                             "만든 조사 파일은 %2 에 남겨 두었습니다.")
+                  .arg(copyError.isEmpty() ? replaceError : copyError,
                        QDir::toNativeSeparators(staged)));
 }
 
@@ -535,42 +491,30 @@ bool copySurvey(const QString& sourceGpkg, const QString& targetGpkg, QString* e
   if (!copied || QFileInfo(snapshot).size() <= 0)
     return fail(QStringLiteral("조사 파일 사본을 만들지 못했습니다: %1").arg(copyError));
   // 대상 옆에 새 세대를 먼저 다 쓴다. 다 쓰기 전에는 원본을 건드리지 않는다.
+  // 사본은 이미 대상과 같은 폴더(같은 볼륨)에 있으므로 다시 복사하지 않고 이름만 옮긴다.
+  // 조사 파일 전체 쓰기가 한 번 줄고, 옮기기 전에 내용을 디스크까지 내린다.
   const QString staged = target.absoluteFilePath() + QStringLiteral(".ka-new");
   QFile::remove(staged);
-  const auto dropStaged = [&staged] { QFile::remove(staged); };
-  QFile input(snapshot);
-  QFile output(staged);
-  if (!input.open(QIODevice::ReadOnly) || !output.open(QIODevice::WriteOnly)) {
-    dropStaged();
-    return fail(QStringLiteral("저장 대상에 쓸 수 없습니다: %1").arg(output.errorString()));
-  }
-  while (!input.atEnd()) {
-    const QByteArray data = input.read(1024 * 1024);
-    if (input.error() != QFileDevice::NoError || output.write(data) != data.size()) {
-      output.close();
-      dropStaged();
-      return fail(QStringLiteral("조사 파일 사본을 기록하지 못했습니다."));
-    }
-  }
-  const bool flushed = output.flush();
-  output.close();
-  input.close();
-  if (!flushed) {
-    dropStaged();
-    return fail(QStringLiteral("조사 파일 사본을 끝까지 기록하지 못했습니다."));
-  }
-  if (!finishStagedSurvey(staged, target.absoluteFilePath(), errorOut, writtenPath)) {
-    dropStaged();
-    return false;
-  }
-  dropStaged();
+  QString stageError;
+  const bool movedSnapshot = SurveyDurability::flushPathToDisk(snapshot) &&
+                             SurveyDurability::replaceFileDurably(snapshot, staged);
+  if (!movedSnapshot && !SurveyDurability::copyFileDurably(snapshot, staged, &stageError))
+    return fail(QStringLiteral("조사 파일 사본을 기록하지 못했습니다: %1").arg(stageError));
+  // 실패하면 staged 는 finishStagedSurvey 가 안내한 경로에 그대로 남긴다.
+  if (!finishStagedSurvey(staged, target.absoluteFilePath(), errorOut, writtenPath)) return false;
+  QFile::remove(staged);
   return true;
 }
 
 bool publishSurveyGeneration(const QString& generationGpkg, const QString& targetGpkg,
                              QString* errorOut, QString* writtenPath) {
   if (!validateForOpen(generationGpkg, errorOut)) return false;
-  return copySurvey(generationGpkg, targetGpkg, errorOut, writtenPath);
+  QString written;
+  if (!copySurvey(generationGpkg, targetGpkg, errorOut, &written)) return false;
+  // 이 프로세스가 방금 바꿔 끼운 상태를 기억한다. 다음 저장 전에 다른 곳의 저장을 알아본다.
+  SurveyFileFingerprint::remember(written.isEmpty() ? targetGpkg : written);
+  if (writtenPath) *writtenPath = written;
+  return true;
 }
 
 bool noteRecoveryPending(const QString& recoveryDirectory, const QString& snapshotPath, QString* errorOut) {
@@ -746,10 +690,11 @@ QString writeRecoverySnapshot(QgsProject* project, const QString& recoveryDirect
     QString detail;
     if (!validateForOpen(path, &detail))
       return fail(QStringLiteral("복구 사본 파일을 다시 확인하지 못했습니다: %1").arg(detail));
+    SurveyDurability::flushPathToDisk(path);  // a power cut must not leave a hollow recovery copy
     output.setAutoRemove(false);
     return path;
   } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/SurveyStorage.cpp:494"));
+    KA_LOG_EXCEPT();
     return fail(QStringLiteral("복구 사본을 만드는 중 오류가 발생했습니다. 현재 창을 닫지 말고 다시 저장하세요."));
   }
 }
@@ -858,6 +803,13 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
   const QString generation = generationDir.isValid()
       ? generationDir.filePath(QStringLiteral("survey.gpkg"))
       : QString();
+  // Stage timings go to the session log so the slow part of a large save can be measured.
+  QElapsedTimer clock;
+  clock.start();
+  QStringList timings;
+  // Once layers are retargeted to the validated generation for the publish, that file holds
+  // the saved edits (the original never got them). A failed publish keeps them there.
+  bool publishing = false;
 
   const auto recover = [&](const QString& message) {
     attempt.saved = false;
@@ -872,17 +824,20 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
                                                  recoverable);
     if (attempt.recoveryPath.isEmpty() && !recoveryError.isEmpty())
       attempt.error += QLatin1Char('\n') + recoveryError;
-    restoreLayerSources(project, sources);
+    restoreLayerSources(project, sources, publishing ? generation : QString());
     project->setDirty(true);
     if (!generation.isEmpty()) {
       for (QgsMapLayer* layer : project->mapLayers()) {
         auto* vector = qobject_cast<QgsVectorLayer*>(layer);
         if (vector && livesInGpkg(vector, generation)) {
           generationDir.setAutoRemove(false);
+          // Tell a later stale-staging cleanup that this folder must stay.
+          SurveyFileHygiene::markPreservedGeneration(generationDir.path(), attempt.error);
           break;
         }
       }
     }
+    KaSessionLog::line(QStringLiteral("[save] 실패 — %1").arg(timings.join(QStringLiteral(" · "))));
   };
 
   QList<QgsVectorLayer*> ordered;
@@ -910,7 +865,8 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
     return attempt;
   }
   QString copyError;
-  if (!QFileInfo::exists(gpkgPath)) {
+  const bool generationFromOriginal = QFileInfo::exists(gpkgPath);  // [pkg K] layers are not mounted on the copy
+  if (!generationFromOriginal) {
     QString snapshotError;
     const QString snapshot = writeRecoverySnapshot(project, recoveryDirectory, &snapshotError);
     if (snapshot.isEmpty() || !copySurvey(snapshot, generation, &copyError)) {
@@ -927,9 +883,22 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
     return attempt;
   }
 
-  // Tree order is not save order. Commit every layer that can save, then
-  // fail if a later (or earlier) layer still blocks the package publish.
+  timings << QStringLiteral("세대 복사 %1ms").arg(clock.restart());
+  // [pkg K] F053/F112: an older survey gains the optional record columns in the generation copy only
+  // (never on open). Every column is optional: a failure is logged and the save goes on.
+  if (generationFromOriginal) {
+    const SurveySchema::MigrationResult schema = SurveySchema::migrateGenerationCopy(generation);
+    if (!schema.ok)
+      KaSessionLog::line(QStringLiteral("[save] 기록 항목 추가 건너뜀: %1").arg(schema.error));
+    else if (!schema.addedFields.isEmpty())
+      timings << QStringLiteral("기록 항목 %1개 추가").arg(schema.addedFields.size());
+  }
+
+  // Tree order is not save order. Survey-file layers write their edits into the generation
+  // only; the original survey file is not committed here, so any later failure (absorb,
+  // embedded workspace, publish) leaves the original bytes and the edit buffers as they were.
   QStringList blockedNames;
+  QList<QgsVectorLayer*> appliedToGeneration;
   for (QgsVectorLayer* vector : ordered) {
     if (!vector->isValid() || !vector->isEditable() || !vector->isModified())
       continue;
@@ -952,33 +921,39 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
                     : writeLayerError);
         return attempt;
       }
-      // 세대 파일에 쓴 뒤에도 메모리 버퍼를 비운다. 다음 레이어가 실패하면
-      // 이미 쓴 레이어는 원본에도 반영되고 isModified()가 꺼져 있어야 한다.
-      if (!vector->commitChanges(false)) {
-        attempt.failedLayers << vector->name();
-        recover(QStringLiteral("%1의 편집을 저장하지 못해 전체 저장을 마치지 못했습니다. "
-                               "미저장 편집은 유지됩니다.")
-                    .arg(vector->name()));
-        return attempt;
-      }
-      attempt.committedLayers << vector->name();
+      appliedToGeneration << vector;
       continue;
     }
+    // Memory and outside-file layers commit to their own source; the survey file is untouched.
     if (!vector->commitChanges(false)) {
+      blockedNames << vector->name();
       attempt.failedLayers << vector->name();
-      recover(QStringLiteral("%1의 편집을 저장하지 못해 전체 저장을 마치지 못했습니다. "
-                             "미저장 편집은 유지됩니다.")
-                  .arg(vector->name()));
-      return attempt;
+      continue;
     }
     attempt.committedLayers << vector->name();
   }
   if (!blockedNames.isEmpty()) {
-    recover(QStringLiteral("%1의 편집을 저장하지 못해 전체 저장을 마치지 못했습니다. "
-                           "미저장 편집은 유지됩니다.")
-                .arg(blockedNames.join(QStringLiteral(", "))));
+    // 사용자 결정(2026-09-20): 막힌 레이어가 있어도 저장할 수 있는 레이어는 먼저 원본에 커밋한다.
+    // 이 경우에만 원본이 일부 갱신되므로 실패 안내에 그 사실과 레이어 이름을 적는다.
+    for (QgsVectorLayer* vector : appliedToGeneration) {
+      if (vector->commitChanges(false)) {
+        attempt.committedLayers << vector->name();
+        attempt.originalCommittedLayers << vector->name();
+      } else {
+        blockedNames << vector->name();
+        attempt.failedLayers << vector->name();
+      }
+    }
+    QString message = QStringLiteral("%1의 편집을 저장하지 못해 전체 저장을 마치지 못했습니다. "
+                                     "미저장 편집은 유지됩니다.")
+                          .arg(blockedNames.join(QStringLiteral(", ")));
+    if (!attempt.originalCommittedLayers.isEmpty())
+      message += QStringLiteral(" 저장할 수 있던 %1은 원본 조사 파일에 먼저 저장했습니다.")
+                     .arg(attempt.originalCommittedLayers.join(QStringLiteral(", ")));
+    recover(message);
     return attempt;
   }
+  timings << QStringLiteral("편집 %1ms").arg(clock.restart());
 
   // 다른 PC·새 포터블에서도 열리게 AppData·임시·앱 폴더의 자료를 조사 폴더로 모은다.
   const SurveyBundle::CollectResult collected =
@@ -1010,16 +985,27 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
       return attempt;
     }
   } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/SurveyStorage.cpp:709"));
+    KA_LOG_EXCEPT();
     recover(QStringLiteral("저장 중 오류가 발생했습니다. 원본 조사 파일은 그대로입니다. "
                            "창을 닫지 말고 다시 저장하세요."));
     return attempt;
   }
+  timings << QStringLiteral("모으기·흡수·작업공간 %1ms").arg(clock.restart());
 
+  // The generation now holds every saved edit. Drop the buffers in the order a commit uses:
+  // the layer undo history is cleared first, so the app's EditHistory records those commands
+  // as saved (a command that leaves the stack while undone counts as thrown away, and the
+  // app then prunes its own 되돌리기 entries). Then the buffer is dropped without undoing
+  // anything through it (rollBack(false) would replay every command backwards and fire
+  // featureDeleted/geometryChanged for edits that are already on disk), and editing goes on
+  // against the generation once the layers are retargeted below.
   for (QgsVectorLayer* vector : ordered) {
-    if (vector && livesInGpkg(vector, gpkgPath) && vector->isModified())
-      vector->rollBack(false);
+    if (!vector || !livesInGpkg(vector, gpkgPath) || !vector->isModified()) continue;
+    if (vector->undoStack()) vector->undoStack()->clear();
+    vector->rollBack(true);
+    vector->startEditing();
   }
+  publishing = true;
   retargetGpkgLayers(project, gpkgPath, generation);
   QgsOgrProviderUtils::invalidateCachedDatasets(QFileInfo(gpkgPath).absoluteFilePath());
   dropIdleJournals(gpkgPath);
@@ -1061,6 +1047,11 @@ PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
   if (published.compare(QFileInfo(gpkgPath).absoluteFilePath(), Qt::CaseInsensitive) != 0)
     remountCopiedSurveyLayers(project, published);
   LayerOps::reloadSurveyGpkgReaders(project, published);
+  timings << QStringLiteral("검증·교체 %1ms").arg(clock.restart());
+  KaSessionLog::line(QStringLiteral("[save] %1 · %2 MB — %3")
+                         .arg(QFileInfo(published).fileName(),
+                              QString::number(QFileInfo(published).size() / (1024.0 * 1024.0), 'f', 1),
+                              timings.join(QStringLiteral(" · "))));
   attempt.surveyPath = originalAbs;
   attempt.saved = true;
   return attempt;
@@ -1152,13 +1143,18 @@ ExtractAttempt extractEmbeddedReferenceVectors(QgsProject* project, const QStrin
       return attempt;
     }
   } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/SurveyStorage.cpp:826"));
+    KA_LOG_EXCEPT();
     attempt.error = QStringLiteral("작업 구성을 저장하는 중 오류가 났습니다. 조사 파일은 그대로 둡니다.");
     return attempt;
   }
   for (QgsMapLayer* ml : project->mapLayers()) {
     auto* vl = qobject_cast<QgsVectorLayer*>(ml);
-    if (vl && livesInGpkg(vl, gpkgPath) && vl->isModified()) vl->rollBack(false);
+    // [v3] Same order as persistWorkspace: clear the saved commands first so Ctrl+Y cannot
+    // redo an edit that is already on disk, then drop the buffer and stay in editing mode.
+    if (!vl || !livesInGpkg(vl, gpkgPath) || !vl->isModified()) continue;
+    if (vl->undoStack()) vl->undoStack()->clear();
+    vl->rollBack(true);
+    vl->startEditing();
   }
   retargetGpkgLayers(project, gpkgPath, generation);
   QgsOgrProviderUtils::invalidateCachedDatasets(QFileInfo(gpkgPath).absoluteFilePath());

@@ -1,4 +1,5 @@
 #include "KaAlignMapTool.h"
+#include "core/GeorefQuality.h"
 #include "core/LayerOps.h"
 
 #include <qgsmapcanvas.h>
@@ -62,16 +63,13 @@ void KaAlignPickTool::updateSnapMark(const QgsPointXY& pt, bool snapped) {
   m_snapMark->show();
 }
 
-void KaAlignPickTool::canvasPressEvent(QgsMapMouseEvent* e) {
-  if (e->button() != Qt::LeftButton) return;
-  bool snapped = false;
-  emit picked(snapPoint(e, &snapped));
-}
+// canvasPressEvent / canvasReleaseEvent (pick or drag): KaAlignMapToolEdit.cpp
 
 void KaAlignPickTool::canvasMoveEvent(QgsMapMouseEvent* e) {
   bool snapped = false;
   const QgsPointXY pt = snapPoint(e, &snapped);
-  updateSnapMark(pt, snapped);
+  // While dragging a picked point the mark follows the cursor even without a snap.
+  updateSnapMark(pt, snapped || m_dragIndex >= 0);
 }
 
 void KaAlignPickTool::deactivate() {
@@ -117,6 +115,7 @@ bool KaAlignMapTool::beginLayer(QgsMapLayer* layer, const QgsCoordinateReference
   if (auto* rl = qobject_cast<QgsRasterLayer*>(layer)) {
     m_raster = true;
     m_rasterPath = rl->source();
+    m_originalRasterCrs = rl->crs();
     m_pixelW = rl->width();
     m_pixelH = rl->height();
     LayerOps::setAlignPending(rl, true);
@@ -193,6 +192,11 @@ void KaAlignMapTool::endSession() {
   m_phase = Phase::Idle;
   m_raster = false;
   m_rasterPath.clear();
+  // The backup folder stays on disk; only this session's link to it ends.
+  m_rasterBackup = GeorefBackup::RasterBackup();
+  m_originalRasterCrs = QgsCoordinateReferenceSystem();
+  m_savedVectorPath.clear();
+  m_dragIndex = -1;
 }
 
 QgsMapLayer* KaAlignMapTool::sourceDisplayLayer() const {
@@ -289,7 +293,8 @@ bool KaAlignMapTool::applyPreview(QString* errorOut) {
   bool ok = true;
   if (m_raster) {
     auto* rl = qobject_cast<QgsRasterLayer*>(m_layer.data());
-    ok = rl && GeorefService::applyWorldFileToRaster(rl, m_affine, workCrs(), &err);
+    ok = rl && ensureRasterBackup(&err)
+         && GeorefService::applyWorldFileToRaster(rl, m_affine, workCrs(), &err);
     if (ok && rl)
       GeorefService::styleAlignedRasterOverlay(rl);
   } else {
@@ -337,28 +342,7 @@ bool KaAlignMapTool::removePairAt(int index) {
   return true;
 }
 
-bool KaAlignMapTool::restoreOriginals() {
-  m_pairs.clear();
-  m_haveFrom = false;
-  m_phase = Phase::WaitFrom;
-  m_affine = {};
-  if (!m_raster) {
-    auto* vl = qobject_cast<QgsVectorLayer*>(m_layer.data());
-    if (vl && vl->startEditing()) {
-      for (auto it = m_originals.constBegin(); it != m_originals.constEnd(); ++it) {
-        QgsGeometry g = it.value();
-        vl->changeGeometry(it.key(), g);
-      }
-      vl->commitChanges();
-      vl->triggerRepaint();
-    }
-  }
-  clearMarks();
-  if (canvas()) canvas()->refresh();
-  emit statusChanged(statusText());
-  emit pairsChanged();
-  return true;
-}
+// restoreOriginals: KaAlignMapToolEdit.cpp (restores the raster from its backup)
 
 bool KaAlignMapTool::applyMove(QString* errorOut) {
   if (m_pairs.size() < 2) {
@@ -376,6 +360,7 @@ bool KaAlignMapTool::applyMove(QString* errorOut) {
       if (errorOut) *errorOut = QStringLiteral("그림 레이어가 없습니다");
       return false;
     }
+    if (!ensureRasterBackup(errorOut)) return false;
     if (!GeorefService::persistAlignedRaster(rl, m_affine, workCrs(), errorOut)) {
       const QString src = rl->source();
       const QString name = rl->name();
@@ -424,7 +409,10 @@ bool KaAlignMapTool::applyMove(QString* errorOut) {
     LayerOps::refreshCanvasIfIdle(canvas());
   }
   rebuildPairMarks();
-  emit statusChanged(QStringLiteral("이동 완료 · %1점").arg(m_pairs.size()));
+  emit statusChanged(QStringLiteral("이동 완료 · %1점").arg(m_pairs.size())
+                     + (m_pairs.size() >= 4
+                            ? QStringLiteral(" · 평균 어긋남 %1 m").arg(m_affine.rmsMeters, 0, 'f', 2)
+                            : QString()));
   emit pairsChanged();
   return true;
 }
@@ -435,7 +423,7 @@ bool KaAlignMapTool::saveAligned(QString* savedPath, QString* errorOut) {
     return false;
   }
   if (m_pairs.size() < 2 && !m_affine.valid) {
-    if (errorOut) *errorOut = QStringLiteral("점을 두 곳 이상 찍거나 화면에 가져오기를 하세요");
+    if (errorOut) *errorOut = QStringLiteral("점을 두 곳 이상 찍은 뒤 저장하세요");
     return false;
   }
   if (m_pairs.size() >= 2) {
@@ -445,6 +433,7 @@ bool KaAlignMapTool::saveAligned(QString* savedPath, QString* errorOut) {
   if (m_raster) {
     auto* rl = qobject_cast<QgsRasterLayer*>(m_layer.data());
     if (!rl) return false;
+    if (!ensureRasterBackup(errorOut)) return false;
     if (!GeorefService::persistAlignedRaster(rl, m_affine, workCrs(), errorOut))
       return false;
     LayerOps::markReferenceLayer(rl);
@@ -469,8 +458,12 @@ bool KaAlignMapTool::saveAligned(QString* savedPath, QString* errorOut) {
     dir = QFileInfo(m_hiddenSource->source().section(QLatin1Char('|'), 0, 0)).absolutePath();
   if (dir.isEmpty()) dir = QFileInfo(vl->source()).absolutePath();
   if (dir.isEmpty() || dir == QLatin1String(".")) dir = QDir::tempPath();
-  const QString out = dir + QLatin1Char('/') + QFileInfo(base).completeBaseName()
-                      + QStringLiteral("_aligned.gpkg");
+  // Never delete a file this session did not write: an older <name>_aligned.gpkg gets a
+  // numbered sibling instead; saving again in the same session rewrites our own copy.
+  if (m_savedVectorPath.isEmpty())
+    m_savedVectorPath = GeorefBackup::uniqueOutputPath(
+        dir + QLatin1Char('/') + QFileInfo(base).completeBaseName() + QStringLiteral("_aligned.gpkg"));
+  const QString out = m_savedVectorPath;
   if (QFile::exists(out)) QFile::remove(out);
   const QString written = GeorefService::saveVectorCopyGpkg(vl, out, workCrs(), errorOut);
   if (written.isEmpty()) return false;
@@ -486,12 +479,9 @@ QString KaAlignMapTool::statusText() const {
     return QStringLiteral("오른쪽 지도에서 같은 모서리를 찍으세요");
   if (m_pairs.isEmpty())
     return QStringLiteral("왼쪽 도면 모서리 → 오른쪽 지적 모서리");
-  QString s = QStringLiteral("왼쪽 → 오른쪽 · %1점").arg(m_pairs.size());
-  if (m_pairs.size() >= 3 && m_affine.valid)
-    s += QStringLiteral(" · 어긋남 %1 m").arg(m_affine.rmsMeters, 0, 'f', 2);
-  else if (m_pairs.size() == 2)
-    s += QStringLiteral(" · 한 점 더 찍으면 기울기도 맞습니다");
-  return s;
+  // Residuals come from the points themselves, so they show before 「이동」 too.
+  return QStringLiteral("왼쪽 → 오른쪽 · %1점").arg(m_pairs.size())
+         + GeorefQuality::summary(GeorefQuality::assess(m_pairs, m_raster));
 }
 
 void KaAlignMapTool::updateSnapMark(const QgsPointXY& pt, bool snapped) {
@@ -539,6 +529,8 @@ void KaAlignMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
     }
     return;
   }
+  // Pressing on a finished pair's mark (while no left point waits) drags it.
+  if (beginPairDrag(e)) return;
   if (m_phase != Phase::WaitTo || !m_haveFrom) {
     emit statusChanged(QStringLiteral("왼쪽 도면에서 먼저 모서리를 찍으세요"));
     return;
@@ -561,6 +553,7 @@ void KaAlignMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
 void KaAlignMapTool::canvasMoveEvent(QgsMapMouseEvent* e) {
   QgsPointXY mapPt;
   mapPointFromEvent(e, &mapPt, nullptr);
+  if (m_dragIndex >= 0 && m_dragIndex < m_marks.size()) m_marks[m_dragIndex]->setCenter(mapPt);
   if (m_haveFrom && m_rubber) m_rubber->movePoint(mapPt);
   emit cursorMoved(mapPt);
 }

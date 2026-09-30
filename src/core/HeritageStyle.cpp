@@ -1,5 +1,6 @@
 #include "HeritageStyle.h"
 #include "LayerOps.h"
+#include "HeritageLayoutNumbers.h"
 
 #include <qgsfillsymbol.h>
 #include <qgslinesymbol.h>
@@ -151,6 +152,9 @@ HeritageStyleResult HeritageStyle::apply(QgsVectorLayer* layer, HeritageDataset 
     out.message = QStringLiteral("색표에 없는 자료 종류입니다.");
     return out;
   }
+  // Logical dataset identity for layout numbers (ka_hgis/heritage_dataset);
+  // group titles are labels only, so a renamed group keeps its numbers.
+  HeritageLayoutNumbers::tagDataset(layer, ds);
   const Qgis::GeometryType gt = layer->geometryType();
   if (QgsSymbol* sym = makeSymbol(c, gt)) layer->setRenderer(new QgsSingleSymbolRenderer(sym));
 
@@ -174,6 +178,8 @@ HeritageStyleResult HeritageStyle::apply(QgsVectorLayer* layer, HeritageDataset 
     labels.minimumScale = nameLabelMinScale();
     labels.maximumScale = 0.;
     layer->setLabeling(new QgsVectorLayerSimpleLabeling(labels));
+    // setLabeling() emits nothing; the repaint tells the map and the label stack.
+    layer->triggerRepaint();
   }
   out.ok = true;
   out.categoryCount = 1;

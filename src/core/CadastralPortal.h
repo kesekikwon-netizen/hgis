@@ -18,6 +18,8 @@ struct Request {
 };
 Credentials credentials();
 bool saveCredentials(const Credentials& account, QString* error = nullptr);
+// ID and password are both set. Read-only: never rewrites vworld-account.ini.
+bool hasCredentials();
 QList<Resource> parseResources(const QByteArray& html);
 QList<Resource> selectResources(const QList<Resource>& resources, const QList<District>& districts, QString* error);
 PreparedReferenceMap prepare(const Request& request, const CadastralImport::Cancel& cancel = {},

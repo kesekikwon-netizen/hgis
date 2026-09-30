@@ -134,7 +134,7 @@ AdminBoundaryParse AdminBoundaryService::parseGetFeature(const QByteArray& body,
     const QString code = resp.value(QStringLiteral("error")).toObject()
                              .value(QStringLiteral("code")).toString();
     if (code.contains(QLatin1String("KEY"), Qt::CaseInsensitive))
-      out.error = QStringLiteral("행정구역 서비스의 인증에 실패했습니다. 도움말에서 VWorld API 키를 확인한 뒤 다시 불러오세요.");
+      out.error = QStringLiteral("행정구역 서비스의 인증에 실패했습니다. 리본의 더보기 → API 키 입력에서 VWorld API 키를 확인한 뒤 다시 불러오세요.");
     else if (status == QLatin1String("NOT_FOUND"))
       out.error = QStringLiteral("선택한 읍면동 경계를 찾지 못했습니다. 시·군·구와 읍·면·동을 확인한 뒤 다시 불러오세요.");
     else
@@ -190,7 +190,7 @@ void AdminBoundaryService::fetchEmd(const QString& sido, const QString& city, co
   }
   const QString key = VworldSettings::loadApiKey().trimmed();
   if (key.isEmpty()) {
-    emit failed(QStringLiteral("VWorld 키가 없습니다. 설정에서 키를 넣은 뒤 다시 누르세요."));
+    emit failed(QStringLiteral("VWorld API 키가 없습니다. 리본의 더보기 → API 키 입력에서 키를 넣은 뒤 다시 누르세요."));
     return;
   }
   if (city.trimmed().isEmpty() || dong.trimmed().isEmpty()) {

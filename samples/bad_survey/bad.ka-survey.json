@@ -1,1 +1,16 @@
-﻿{"survey_name":"bad","crs":"EPSG:5179","control_points_count":0,"fixture":"bad"}
+﻿{
+  "survey_name": "오류 연습",
+  "survey_file": "bad.gpkg",
+  "crs": "EPSG:5186",
+  "layers": {
+    "survey_area": 1,
+    "feature_poly": 1,
+    "control_points": 0
+  },
+  "expected_checklist_errors": [
+    "GCP_MIN_TWO",
+    "FEATURE_LEGEND_FIELDS"
+  ],
+  "fixture": "bad",
+  "note": "Metadata for samples/bad_survey/bad.gpkg. The app opens the .gpkg, not this JSON."
+}

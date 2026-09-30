@@ -42,7 +42,17 @@ Desktop.ini
 !.agents/skills/heritage-intranet/
 !.agents/skills/ka-hgis-sheet/
 !.agents/skills/ka-hgis-verify/
-.claude/
+# Claude Code: share project config, keep per-PC state local
+.claude/*
+!.claude/settings.json
+!.claude/rules/
+!.claude/skills/
+!.claude/agents/
+!.claude/hooks/
+.claude/hooks/state/
+.claude/settings.local.json
+.claude/worktrees/
+CLAUDE.local.md
 .repowise/
 .mcp.json
 # Per-checkout Graft paths. scripts/setup-dev-paths.ps1 writes this file.
@@ -122,10 +132,24 @@ venv/
 *.gpkg
 *.qgz
 !samples/**/*.gpkg
+!samples/**/*.qgz
+# Old-version compatibility samples are synthetic surveys saved by that version's
+# app code (no real site data). They must travel with the repo, or a fresh clone/CI
+# cannot run save_open_portable::oldVersionSurveysStillOpen (tests/data/compat/README.md).
+!tests/data/compat/**
 
+# Account/key files: never commit, wherever a checkout, build or portable puts them.
 config/secrets.ini
 config/ngii-local.ini
+config/*-local.ini
+config/*-account.ini
+**/config/*-local.ini
+**/config/*-account.ini
 **/secrets.ini
+ka-hgis-vworld.ini
+
+# CTest writes cost data next to the build; not source.
+Testing/
 
 
 # QGIS offline manuals: large Desktop User Guide PDFs stay local (see docs/vendor/qgis-manual-3.44/README.md)

@@ -35,6 +35,11 @@
 #include <qgsvectorlayer.h>
 #include <qgsrasterrenderer.h>
 #include <qgsrastertransparency.h>
+#include <qgslayoutpoint.h>
+#include <qgstextformat.h>
+
+#include <QPointer>
+#include <QTemporaryDir>
 
 #include <gdal.h>
 #include <cpl_conv.h>
@@ -96,6 +101,14 @@ private slots:
     // ---- Task 3 ???: scaleDenominator ?? ?? ----
     void buildLayoutScaleDenominator();
     void buildLayoutCropsWhiteMargin();
+    // ---- F103: requested scale that does not fit is reported, not silent ----
+    void scaleThatDoesNotFitWarnsAndSuggestsStandard();
+    void largerPaperKeepsRequestedScale();
+    // ---- F051: in-place options, skip rebuild, keep user moves ----
+    void inputSignatureIgnoresLookOnlyOptions();
+    void decorationsApplyInPlace();
+    void userMovedChromeSurvivesRebuild();
+    void displayLayersStayOutOfProjectAndAreReused();
 
 private:
     QString m_tiffPath; // Task 3 ???? ?? GeoTIFF ??
@@ -1023,8 +1036,14 @@ void TestSectionLayout::buildLayoutCropsWhiteMargin()
              qPrintable(QStringLiteral("height %1 expected 0.12m after crop")
                             .arg(res.appliedExtent.height(), 0, 'f', 4)));
 
+    // Display rasters belong to the section sheet, not to the saved project.
+    auto* sheet = dynamic_cast<QgsPrintLayout*>(
+        proj.layoutManager()->layoutByName(QStringLiteral("section_sheet")));
+    QVERIFY(sheet);
+    auto* sheetMap = qobject_cast<QgsLayoutItemMap*>(sheet->itemById(QStringLiteral("ka_section_map")));
+    QVERIFY(sheetMap);
     bool knocked = false;
-    for (QgsMapLayer* ml : proj.mapLayers()) {
+    for (QgsMapLayer* ml : sheetMap->layers()) {
         auto* rl = qobject_cast<QgsRasterLayer*>(ml);
         if (!rl || !rl->renderer() || !rl->renderer()->rasterTransparency()) continue;
         const auto list = rl->renderer()->rasterTransparency()->transparentThreeValuePixelList();
@@ -1034,6 +1053,244 @@ void TestSectionLayout::buildLayoutCropsWhiteMargin()
         }
     }
     QVERIFY2(knocked, "white paper pixels should be transparent");
+    QFile::remove(path);
+}
+
+static QgsPrintLayout* sectionSheet(QgsProject& proj)
+{
+    return dynamic_cast<QgsPrintLayout*>(
+        proj.layoutManager()->layoutByName(QStringLiteral("section_sheet")));
+}
+
+void TestSectionLayout::scaleThatDoesNotFitWarnsAndSuggestsStandard()
+{
+    if (m_tiffPath.isEmpty()) QSKIP("GeoTIFF missing");
+    QgsProject proj;
+    auto* layer = new QgsRasterLayer(m_tiffPath, QStringLiteral("fit"), QStringLiteral("gdal"));
+    QVERIFY(layer->isValid());
+    proj.addMapLayer(layer, false);
+
+    // 10 m at 1:20 is 500 mm; the A3 frame holds 390 mm.
+    SectionLayoutOptions opts;
+    opts.scaleDenominator = 20.0;
+    auto res = SectionLayoutService::buildSectionLayout(&proj, {layer}, opts);
+    QVERIFY2(res.errorKo.isEmpty(), qPrintable(res.errorKo));
+    QVERIFY2(!res.warningKo.isEmpty(), "a scale that does not fit must not change silently");
+    QVERIFY2(res.warningKo.contains(QStringLiteral("1:20")) && res.warningKo.contains(QStringLiteral("1:30")),
+             qPrintable(res.warningKo));
+    QVERIFY(std::abs(res.appliedScaleDenominator - 10000.0 / 390.0) < 0.5);
+    QCOMPARE(res.suggestedScaleDenominator, 30.0);
+
+    // Fill mode: a non-standard 1:26 gets a suggestion but no warning.
+    opts.scaleDenominator = 0.0;
+    res = SectionLayoutService::buildSectionLayout(&proj, {layer}, opts);
+    QVERIFY(res.warningKo.isEmpty());
+    QCOMPARE(res.suggestedScaleDenominator, 30.0);
+
+    // A standard scale that fits: nothing to say.
+    opts.scaleDenominator = 30.0;
+    res = SectionLayoutService::buildSectionLayout(&proj, {layer}, opts);
+    QVERIFY(res.warningKo.isEmpty());
+    QCOMPARE(res.suggestedScaleDenominator, 0.0);
+    QVERIFY(std::abs(res.appliedScaleDenominator - 30.0) < 0.5);
+}
+
+void TestSectionLayout::largerPaperKeepsRequestedScale()
+{
+    QCOMPARE(SectionLayoutService::paperSizeMm(SectionLayoutOptions::Paper::A2), QSizeF(594.0, 420.0));
+    QCOMPARE(SectionLayoutService::paperSizeMm(SectionLayoutOptions::Paper::A1), QSizeF(841.0, 594.0));
+    if (m_tiffPath.isEmpty()) QSKIP("GeoTIFF missing");
+    QgsProject proj;
+    auto* layer = new QgsRasterLayer(m_tiffPath, QStringLiteral("a2"), QStringLiteral("gdal"));
+    QVERIFY(layer->isValid());
+    proj.addMapLayer(layer, false);
+    SectionLayoutOptions opts;
+    opts.paper = SectionLayoutOptions::Paper::A2;
+    opts.scaleDenominator = 20.0;
+    const auto res = SectionLayoutService::buildSectionLayout(&proj, {layer}, opts);
+    QVERIFY2(res.errorKo.isEmpty(), qPrintable(res.errorKo));
+    QVERIFY2(res.warningKo.isEmpty(), qPrintable(res.warningKo));
+    QVERIFY(std::abs(res.appliedScaleDenominator - 20.0) < 0.5);
+    QCOMPARE(res.suggestedScaleDenominator, 0.0);
+    auto* ly = sectionSheet(proj);
+    QVERIFY(ly);
+    QCOMPARE(ly->pageCollection()->page(0)->pageSize().width(), 594.0);
+}
+
+void TestSectionLayout::inputSignatureIgnoresLookOnlyOptions()
+{
+    const SectionLayoutOptions base;
+    const QByteArray signature = SectionLayoutService::inputSignature({}, base);
+    SectionLayoutOptions look = base;
+    look.titleKo = QStringLiteral("북벽 단면");
+    look.showReferenceLine = false;
+    look.referenceLineWidthMm = 0.5;
+    look.referenceLineColor = QStringLiteral("#000000");
+    look.scaleBarStyle = QStringLiteral("Single Box");
+    look.tickLabelPt = 8.0;
+    look.elevationPrefix = true;
+    look.noteText = QStringLiteral("A-A'");
+    QCOMPARE(SectionLayoutService::inputSignature({}, look), signature);
+    SectionLayoutOptions geometry = base;
+    geometry.elevationIntervalM = 0.5;
+    QVERIFY(SectionLayoutService::inputSignature({}, geometry) != signature);
+    geometry = base;
+    geometry.paper = SectionLayoutOptions::Paper::A2;
+    QVERIFY(SectionLayoutService::inputSignature({}, geometry) != signature);
+    geometry = base;
+    geometry.scaleDenominator = 50.0;
+    QVERIFY(SectionLayoutService::inputSignature({}, geometry) != signature);
+}
+
+void TestSectionLayout::decorationsApplyInPlace()
+{
+    if (m_tiffPath.isEmpty()) QSKIP("GeoTIFF missing");
+    QgsProject proj;
+    QgsRasterLayer* layer = nullptr;
+    QVERIFY(buildTestLayout(&proj, m_tiffPath, &layer).errorKo.isEmpty());
+    QPointer<QgsPrintLayout> ly = sectionSheet(proj);
+    QVERIFY(ly);
+    auto* title = qobject_cast<QgsLayoutItemLabel*>(ly->itemById(QStringLiteral("ka_section_title_block")));
+    QVERIFY(title);
+    title->attemptMove(QgsLayoutPoint(30.0, 20.0, Qgis::LayoutUnit::Millimeters));
+    const QPointF moved = title->pos();
+
+    SectionLayoutOptions opts;
+    opts.titleKo = QStringLiteral("북벽 단면");
+    opts.referenceLineWidthMm = 0.45;
+    opts.tickLabelPt = 7.0;
+    opts.elevationPrefix = true;
+    opts.noteText = QStringLiteral("A-A' 단면");
+    QVERIFY(SectionLayoutService::applyDecorationOptions(&proj, opts));
+    QVERIFY2(ly && sectionSheet(proj) == ly.data(), "look-only options must not rebuild the sheet");
+    QVERIFY(title->text().contains(QStringLiteral("북벽 단면")));
+    QCOMPARE(title->pos(), moved);
+    auto* elev0 = qobject_cast<QgsLayoutItemLabel*>(ly->itemById(QStringLiteral("ka_section_elevation_0")));
+    QVERIFY(elev0);
+    QCOMPARE(elev0->text(), QStringLiteral("EL. 100.00"));
+    QCOMPARE(elev0->textFormat().size(), 7.0);
+    auto* dist0 = qobject_cast<QgsLayoutItemLabel*>(ly->itemById(QStringLiteral("ka_section_distance_0")));
+    QVERIFY(dist0);
+    QCOMPARE(dist0->text(), QStringLiteral("0.00m"));
+    auto* note = qobject_cast<QgsLayoutItemLabel*>(ly->itemById(QStringLiteral("ka_section_note")));
+    QVERIFY2(note, "optional note line");
+    QCOMPARE(note->text(), QStringLiteral("A-A' 단면"));
+    auto* ref = qobject_cast<QgsLayoutItemPolyline*>(ly->itemById(QStringLiteral("ka_section_reference_line")));
+    QVERIFY(ref);
+    auto* sl = dynamic_cast<QgsSimpleLineSymbolLayer*>(ref->symbol()->symbolLayer(0));
+    QVERIFY(sl && std::abs(sl->width() - 0.45) < 0.01);
+
+    opts.showReferenceLine = false;
+    opts.noteText.clear();
+    QVERIFY(SectionLayoutService::applyDecorationOptions(&proj, opts));
+    QVERIFY(!ly->itemById(QStringLiteral("ka_section_reference_line")));
+    QVERIFY(!ly->itemById(QStringLiteral("ka_section_note")));
+
+    // Switched back on: the line returns along the exact bottom edge of the map frame.
+    opts.showReferenceLine = true;
+    QVERIFY(SectionLayoutService::applyDecorationOptions(&proj, opts));
+    auto* again = qobject_cast<QgsLayoutItemPolyline*>(ly->itemById(QStringLiteral("ka_section_reference_line")));
+    QVERIFY(again);
+    auto* map = qobject_cast<QgsLayoutItemMap*>(ly->itemById(QStringLiteral("ka_section_map")));
+    QVERIFY(map);
+    const QRectF frame = map->mapRectToScene(map->rect());
+    const QRectF line = again->mapRectToScene(again->rect());
+    QVERIFY2(std::abs(line.bottom() - frame.bottom()) < 0.05 && std::abs(line.left() - frame.left()) < 0.05
+                 && std::abs(line.right() - frame.right()) < 0.05,
+             qPrintable(QStringLiteral("line %1..%2 @%3 vs frame %4..%5 @%6")
+                            .arg(line.left()).arg(line.right()).arg(line.bottom())
+                            .arg(frame.left()).arg(frame.right()).arg(frame.bottom())));
+}
+
+void TestSectionLayout::userMovedChromeSurvivesRebuild()
+{
+    if (m_tiffPath.isEmpty()) QSKIP("GeoTIFF missing");
+    QgsProject proj;
+    QgsRasterLayer* layer = nullptr;
+    QVERIFY(buildTestLayout(&proj, m_tiffPath, &layer).errorKo.isEmpty());
+    QVERIFY(SectionLayoutService::userMovedItems(&proj).isEmpty());
+    auto* scale = sectionSheet(proj)->itemById(QStringLiteral("ka_section_scale"));
+    QVERIFY(scale);
+    scale->attemptMove(QgsLayoutPoint(300.0, 250.0, Qgis::LayoutUnit::Millimeters));
+    const auto moved = SectionLayoutService::userMovedItems(&proj);
+    QCOMPARE(moved.size(), 1);
+    QVERIFY(moved.contains(QStringLiteral("ka_section_scale")));
+
+    SectionLayoutOptions opts;
+    opts.elevationIntervalM = 0.5;
+    QVERIFY(SectionLayoutService::buildSectionLayout(&proj, {layer}, opts).errorKo.isEmpty());
+    SectionLayoutService::restoreUserMovedItems(&proj, moved);
+    auto* rebuilt = sectionSheet(proj)->itemById(QStringLiteral("ka_section_scale"));
+    QVERIFY(rebuilt);
+    QCOMPARE(rebuilt->pos(), QPointF(300.0, 250.0));
+    QVERIFY(!SectionLayoutService::userMovedItems(&proj).contains(QStringLiteral("ka_section_title_block")));
+}
+
+void TestSectionLayout::displayLayersStayOutOfProjectAndAreReused()
+{
+    const QString path = QDir::temp().filePath(QStringLiteral("ka_test_section_reuse.tif"));
+    GDALDriverH drv = GDALGetDriverByName("GTiff");
+    QVERIFY2(drv, "GTiff driver missing");
+    GDALDatasetH ds = GDALCreate(drv, qUtf8Printable(path), 10, 20, 1, GDT_Float32, nullptr);
+    QVERIFY2(ds, "reuse GeoTIFF create failed");
+    const double c = 0.7071067811865476;
+    double gt[6] = {200000.0, 1.0 * c, 0.1 * c, 450000.0, 1.0 * c, -0.1 * c};
+    GDALSetGeoTransform(ds, gt);
+    std::vector<float> data(10 * 20, 101.0f);
+    GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, 10, 20, data.data(), 10, 20, GDT_Float32, 0, 0);
+    GDALClose(ds);
+
+    QgsProject proj;
+    auto* layer = new QgsRasterLayer(path, QStringLiteral("reuse"), QStringLiteral("gdal"));
+    QVERIFY(layer->isValid());
+    proj.addMapLayer(layer, false);
+    SectionLayoutOptions opts;
+    opts.mapCrsAuthId = QStringLiteral("EPSG:5187");
+    auto displayOf = [&proj]() -> QgsMapLayer* {
+        auto* map = qobject_cast<QgsLayoutItemMap*>(sectionSheet(proj)->itemById(QStringLiteral("ka_section_map")));
+        for (QgsMapLayer* ml : map ? map->layers() : QList<QgsMapLayer*>()) {
+            if (ml && ml->customProperty(QStringLiteral("ka_hgis/section_display")).toBool()) return ml;
+        }
+        return nullptr;
+    };
+    QVERIFY(SectionLayoutService::buildSectionLayout(&proj, {layer}, opts).errorKo.isEmpty());
+    QCOMPARE(proj.mapLayers().size(), 1);  // the saved survey never lists a temp display file
+    QgsMapLayer* first = displayOf();
+    QVERIFY2(first, "rotated section must be shown through a display raster");
+    QCOMPARE(first->parent(), static_cast<QObject*>(sectionSheet(proj)));
+    const QString firstPath = first->customProperty(QStringLiteral("ka_hgis/section_display_path")).toString();
+    QVERIFY(QFile::exists(firstPath));
+
+    opts.paper = SectionLayoutOptions::Paper::A4;  // new sheet, same source and plane
+    QVERIFY(SectionLayoutService::buildSectionLayout(&proj, {layer}, opts).errorKo.isEmpty());
+    QCOMPARE(proj.mapLayers().size(), 1);
+    QgsMapLayer* second = displayOf();
+    QVERIFY(second);
+    QCOMPARE(second->customProperty(QStringLiteral("ka_hgis/section_display_path")).toString(), firstPath);
+    QVERIFY2(QFile::exists(firstPath), "the reused derived file must not be deleted");
+
+    // Reopen: the saved project lists only the source; the sheet derives its
+    // display raster again from the stored plane, without a full photo scan.
+    QTemporaryDir saveDir;
+    QVERIFY(saveDir.isValid());
+    const QString qgs = saveDir.filePath(QStringLiteral("reopen.qgs"));
+    QVERIFY(proj.write(qgs));
+    QgsProject reopened;
+    QVERIFY(reopened.read(qgs));
+    QCOMPARE(reopened.mapLayers().size(), 1);
+    QVERIFY(sectionSheet(reopened));
+    QVERIFY(SectionLayoutService::restoreDisplayLayers(&reopened));
+    auto* reopenedMap = qobject_cast<QgsLayoutItemMap*>(
+        sectionSheet(reopened)->itemById(QStringLiteral("ka_section_map")));
+    QVERIFY(reopenedMap);
+    QCOMPARE(reopenedMap->layers().size(), 1);
+    QVERIFY(reopenedMap->layers().first()->isValid());
+    QVERIFY(reopenedMap->layers().first()->customProperty(QStringLiteral("ka_hgis/section_display")).toBool());
+    QCOMPARE(reopened.mapLayers().size(), 1);
+    QVERIFY2(!SectionLayoutService::restoreDisplayLayers(&reopened), "a complete sheet is left alone");
+
+    reopened.removeAllMapLayers();
+    proj.removeAllMapLayers();
     QFile::remove(path);
 }
 

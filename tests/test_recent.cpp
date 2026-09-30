@@ -10,13 +10,18 @@ class TestRecent : public QObject {
   Q_OBJECT
 private slots:
   void rememberPutsNewestFirstAndDropsMissing();
+  void remember_keepsOfflineSurveysForLater();
+  void forget_keepsOtherOfflineSurveys();
+  void remember_sameSurveyDifferentCaseIsOneEntry();
+  void remember_tabInNameDoesNotShiftFields();
+  void forget_removesSurveyShownOnNewDriveLetter();
   void recentSurveyFollowsUsbDriveLetter();
   void forgetRemovesPath();
   void lastPath_isNewestRemembered();
   void takeSkipAutoRestore_clearsOneShot();
   void bootStaysOnHome_doesNotAutoOpenLastSurvey();
   void closeEvent_asksBeforeDiscardingUnsavedWork();
-  void captureTool_dragsSavedPolygonVertex();
+  void captureTool_alwaysStartsNewShape();
 };
 
 void TestRecent::recentSurveyFollowsUsbDriveLetter() {
@@ -62,6 +67,111 @@ void TestRecent::rememberPutsNewestFirstAndDropsMissing() {
   items = RecentSurveys::load(st);
   QCOMPARE(items.size(), 1);
   QCOMPARE(items.at(0).name, QStringLiteral("조사B"));
+}
+
+// USB·네트워크 드라이브가 빠진 동안 다른 조사를 열어도 그 조사 기록은 남아야 한다.
+// 홈 목록은 loadAll 로 회색 「찾을 수 없음」을 보이고, 다시 꽂으면 그대로 열 수 있다.
+void TestRecent::remember_keepsOfflineSurveysForLater() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  const QString usb = dir.filePath(QStringLiteral("USB조사.gpkg"));
+  const QString b = dir.filePath(QStringLiteral("다른조사.gpkg"));
+  QVERIFY(QFile(usb).open(QIODevice::WriteOnly));
+  QVERIFY(QFile(b).open(QIODevice::WriteOnly));
+  QSettings st(dir.filePath(QStringLiteral("recent.ini")), QSettings::IniFormat);
+  RecentSurveys::remember(st, usb, QStringLiteral("USB조사"));
+  QVERIFY(QFile::rename(usb, usb + QStringLiteral(".away")));  // USB 를 뺐다
+  RecentSurveys::remember(st, b, QStringLiteral("다른조사"));
+  auto all = RecentSurveys::loadAll(st);
+  QCOMPARE(all.size(), 2);
+  QCOMPARE(all.at(0).name, QStringLiteral("다른조사"));
+  QVERIFY(all.at(0).available);
+  QCOMPARE(all.at(1).name, QStringLiteral("USB조사"));
+  QVERIFY(!all.at(1).available);
+  QCOMPARE(RecentSurveys::load(st).size(), 1);  // 열 수 있는 항목만
+  QCOMPARE(RecentSurveys::lastPath(st), QFileInfo(b).absoluteFilePath());
+  QVERIFY(QFile::rename(usb + QStringLiteral(".away"), usb));  // 다시 꽂았다
+  all = RecentSurveys::loadAll(st);
+  QCOMPARE(all.size(), 2);
+  QVERIFY(all.at(1).available);
+  QCOMPARE(RecentSurveys::load(st).size(), 2);
+}
+
+void TestRecent::forget_keepsOtherOfflineSurveys() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  const QString gone = dir.filePath(QStringLiteral("빠진조사.gpkg"));
+  const QString here = dir.filePath(QStringLiteral("있는조사.gpkg"));
+  QVERIFY(QFile(gone).open(QIODevice::WriteOnly));
+  QVERIFY(QFile(here).open(QIODevice::WriteOnly));
+  QSettings st(dir.filePath(QStringLiteral("recent.ini")), QSettings::IniFormat);
+  RecentSurveys::remember(st, gone, QStringLiteral("빠진조사"));
+  RecentSurveys::remember(st, here, QStringLiteral("있는조사"));
+  QVERIFY(QFile::remove(gone));
+  RecentSurveys::forget(st, here);
+  const auto all = RecentSurveys::loadAll(st);
+  QCOMPARE(all.size(), 1);
+  QCOMPARE(all.at(0).name, QStringLiteral("빠진조사"));
+  QVERIFY(!all.at(0).available);
+}
+
+void TestRecent::remember_sameSurveyDifferentCaseIsOneEntry() {
+#ifndef Q_OS_WIN
+  QSKIP("대소문자를 가리지 않는 경로는 Windows 에만 있다");
+#endif
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  const QString path = QFileInfo(dir.filePath(QStringLiteral("Site.gpkg"))).absoluteFilePath();
+  QVERIFY(QFile(path).open(QIODevice::WriteOnly));
+  QSettings st(dir.filePath(QStringLiteral("recent.ini")), QSettings::IniFormat);
+  RecentSurveys::remember(st, path, QStringLiteral("첫"));
+  RecentSurveys::remember(st, QDir::toNativeSeparators(path.toLower()), QStringLiteral("둘"));
+  const auto all = RecentSurveys::loadAll(st);
+  QCOMPARE(all.size(), 1);
+  QCOMPARE(all.at(0).name, QStringLiteral("둘"));
+  QVERIFY(RecentSurveys::samePath(QStringLiteral("c:\\a\\b.gpkg"), QStringLiteral("C:/A/b.GPKG")));
+}
+
+void TestRecent::remember_tabInNameDoesNotShiftFields() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  const QString path = dir.filePath(QStringLiteral("탭.gpkg"));
+  QVERIFY(QFile(path).open(QIODevice::WriteOnly));
+  QSettings st(dir.filePath(QStringLiteral("recent.ini")), QSettings::IniFormat);
+  RecentSurveys::remember(st, path, QStringLiteral("안동\t2차\n조사"));
+  const auto all = RecentSurveys::loadAll(st);
+  QCOMPARE(all.size(), 1);
+  QCOMPARE(all.at(0).name, QStringLiteral("안동 2차 조사"));
+  QCOMPARE(all.at(0).path, QFileInfo(path).absoluteFilePath());
+  QVERIFY(all.at(0).lastOpenedMs > 0);
+}
+
+// 홈 목록은 USB 조사를 새 드라이브 글자로 보여 준다. 그 항목을 「목록에서 제거」하면
+// 저장된 옛 글자 항목도 지워져야 한다.
+void TestRecent::forget_removesSurveyShownOnNewDriveLetter() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  const QString real = QDir::fromNativeSeparators(QFileInfo(dir.filePath(QStringLiteral("이동.gpkg"))).absoluteFilePath());
+  QVERIFY(QFile(real).open(QIODevice::WriteOnly));
+  if (real.size() < 3 || real.at(1) != QLatin1Char(':')) QSKIP("드라이브 글자는 Windows 에만 있다");
+  QChar unused;
+  for (char c = 'Z'; c >= 'D'; --c) {
+    if (!QFileInfo::exists(QStringLiteral("%1:/").arg(QLatin1Char(c)))) {
+      unused = QLatin1Char(c);
+      break;
+    }
+  }
+  QVERIFY(!unused.isNull());
+  const QString before = QString(unused) + real.mid(1);
+  QSettings st(dir.filePath(QStringLiteral("recent.ini")), QSettings::IniFormat);
+  st.setValue(QStringLiteral("RecentSurveys/items"), QStringList{before + QStringLiteral("\t이동\t1")});
+  QCOMPARE(RecentSurveys::loadAll(st).size(), 1);
+  RecentSurveys::forget(st, real);
+  QCOMPARE(RecentSurveys::loadAll(st).size(), 0);
+  // 다시 기억하면 옛 글자 항목과 겹치지 않고 하나만 남는다.
+  st.setValue(QStringLiteral("RecentSurveys/items"), QStringList{before + QStringLiteral("\t이동\t1")});
+  RecentSurveys::remember(st, real, QStringLiteral("이동"));
+  QCOMPARE(st.value(QStringLiteral("RecentSurveys/items")).toStringList().size(), 1);
 }
 
 void TestRecent::takeSkipAutoRestore_clearsOneShot() {
@@ -110,8 +220,9 @@ void TestRecent::bootStaysOnHome_doesNotAutoOpenLastSurvey() {
   QFile h(QStringLiteral("src/app/MainWindow.h"));
   QVERIFY2(h.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.h");
   const QString hdr = QString::fromUtf8(h.readAll());
-  QVERIFY2(hdr.contains(QLatin1String("m_restoreLastSurveyEnabled = false")),
-           "자동 복원 기본값은 꺼짐이어야 한다");
+  QVERIFY2(!hdr.contains(QLatin1String("m_restoreLastSurveyEnabled")) &&
+               !hdr.contains(QLatin1String("void restoreLastSurvey()")),
+           "자동 복원 코드는 없어야 한다(홈 화면만 연다)");
 }
 
 // 20초 자동 저장은 없앴다. 저장은 사용자가 「저장」을 누를 때만 일어난다.
@@ -165,15 +276,18 @@ void TestRecent::closeEvent_asksBeforeDiscardingUnsavedWork() {
            "새 조사·다른 이름으로 저장은 마지막에 쓴 조사 폴더에서 시작해야 한다");
 }
 
-void TestRecent::captureTool_dragsSavedPolygonVertex() {
+void TestRecent::captureTool_alwaysStartsNewShape() {
+  // F002/F043: the drawing tool always starts a new shape and never writes the file;
+  // saved shapes are changed in 도형선택 inside the edit buffer.
   QFile f(QStringLiteral("src/app/KaCaptureMapTool.cpp"));
   QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "KaCaptureMapTool.cpp");
   const QString src = QString::fromUtf8(f.readAll());
-  QVERIFY2(src.contains(QLatin1String("hitSavedVertex")),
-           "그린 폴리곤의 꼭짓점을 다시 집을 수 있어야 한다");
-  QVERIFY2(src.contains(QLatin1String("moveFeatureVertex")) ||
-               src.contains(QLatin1String("moveVertex")),
-           "집은 꼭짓점을 옮겨 도형을 고쳐야 한다");
+  QVERIFY2(!src.contains(QLatin1String("hitSavedVertex")), "그리기 도구의 첫 클릭은 항상 새 도형이어야 한다");
+  QVERIFY2(!src.contains(QLatin1String("commitChanges")), "그리기 도구는 조사 파일에 바로 쓰지 않는다");
+  QFile sel(QStringLiteral("src/app/KaFeatureSelectTool.cpp"));
+  QVERIFY2(sel.open(QIODevice::ReadOnly | QIODevice::Text), "KaFeatureSelectTool.cpp");
+  QVERIFY2(QString::fromUtf8(sel.readAll()).contains(QLatin1String("moveVertexTo")),
+           "그린 도형의 꼭짓점은 도형선택에서 끌어 고친다");
 }
 
 QTEST_GUILESS_MAIN(TestRecent)

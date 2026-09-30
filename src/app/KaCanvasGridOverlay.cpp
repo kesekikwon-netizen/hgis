@@ -1,8 +1,10 @@
 #include "KaCrashGuard.h"
+#include "core/KaLogExcept.h"
 #include "KaCanvasGridOverlay.h"
 #include "core/CanvasGridMath.h"
 
 #include <QPainter>
+#include <algorithm>
 #include <cmath>
 
 #include <qgscoordinatetransform.h>
@@ -58,17 +60,10 @@ double KaCanvasGridOverlay::stepMeters() const {
 }
 
 QgsPointXY KaCanvasGridOverlay::snapToGrid(const QgsPointXY& p) const {
-  const double s = stepMeters();
-  if (!(s > 1e-9))
-    return p;
-  const double rad = m_cfg.rotationDeg * 3.14159265358979323846 / 180.0;
-  const double c = std::cos(rad);
-  const double sn = std::sin(rad);
-  const double u = p.x() * c + p.y() * sn;
-  const double v = -p.x() * sn + p.y() * c;
-  const double us = std::round(u / s) * s;
-  const double vs = std::round(v / s) * s;
-  return QgsPointXY(us * c - vs * sn, us * sn + vs * c);
+  double x = p.x();
+  double y = p.y();
+  CanvasGridMath::snapToNode({m_cfg.originX, m_cfg.originY, m_cfg.rotationDeg}, stepMeters(), &x, &y);
+  return QgsPointXY(x, y);
 }
 
 void KaCanvasGridOverlay::paintProjected(QPainter* p) {
@@ -83,41 +78,44 @@ void KaCanvasGridOverlay::paintProjected(QPainter* p) {
   p->setPen(pen);
   p->setBrush(Qt::NoBrush);
 
-  const double rad = m_cfg.rotationDeg * 3.14159265358979323846 / 180.0;
-  const double c = std::cos(rad);
-  const double sn = std::sin(rad);
-  auto toUV = [&](double x, double y) {
-    return QgsPointXY(x * c + y * sn, -x * sn + y * c);
-  };
-  auto fromUV = [&](double u, double v) {
-    return QgsPointXY(u * c - v * sn, u * sn + v * c);
+  const CanvasGridMath::Frame frame{m_cfg.originX, m_cfg.originY, m_cfg.rotationDeg};
+  auto fromUV = [&frame](double u, double v) {
+    double x = 0.0, y = 0.0;
+    CanvasGridMath::toMap(frame, u, v, &x, &y);
+    return QgsPointXY(x, y);
   };
   double umin = 1e99, umax = -1e99, vmin = 1e99, vmax = -1e99;
   const QgsPointXY corners[4] = {
       QgsPointXY(ext.xMinimum(), ext.yMinimum()), QgsPointXY(ext.xMaximum(), ext.yMinimum()),
       QgsPointXY(ext.xMaximum(), ext.yMaximum()), QgsPointXY(ext.xMinimum(), ext.yMaximum())};
   for (const QgsPointXY& pt : corners) {
-    const QgsPointXY uv = toUV(pt.x(), pt.y());
-    umin = std::min(umin, uv.x());
-    umax = std::max(umax, uv.x());
-    vmin = std::min(vmin, uv.y());
-    vmax = std::max(vmax, uv.y());
+    double u = 0.0, v = 0.0;
+    CanvasGridMath::toGrid(frame, pt.x(), pt.y(), &u, &v);
+    umin = std::min(umin, u);
+    umax = std::max(umax, u);
+    vmin = std::min(vmin, v);
+    vmax = std::max(vmax, v);
   }
-  const double u0 = std::floor(umin / step) * step;
-  const double v0 = std::floor(vmin / step) * step;
+  // Too many lines are thinned to every n-th line on the same grid, never cut off at one side.
+  const int stride = std::max(CanvasGridMath::lineStride(umax - umin, step, kMaxLines),
+                              CanvasGridMath::lineStride(vmax - vmin, step, kMaxLines));
+  const double drawStep = step * stride;
+  const double u0 = std::floor(umin / drawStep) * drawStep;
+  const double v0 = std::floor(vmin / drawStep) * drawStep;
+  const int cap = kMaxLines + 2;
   const QPointF origin = pos();
   auto drawMapLine = [&](const QgsPointXY& a, const QgsPointXY& b) {
     p->drawLine(toCanvasCoordinates(a) - origin, toCanvasCoordinates(b) - origin);
   };
 
   int nx = 0;
-  for (double u = u0; u <= umax + step * 0.5 && nx < 80; u += step, ++nx)
+  for (double u = u0; u <= umax + drawStep * 0.5 && nx < cap; u += drawStep, ++nx)
     drawMapLine(fromUV(u, vmin), fromUV(u, vmax));
   int ny = 0;
-  for (double v = v0; v <= vmax + step * 0.5 && ny < 80; v += step, ++ny)
+  for (double v = v0; v <= vmax + drawStep * 0.5 && ny < cap; v += drawStep, ++ny)
     drawMapLine(fromUV(umin, v), fromUV(umax, v));
 
-  if (!m_cfg.labels)
+  if (!m_cfg.labels && stride == 1)
     return;
   QFont f(QStringLiteral("Malgun Gothic"), m_cfg.fontPt);
   p->setFont(f);
@@ -125,22 +123,37 @@ void KaCanvasGridOverlay::paintProjected(QPainter* p) {
   QColor labelColor = m_cfg.color;
   labelColor.setAlpha(255);
   p->setPen(QPen(labelColor.darker(115), 0));
-  auto fmt = [&](double v) {
-    if (step >= 1000.0)
-      return QStringLiteral("%1 km").arg(v / 1000.0, 0, 'f', 0);
-    if (step >= 1.0)
-      return QStringLiteral("%1 m").arg(v, 0, 'f', 0);
-    return QStringLiteral("%1 m").arg(v, 0, 'f', 1);
+  if (stride > 1)
+    p->drawText(QRectF(0, 16, mMapCanvas->width(), 16), Qt::AlignHCenter,
+                QStringLiteral("격자가 촘촘해 %1 m마다 그립니다")
+                    .arg(drawStep, 0, 'f', CanvasGridMath::labelDecimals(drawStep)));
+  if (!m_cfg.labels)
+    return;
+  // Unturned lines are real map coordinates. A turned grid has no single easting per line,
+  // so its labels are distances from the grid origin.
+  const bool turned = CanvasGridMath::isTurned(frame);
+  auto fmt = [&](double gridValue, double originValue) {
+    if (turned) {
+      if (std::abs(gridValue) < drawStep * 1e-6)
+        return QStringLiteral("원점");
+      const int decimals = CanvasGridMath::labelDecimals(drawStep);
+      return QStringLiteral("%1%2 m").arg(gridValue > 0 ? QStringLiteral("+") : QStringLiteral("−"))
+          .arg(std::abs(gridValue), 0, 'f', decimals);
+    }
+    const double value = gridValue + originValue;
+    if (drawStep >= 1000.0 && CanvasGridMath::labelDecimals(originValue) == 0)
+      return QStringLiteral("%1 km").arg(value / 1000.0, 0, 'f', CanvasGridMath::labelDecimals(drawStep / 1000.0, originValue / 1000.0));
+    return QStringLiteral("%1 m").arg(value, 0, 'f', CanvasGridMath::labelDecimals(drawStep, originValue));
   };
   nx = 0;
-  for (double u = u0; u <= umax + step * 0.5 && nx < 80; u += step, ++nx) {
+  for (double u = u0; u <= umax + drawStep * 0.5 && nx < cap; u += drawStep, ++nx) {
     const QPointF top = toCanvasCoordinates(fromUV(u, vmax)) - origin;
-    p->drawText(QPointF(top.x() + 2, 12), fmt(u));
+    p->drawText(QPointF(top.x() + 2, 12), fmt(u, m_cfg.originX));
   }
   ny = 0;
-  for (double v = v0; v <= vmax + step * 0.5 && ny < 80; v += step, ++ny) {
+  for (double v = v0; v <= vmax + drawStep * 0.5 && ny < cap; v += drawStep, ++ny) {
     const QPointF left = toCanvasCoordinates(fromUV(umin, v)) - origin;
-    p->drawText(QPointF(4, left.y() - 2), fmt(v));
+    p->drawText(QPointF(4, left.y() - 2), fmt(v, m_cfg.originY));
   }
 }
 
@@ -164,7 +177,7 @@ void KaCanvasGridOverlay::paintGeographic(QPainter* p) {
     try {
       pt = toWgs.transform(pt);
     } catch (...) {
-      KaCrashGuard::logLine(QStringLiteral("[except] app/KaCanvasGridOverlay.cpp:165"));
+      KA_LOG_EXCEPT();
       return;
     }
     lon0 = std::min(lon0, pt.x());
@@ -185,7 +198,7 @@ void KaCanvasGridOverlay::paintGeographic(QPainter* p) {
     try {
       return toCanvasCoordinates(toMap.transform(QgsPointXY(lon, lat))) - origin;
     } catch (...) {
-      KaCrashGuard::logLine(QStringLiteral("[except] app/KaCanvasGridOverlay.cpp:185"));
+      KA_LOG_EXCEPT();
       return QPointF();
     }
   };

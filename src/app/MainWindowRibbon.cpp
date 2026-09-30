@@ -6,6 +6,7 @@
 #include "KaWindowGeometry.h"
 #include "core/DemPresentation.h"
 #include "KaTheme.h"
+#include "KaThemeOptions.h"
 #include "KaUserError.h"
 #include "KaIcons.h"
 #include "KaCaptureMapTool.h"
@@ -17,7 +18,6 @@
 #include "KaTerrain3dStudio.h"
 #include "KaTerrain3dLayoutStudio.h"
 #include "KaStartPage.h"
-#include "KaCoordPointMapTool.h"
 #include "KaMeasureMapTool.h"
 #include "core/DemAnalyzer.h"
 #include "core/TilePackService.h"
@@ -26,7 +26,8 @@
 #include "KaCanvasGridOverlay.h"
 #include "KaTrenchMoveTool.h"
 #include "KaFeatureSelectTool.h"
-#include "KaFoundLocationMark.h"
+#include "KaShellFocus.h"
+#include "KaShellUi.h"
 #include "KaStatusBar.h"
 #include "KaBeginnerRibbon.h"
 #include "KaSnapSettingsWidget.h"
@@ -216,17 +217,6 @@
 #include <qgsvectordataprovider.h>
 #include <qgsprovidersublayerdetails.h>
 #endif
-#include <QGraphicsDropShadowEffect>
-
-static void applyWidgetShadow(QWidget* w, int blur = 14, int yOffset = 3, int alpha = 35) {
-  if (!w) return;
-  auto* shadow = new QGraphicsDropShadowEffect(w);
-  shadow->setBlurRadius(blur);
-  shadow->setOffset(0, yOffset);
-  shadow->setColor(QColor(0, 0, 0, alpha));
-  w->setGraphicsEffect(shadow);
-}
-
 
 void MainWindow::buildMenus() {
   menuBar()->setNativeMenuBar(false);
@@ -302,7 +292,7 @@ void MainWindow::buildMenus() {
   actSaveAs->setShortcut(QKeySequence::SaveAs);
   Q_UNUSED(actNew);
   Q_UNUSED(actOpen);
-  Q_UNUSED(actSave);
+  m_actSave = actSave;  // [P6] syncShellChips swaps this icon for save_unsaved (warn dot)
   Q_UNUSED(actSaveAs);
   paintPrimary(actSave, QStringLiteral("save"));
   btnNew->setObjectName(QStringLiteral("ribbonNew"));
@@ -372,7 +362,7 @@ void MainWindow::buildMenus() {
   addAction(actDraw);
 
   auto trenchAdded = addIcon(QStringLiteral("record"), QStringLiteral("trench_grid"), QStringLiteral("시굴격자"),
-          QStringLiteral("조사구역이 있으면 바로 깔고, 없으면 맵을 찍어 놓습니다. 깐 뒤에는 끌어 옮깁니다"),
+          QStringLiteral("조사구역이 있으면 바로 시굴격자를 놓고, 없으면 지도에서 놓을 자리를 누릅니다. 놓은 뒤에는 끌어 옮깁니다"),
           &MainWindow::startTrenchGrid);
   trenchAdded.second->setObjectName(QStringLiteral("btnTrenchGrid"));
 
@@ -413,8 +403,11 @@ void MainWindow::buildMenus() {
   m_btnDem->setText(QStringLiteral("DEM"));
   m_btnDem->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   m_btnDem->setCheckable(true);
-  m_btnDem->setToolTip(
-      QStringLiteral("고도를 색으로 보여 줍니다. 다시 누르면 숨깁니다. 우클릭: 상세 메뉴"));
+  // F062: the one-click download is Copernicus GLO-30, a 30 m surface model (DSM). The chip
+  // label stays the short 「DEM」; the tip says what the heights really are.
+  m_btnDem->setToolTip(QStringLiteral(
+      "고도를 색으로 보여 줍니다. 받는 자료는 지표모델(DSM) 30m · Copernicus라 나무·건물 높이가 섞여 있습니다.\n"
+      "미세지형 판독에는 우클릭 → 「국토지리원 DEM 불러오기」를 쓰세요. 다시 누르면 숨깁니다. 우클릭: 상세 메뉴"));
   auto* demMenu = new QMenu(m_btnDem);
   demMenu->addAction(KaIcons::icon(QStringLiteral("dem")),
                       QStringLiteral("국토지리원 DEM 불러오기(.img)…"), this,
@@ -580,12 +573,12 @@ void MainWindow::buildMenus() {
       &MainWindow::exportMapGeoTiff);
   m_actMapGeoTiff = actMapGeoTiff;
   m_actMapGeoTiff->setObjectName(QStringLiteral("actionMapGeoTiff"));
-  m_actMapGeoTiff->setEnabled(false);
+  KaShellUi::setEnabledWithReason(m_actMapGeoTiff, false, KaShellUi::mapTabOnlyReason());
   btnMapGeoTiff->setObjectName(QStringLiteral("btnMapGeoTiff"));
   auto [actExport, btnExport] = addIcon(
-      QStringLiteral("out"), QStringLiteral("export_convert"), QStringLiteral("제출 변환"),
-      QStringLiteral("인트라넷 제출. 선택한 레이어를 EPSG:5179 SHP 파일로만 저장합니다 (Ctrl+E)."),
-      &MainWindow::convertSelectedTo5179);
+      QStringLiteral("out"), QStringLiteral("export_convert"), QStringLiteral("검수·제출"),
+      QStringLiteral("도면을 검수하고 제출 꾸러미(EPSG:5179 SHP·조사도면.pdf·MANIFEST)를 만듭니다. 오류가 있으면 막고 고칠 곳을 보여 줍니다. 레이어 하나만 바꾸는 「레이어 5179 변환」도 여기 있습니다 (Ctrl+E)."),
+      &MainWindow::openSubmitReview);
   actExport->setShortcut(QKeySequence(QStringLiteral("Ctrl+E")));
   Q_UNUSED(btnExport);
   ribbon->applyTabOrder();
@@ -642,6 +635,10 @@ void MainWindow::buildMenus() {
   moreMenu->addAction(KaIcons::icon(QStringLiteral("layer")),
                       QStringLiteral("참조 벡터를 조사 파일 밖으로…"), this,
                       &MainWindow::extractEmbeddedReferenceVectors);
+  // [pkg D1] F114/F133: explicit, user-clicked cleanup of app staging left beside the survey.
+  moreMenu->addAction(KaIcons::icon(QStringLiteral("layer")),
+                      QStringLiteral("조사 폴더 임시 자료 정리…"), this,
+                      &MainWindow::cleanSurveyStaging);
   moreMenu->addAction(KaIcons::icon(QStringLiteral("layer")),
                       QStringLiteral("토양도 SHP 불러오기"), this,
                       &MainWindow::importSoilShapefile);
@@ -658,16 +655,38 @@ void MainWindow::buildMenus() {
     if (auto* toggle = findChild<QToolButton*>(QStringLiteral("sidebarFilesToggle")))
       toggle->toggle();
   });
-  moreMenu->addAction(QStringLiteral("작업 목록"), this, [this]() {
-    if (auto* d = findChild<QDockWidget*>(QStringLiteral("workDock"))) {
-      d->setVisible(!d->isVisible());
-      if (d->isVisible()) d->raise();
-    }
+  // 작은 화면에서 지도를 넓히는 선택 기능. 창 단축키라 리본이 숨어 있어도 듣는다.
+  auto* actMapFocus = new QAction(QStringLiteral("지도 넓게 보기"), this);
+  actMapFocus->setObjectName(QStringLiteral("actionMapFocus"));
+  actMapFocus->setShortcut(QKeySequence(KaShellFocus::mapFocusKey()));
+  actMapFocus->setShortcutContext(Qt::WindowShortcut);
+  actMapFocus->setToolTip(QStringLiteral("리본과 왼쪽 패널을 잠시 숨겨 지도를 넓게 봅니다. 다시 누르면 돌아옵니다 (%1)")
+                              .arg(KaShellFocus::mapFocusKey()));
+  connect(actMapFocus, &QAction::triggered, this, [this]() {
+    if (m_shellFocus) m_shellFocus->toggleMapFocus();
   });
+  addAction(actMapFocus);
+  moreMenu->addAction(actMapFocus);
+  auto* actLeftPanel = new QAction(QStringLiteral("왼쪽 패널 접기/펴기"), this);
+  actLeftPanel->setObjectName(QStringLiteral("actionToggleLeftPanel"));
+  actLeftPanel->setShortcut(QKeySequence(KaShellFocus::leftPanelKey()));
+  actLeftPanel->setShortcutContext(Qt::WindowShortcut);
+  actLeftPanel->setToolTip(QStringLiteral("레이어·파일함 패널을 접거나 다시 폅니다 (%1)")
+                               .arg(KaShellFocus::leftPanelKey()));
+  connect(actLeftPanel, &QAction::triggered, this, [this]() {
+    if (m_shellFocus) m_shellFocus->toggleLeftPanel();
+  });
+  addAction(actLeftPanel);
+  moreMenu->addAction(actLeftPanel);
   moreMenu->addAction(QStringLiteral("API 키 입력"), this, &MainWindow::configureVworldKey);
   moreMenu->addAction(QStringLiteral("VWorld 지적도 아이디·비밀번호"), this, &MainWindow::configureCadastralAccount);
   moreMenu->addAction(QStringLiteral("수치지형도 아이디·비밀번호"), this, &MainWindow::configureTopographicAccount);
   moreMenu->addAction(QStringLiteral("국가유산 인트라넷 아이디·비밀번호"), this, &MainWindow::configureHeritageAccount);
+  // [pkg G1] F060: read-only reference/offline readiness table, opened only on click.
+  moreMenu->addAction(KaIcons::icon(QStringLiteral("layer")), QStringLiteral("자료 준비 상태"), this,
+                      &MainWindow::showReferenceStatus)->setObjectName(QStringLiteral("actionReferenceStatus"));
+  // [pkg H] F081/F153/F154: opt-in 「화면 보기」 (고대비·큰 글씨); the ribbon itself does not change.
+  moreMenu->addMenu(KaTheme::createDisplayOptionsMenu(moreMenu));
   moreMenu->addAction(QStringLiteral("정보"), this, &MainWindow::showAbout);
   auto* webMenu = moreMenu->addMenu(KaIcons::icon(QStringLiteral("web")), QStringLiteral("웹 자료"));
   webMenu->menuAction()->setObjectName(QStringLiteral("actionWebSources"));
@@ -704,7 +723,7 @@ void MainWindow::buildMenus() {
   m_subToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   m_subToolbar->setMovable(false);
   m_subToolbar->setVisible(false);
-  applyWidgetShadow(m_subToolbar, 10, 2, 25);
+  // Flat chrome: the QSS draws a 1px top/bottom rule for this row instead of a drop shadow.
   insertToolBarBreak(m_subToolbar);
 }
 
@@ -840,7 +859,9 @@ void MainWindow::showSubToolsDraw() {
   selAct->setToolTip(QStringLiteral(
       "도형을 클릭하면 수정점이 나옵니다.\n"
       "점을 끌면 그 점만 옮겨집니다.\n"
-      "점 위에서 우클릭하면 그 점을 지우고, 선 위에서 우클릭하면 점을 넣습니다."));
+      "점 위에서 우클릭하면 그 점을 지우고, 선 위에서 우클릭하면 점을 넣습니다.\n"
+      "Ctrl을 누른 채 끌면 다른 도형의 점·선에 붙습니다. 점을 클릭해 고른 뒤 Delete로 지웁니다.\n"
+      "겹친 도형은 같은 자리를 다시 누르면 다음 도형이 골라집니다."));
   auto* snap = new KaSnapSettingsWidget(m_subToolbar);
   snap->syncFromProject();
   connect(snap, &KaSnapSettingsWidget::settingsChanged, this, [this, snap]() {
@@ -886,6 +907,7 @@ void MainWindow::showSubToolsDraw() {
   artiAct->setProperty("kaSubTool", QStringLiteral("artifact"));
   artiAct->setToolTip(QStringLiteral(
       "유물이 나온 자리를 점으로 찍어 표시합니다. 한 번 클릭에 한 점입니다."));
+  addDrawSketchButtons();  // [pkg B1] F085/F150: 완료·되돌리기·취소 (only while sketching) + 연속 그리기
 
   // 폴리곤 묶기·나누기는 「그리는 도구」가 아니라 「이미 그린 면을 고치는 도구」다.
   // 예전에는 늘어나는 빈칸으로 오른쪽 끝까지 밀어 두었는데, 넓은 화면에서는 그리기
@@ -914,7 +936,7 @@ void MainWindow::showSubToolsDraw() {
   m_subToolbar->setVisible(true);
   updateSubToolbarChecks();
   statusBar()->showMessage(
-      QStringLiteral("유구 면을 그리는 중 — 점을 찍고 Enter로 닫기. 작업 좌표계 → 제출 5179."), 8000);
+      QStringLiteral("그릴 도구를 고르세요 — 조사구역·유구·유구 선·유물 가운데 하나를 누르면 그리기가 시작됩니다."), 8000);
 #endif
 }
 

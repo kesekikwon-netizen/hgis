@@ -1,19 +1,25 @@
 #include "MainWindow.h"
 #include "KaAttributeMapTool.h"
 #include "KaCaptureMapTool.h"
-#include "KaCoordPointMapTool.h"
 #include "KaCrashGuard.h"
 #include "KaDrawingStudio.h"
+#include "KaEditErrors.h"
 #include "KaFeatureFormDialog.h"
 #include "KaFeatureSelectTool.h"
 #include "KaVertexEditTool.h"
 #include "KaMeasureMapTool.h"
+#include "KaStatusBar.h"  // [P6] setSnapState
 #include "KaSurveyAreaDialog.h"
 #include "KaTerrain3dLayoutStudio.h"
 #include "KaTerrain3dStudio.h"
 #include "KaTheme.h"
 #include "KaUserError.h"
+#include "core/FeaturePresets.h"   // [pkg K] F041 시대색·종류 무늬
+#include "core/FeatureRecord.h"    // [pkg K] F054 audit fields
 #include "core/LayerOps.h"
+#include "core/LayerStyleKinds.h"  // [pkg E1] F144 remembered kind look
+#include "core/MeasureOps.h"
+#include "core/SurveySchema.h"     // [pkg K] F045/F054 auto fields, v3 labels
 
 #include <QAbstractSpinBox>
 #include <QAction>
@@ -34,6 +40,8 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QStatusBar>
+#include <QTabWidget>
+#include <QToolBar>
 #include <QVBoxLayout>
 
 #include <exception>
@@ -159,6 +167,7 @@ void MainWindow::applySnapConfig() {
     m_measureTool->setSnapEnabled(m_snapEnabled);
   if (m_featureSelectTool)
     m_featureSelectTool->setSnapEnabled(m_snapEnabled);
+  if (m_status) m_status->setSnapState(m_snapEnabled);  // [P6] 상태줄 「자석 켬/끔」 칩(표시 전용)
 #endif
 }
 
@@ -194,7 +203,8 @@ void MainWindow::startSelectTool() {
       action.layerId = layer->id();
       action.featureId = before.id();
       action.featureData = before;
-      m_undoActions.append(action);
+      // Mirrors the command just pushed on the layer stack; used only after 저장 clears it.
+      pushUndoAction(std::move(action), layer);
       QgsProject::instance()->setDirty(true);
       updateUndoRedoActions();
     });
@@ -206,49 +216,14 @@ void MainWindow::startSelectTool() {
     return;
   }
 
+  m_featureSelectTool->setSnapEnabled(m_snapEnabled);
+  MeasureOps::pinPlanarEllipsoid(QgsProject::instance());
   m_canvas->setMapTool(m_featureSelectTool);
   m_canvas->setFocus(Qt::OtherFocusReason);
+  updateToolChip();
   statusBar()->showMessage(
-      QStringLiteral("도형선택 — 도형을 클릭하면 점이 나옵니다. 점 우클릭은 삭제, 선 우클릭은 점추가입니다."),
-      10000);
-#endif
-}
-
-void MainWindow::startVertexEditTool() {
-#if KA_HGIS_HAS_QGIS
-  if (!m_canvas) return;
-  if (m_captureTool && m_canvas->mapTool() == m_captureTool)
-    stopCaptureTool();
-  if (m_actMeasure)
-    m_actMeasure->setChecked(false);
-  if (!m_vertexEditTool) {
-    m_vertexEditTool = new KaVertexEditTool(m_canvas);
-    m_vertexEditTool->setParent(this);
-    connect(m_vertexEditTool, &KaVertexEditTool::statusMessage, this,
-            [this](const QString& text) { statusBar()->showMessage(text, 8000); });
-    connect(m_vertexEditTool, &KaVertexEditTool::featureGeometryEdited, this,
-            [this](QgsVectorLayer* layer, const QgsFeature& before) {
-              if (!layer || !before.isValid()) return;
-              KaUndoAction action;
-              action.type = KaUndoAction::FeatureChanged;
-              action.layerId = layer->id();
-              action.featureId = before.id();
-              action.featureData = before;
-              m_undoActions.append(action);
-              QgsProject::instance()->setDirty(true);
-              updateUndoRedoActions();
-            });
-  }
-  m_vertexEditTool->setSnapEnabled(m_snapEnabled);
-  if (m_canvas->mapTool() == m_vertexEditTool) {
-    if (m_panTool) m_canvas->setMapTool(m_panTool);
-    statusBar()->showMessage(QStringLiteral("도형 수정 종료"), 3000);
-    return;
-  }
-  m_canvas->setMapTool(m_vertexEditTool);
-  m_canvas->setFocus(Qt::OtherFocusReason);
-  statusBar()->showMessage(
-      QStringLiteral("도형 수정 — 도형을 클릭하면 점이 나옵니다. 점을 끌어 옮기고, 선 위에서 우클릭하면 점추가·점삭제입니다."),
+      QStringLiteral("도형선택 — 도형을 클릭하면 점이 나옵니다. 점을 끌면 옮기고(Ctrl=자석), "
+                     "점을 클릭한 뒤 Delete로 지웁니다. 같은 자리를 다시 누르면 겹친 도형을 고릅니다."),
       10000);
 #endif
 }
@@ -260,6 +235,8 @@ void MainWindow::startMeasureTool() {
     stopCaptureTool();
   showMapWorkspace();
   applySnapConfig();
+  // The tape is planar; area($geometry) labels must use the same plane.
+  MeasureOps::pinPlanarEllipsoid(QgsProject::instance());
   if (!m_measureTool) {
     m_measureTool = new KaMeasureMapTool(m_canvas);
     m_measureTool->setParent(this);
@@ -276,27 +253,10 @@ void MainWindow::startMeasureTool() {
   }
   m_canvas->setMapTool(m_measureTool);
   m_canvas->setFocus(Qt::OtherFocusReason);
+  updateToolChip();
   if (m_actMeasure)
     m_actMeasure->setChecked(true);
   statusBar()->showMessage(QStringLiteral("줄자: 점을 찍고 우클릭에서 마침을 고르세요. 면적은 면적만 나옵니다."), 0);
-#endif
-}
-
-void MainWindow::startCoordPointTool() {
-#if KA_HGIS_HAS_QGIS
-  if (!m_canvas) return;
-  showMapWorkspace();
-  applySnapConfig();
-  if (!m_coordPointTool) {
-    m_coordPointTool = new KaCoordPointMapTool(m_canvas);
-    m_coordPointTool->setParent(this);
-    connect(m_coordPointTool, &KaCoordPointMapTool::statusMessage, this, [this](const QString& t) {
-      statusBar()->showMessage(t, 8000);
-    });
-  }
-  m_canvas->setMapTool(m_coordPointTool);
-  m_canvas->setFocus(Qt::OtherFocusReason);
-  statusBar()->showMessage(QStringLiteral("맵에서 꼭짓점을 찍으세요. Esc로 지웁니다."), 0);
 #endif
 }
 
@@ -337,7 +297,7 @@ QString MainWindow::attributeFieldLabelKo(const QString& fieldName) {
       {QStringLiteral("pixel_x"), QStringLiteral("픽셀 X")},
       {QStringLiteral("pixel_y"), QStringLiteral("픽셀 Y")},
   };
-  return labels.value(fieldName, fieldName);
+  return labels.value(fieldName, SurveySchema::labelKo(fieldName));  // [pkg K] labels of the v3 record fields
 }
 
 void MainWindow::ensureAttributeTool() {
@@ -552,14 +512,31 @@ void MainWindow::editCurrentLayerStyle(QgsMapLayer* targetLayer) {
   }
 
   QCheckBox* catCheck = nullptr;
+  const bool wasByKind = LayerStyleKinds::isByKind(layer);
   if (LayerOps::layerKeyOf(layer) == QLatin1String("feature_poly")) {
     catCheck = new QCheckBox(QStringLiteral("종류별 자동 색"), &dlg);
+    catCheck->setChecked(wasByKind);  // [pkg E1] F144: show the remembered look
     root->addWidget(catCheck);
+  }
+  // [pkg K] F041/F042: 시대색·종류 무늬 — ordered period ramp + kind hatch/dash/marker (FeaturePresets).
+  QCheckBox* presetCheck = nullptr;
+  const bool wasPreset = FeaturePresets::isPresetStyled(layer);
+  if (FeaturePresets::canStyle(layer)) {
+    presetCheck = new QCheckBox(QStringLiteral("시대색·종류 무늬"), &dlg);
+    presetCheck->setToolTip(QStringLiteral("시대는 밝기 순서 색으로, 종류는 빗금·점선·기호 모양으로 나눕니다. 흑백 인쇄에서도 구분됩니다."));
+    presetCheck->setChecked(wasPreset);
+    root->addWidget(presetCheck);
+    if (catCheck) {
+      connect(presetCheck, &QCheckBox::toggled, catCheck, [catCheck](bool on) { if (on) catCheck->setChecked(false); });
+      connect(catCheck, &QCheckBox::toggled, presetCheck, [presetCheck](bool on) { if (on) presetCheck->setChecked(false); });
+    }
   }
 
   auto applyLive = [this, layer, fillBtn, strokeBtn, noFillCheck, noStrokeCheck, dashCheck, widthSpin,
-                    markerSpin, markerMm, catCheck]() {
-    if (catCheck && catCheck->isChecked()) {
+                    markerSpin, markerMm, catCheck, presetCheck]() {
+    if (presetCheck && presetCheck->isChecked()) {
+      FeaturePresets::instance().applyRenderer(layer);
+    } else if (catCheck && catCheck->isChecked()) {
       LayerOps::applyFeaturePolyStyle(layer);
     } else {
       const QColor outFill = fillBtn ? fillBtn->property("kaColor").value<QColor>() : QColor();
@@ -603,6 +580,8 @@ void MainWindow::editCurrentLayerStyle(QgsMapLayer* targetLayer) {
             [applyLive](double) { applyLive(); });
   if (catCheck)
     connect(catCheck, &QCheckBox::toggled, &dlg, [applyLive](bool) { applyLive(); });
+  if (presetCheck)
+    connect(presetCheck, &QCheckBox::toggled, &dlg, [applyLive](bool) { applyLive(); });
   if (fillBtn)
     connect(fillBtn, &QPushButton::clicked, &dlg, [applyLive]() { applyLive(); });
   connect(strokeBtn, &QPushButton::clicked, &dlg, [applyLive]() { applyLive(); });
@@ -610,6 +589,8 @@ void MainWindow::editCurrentLayerStyle(QgsMapLayer* targetLayer) {
 
   if (dlg.exec() != QDialog::Accepted) {
     LayerOps::applySimpleVectorStyle(layer, fill, stroke, widthMm, markerMm, noFill, noStroke, dashed);
+    if (wasPreset) FeaturePresets::instance().applyRenderer(layer);  // [pkg K] cancel keeps the preset look
+    else if (wasByKind) LayerStyleKinds::apply(layer);              // [int W4] and the remembered kind look
     if (m_canvas) m_canvas->refresh();
     if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
     return;
@@ -621,32 +602,29 @@ void MainWindow::editCurrentLayerStyle(QgsMapLayer* targetLayer) {
 #endif
 }
 
-void MainWindow::editAttributesAtCanvasPos(const QPoint& canvasPos) {
-#if KA_HGIS_HAS_QGIS
-  if (!m_canvas) return;
-  ensureAttributeTool();
-  if (!m_attributeTool) return;
-  QgsVectorLayer* layer = nullptr;
-  QgsFeature feat;
-  if (!m_attributeTool->pickAtScreen(canvasPos, &layer, &feat) || !layer) {
-    QMessageBox::information(this, QStringLiteral("속성"),
-                             QStringLiteral("이 위치에 도형이 없습니다.\n"
-                                            "유구·조사구역 등을 그린 뒤 다시 클릭하세요."));
-    return;
-  }
-  editFeatureAttributes(layer, feat);
-#else
-  Q_UNUSED(canvasPos);
-#endif
-}
-
 void MainWindow::editFeatureAttributes(QgsVectorLayer* layer, const QgsFeature& feature) {
 #if KA_HGIS_HAS_QGIS
   if (!layer || !layer->isValid() || !feature.isValid()) return;
+  // Reference maps and downloaded cadastral are read-only; every other edit path refuses
+  // them in LayerOps::runEditCommand, so the attribute dialog must not open for them.
+  if (!KaAttributeMapTool::isEditableLayer(layer)) {
+    KaUserError::warn(this, {
+        QStringLiteral("속성"),
+        QStringLiteral("「%1」의 속성은 고칠 수 없습니다.").arg(layer->name()),
+        QStringLiteral("참조 지도와 지적도는 읽기 전용입니다. 조사 원본을 지키기 위해 막아 둡니다."),
+        QStringLiteral("유구·조사구역처럼 직접 그린 조사 데이터 도형을 고르세요."),
+    });
+    return;
+  }
 
   QgsFeature feat = feature;
   if (!layer->getFeatures(QgsFeatureRequest(feat.id())).nextFeature(feat)) {
-    QMessageBox::warning(this, QStringLiteral("속성"), QStringLiteral("피처를 다시 읽을 수 없습니다."));
+    KaUserError::warn(this, {
+        QStringLiteral("속성"),
+        QStringLiteral("고른 도형을 다시 읽지 못했습니다."),
+        QStringLiteral("그 사이에 도형이 지워졌거나 레이어가 다시 열렸을 수 있습니다."),
+        QStringLiteral("도형을 다시 클릭한 뒤 속성을 여세요."),
+    });
     return;
   }
 
@@ -673,6 +651,7 @@ void MainWindow::editFeatureAttributes(QgsVectorLayer* layer, const QgsFeature& 
     const QString name = f.name();
     if (name.compare(QLatin1String("fid"), Qt::CaseInsensitive) == 0) continue;
     if (name.startsWith(QLatin1String("ogc_"), Qt::CaseInsensitive)) continue;
+    if (SurveySchema::isAutoField(name)) continue;  // [pkg K] F054: uid/created_at/updated_at fill themselves
 
     Row row;
     row.index = i;
@@ -687,15 +666,8 @@ void MainWindow::editFeatureAttributes(QgsVectorLayer* layer, const QgsFeature& 
         edit->setText(cur.toString());
       row.editor = edit;
     } else {
-      auto* edit = new QLineEdit(&dlg);
-      edit->setText(cur.toString());
-      if (name == QLatin1String("kind"))
-        edit->setPlaceholderText(QStringLiteral("예: 주거지, 수혈, 구"));
-      else if (name == QLatin1String("period"))
-        edit->setPlaceholderText(QStringLiteral("예: 청동기, 원삼국"));
-      else if (name == QLatin1String("feature_no"))
-        edit->setPlaceholderText(QStringLiteral("예: 1호"));
-      row.editor = edit;
+      // [pkg K] F045: kind/period = preset combo (free text allowed); other text = line edit.
+      row.editor = KaFeatureFormDialog::createValueEditor(&dlg, layer, name, cur.toString());
     }
     form->addRow(attributeFieldLabelKo(name), row.editor);
     rows.push_back(row);
@@ -714,80 +686,66 @@ void MainWindow::editFeatureAttributes(QgsVectorLayer* layer, const QgsFeature& 
   connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
   if (dlg.exec() != QDialog::Accepted) return;
 
-  const bool wasEditable = layer->isEditable();
-  if (!wasEditable && !layer->startEditing()) {
-    QString detail = layer->dataProvider() ? layer->dataProvider()->error().message() : QString();
-    KaUserError::warn(this, {
-        QStringLiteral("속성"),
-        QStringLiteral("속성 편집 모드를 열지 못했습니다."),
-        QStringLiteral("%1\n%2").arg(layer->name(),
-                                     detail.isEmpty() ? QStringLiteral("레이어가 잠겨 있거나 다른 프로그램에서 열려 있을 수 있습니다.")
-                                                      : detail),
-        QStringLiteral("다른 프로그램에서 같은 파일을 닫은 뒤 다시 저장하세요."),
-    });
-    return;
-  }
-
-  layer->beginEditCommand(QStringLiteral("속성 편집"));
-  bool ok = true;
+  // Check every entry first: a bad number must not leave half of the fields changed.
+  QVector<QPair<int, QVariant>> values;
   for (const Row& row : rows) {
-    auto* edit = qobject_cast<QLineEdit*>(row.editor);
-    if (!edit) continue;
-    const QString text = edit->text().trimmed();
+    if (!row.editor) continue;
+    const QString text = KaFeatureFormDialog::valueEditorText(row.editor);  // [pkg K] combo or line edit
     QVariant value;
+    bool conv = true;
     if (text.isEmpty()) {
       value = QVariant(QString());
     } else if (row.type == QMetaType::Double || row.type == QMetaType::Float) {
-      bool conv = false;
       value = text.toDouble(&conv);
-      if (!conv) {
-        QMessageBox::warning(this, QStringLiteral("속성"),
-                             QStringLiteral("숫자 형식이 아닙니다: %1").arg(attributeFieldLabelKo(row.name)));
-        ok = false;
-        break;
-      }
     } else if (row.type == QMetaType::Int || row.type == QMetaType::LongLong) {
-      bool conv = false;
       value = text.toLongLong(&conv);
-      if (!conv) {
-        QMessageBox::warning(this, QStringLiteral("속성"),
-                             QStringLiteral("정수 형식이 아닙니다: %1").arg(attributeFieldLabelKo(row.name)));
-        ok = false;
-        break;
-      }
     } else {
       value = text;
     }
-    if (!layer->changeAttributeValue(feat.id(), row.index, value)) {
-      ok = false;
-      break;
+    if (!conv) {
+      const QString kind = (row.type == QMetaType::Int || row.type == QMetaType::LongLong)
+                               ? QStringLiteral("정수")
+                               : QStringLiteral("숫자");
+      KaUserError::warn(this, {
+          QStringLiteral("속성"),
+          QStringLiteral("「%1」에 넣은 값이 %2가 아닙니다: %3")
+              .arg(attributeFieldLabelKo(row.name), kind, text),
+          QStringLiteral("이 칸은 %1만 받습니다. 아무 값도 바꾸지 않았습니다.").arg(kind),
+          QStringLiteral("숫자만 넣고(소수점은 .) 다시 저장하세요."),
+      });
+      return;
     }
+    values.append({row.index, value});
   }
 
-  if (!ok) {
-    layer->destroyEditCommand();
-    if (!wasEditable) layer->rollBack();
+  // Into the edit buffer like every other edit: Ctrl+Z undoes it, 저장(Ctrl+S) writes it.
+  QString editError;
+  if (!LayerOps::runEditCommand(layer, QStringLiteral("속성 편집"), [&]() {
+        for (const auto& value : values) {
+          if (!layer->changeAttributeValue(feat.id(), value.first, value.second)) return false;
+        }
+        FeatureRecord::touch(layer, feat.id());  // [pkg K] F054 updated_at
+        return true;
+      }, &editError)) {
+    const QString detail =
+        layer->dataProvider() ? layer->dataProvider()->error().message() : QString();
+    KaEditErrors::show(this, {
+        QStringLiteral("속성"),
+        QStringLiteral("속성을 바꾸지 못했습니다."),
+        editError,
+        QStringLiteral("같은 파일을 연 다른 프로그램을 닫은 뒤 다시 저장하세요."),
+    }, detail);
     return;
   }
-  layer->endEditCommand();
 
   KaUndoAction undo;
   undo.type = KaUndoAction::AttributesChanged;
   undo.layerId = layer->id();
   undo.featureId = feat.id();
   undo.featureData = feat;
-  m_undoActions.append(undo);
-  if (!wasEditable) {
-    if (!layer->commitChanges()) {
-      KaUserError::warn(this, {
-          QStringLiteral("속성"),
-          QStringLiteral("바꾼 속성을 저장하지 못했습니다."),
-          layer->commitErrors().join(QLatin1Char('\n')),
-          QStringLiteral("파일이 다른 곳에서 열려 있지 않은지 확인한 뒤 다시 저장하세요."),
-      });
-      return;
-    }
-  }
+  pushUndoAction(std::move(undo), layer);
+  QgsProject::instance()->setDirty(true);
+  updateUndoRedoActions();
 
   LayerOps::applyDomainDrawStyle(layer, LayerOps::layerKeyOf(layer));
   layer->triggerRepaint();
@@ -796,7 +754,11 @@ void MainWindow::editFeatureAttributes(QgsVectorLayer* layer, const QgsFeature& 
       layer->triggerRepaint();
     m_canvas->refresh();
   }
-  statusBar()->showMessage(QStringLiteral("속성 저장: %1 (#%2)").arg(layer->name()).arg(feat.id()), 5000);
+  statusBar()->showMessage(
+      QStringLiteral("속성을 바꿨습니다: %1 (#%2). Ctrl+Z로 되돌리고, 「저장」(Ctrl+S)으로 파일에 씁니다.")
+          .arg(layer->name())
+          .arg(feat.id()),
+      6000);
 #else
   Q_UNUSED(layer);
   Q_UNUSED(feature);
@@ -825,7 +787,12 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
       }
       QString err;
       if (!LayerOps::splitPolygonWithLine(layer, pts, &err)) {
-        QMessageBox::warning(this, QStringLiteral("폴리곤 나누기 실패"), err);
+        KaUserError::warn(this, {
+            QStringLiteral("폴리곤 나누기"),
+            QStringLiteral("폴리곤을 나누지 못했습니다."),
+            err,
+            QStringLiteral("분할선이 면을 끝에서 끝까지 가로지르게 다시 그리세요."),
+        });
         return;
       }
       if (m_canvas) m_canvas->refresh();
@@ -836,6 +803,7 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
     }
     QgsFeature feat(layer->fields());
     feat.setGeometry(geom);
+    FeatureRecord::stampNew(feat);  // [pkg K] F054: uid / created_at / updated_at when the survey has them
     if (LayerOps::layerKeyOf(layer) == QLatin1String("paleo_landform")) {
       const int kindIdx = layer->fields().indexOf(QStringLiteral("kind"));
       const int statusIdx = layer->fields().indexOf(QStringLiteral("status"));
@@ -846,20 +814,36 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
     if (!LayerOps::runEditCommand(layer, QStringLiteral("도형 그리기"), [&]() {
           return layer->addFeature(feat);
         }, &addError)) {
-      QMessageBox::warning(this, QStringLiteral("오류"), addError);
+      KaUserError::warn(this, {
+          QStringLiteral("그리기"),
+          QStringLiteral("그린 도형을 「%1」에 넣지 못했습니다.").arg(layer->name()),
+          addError,
+          QStringLiteral("같은 파일을 연 다른 프로그램을 닫은 뒤 다시 그리세요."),
+      });
       return;
     }
     QgsProject::instance()->setDirty(true);
+    // Read before the form: a modal dialog can let another capture overwrite it.
+    const QString repairNotice = m_captureTool ? m_captureTool->lastRepairNotice() : QString();
 
-    if (KaFeatureFormDialog::canOffer(layer)) {
-      KaFeatureFormDialog form(layer, this);
+    // The name/number form comes only after the shape is in (never while drawing).
+    // 연속 그리기 skips it; the record can be entered later from the shape's 속성.
+    const bool offerForm = KaFeatureFormDialog::canOffer(layer);
+    if (offerForm && !m_continuousDraw) {
+      statusBar()->showMessage(
+          QStringLiteral("도형은 넣었습니다. 이름·번호를 적거나 Esc로 건너뛰세요."), 0);
+      KaFeatureFormDialog form(layer, this, feat.id());  // [pkg K] F044/F045: kind·period combos, next number
       if (form.exec() == QDialog::Accepted) {
         QString formError;
         if (!LayerOps::runEditCommand(layer, QStringLiteral("이름·번호"), [&]() {
-              return LayerOps::applyFeatureFormValues(layer, static_cast<qint64>(feat.id()),
-                                                      form.nameText(), form.numberText(), nullptr);
+              return form.applyTo(layer, nullptr);  // [pkg K] kind/name, number, period + updated_at; no commit
             }, &formError)) {
-          QMessageBox::warning(this, QStringLiteral("속성"), formError);
+          KaUserError::warn(this, {
+              QStringLiteral("속성"),
+              QStringLiteral("이름·번호를 넣지 못했습니다. 도형은 그대로 있습니다."),
+              formError,
+              QStringLiteral("도형을 우클릭해 「이 도형 기록 입력」으로 다시 적으세요."),
+          });
         }
       }
     }
@@ -896,16 +880,27 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
 
     const long long n = static_cast<long long>(layer->featureCount());
     statusBar()->showMessage(
-        QStringLiteral("도형을 넣었습니다 (%1, %2개). Ctrl+Z로 되돌리기 · 조사 저장으로 파일에 씁니다")
+        QStringLiteral("도형을 넣었습니다 (%1, %2개). Ctrl+Z로 되돌리기 · 「저장」(Ctrl+S)으로 파일에 씁니다%3")
             .arg(layer->name())
-            .arg(n),
+            .arg(n)
+            .arg(offerForm && m_continuousDraw ? QStringLiteral(" · 이름·번호는 나중에 속성에서")
+                                               : QString())
+            // [pkg A] F080: missing kind/period is counted here, after the shape (no popup while drawing).
+            + (LayerOps::layerKeyOf(layer) == QLatin1String("feature_poly") ? missingAttributeCounterText()
+                                                                              : QString()),
         8000);
-    refreshWorkPanel();
+    // Told after the shape is finished, never while drawing.
+    if (!repairNotice.isEmpty())
+      notify(Notice::Warning, QStringLiteral("면을 고쳐 넣었습니다"), repairNotice);
   } catch (const std::exception& ex) {
-    QMessageBox::critical(this, QStringLiteral("그리기 오류"), QString::fromUtf8(ex.what()));
+    KaEditErrors::unexpected(this, QStringLiteral("그리기"),
+                             QStringLiteral("그린 도형을 마무리하지 못했습니다."),
+                             QString::fromUtf8(ex.what()));
   } catch (...) {
-    KaCrashGuard::logLine(QStringLiteral("[except] app/MainWindow.cpp:5391"));
-    QMessageBox::critical(this, QStringLiteral("그리기 오류"), QStringLiteral("알 수 없는 오류"));
+    KaCrashGuard::logLine(QStringLiteral("[except] app/MainWindowEditing.cpp:onGeometryCaptured"));
+    KaEditErrors::unexpected(this, QStringLiteral("그리기"),
+                             QStringLiteral("그린 도형을 마무리하지 못했습니다."),
+                             QStringLiteral("C++ 예외 (종류 미상). 세션 로그에 기록했습니다."));
   }
 }
 
@@ -913,7 +908,7 @@ void MainWindow::beginEdit(QgsVectorLayer* layer) {
   try {
     if (!layer || !layer->isValid()) {
       KaUserError::warn(this, {
-          QStringLiteral("알림"),
+          QStringLiteral("그리기"),
           QStringLiteral("그릴 조사 레이어가 없습니다."),
           QStringLiteral("아직 새 조사를 만들지 않았거나 조사 파일이 열려 있지 않습니다."),
           QStringLiteral("먼저 「새 조사」로 프로젝트를 만든 뒤 다시 그리세요."),
@@ -955,8 +950,12 @@ void MainWindow::beginEdit(QgsVectorLayer* layer) {
     if (gt == Qgis::GeometryType::Line) mode = KaCaptureMapTool::Mode::Line;
     else if (gt == Qgis::GeometryType::Point) mode = KaCaptureMapTool::Mode::Point;
     else if (gt == Qgis::GeometryType::Null || gt == Qgis::GeometryType::Unknown) {
-      QMessageBox::warning(this, QStringLiteral("편집"),
-                           QStringLiteral("이 레이어 지오메트리 타입을 알 수 없습니다: %1").arg(layer->name()));
+      KaUserError::warn(this, {
+          QStringLiteral("그리기"),
+          QStringLiteral("「%1」에는 그릴 수 없습니다.").arg(layer->name()),
+          QStringLiteral("점·선·면 가운데 어느 도형을 담는 레이어인지 알 수 없습니다(표만 있는 자료 등)."),
+          QStringLiteral("조사구역·유구처럼 도형이 있는 레이어를 고른 뒤 다시 그리세요."),
+      });
       return;
     }
 
@@ -965,38 +964,41 @@ void MainWindow::beginEdit(QgsVectorLayer* layer) {
       m_captureTool->setParent(this);
       connect(m_captureTool, &KaCaptureMapTool::geometryCaptured, this, &MainWindow::onGeometryCaptured,
               Qt::DirectConnection);
-      connect(m_captureTool, &KaCaptureMapTool::vertexMoved, this, [this]() {
-        QgsProject::instance()->setDirty(true);
-        if (m_canvas) m_canvas->refresh();
-        statusBar()->showMessage(QStringLiteral("꼭짓점을 고쳤습니다. 끌어서 계속 수정하세요."), 5000);
-      });
-      connect(m_captureTool, &KaCaptureMapTool::vertexMoveFailed, this, [this](const QString& message) {
-        QgsProject::instance()->setDirty(true);
-        notify(Notice::Warning, QStringLiteral("꼭짓점 수정 확인 필요"), message);
-      });
       connect(m_captureTool, &KaCaptureMapTool::captureCanceled, this, [this]() {
         statusBar()->showMessage(
-            QStringLiteral("아직 저장 안 됨 — 면은 점 3개 이상, 선은 2개 이상 필요. 우클릭으로 완료."),
+            QStringLiteral("아직 넣지 않았습니다 — 면은 점 3개, 선은 2개 이상 필요합니다. 우클릭·Enter로 완료."),
             8000);
+      });
+      connect(m_captureTool, &KaCaptureMapTool::sketchCanceled, this, [this]() {
+        statusBar()->showMessage(QStringLiteral("그리던 도형을 지웠습니다."), 4000);
+      });
+      connect(m_captureTool, &KaCaptureMapTool::sketchChanged, this, [this](int) {
+        updateToolChip();  // also enables 완료·되돌리기·취소 while points exist
+        updateUndoRedoActions();
       });
     }
 
     m_captureTool->setTargetLayer(layer);
     m_captureTool->setMode(mode);
     m_captureTool->setEasyDraw(false);
+    MeasureOps::pinPlanarEllipsoid(QgsProject::instance());
     m_canvas->setMapTool(m_captureTool);
     m_canvas->setFocus(Qt::OtherFocusReason);
     m_canvas->setCursor(Qt::CrossCursor);
+    updateToolChip();
 
+    // Short enough for a narrow status bar; the tool chip keeps showing the target.
     const QString how = (mode == KaCaptureMapTool::Mode::Point)
-                            ? QStringLiteral("지도 좌클릭 = 점")
-                            : QStringLiteral("좌클릭=꼭짓점 / 우클릭=완료 / 그린 뒤 점을 끌어 수정 / ESC=취소");
-    statusBar()->showMessage(QStringLiteral("그리기 중: %1 | %2").arg(layer->name(), how), 0);
+                            ? QStringLiteral("좌클릭으로 점 찍기")
+                            : QStringLiteral("좌클릭 점 · 우클릭/Enter 완료 · Esc 취소");
+    statusBar()->showMessage(QStringLiteral("%1 — %2").arg(layer->name(), how), 0);
   } catch (const std::exception& ex) {
-    QMessageBox::critical(this, QStringLiteral("그리기 시작 실패"), QString::fromUtf8(ex.what()));
+    KaEditErrors::unexpected(this, QStringLiteral("그리기"), QStringLiteral("그리기를 시작하지 못했습니다."),
+                             QString::fromUtf8(ex.what()));
   } catch (...) {
-    KaCrashGuard::logLine(QStringLiteral("[except] app/MainWindow.cpp:5473"));
-    QMessageBox::critical(this, QStringLiteral("그리기 시작 실패"), QStringLiteral("내부 오류"));
+    KaCrashGuard::logLine(QStringLiteral("[except] app/MainWindowEditing.cpp:beginEdit"));
+    KaEditErrors::unexpected(this, QStringLiteral("그리기"), QStringLiteral("그리기를 시작하지 못했습니다."),
+                             QStringLiteral("C++ 예외 (종류 미상). 세션 로그에 기록했습니다."));
   }
 }
 #endif
@@ -1027,7 +1029,12 @@ void MainWindow::startEasyDraw() {
     layer = LayerOps::createUserPolygonLayer(QgsProject::instance(), m_surveyPath,
                                              QStringLiteral("쉽게그리기"), m_workCrs, &err);
     if (!layer) {
-      QMessageBox::warning(this, QStringLiteral("쉽게그리기"), err);
+      KaUserError::warn(this, {
+          QStringLiteral("쉽게그리기"),
+          QStringLiteral("「쉽게그리기」 레이어를 만들지 못했습니다."),
+          err,
+          QStringLiteral("조사 파일이 있는 폴더에 쓸 수 있는지 확인한 뒤 다시 누르세요."),
+      });
       return;
     }
     LayerOps::applySimpleVectorStyle(layer, QColor(30, 103, 198, 70), QColor(30, 103, 198), 1.4, 3.5,
@@ -1041,7 +1048,7 @@ void MainWindow::startEasyDraw() {
     m_captureTool->setSnapEnabled(true);
   }
   statusBar()->showMessage(
-      QStringLiteral("쉽게그리기 → 「쉽게그리기」레이어에 저장. 지적은 자석만 사용. 우클릭=완료"),
+      QStringLiteral("쉽게그리기 — 꼭짓점에 대면 바로, 선 위에서는 잠깐 멈추면 점이 찍힙니다. 우클릭·Enter로 완료"),
       0);
 #else
   statusBar()->showMessage(QStringLiteral("쉽게그리기 (스텁)"));
@@ -1076,8 +1083,13 @@ void MainWindow::startEditSurveyArea() {
         QgsProject::instance(), m_surveyPath, dlg.layerName(),
         dlg.strokeColor(), dlg.fillColor(), dlg.strokeWidthMm(), &err);
     if (!targetLayer) {
-      QMessageBox::critical(this, QStringLiteral("조사구역 생성 실패"),
-                            err.isEmpty() ? QStringLiteral("레이어를 생성하지 못했습니다.") : err);
+      KaEditErrors::show(this, {
+          QStringLiteral("조사구역"),
+          QStringLiteral("새 조사구역 레이어를 만들지 못했습니다."),
+          QStringLiteral("조사 파일에 새 표를 쓰지 못했습니다. 파일이 다른 프로그램에서 열려 있거나 "
+                         "폴더에 쓸 권한이 없을 수 있습니다."),
+          QStringLiteral("같은 파일을 연 프로그램을 닫고, 기존 조사구역에 이어 그리기로 다시 해 보세요."),
+      }, err, true);
       return;
     }
   }
@@ -1151,7 +1163,12 @@ void MainWindow::startSplitPolygonTool() {
       QgsVectorLayer* targetLayer = nullptr;
       if (!LayerOps::splitTwoOverlappingFeatures(l1, selected[0].fid, l2, selected[1].fid,
                                                  &createdFid, &targetLayer, &err)) {
-        QMessageBox::warning(this, QStringLiteral("폴리곤 중첩 분할 실패"), err);
+        KaUserError::warn(this, {
+            QStringLiteral("폴리곤 나누기"),
+            QStringLiteral("두 도형의 겹친 구간을 나누지 못했습니다."),
+            err,
+            QStringLiteral("겹치는 도형 두 개를 Shift+클릭으로 다시 고른 뒤 누르세요."),
+        });
         return;
       }
       if (createdFid >= 0 && targetLayer) {
@@ -1160,7 +1177,8 @@ void MainWindow::startSplitPolygonTool() {
         act.layerId = targetLayer->id();
         act.featureId = createdFid;
         act.description = QStringLiteral("중첩 분할 도형 생성");
-        m_undoActions.append(act);
+        // Mirrors the add on the layer stack when the layer was being edited.
+        pushUndoAction(std::move(act), targetLayer);
       }
       if (m_canvas) m_canvas->refresh();
       statusBar()->showMessage(QStringLiteral("선택한 두 도형의 겹치는 구간을 잘라 분할했습니다! (A, B, 중첩부 3개로 분할됨)"), 8000);
@@ -1290,14 +1308,24 @@ void MainWindow::clipOverlappingLayers() {
 
   if (!target || !boundary) return;
   if (target == boundary) {
-    QMessageBox::warning(this, QStringLiteral("구간 분리"), QStringLiteral("대상 레이어와 기준 바운더리 레이어가 같을 수 없습니다."));
+    KaUserError::warn(this, {
+        QStringLiteral("구간 분리"),
+        QStringLiteral("같은 레이어로는 구간을 나눌 수 없습니다."),
+        QStringLiteral("자를 대상과 기준 바운더리에 같은 레이어를 골랐습니다."),
+        QStringLiteral("기준 바운더리에 다른 면 레이어를 고른 뒤 다시 실행하세요."),
+    });
     return;
   }
 
   QString err;
   QgsVectorLayer* clipped = LayerOps::clipLayerByBoundary(target, boundary, proj, &err);
   if (!clipped) {
-    QMessageBox::warning(this, QStringLiteral("구간 분리 실패"), err);
+    KaUserError::warn(this, {
+        QStringLiteral("구간 분리"),
+        QStringLiteral("겹치는 구간을 새 레이어로 떼어 내지 못했습니다."),
+        err,
+        QStringLiteral("두 레이어가 실제로 겹치는지 지도에서 확인한 뒤 다시 실행하세요."),
+    });
     return;
   }
 
@@ -1306,7 +1334,7 @@ void MainWindow::clipOverlappingLayers() {
   act.type = KaUndoAction::LayerAdded;
   act.layerId = clipped->id();
   act.description = QStringLiteral("구간 분리 레이어 생성");
-  m_undoActions.append(act);
+  pushUndoAction(std::move(act));
 
   statusBar()->showMessage(QStringLiteral("겹치는 구간을 분리하여 「%1」 레이어를 생성했습니다. (Ctrl+Z로 되돌리기 가능)").arg(clipped->name()), 8000);
   notify(Notice::Success, QStringLiteral("구간 분리 완료"),
@@ -1317,36 +1345,6 @@ void MainWindow::clipOverlappingLayers() {
 #endif
 }
 
-void MainWindow::saveEdits() {
-#if KA_HGIS_HAS_QGIS
-  int n = 0;
-  for (auto* l : QgsProject::instance()->mapLayers()) {
-    if (auto* v = qobject_cast<QgsVectorLayer*>(l)) {
-      if (v->isEditable()) {
-        if (v->commitChanges()) ++n;
-        else {
-          QMessageBox::warning(this, QStringLiteral("저장 실패"),
-                               QStringLiteral("%1: %2").arg(v->name(), v->commitErrors().join(QStringLiteral("; "))));
-        }
-      }
-    }
-  }
-  if (m_canvas) m_canvas->refresh();
-  statusBar()->showMessage(QStringLiteral("편집저장 완료 (%1개 레이어)").arg(n), 5000);
-  refreshWorkPanel();
-#else
-  statusBar()->showMessage(QStringLiteral("스텁 저장"), 3000);
-#endif
-}
-
-void MainWindow::stopEdits() {
-#if KA_HGIS_HAS_QGIS
-  stopCaptureTool();
-  m_editLayer = nullptr;
-#endif
-  statusBar()->showMessage(QStringLiteral("그리기 종료. 미커밋은 「편집저장」"), 5000);
-}
-
 void MainWindow::addControlPoint() {
   QDialog dlg(this);
   dlg.setWindowTitle(QStringLiteral("GPS 기준점"));
@@ -1354,6 +1352,8 @@ void MainWindow::addControlPoint() {
   auto* id = new QLineEdit(&dlg);
   auto* x = new QLineEdit(&dlg);
   auto* y = new QLineEdit(&dlg);
+  auto* z = new QLineEdit(&dlg);
+  z->setPlaceholderText(QStringLiteral("비워 두면 표고 없이 넣습니다"));
   auto* datum = new QLineEdit(QStringLiteral("세계측지계"), &dlg);
   auto* ell = new QLineEdit(QStringLiteral("GRS80"), &dlg);
   auto* proj = new QLineEdit(QStringLiteral("TM/UTM-K"), &dlg);
@@ -1369,24 +1369,35 @@ void MainWindow::addControlPoint() {
   form->addRow(QStringLiteral("Y (북쪽)"), y);
   auto* swapAxes = new QCheckBox(QStringLiteral("X·Y 교환 (측량 X=북, Y=동)"), &dlg);
   form->addRow(swapAxes);
+  form->addRow(QStringLiteral("Z (표고 m, 선택)"), z);
   form->addRow(QStringLiteral("측지기준계"), datum);
   form->addRow(QStringLiteral("타원체"), ell);
   form->addRow(QStringLiteral("투영"), proj);
   form->addRow(QStringLiteral("원점"), origin);
-  form->addRow(QStringLiteral("accuracy_m"), acc);
+  form->addRow(attributeFieldLabelKo(QStringLiteral("accuracy_m")), acc);
   form->addRow(QStringLiteral("PDOP"), pdop);
-  form->addRow(QStringLiteral("fix_type"), fix);
+  form->addRow(attributeFieldLabelKo(QStringLiteral("fix_type")), fix);
   auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
   form->addRow(buttons);
   connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
   connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
   if (dlg.exec() != QDialog::Accepted) return;
-  if (id->text().isEmpty() || x->text().isEmpty() || y->text().isEmpty()) {
-    QMessageBox::warning(this, QStringLiteral("입력"), QStringLiteral("점ID/X/Y 필수"));
+  bool xOk = false;
+  bool yOk = false;
+  bool zOk = true;
+  const double xv = x->text().trimmed().toDouble(&xOk);
+  const double yv = y->text().trimmed().toDouble(&yOk);
+  const QString zText = z->text().trimmed();
+  const double zv = zText.isEmpty() ? 0.0 : zText.toDouble(&zOk);
+  if (id->text().trimmed().isEmpty() || !xOk || !yOk || !zOk) {
+    KaUserError::warn(this, {
+        QStringLiteral("GPS 기준점"),
+        QStringLiteral("기준점을 넣지 않았습니다."),
+        QStringLiteral("점ID와 X·Y는 꼭 적어야 하고, X·Y·Z는 숫자여야 합니다."),
+        QStringLiteral("점ID와 좌표를 숫자로(소수점은 .) 적은 뒤 다시 넣으세요."),
+    });
     return;
   }
-  const double xv = x->text().toDouble();
-  const double yv = y->text().toDouble();
   bool swap = swapAxes->isChecked();
 #if KA_HGIS_HAS_QGIS
   const auto suggestion = LayerOps::suggestControlPointAxisSwap(QgsProject::instance(), xv, yv);
@@ -1408,27 +1419,50 @@ void MainWindow::addControlPoint() {
   m_stubHasMeta = !datum->text().isEmpty() && !ell->text().isEmpty() && !proj->text().isEmpty();
 #if KA_HGIS_HAS_QGIS
   auto* layer = ensureDomainLayerForEdit(QStringLiteral("control_points"), QStringLiteral("GPS기준점"));
-  if (layer && layer->startEditing()) {
-    QgsFeature f(layer->fields());
-    f.setAttribute(QStringLiteral("point_id"), id->text());
-    f.setAttribute(QStringLiteral("x"), mapXy.x());
-    f.setAttribute(QStringLiteral("y"), mapXy.y());
-    f.setAttribute(QStringLiteral("datum"), datum->text());
-    f.setAttribute(QStringLiteral("ellipsoid"), ell->text());
-    f.setAttribute(QStringLiteral("projection"), proj->text());
-    f.setAttribute(QStringLiteral("origin"), origin->text());
-    f.setAttribute(QStringLiteral("accuracy"), acc->text());
-    f.setAttribute(QStringLiteral("accuracy_m"), acc->text().toDouble());
-    f.setAttribute(QStringLiteral("pdop"), pdop->text().toDouble());
-    f.setAttribute(QStringLiteral("fix_type"), fix->text());
-    f.setGeometry(QgsGeometry::fromPointXY(mapXy));
-    layer->addFeature(f);
-    layer->commitChanges();
-    m_stubGcp = layer->featureCount();
-  } else
-#endif
-  { m_stubGcp++; }
+  if (!layer) return;
+  QgsFeature f(layer->fields());
+  f.setAttribute(QStringLiteral("point_id"), id->text().trimmed());
+  f.setAttribute(QStringLiteral("x"), mapXy.x());
+  f.setAttribute(QStringLiteral("y"), mapXy.y());
+  if (!zText.isEmpty() && layer->fields().indexOf(QStringLiteral("z")) >= 0)
+    f.setAttribute(QStringLiteral("z"), zv);
+  f.setAttribute(QStringLiteral("datum"), datum->text());
+  f.setAttribute(QStringLiteral("ellipsoid"), ell->text());
+  f.setAttribute(QStringLiteral("projection"), proj->text());
+  f.setAttribute(QStringLiteral("origin"), origin->text());
+  f.setAttribute(QStringLiteral("accuracy"), acc->text());
+  f.setAttribute(QStringLiteral("accuracy_m"), acc->text().toDouble());
+  f.setAttribute(QStringLiteral("pdop"), pdop->text().toDouble());
+  f.setAttribute(QStringLiteral("fix_type"), fix->text());
+  f.setGeometry(QgsGeometry::fromPointXY(mapXy));
+  FeatureRecord::stampNew(f);  // [pkg K] F054 audit fields
+  // Into the edit buffer like a drawn shape: Ctrl+Z takes it back, 저장 writes it, and an
+  // edit session already open on the layer is left open.
+  QString addError;
+  if (!LayerOps::runEditCommand(layer, QStringLiteral("기준점 추가"), [&]() {
+        return layer->addFeature(f);
+      }, &addError)) {
+    KaUserError::warn(this, {
+        QStringLiteral("GPS 기준점"),
+        QStringLiteral("기준점 「%1」을 넣지 못했습니다.").arg(id->text().trimmed()),
+        addError,
+        QStringLiteral("같은 파일을 연 다른 프로그램을 닫은 뒤 다시 넣으세요."),
+    });
+    return;
+  }
+  QgsProject::instance()->setDirty(true);
+  updateUndoRedoActions();
+  m_stubGcp = static_cast<int>(layer->featureCount());
+  statusBar()->showMessage(
+      QStringLiteral("기준점 %1을 넣었습니다 (모두 %2개). Ctrl+Z로 되돌리고, 「저장」(Ctrl+S)으로 파일에 씁니다.")
+          .arg(id->text().trimmed())
+          .arg(m_stubGcp),
+      6000);
+#else
+  Q_UNUSED(zv);
+  m_stubGcp++;
   statusBar()->showMessage(QStringLiteral("기준점 등록 (총 추정 %1)").arg(m_stubGcp), 4000);
+#endif
 }
 
 void MainWindow::clearDrawnFeaturesOfCurrentLayer() {

@@ -29,6 +29,9 @@ QString productSubtitle(const QString& version) {
   return QStringLiteral("필드고고학 GIS · v%1").arg(version.isEmpty() ? QStringLiteral("2") : version);
 }
 
+// The startup notice names 권영인 only; the About box (MainWindow::showAbout)
+// names 권영인 · 조유량 · 박종환. The split is the user's decision, recorded in
+// the startup-splash tests: do not add the other two names back here.
 QString creators() {
   return QStringLiteral("권영인");
 }
@@ -87,16 +90,21 @@ void paintTitle(QPainter& painter, const QPointF& baseline, double unit, const Q
   painter.restore();
 }
 
+// The licence notice is the smallest text on the card, so it keeps the most
+// contrast: >= 4.5:1 over the card's lightest blue with the foot shade.
+QColor copyrightInk() { return withAlpha(kInk, 0.96); }
+QColor dataInk() { return withAlpha(kInk, 0.92); }
+
 void paintNotices(QPainter& painter, const QRectF& area, double unit) {
   const double u = unit;
   painter.save();
   const QString copyright = copyrightLine();
   painter.setFont(fitted(uiFont(11.5 * u), copyright, area.width()));
-  painter.setPen(withAlpha(kInk, 0.78));
+  painter.setPen(copyrightInk());
   painter.drawText(QPointF(area.left(), area.top() + 12 * u), copyright);
   const QString data = dataLine();
   painter.setFont(fitted(lightFont(11 * u), data, area.width()));
-  painter.setPen(withAlpha(kInk, 0.58));
+  painter.setPen(dataInk());
   painter.drawText(QPointF(area.left(), area.top() + 30 * u), data);
   painter.restore();
 }

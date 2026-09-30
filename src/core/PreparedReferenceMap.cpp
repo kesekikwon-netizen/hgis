@@ -6,7 +6,9 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QNetworkReply>
 #include <QTimer>
+#include <algorithm>
 #include <qgsblockingnetworkrequest.h>
 #include <qgsfeedback.h>
 #include <qgsvectorlayer.h>
@@ -35,9 +37,31 @@ bool ReferenceMapPreparation::cancelled(PreparedReferenceMap& result, QgsFeedbac
 bool ReferenceMapPreparation::download(QNetworkRequest request, QByteArray* body,
                                       QString* error, QgsFeedback* feedback,
                                       const ReferenceDownload& overrideDownload, int timeoutMs) {
-  if (feedback && feedback->isCanceled()) return false;
-  request.setTransferTimeout(timeoutMs);
-  if (overrideDownload) return overrideDownload(request, body, error, feedback);
+  return download(std::move(request), body, error, feedback, overrideDownload,
+                  ReferenceTransferLimits{timeoutMs, timeoutMs});
+}
+
+bool ReferenceMapPreparation::download(QNetworkRequest request, QByteArray* body,
+                                      QString* error, QgsFeedback* feedback,
+                                      const ReferenceDownload& overrideDownload,
+                                      const ReferenceTransferLimits& limits,
+                                      ReferenceTransferFailure* failure) {
+  const auto fail = [failure](ReferenceTransferFailure kind) {
+    if (failure) *failure = kind;
+    return false;
+  };
+  if (failure) *failure = ReferenceTransferFailure::None;
+  if (feedback && feedback->isCanceled()) return fail(ReferenceTransferFailure::Cancelled);
+  const int idleMs = std::max(1, limits.idleMs);
+  const int totalMs = std::max(idleMs, limits.totalMs);
+  // Qt restarts this inactivity timer whenever bytes arrive, so a slow but
+  // progressing response is extended; a silent connection still stops early.
+  request.setTransferTimeout(idleMs);
+  if (overrideDownload) {
+    if (overrideDownload(request, body, error, feedback)) return true;
+    return fail(feedback && feedback->isCanceled() ? ReferenceTransferFailure::Cancelled
+                                                   : ReferenceTransferFailure::Network);
+  }
   QgsBlockingNetworkRequest operation;
   QgsFeedback requestFeedback;
   if (feedback)
@@ -51,15 +75,20 @@ bool ReferenceMapPreparation::download(QNetworkRequest request, QByteArray* body
   });
   // In a worker QgsBlockingNetworkRequest services this event loop. Unlike the
   // inactivity timeout, this deadline also bounds a server sending trickle data.
-  deadline.start(timeoutMs);
+  deadline.start(totalMs);
   const auto code = operation.get(request, false, &requestFeedback);
   deadline.stop();
-  if (feedback && feedback->isCanceled()) return false;
+  if (feedback && feedback->isCanceled()) return fail(ReferenceTransferFailure::Cancelled);
   if (deadlineExceeded || code != QgsBlockingNetworkRequest::NoError) {
-    if (error) *error = deadlineExceeded || code == QgsBlockingNetworkRequest::TimeoutError
+    // Qt reports its expired inactivity timer as an abort that nobody requested.
+    const auto replyError = operation.reply().error();
+    const bool idleExpired = !requestFeedback.isCanceled() &&
+        (replyError == QNetworkReply::TimeoutError || replyError == QNetworkReply::OperationCanceledError);
+    const bool timedOut = deadlineExceeded || idleExpired || code == QgsBlockingNetworkRequest::TimeoutError;
+    if (error) *error = timedOut
         ? QStringLiteral("지도 서버의 응답이 늦어 요청을 중단했습니다. 인터넷 연결을 확인한 뒤 다시 내려받으세요.")
         : QStringLiteral("지도 서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 내려받으세요.");
-    return false;
+    return fail(timedOut ? ReferenceTransferFailure::Timeout : ReferenceTransferFailure::Network);
   }
   if (body) *body = operation.reply().content();
   return true;

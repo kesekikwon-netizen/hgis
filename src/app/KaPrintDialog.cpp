@@ -33,7 +33,6 @@
 #include <functional>
 
 namespace {
-constexpr double kPrintDpi = 300.0;       // 그림 해상도 상한. 「PDF 내보내기」와 같다
 constexpr double kDefaultMarginMm = 5.0;  // 프린터를 모를 때의 가장자리
 constexpr double kLabelBandMm = 6.0;      // 장 번호·5 cm 확인선 띠
 const QString kSettingsGroup = QStringLiteral("print");
@@ -289,6 +288,20 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, doubl
   paperRow->addStretch(1);
   form->addRow(QStringLiteral("용지"), paperRow);
 
+  // 저장 PDF 와 같은 도면 PDF 를 그려 찍는다. 해상도 상한만 고른다.
+  m_dpi = new QComboBox(this);
+  m_dpi->setObjectName(QStringLiteral("printDpi"));
+  for (int dpi : TilePrint::printDpiChoices()) {
+    m_dpi->addItem(dpi <= int(TilePrint::kDefaultPrintDpi)
+                       ? QStringLiteral("%1 DPI (보통)").arg(dpi)
+                       : QStringLiteral("%1 DPI (가는 선이 많은 실측도)").arg(dpi),
+                   dpi);
+  }
+  m_dpi->setToolTip(QStringLiteral(
+      "도면 PDF를 이 해상도로 그려 찍습니다. 0.1~0.2 mm 선이 많은 1:20 실측도는 600을 고르세요. "
+      "프린터 해상도보다 곱게 그리지는 않습니다."));
+  form->addRow(QStringLiteral("해상도"), m_dpi);
+
   m_marks = new QCheckBox(QStringLiteral("자르는 점선·장 번호·5 cm 확인선 넣기"), this);
   m_marks->setObjectName(QStringLiteral("printMarks"));
   m_marks->setChecked(true);
@@ -313,7 +326,7 @@ KaPrintDialog::KaPrintDialog(const QString& pdfPath, const QString& title, doubl
   m_warning = new QLabel(this);
   m_warning->setObjectName(QStringLiteral("printWarning"));
   m_warning->setWordWrap(true);
-  m_warning->setStyleSheet(QStringLiteral("color: #b45309;"));
+  m_warning->setStyleSheet(QStringLiteral("QLabel#printWarning { color: #92400e; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; padding: 6px 8px; font-weight: 700; }"));
   root->addWidget(m_warning);
   m_preview = new KaTilePreview(this);
   m_preview->onToggle = [this](int index) { toggleSheet(index); };
@@ -437,6 +450,16 @@ void KaPrintDialog::setSheet(Sheet sheet) { m_sheet->setCurrentIndex(int(sheet))
 void KaPrintDialog::setOverlapMm(double mm) { m_overlap->setValue(mm); }
 void KaPrintDialog::setMarks(bool on) { m_marks->setChecked(on); }
 void KaPrintDialog::setOverview(bool on) { m_overview->setChecked(on); }
+
+void KaPrintDialog::setPrintDpi(double dpi) {
+  const int index = m_dpi->findData(int(std::lround(dpi)));
+  if (index >= 0) m_dpi->setCurrentIndex(index);
+}
+
+double KaPrintDialog::printDpi() const {
+  const int dpi = m_dpi ? m_dpi->currentData().toInt() : 0;
+  return dpi > 0 ? double(dpi) : TilePrint::kDefaultPrintDpi;
+}
 bool KaPrintDialog::isTiled() const { return m_modeTiles->isChecked(); }
 
 void KaPrintDialog::toggleSheet(int index) {
@@ -568,7 +591,10 @@ void KaPrintDialog::rebuild() {
       ? QStringLiteral("설치된 프린터가 없습니다. 나눈 장을 PDF로 저장해 다른 PC나 출력소에서 찍으세요.")
       : QStringLiteral("프린터 속성이 열립니다. 양면으로 나오면 기본 설정에서 단면을 고르세요.");
   m_print->setToolTip(printTip);
-  m_properties->setToolTip(printTip);
+  // Same flow as 「인쇄」: the properties window prints on 확인, 취소 prints nothing.
+  m_properties->setToolTip(printerName().isEmpty()
+      ? printTip
+      : printTip + QStringLiteral(" 속성 창에서 「인쇄」를 누르면 바로 찍히고, 「취소」를 누르면 찍지 않습니다."));
   m_savePdf->setEnabled(tiled && canDraw);
 }
 
@@ -655,6 +681,7 @@ void KaPrintDialog::loadSettings() {
     if (sheet == SheetA4 || (sheet == SheetA3 && printerSupports(QPageSize::A3))) m_sheet->setCurrentIndex(sheet);
   }
   m_overlap->setValue(settings.value(QStringLiteral("overlap"), m_overlap->value()).toDouble());
+  setPrintDpi(settings.value(QStringLiteral("dpi"), TilePrint::kDefaultPrintDpi).toDouble());
   m_marks->setChecked(settings.value(QStringLiteral("marks"), true).toBool());
   m_overview->setChecked(settings.value(QStringLiteral("overview"), true).toBool());
 }
@@ -665,6 +692,7 @@ void KaPrintDialog::saveSettings() const {
   if (!printerName().isEmpty()) settings.setValue(QStringLiteral("printer"), printerName());
   settings.setValue(QStringLiteral("sheet"), m_sheet->currentIndex());
   settings.setValue(QStringLiteral("overlap"), m_overlap->value());
+  settings.setValue(QStringLiteral("dpi"), int(printDpi()));
   settings.setValue(QStringLiteral("marks"), m_marks->isChecked());
   settings.setValue(QStringLiteral("overview"), m_overview->isChecked());
 }
@@ -675,10 +703,10 @@ bool KaPrintDialog::saveTilesPdf(const QString& path, QString* error, bool* canc
     return false;
   }
   QPdfWriter writer(path);
-  writer.setResolution(int(kPrintDpi));
+  writer.setResolution(int(printDpi()));
   writer.setTitle(m_title);
   writer.setCreator(QStringLiteral("ka-hgis"));
-  return TilePrint::renderTiles(m_pdfPath, m_plan, &writer, kPrintDpi, tileOptions(), error, cancelled);
+  return TilePrint::renderTiles(m_pdfPath, m_plan, &writer, printDpi(), tileOptions(), error, cancelled);
 }
 
 bool KaPrintDialog::renderWithProgress(QPagedPaintDevice* device, const QString& verb, QString* error,
@@ -695,7 +723,7 @@ bool KaPrintDialog::renderWithProgress(QPagedPaintDevice* device, const QString&
     progress.setValue(done);
     return !progress.wasCanceled();
   };
-  return TilePrint::renderTiles(m_pdfPath, m_plan, device, kPrintDpi, options, error, cancelled);
+  return TilePrint::renderTiles(m_pdfPath, m_plan, device, printDpi(), options, error, cancelled);
 }
 
 void KaPrintDialog::saveTilesAs() {
@@ -709,7 +737,7 @@ void KaPrintDialog::saveTilesAs() {
   bool ok = false;
   {
     QPdfWriter writer(path);
-    writer.setResolution(int(kPrintDpi));
+    writer.setResolution(int(printDpi()));
     writer.setTitle(m_title);
     writer.setCreator(QStringLiteral("ka-hgis"));
     ok = renderWithProgress(&writer, QStringLiteral("나눈 장을 PDF로 저장하는 중"), &error, &cancelled);
@@ -757,7 +785,7 @@ void KaPrintDialog::printNow() {
     ok = renderWithProgress(&printer, QStringLiteral("프린터로 보내는 중"), &error, &cancelled);
   } else {
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    ok = TilePrint::renderFit(m_pdfPath, sheetSize(), m_margins, &printer, kPrintDpi, &error);
+    ok = TilePrint::renderFit(m_pdfPath, sheetSize(), m_margins, &printer, printDpi(), &error);
     QApplication::restoreOverrideCursor();
   }
   if (cancelled) {

@@ -1,10 +1,13 @@
 #include "KaSessionLog.h"
+#include "KaLogExcept.h"
 #include "LayoutService.h"
 #include "HeritageLayoutNumbers.h"
 #include "DemColorRampLegend.h"
 #include "GeologyMapService.h"
 #include "LayerOps.h"
 #include "LayerLabelControls.h"
+#include "PdfExportSettings.h"
+#include "StandardScales.h"
 
 #include <QColor>
 #include <QGraphicsItem>
@@ -701,17 +704,10 @@ static void fillLayout(QgsPrintLayout* layout, QgsProject* project,
 int LayoutService::niceScaleDenominator(double rawScale) {
   if (!(rawScale > 0.0) || !std::isfinite(rawScale))
     return 1000;
-  static const int kNice[] = {10,   20,    40,    50,    80,    100,   150,   200,
-                              250,  300,   400,   500,   1000,  2000,  4000,  5000,
-                              10000, 20000, 40000,
-                              50000, 100000, 200000, 500000};
   // Smallest 10-ending cartographic scale that still contains the extent
-  // (do not snap down — that clips the dragged survey).
-  for (int n : kNice) {
-    if (static_cast<double>(n) + 1e-6 >= rawScale)
-      return n;
-  }
-  return kNice[sizeof(kNice) / sizeof(kNice[0]) - 1];
+  // (do not snap down — that clips the dragged survey). One table for chips,
+  // snap, section and print lists lives in StandardScales.
+  return StandardScales::snapUp(rawScale, StandardScales::Snap);
 }
 
 double LayoutService::niceScaleBarSegmentMeters(double mapWidthMm, double scaleDenominator,
@@ -723,7 +719,8 @@ double LayoutService::niceScaleBarSegmentMeters(double mapWidthMm, double scaleD
   const double targetBarMm = std::clamp(mapWidthMm * 0.35, 40.0, 160.0);
   const double rawSeg =
       (targetBarMm / 1000.0 * scaleDenominator) / static_cast<double>(segments);
-  static const double kLen[] = {0.5, 1.0, 2.0, 4.0, 5.0, 10.0, 20.0, 40.0, 50.0,
+  // 0.1–0.4 m segments let 1:10–1:30 excavation drawings carry 10–20 cm ticks.
+  static const double kLen[] = {0.1, 0.2, 0.4, 0.5, 1.0, 2.0, 4.0, 5.0, 10.0, 20.0, 40.0, 50.0,
                                 100.0, 200.0, 400.0, 500.0, 1000.0, 2000.0, 5000.0};
   double best = kLen[0];
   double bestRel = 1.0e99;
@@ -794,7 +791,7 @@ double LayoutService::niceGridIntervalMeters(double scaleDenominator, double map
   // 한 칸이 종이에서 25~70mm 사이가 되게 목표 간격을 잡고 1-2-5 계열로 스냅.
   const double targetMm = std::clamp(paperMm * 0.24, 25.0, 70.0);
   const double rawM = targetMm / 1000.0 * scaleDenominator;
-  static const double kSteps[] = {0.5,   1.0,   2.0,    5.0,    10.0,   20.0,
+  static const double kSteps[] = {0.1,   0.2,   0.5,   1.0,   2.0,    5.0,    10.0,   20.0,
                                   25.0,  50.0,  100.0,  200.0,  250.0,  500.0,
                                   1000.0, 2000.0, 5000.0, 10000.0};
   double best = kSteps[0];
@@ -1062,9 +1059,7 @@ QgsRectangle LayoutService::zoomExtentAtAnchor(const QgsRectangle& extent, doubl
 }
 
 void LayoutService::applySingleRasterPassRendering(QgsLayout* layout) {
-  if (!layout)
-    return;
-  layout->renderContext().setFlag(Qgis::LayoutRenderFlag::DisableTiledRasterLayerRenders, true);
+  KaPdfExport::prepareLayout(layout);
 }
 
 QString LayoutService::createBlankSheet(QgsProject* project, double widthMm, double heightMm,
@@ -1155,7 +1150,7 @@ LayoutService::DrawingBuildResult LayoutService::buildDrawing(QgsProject* projec
     result.warningKo = QString::fromUtf8(ex.what());
     if (errorOut) *errorOut = result.warningKo;
   } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/LayoutService.cpp:1092"));
+    KA_LOG_EXCEPT();
     result.warningKo = QStringLiteral("도면을 만드는 중 오류가 났습니다.");
     if (errorOut) *errorOut = result.warningKo;
   }
@@ -1302,7 +1297,7 @@ QString LayoutService::exportLayoutPdf(QgsProject* project, const QString& layou
   }
 
   // 저장된 조판(예전 프로젝트에서 열린 것)에도 래스터 단일 렌더를 보장한다.
-  applySingleRasterPassRendering(layout);
+  KaPdfExport::prepareLayout(layout);
   // Saved studio sheets and submission PDFs need the same actual print-label
   // filtering as the Studio PDF button, including sheets reopened from disk.
   if (auto* map = dynamic_cast<QgsLayoutItemMap*>(layout->itemById(QStringLiteral("ka_map")))) {
@@ -1314,13 +1309,12 @@ QString LayoutService::exportLayoutPdf(QgsProject* project, const QString& layou
       return {};
     }
     auto* legend = dynamic_cast<QgsLayoutItemLegend*>(layout->itemById(QStringLiteral("ka_legend")));
-    if (!numbers->exportPdf(map, legend, pdfPath, 300., errorOut, true)) return {};
+    // Same call (and KaPdfExport settings) as the drawing studio 「PDF 저장」.
+    if (!numbers->exportPdf(map, legend, pdfPath, KaPdfExport::kSheetDpi, errorOut)) return {};
     return pdfPath;
   }
   QgsLayoutExporter exporter(layout);
-  QgsLayoutExporter::PdfExportSettings settings;
-  settings.dpi = 300;
-  settings.forceVectorOutput = true;
+  const QgsLayoutExporter::PdfExportSettings settings = KaPdfExport::sheetSettings();
   // 화면 미리보기용으로 낮춰 둔 해상도가 남아 있어도 인쇄는 300 DPI로 나가게 한다.
   const double keepDpi = layout->renderContext().dpi();
   layout->renderContext().setDpi(settings.dpi);
@@ -1364,7 +1358,7 @@ QImage LayoutService::renderPreview(QgsProject* project, const QString& layoutNa
     if (errorOut) *errorOut = QString::fromUtf8(ex.what());
     return {};
   } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/LayoutService.cpp:1296"));
+    KA_LOG_EXCEPT();
     if (errorOut) *errorOut = QStringLiteral("미리보기를 그리는 중 오류가 났습니다.");
     return {};
   }

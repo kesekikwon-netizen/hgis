@@ -1,4 +1,5 @@
 #include "KaCrashGuard.h"
+#include "core/KaLogExcept.h"
 #include "KaTerrain3dStudio.h"
 
 #include "KaTerrain3dView.h"
@@ -307,7 +308,7 @@ bool KaTerrain3dStudio::loadDemClipToCanvas(const QString& path, QString* errorO
                                                               : QgsCoordinateTransformContext());
       clip = tr.transformBoundingBox(clip);
     } catch (...) {
-      KaCrashGuard::logLine(QStringLiteral("[except] app/KaTerrain3dStudio.cpp:308"));
+      KA_LOG_EXCEPT();
       if (errorOut) *errorOut = QStringLiteral("화면 범위를 DEM 좌표로 바꾸지 못했습니다.");
       return false;
     }
@@ -403,7 +404,7 @@ void KaTerrain3dStudio::tryAutoFill() {
                                                             : QgsCoordinateTransformContext());
         wgsExt = tr.transformBoundingBox(e);
       } catch (...) {
-        KaCrashGuard::logLine(QStringLiteral("[except] app/KaTerrain3dStudio.cpp:403"));
+        KA_LOG_EXCEPT();
         wgsExt = QgsRectangle();
       }
     }

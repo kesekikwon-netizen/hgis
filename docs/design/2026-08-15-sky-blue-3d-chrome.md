@@ -1,12 +1,16 @@
 # ka-hgis 하늘색 3D 크롬 · 검정 테두리 · 현장 중심 IA
 
+> **Superseded by Strata — 현재 디자인이 아님.** 앱은 이 문서의 하늘색 3D 베벨·검정 2px 구역 테두리·`sky0..6` 토큰에서 평면 Strata 로 옮겼다: 테두리 `#DCE3EA` 1px, 강조색 하나(`accent #1F6FB2`, hover `#185E99`, deep `#12558D`), 광택 없는 평면 기능 타일, 한 줄 리본(칩 56×82, 간격 0), 앱 바·7단계 레일 없음. 코드(`src/app/KaTheme.cpp`, `data/theme/ka-hgis.qss`)가 정본이다.
+>
+> 아직 살아 있는 결정(여기서 옮겨 적음): 열기·저장 파일 창은 **네이티브 Windows `QFileDialog`** 를 쓴다(2026-08-15 사용자 결정). 지도 캔버스·조판 책상에는 앱 스타일시트를 칠하지 않는다. 제출 좌표계 5179 와 도면 시트 장식은 이 테마 작업의 범위가 아니었다.
+
 | 항목 | 값 |
 | --- | --- |
 | Document | Sky-blue 3D application chrome / black region borders / user-centered IA |
 | Product | ka-hgis (고고학 전용 HGIS) 0.3.0 |
 | Author | Grok Build (architect) |
 | Date | 2026-08-15 |
-| Status | Draft (rev 4 — user: native QFileDialog; PR1 authorized) |
+| Status | **Superseded by Strata** (2026-09) — 옛 기록. rev 4 초안이었다 |
 | Scope | Application chrome, theme, IA grouping — **not** map rendering, **not** 도면 시트 장식, **not** export CRS |
 | Audience | 구현 담당 (C++20 / Qt6 / OSGeo4W qgis-dev) |
 
@@ -649,7 +653,6 @@ const Tokens& tokens();
 QPalette palette();  // Active + Inactive + Disabled. PlaceholderText, ToolTip*, Light/Mid/Dark
 QString embeddedStyleSheet();          // #include generated ka-hgis.qss.inc
 QStringList styleSheetCandidates();    // rulesPath 와 같은 3후보
-QString resolveStyleSheetPath();       // 존재하는 첫 후보, 없으면 빈 문자열
 QString loadStyleSheet();              // 디스크 우선, 실패/부재 시 embedded
 void apply(QApplication* app);         // setPalette + setStyleSheet(loadStyleSheet()). Fusion은 호출자
 void excludeMapSurface(QWidget* w);    // Qt only — no qgs*.h

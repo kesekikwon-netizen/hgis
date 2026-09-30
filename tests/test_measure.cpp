@@ -10,6 +10,7 @@
 #include <qgsapplication.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgscoordinatetransformcontext.h>
+#include <qgsdistancearea.h>
 #include <qgsexpression.h>
 #include <qgsexpressioncontext.h>
 #include <qgsfeature.h>
@@ -24,6 +25,8 @@ private slots:
   void rectangleArea200m2();
   void formatters();
   void planarAreaMatchesLabelSelectAndTape();
+  void gridBearingIsClockwiseFromGridNorth();
+  void pinPlanarEllipsoidKeepsSavedState();
 };
 
 void TestMeasure::length10mOn5187() {
@@ -105,6 +108,51 @@ void TestMeasure::planarAreaMatchesLabelSelectAndTape() {
                           .arg(tape)
                           .arg(QgsProject::instance()->ellipsoid())));
   QgsProject::instance()->setEllipsoid(Qgis::geoNone());
+}
+
+void TestMeasure::gridBearingIsClockwiseFromGridNorth() {
+  const QgsPointXY o(200000.0, 450000.0);
+  QCOMPARE(MeasureOps::gridBearingDegrees(o, QgsPointXY(200000.0, 450010.0)), 0.0);
+  QCOMPARE(MeasureOps::gridBearingDegrees(o, QgsPointXY(200010.0, 450000.0)), 90.0);
+  QCOMPARE(MeasureOps::gridBearingDegrees(o, QgsPointXY(200000.0, 449990.0)), 180.0);
+  QCOMPARE(MeasureOps::gridBearingDegrees(o, QgsPointXY(199990.0, 450000.0)), 270.0);
+  QVERIFY(std::abs(MeasureOps::gridBearingDegrees(o, QgsPointXY(200010.0, 450010.0)) - 45.0) < 1e-9);
+  QVERIFY(std::isnan(MeasureOps::gridBearingDegrees(o, o)));
+  QCOMPARE(MeasureOps::formatBearing(123.0 + 27.0 / 60.0 + 15.0 / 3600.0), QStringLiteral("123°27′15″"));
+  QCOMPARE(MeasureOps::formatBearing(359.99999), QStringLiteral("0°00′00″"));
+  QCOMPARE(MeasureOps::formatBearing(std::nan("")), QStringLiteral("—"));
+}
+
+void TestMeasure::pinPlanarEllipsoidKeepsSavedState() {
+  // Labels follow the project ellipsoid; the tape is planar. Pinning NONE keeps them equal
+  // without marking a freshly opened survey as unsaved.
+  const QgsCoordinateReferenceSystem crs(QStringLiteral("EPSG:5186"));
+  QgsProject project;
+  project.setCrs(crs);
+  project.setEllipsoid(QStringLiteral("EPSG:7019"));
+  project.setDirty(false);
+  QVERIFY(project.ellipsoid() != Qgis::geoNone());
+
+  QVERIFY(MeasureOps::pinPlanarEllipsoid(&project));
+  QCOMPARE(project.ellipsoid(), Qgis::geoNone());
+  QVERIFY(!project.isDirty());
+  QVERIFY(!MeasureOps::pinPlanarEllipsoid(&project));
+
+  project.setDirty(true);
+  project.setEllipsoid(QStringLiteral("EPSG:7019"));
+  QVERIFY(MeasureOps::pinPlanarEllipsoid(&project));
+  QVERIFY(project.isDirty());  // real unsaved work stays flagged
+
+  const QVector<QgsPointXY> pts{QgsPointXY(200000.0, 450000.0), QgsPointXY(200010.0, 450000.0),
+                                QgsPointXY(200010.0, 450020.0), QgsPointXY(200000.0, 450020.0)};
+  QgsPolylineXY ring = pts;
+  ring.append(pts.first());
+  QgsDistanceArea labelEngine;
+  labelEngine.setSourceCrs(crs, project.transformContext());
+  labelEngine.setEllipsoid(project.ellipsoid());
+  const double label = labelEngine.measureArea(QgsGeometry::fromPolygonXY({ring}));
+  const double tape = MeasureOps::polygonAreaSquareMeters(pts, crs, project.transformContext());
+  QVERIFY2(std::abs(label - tape) < 1e-6, qPrintable(QStringLiteral("label=%1 tape=%2").arg(label).arg(tape)));
 }
 
 #include "test_measure.moc"

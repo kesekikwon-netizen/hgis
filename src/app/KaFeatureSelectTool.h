@@ -8,10 +8,13 @@
 
 #include <QPointer>
 #include <QList>
+#include <QPair>
 
 class QgsMapCanvas;
 class QgsVectorLayer;
 class QgsRubberBand;
+class QgsVertexMarker;
+class QKeyEvent;
 class KaVertexEditTool;
 
 class KaFeatureSelectTool : public QgsMapTool {
@@ -29,15 +32,22 @@ public:
   void canvasPressEvent(QgsMapMouseEvent* e) override;
   void canvasMoveEvent(QgsMapMouseEvent* e) override;
   void canvasReleaseEvent(QgsMapMouseEvent* e) override;
+  void keyPressEvent(QKeyEvent* e) override;
   void activate() override;
   void deactivate() override;
 
   static QList<SelectedItem> allSelectedFeatures(QgsMapCanvas* canvas);
 
-  // 자석은 새 점을 찍을 때 쓴다. 이미 있는 점을 끌 때는 커서 위치를 쓴다.
+  // 자석은 새 점을 찍을 때 쓴다. 이미 있는 점을 끌 때는 커서 위치를 쓰고,
+  // Ctrl을 누른 채 끌 때만 (끄는 도형 자신을 뺀) 다른 도형에 붙는다.
   void setSnapEnabled(bool on);
   // Update editing handles after an external Undo restores the feature geometry.
   void refreshSelectedGeometry();
+  // Delete while a vertex is picked (clicked) removes that vertex instead of the shape.
+  // True when a picked vertex took the key, even if the vertex could not be removed.
+  bool deleteActiveVertex();
+  // Only survey data can be picked: reference maps and cadastral layers are read-only.
+  static bool isPickableLayer(const QgsVectorLayer* layer);
 
 signals:
   void selectionChanged(int totalSelected);
@@ -50,16 +60,29 @@ signals:
 
 private:
   void handleContextMenu(QgsMapMouseEvent* e);
-  void selectAtPoint(const QgsPointXY& mapPt, bool addToSelection);
+  // Nearest line/point first, then the smallest polygon under the cursor. Clicking the same
+  // spot again moves to the next overlapping shape.
+  void selectAtPoint(const QgsPointXY& mapPt, bool addToSelection, const QPoint& screenPos,
+                     bool allowCycle);
   void selectInRect(const QgsRectangle& mapRect, bool addToSelection);
   // 도형 하나만 골랐으면 그 도형의 수정점을 띄운다. 여러 개면 지운다.
   void syncVertexTarget();
+  // Where a dragged vertex goes: the cursor, or with Ctrl held a snap to other shapes.
+  QgsPointXY dragPoint(QgsMapMouseEvent* e);
+  void showSnapMark(const QgsPointXY& mapPt, bool snapped);
 
   // 도형을 고르면 곧바로 수정점이 나와야 한다는 요구에 맞춰, 선택 도구가 꼭짓점
   // 편집기를 직접 들고 있다. 지도 도구로 걸지 않고 기능만 불러 쓴다.
   KaVertexEditTool* m_vertex = nullptr;
   bool m_vertexDragging = false;
+  bool m_vertexMoved = false;
   int m_vertexIndex = -1;
+  QPoint m_vertexPressPos;
+  QgsVertexMarker* m_snapMark = nullptr;
+
+  QPoint m_lastPickPos;
+  QList<QPair<QString, QgsFeatureId>> m_lastPickCandidates;
+  int m_lastPickIndex = -1;
 
   bool m_dragging = false;
   QPoint m_pressPos;

@@ -46,11 +46,14 @@ QIcon glyph(Glyph kind) {
   return icon;
 }
 
-QToolButton* button(QWidget* parent, const char* name, Glyph kind, const QString& tip) {
+QToolButton* button(QWidget* parent, const char* name, Glyph kind, const QString& label,
+                    const QString& tip) {
   auto* b = new QToolButton(parent);
   b->setObjectName(QString::fromLatin1(name));
   b->setIcon(glyph(kind));
   b->setIconSize(QSize(20, 20));
+  // Icon-only: screen readers read this name, not the tooltip.
+  b->setAccessibleName(label);
   b->setToolTip(tip);
   b->setFixedSize(36, 36);
   b->setFocusPolicy(Qt::NoFocus);
@@ -67,13 +70,17 @@ QString lengthText(double metres) {
 KaMapControls::KaMapControls(QgsMapCanvas* canvas, QWidget* host)
     : QFrame(host), m_canvas(canvas), m_host(host) {
   setObjectName(QStringLiteral("mapControls"));
+  setAccessibleName(QStringLiteral("지도 확대·축소"));
   setAttribute(Qt::WA_StyledBackground, true);
   auto* column = new QVBoxLayout(this);
   column->setContentsMargins(0, 0, 0, 0);
   column->setSpacing(0);
-  auto* zoomIn = button(this, "mapZoomIn", Glyph::Plus, QStringLiteral("확대 (마우스 휠을 앞으로)"));
-  auto* zoomOut = button(this, "mapZoomOut", Glyph::Minus, QStringLiteral("축소 (마우스 휠을 뒤로)"));
-  auto* fit = button(this, "mapZoomFit", Glyph::Fit, QStringLiteral("조사구역이 화면에 꽉 차게 봅니다"));
+  auto* zoomIn = button(this, "mapZoomIn", Glyph::Plus, QStringLiteral("지도 확대"),
+                        QStringLiteral("확대 (마우스 휠을 앞으로)"));
+  auto* zoomOut = button(this, "mapZoomOut", Glyph::Minus, QStringLiteral("지도 축소"),
+                         QStringLiteral("축소 (마우스 휠을 뒤로)"));
+  auto* fit = button(this, "mapZoomFit", Glyph::Fit, QStringLiteral("조사구역 맞춤"),
+                     QStringLiteral("조사구역이 화면에 꽉 차게 봅니다"));
   column->addWidget(zoomIn);
   column->addWidget(zoomOut);
   column->addWidget(fit);
@@ -104,6 +111,7 @@ void KaMapControls::reposition() {
 KaMapScaleBar::KaMapScaleBar(QgsMapCanvas* canvas, QWidget* host)
     : QWidget(host), m_canvas(canvas), m_host(host) {
   setObjectName(QStringLiteral("mapScaleBar"));
+  setAccessibleName(QStringLiteral("축척 막대"));
   setAttribute(Qt::WA_TransparentForMouseEvents, true);
   setFixedHeight(34);
   if (m_canvas) {
@@ -138,6 +146,7 @@ void KaMapScaleBar::refresh() {
     if (step * decade <= wanted) round = step * decade;
   m_metres = round;
   m_pixels = round / perPixel;
+  setAccessibleDescription(QStringLiteral("막대 길이 %1").arg(lengthText(m_metres)));
   setFixedWidth(int(std::ceil(m_pixels)) + 56);
   reposition();
   show();

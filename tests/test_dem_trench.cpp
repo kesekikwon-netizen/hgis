@@ -55,7 +55,7 @@ private slots:
   void demDownload_livePortable();
   void layerTreeMenu_hasLabelToggleAndTrenchRatio();
   void applySnapConfig_vertexAndSegmentNotWmsPromise();
-  void trenchWholeMove_commitsOnMouseRelease();
+  void trenchWholeMove_isUndoableOnMouseRelease();
   void clearLayerReplacesPreviousGrid();
   void hillshadeWritesByteTif();
   void niceMeterStepAround120px();
@@ -754,7 +754,9 @@ void TestDemTrench::startTrenchGrid_placesOnMapWithoutApplyClick() {
            "시굴격자는 속성 창만 띄우지 말고 바로 맵에 깔거나 원점을 찍게 해야 한다");
 }
 
-void TestDemTrench::trenchWholeMove_commitsOnMouseRelease() {
+// Moves and deletes are undoable edits (Ctrl+Z); only 저장 writes them (F003).
+// Behaviour is covered by tests/test_trench_edit.cpp; this guards the source contract.
+void TestDemTrench::trenchWholeMove_isUndoableOnMouseRelease() {
   QFile f(QStringLiteral("src/app/KaTrenchMoveTool.cpp"));
   QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "KaTrenchMoveTool.cpp");
   const QString src = QString::fromUtf8(f.readAll());
@@ -763,6 +765,10 @@ void TestDemTrench::trenchWholeMove_commitsOnMouseRelease() {
   const QString fn = src.mid(rel, 900);
   QVERIFY2(fn.contains(QLatin1String("applyTranslate(")),
            "전체 이동은 끌어다 놓으면 격자 전체가 옮겨져야 한다");
+  QVERIFY2(!src.contains(QLatin1String("commitChanges")),
+           "트렌치 이동·삭제는 바로 파일에 쓰지 않고 Ctrl+Z로 되돌릴 수 있어야 한다");
+  QVERIFY2(src.contains(QLatin1String("TrenchLayerEdit::")),
+           "이동·삭제는 되돌리기 한 단계인 편집 명령으로 묶는다");
 }
 
 // "새로 만들기"는 이전 격자를 대체해야 한다(겹침 금지).

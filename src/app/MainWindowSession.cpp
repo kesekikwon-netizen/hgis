@@ -2,6 +2,8 @@
 #include "KaBeginnerRibbon.h"
 #include "KaCrashGuard.h"
 #include "KaDrawingStudio.h"
+#include "KaNewSurveyDialog.h"
+#include "KaRecoverySnapshots.h"
 #include "KaReferenceDownloadJob.h"
 #include "KaSectionDrawingStudio.h"
 #include "KaStartPage.h"
@@ -10,33 +12,36 @@
 #include "KaTerrain3dStudio.h"
 #include "KaTopographicBrowser.h"
 #include "KaUserError.h"
+#include "core/BasemapDsm.h"
 #include "core/DemPresentation.h"
 #include "core/KaSafeQgis.h"
 #include "core/LayerOps.h"
+#include "core/LayerRole.h"
+#include "core/MeasureOps.h"  // [pkg B1] F101
 #include "core/RecentSurveys.h"
 #include "core/SurveyBundle.h"
+#include "core/SurveyFileFingerprint.h"
+#include "core/SurveyFileHygiene.h"
 #include "core/SurveyProjectFactory.h"
+#include "core/SurveyRecovery.h"
 #include "core/SurveySession.h"
 #include "core/SurveyStorage.h"
 #include "core/VworldSettings.h"
-#include "core/WorkflowGuide.h"
 
 #include <QAbstractButton>
 #include <QCoreApplication>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
-#include <QDockWidget>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QInputDialog>
-#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
 #include <QMessageBox>
 #include <QPointer>
 #include <QProgressDialog>
@@ -50,8 +55,12 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <limits>
+
 #if KA_HGIS_HAS_QGIS
 #include <qgscoordinatereferencesystem.h>
+#include <qgscoordinatetransform.h>
+#include <qgsexception.h>
 #include <qgsfeature.h>
 #include <qgsgeometry.h>
 #include <qgslayertree.h>
@@ -64,6 +73,76 @@
 #include <qgsvectorlayer.h>
 #endif
 
+namespace {
+
+// [pkg D2] F071: the save stays synchronous and keeps its generation order (copy → write →
+// verify → replace); the user sees that it runs. The status bar paints now, before the file work.
+// A save that ends early (failure window, cancel) must not leave 「저장 중입니다」 behind.
+class SaveBusyScope {
+public:
+  explicit SaveBusyScope(QStatusBar* bar) : m_bar(bar) {
+    QGuiApplication::setOverrideCursor(Qt::WaitCursor);
+    if (!m_bar) return;
+    m_bar->showMessage(busyText());
+    m_bar->repaint();
+  }
+  ~SaveBusyScope() {
+    QGuiApplication::restoreOverrideCursor();
+    if (m_bar && m_bar->currentMessage() == busyText()) m_bar->clearMessage();
+  }
+  SaveBusyScope(const SaveBusyScope&) = delete;
+  SaveBusyScope& operator=(const SaveBusyScope&) = delete;
+
+private:
+  static QString busyText() { return QStringLiteral("저장 중입니다. 끝날 때까지 창을 닫지 마세요."); }
+  QPointer<QStatusBar> m_bar;
+};
+
+constexpr int kRecoveryRetryMs = 1500;
+constexpr int kRecoveryRetryMax = 20;
+
+#if KA_HGIS_HAS_QGIS
+// [pkg D2] F176: no new render starts while the survey GPKG is written; one repaint afterwards
+// (QgsMapCanvas drops refresh requests while frozen). The repaint waits for idle itself.
+class CanvasWriteHold {
+public:
+  explicit CanvasWriteHold(QgsMapCanvas* canvas)
+      : m_canvas(canvas), m_wasFrozen(canvas && canvas->isFrozen()) {
+    if (m_canvas) m_canvas->freeze(true);
+  }
+  ~CanvasWriteHold() {
+    if (!m_canvas || m_wasFrozen) return;
+    m_canvas->freeze(false);
+    LayerOps::refreshXyzBasemapTiles(m_canvas);
+  }
+  CanvasWriteHold(const CanvasWriteHold&) = delete;
+  CanvasWriteHold& operator=(const CanvasWriteHold&) = delete;
+
+private:
+  QPointer<QgsMapCanvas> m_canvas;
+  bool m_wasFrozen = false;
+};
+
+// [pkg D2] F152/F183: longitude of what the map shows when it shows a place (after a search
+// or with a survey open), NaN for the whole-country view. Only feeds a suggestion line.
+double canvasCenterLongitude(QgsMapCanvas* canvas) {
+  const double unknown = std::numeric_limits<double>::quiet_NaN();
+  if (!canvas || canvas->width() < 40 || canvas->scale() <= 0.0 || canvas->scale() > 500000.0)
+    return unknown;
+  const QgsCoordinateReferenceSystem source = canvas->mapSettings().destinationCrs();
+  if (!source.isValid()) return unknown;
+  try {
+    const QgsCoordinateTransform toWgs84(
+        source, QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")), QgsProject::instance());
+    return toWgs84.transform(canvas->extent().center()).x();
+  } catch (const QgsCsException&) {
+    return unknown;
+  }
+}
+#endif
+
+}  // namespace
+
 void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sourceLabel,
                                      qint64 elapsedMs) {
 #if KA_HGIS_HAS_QGIS
@@ -74,18 +153,25 @@ void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sou
   m_surveySessionReady = true;
   syncRecordTools();
   m_surveyPath = gpkgPath;
+  SurveyFileFingerprint::remember(gpkgPath);  // [F108] baseline: the file as this session opened it
   if (QgsProject::instance()->crs().isValid())
     m_workCrs = QgsProject::instance()->crs().authid();
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
 
   LayerOps::repairPersistedFileSources(QgsProject::instance());
   LayerOps::restoreMissingLayerTreeNodes(QgsProject::instance());
+  // [pkg E1] F020: store roles for layers saved before roles existed; titles stop deciding.
+  LayerRole::persistLegacyRoles(QgsProject::instance());
   // Workspaces saved before layer removal pruned its group still carry empty 지적도/주변유적 titles.
   LayerOps::pruneEmptyLegendGroups(QgsProject::instance());
+  // [pkg C2] F051: section sheet display rasters are layout-owned temp files (not saved with
+  // the survey); derive them again so the checklist and 단면도.pdf see the sheet.
+  SectionLayoutService::restoreDisplayLayers(QgsProject::instance());
   auto* project = QgsProject::instance();
   for (auto* layer : project->mapLayers()) {
     auto* dem = qobject_cast<QgsRasterLayer*>(layer);
-    if (!dem || dem->name() != QLatin1String("DEM") || !dem->isValid() ||
+    // The DSM keeps ka_hgis/reference_kind=dem under its new title; old projects: "DEM".
+    if (!dem || !BasemapDsm::isDemLayer(dem) || !dem->isValid() ||
         !DemPresentation::restore(dem)) continue;
     DemPresentation::followCanvas(dem, m_canvas);
     const auto* node = project->layerTreeRoot()->findLayer(dem->id());
@@ -109,7 +195,9 @@ void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sou
       if (m_canvas) m_canvas->setPreviewJobsEnabled(true);
     });
   }
-  ensureDefaultBasemaps();
+  // Satellite·cadastral still follow every explicit open (user request); the WMS
+  // capabilities round-trips run after the event loop gets control, not inside the open.
+  scheduleDefaultBasemaps();
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   rememberSurvey(gpkgPath, QFileInfo(gpkgPath).completeBaseName());
   setWindowTitle(QFileInfo(gpkgPath).completeBaseName());
@@ -123,6 +211,7 @@ void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sou
   rememberSurveyDir(gpkgPath);
   m_snapEnabled = LayerOps::readSnapSettings(QgsProject::instance()).enabled;
   applySnapConfig();
+  MeasureOps::pinPlanarEllipsoid(QgsProject::instance());  // [pkg B1] F101: labels use the tape's plane
   markSurveySaved();
   // 방금 연 상태를 기준선으로 남긴다. 세션 도중 사라진 레이어는 이 줄과 비교해서 찾는다.
   logLayerCensus(QStringLiteral("열기직후"));
@@ -167,8 +256,6 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
   m_locator->cancel();
   if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); m_searchProgress = nullptr; }
   m_locationSearchBusy = false;
-  m_adminBoundary->cancel();
-  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
   QScopedValueRollback<bool> opening(m_isOpeningSurvey, true);
 #if KA_HGIS_HAS_QGIS
   // 프로젝트 읽기가 이전 레이어를 해제하기 전에 도구와 편집 참조를 종료한다.
@@ -274,7 +361,17 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
       return abortOpen();
     }
     if (readOk) {
+      // [F026 via D1 API] The embedded workspace failed and the .qgz answered instead: say so,
+      // keep same-name overwrite blocked (finishOpenedProject clears the flag), restore nothing.
+      const bool embeddedFailed = m_workspaceRestoreFailed;
       finishOpenedProject(gpkgPath, projectToRead, t.elapsed());
+      if (embeddedFailed) {
+        m_workspaceRestoreFailed = false;
+        m_workspaceRestoreSuppressesAutosave = true;
+        notify(Notice::Warning, QStringLiteral("동반 작업공간으로 열었습니다"),
+               SurveySession::embeddedFallbackNotice(gpkgPath, projectToRead),
+               QDir::toNativeSeparators(gpkgPath));
+      }
       return true;
     }
     // 여기까지 왔다는 것은 작업공간(.qgz)을 못 읽었다는 뜻이다. 이 파일에만 있는
@@ -295,22 +392,19 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
   if (mode == OpenSurveyMode::LayersOnly)
     m_workspaceRestoreSuppressesAutosave = true;
   loadSurveyLayers(gpkgPath);
+  SurveyFileFingerprint::remember(gpkgPath);  // [F108] baseline for the layers-only open
 #if KA_HGIS_HAS_QGIS
   m_surveySessionReady = true;
   syncRecordTools();
   applyStartupMap();
-  ensureDefaultBasemaps();
+  scheduleDefaultBasemaps();
   QgsProject* proj = QgsProject::instance();
-  for (QgsMapLayer* ml : proj->mapLayers()) {
-    if (ml && ml->name() == QLatin1String("DEM") && ml->isValid()) {
-      if (auto* rl = qobject_cast<QgsRasterLayer*>(ml)) {
-        DemPresentation::restore(rl);
-        DemPresentation::followCanvas(rl, m_canvas);
-        if (LayerOps::isLayerVisible(proj, QStringLiteral("DEM"))) {
-          LayerOps::ensureDemRelief(proj, rl);
-        }
-      }
-      break;
+  // Tagged DSM (renamed) or an untagged old-project layer titled "DEM".
+  if (QgsRasterLayer* rl = BasemapDsm::findDem(proj); rl && rl->isValid()) {
+    DemPresentation::restore(rl);
+    DemPresentation::followCanvas(rl, m_canvas);
+    if (LayerOps::isLayerVisible(proj, QStringLiteral("DEM"))) {
+      LayerOps::ensureDemRelief(proj, rl);
     }
   }
 #endif
@@ -320,6 +414,7 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
       QStringLiteral("[open] 조사 열기 %1 ms — %2").arg(t.elapsed()).arg(gpkgPath));
 #if KA_HGIS_HAS_QGIS
   rememberSurveyDir(gpkgPath);
+  MeasureOps::pinPlanarEllipsoid(QgsProject::instance());  // [pkg B1] F101 (layers-only open)
   markSurveySaved();
   logLayerCensus(QStringLiteral("열기직후"));
   m_lastLayerKeys.clear();
@@ -460,15 +555,6 @@ void MainWindow::rememberSurvey(const QString& path, const QString& name) {
     m_startPage->reload();
 }
 
-void MainWindow::showHomePage() {
-#if KA_HGIS_HAS_QGIS
-  if (m_viewTabs && m_startPage) {
-    m_startPage->reload();
-    m_viewTabs->setCurrentWidget(m_startPage);
-  }
-#endif
-}
-
 void MainWindow::showMapWorkspace() {
 #if KA_HGIS_HAS_QGIS
   if (m_viewTabs && m_mapPage)
@@ -480,10 +566,14 @@ void MainWindow::showMapWorkspace() {
 void MainWindow::openRecentSurvey(const QString& path) {
   if (m_isOpeningSurvey) return;
   if (path.isEmpty() || !QFile::exists(path)) {
-    QMessageBox::warning(this, QStringLiteral("최근 조사"),
-                         QStringLiteral("파일이 없습니다.\n%1").arg(path));
-    QSettings st = RecentSurveys::userSettings();
-    RecentSurveys::forget(st, path);
+    // The entry stays listed (greyed on the home page): a USB or network drive may just be
+    // unplugged. Removing it is the user's right-click choice.
+    QMessageBox::warning(
+        this, QStringLiteral("최근 조사"),
+        QStringLiteral("조사 파일을 찾을 수 없습니다.\n%1\n\nUSB·네트워크 드라이브라면 연결한 뒤 다시 "
+                       "누르세요. 목록에서 빼려면 홈의 최근 조사에서 오른쪽 클릭 → 「목록에서 제거」를 "
+                       "고르세요.")
+            .arg(QDir::toNativeSeparators(path)));
     if (m_startPage) m_startPage->reload();
     return;
   }
@@ -513,8 +603,6 @@ void MainWindow::openRecentSurvey(const QString& path) {
   m_locator->cancel();
   if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); m_searchProgress = nullptr; }
   m_locationSearchBusy = false;
-  m_adminBoundary->cancel();
-  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
   QScopedValueRollback<bool> opening(m_isOpeningSurvey, true);
   stopAlignSession();
   stopCaptureTool();
@@ -534,6 +622,7 @@ void MainWindow::openRecentSurvey(const QString& path) {
   LayerOps::pruneDuplicateSatelliteLayers(QgsProject::instance());
   LayerOps::restoreMissingLayerTreeNodes(QgsProject::instance());
   LayerOps::restoreThematicOverlayVisibility(QgsProject::instance());
+  MeasureOps::pinPlanarEllipsoid(QgsProject::instance());  // [pkg B1] F101: a .qgz may carry an ellipsoid
   if (QFile::exists(companionGpkg)) {
     m_surveyPath = companionGpkg;
     LayerOps::addNonEmptySavedGpkgLayers(QgsProject::instance(), companionGpkg);
@@ -555,7 +644,7 @@ void MainWindow::openRecentSurvey(const QString& path) {
   }
   m_startupViewApplied = true;
   if (m_canvas) m_canvas->refresh();
-  ensureDefaultBasemaps();
+  scheduleDefaultBasemaps();
   rememberSurvey(path, QFileInfo(path).completeBaseName());
   setWindowTitle(QFileInfo(path).completeBaseName());
   showMapWorkspace();
@@ -592,55 +681,18 @@ void MainWindow::newSurvey() {
     if (answer == QMessageBox::Cancel ||
         (answer == QMessageBox::Save && !persistSurveyWork())) return;
   }
-  QDialog dlg(this);
-  dlg.setWindowTitle(QStringLiteral("새 조사"));
-  dlg.setMinimumWidth(420);
-  auto* form = new QFormLayout(&dlg);
-  form->setSpacing(12);
-  form->setContentsMargins(20, 20, 20, 16);
-  auto* nameEdit = new QLineEdit(&dlg);
-  nameEdit->setPlaceholderText(QStringLiteral("예: 병산동"));
-  nameEdit->setMinimumHeight(36);
-  auto* crsRow = new QHBoxLayout();
-  auto* btn5186 = new QPushButton(QStringLiteral("5186  중부원점"), &dlg);
-  auto* btn5187 = new QPushButton(QStringLiteral("5187  동부원점"), &dlg);
-  for (auto* b : {btn5186, btn5187}) {
-    b->setCheckable(true);
-    b->setMinimumHeight(40);
-    b->setCursor(Qt::PointingHandCursor);
-  }
-  const bool use5187 = m_workCrs.contains(QLatin1String("5187"));
-  btn5186->setChecked(!use5187);
-  btn5187->setChecked(use5187);
-  connect(btn5186, &QPushButton::clicked, &dlg, [btn5186, btn5187]() {
-    btn5186->setChecked(true);
-    btn5187->setChecked(false);
-  });
-  connect(btn5187, &QPushButton::clicked, &dlg, [btn5186, btn5187]() {
-    btn5187->setChecked(true);
-    btn5186->setChecked(false);
-  });
-  crsRow->addWidget(btn5186, 1);
-  crsRow->addWidget(btn5187, 1);
-  auto* tip = new QLabel(QStringLiteral("나중에 「도면만들기」옆에서 업로드용으로 바꿀 수 있습니다."), &dlg);
-  tip->setWordWrap(true);
-  form->addRow(QStringLiteral("조사명"), nameEdit);
-  form->addRow(QStringLiteral("작업 좌표계"), crsRow);
-  form->addRow(tip);
-  auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-  buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("다음"));
-  buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("취소"));
-  form->addRow(buttons);
-  connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-  connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  // [pkg D2] F118/F152/F183: the name is checked while typing (Windows reserved names,
+  // trailing dot, forbidden characters); the origin keeps the current default (5187 unless a
+  // 5186 survey is open) and only gets a region hint and a map-based suggestion.
+  double mapLongitude = std::numeric_limits<double>::quiet_NaN();
+#if KA_HGIS_HAS_QGIS
+  mapLongitude = canvasCenterLongitude(m_canvas);
+#endif
+  KaNewSurveyDialog dlg(m_workCrs, mapLongitude, this);
   if (dlg.exec() != QDialog::Accepted) return;
-  const QString name = nameEdit->text().trimmed();
-  if (name.isEmpty()) {
-    QMessageBox::information(this, QStringLiteral("새 조사"), QStringLiteral("조사명을 입력하세요."));
-    return;
-  }
-  const QString selectedCrs = btn5187->isChecked() ? QStringLiteral("EPSG:5187")
-                                                  : QStringLiteral("EPSG:5186");
+  const QString name = dlg.surveyName();
+  if (!KaNewSurveyDialog::nameProblem(name).isEmpty()) return;  // 「다음」 is disabled then
+  const QString selectedCrs = dlg.workCrs();
   const QString dir =
       QFileDialog::getExistingDirectory(this, QStringLiteral("저장 폴더"), preferredSurveyDir());
   if (dir.isEmpty()) return;
@@ -667,8 +719,6 @@ void MainWindow::newSurvey() {
   m_locator->cancel();
   if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); m_searchProgress = nullptr; }
   m_locationSearchBusy = false;
-  m_adminBoundary->cancel();
-  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
   m_surveyPath.clear();  // 비우는 동안 자동 저장이 이전 조사에 덮어쓰지 않게 한다
   m_workspaceRestoreSuppressesAutosave = false;
   if (m_canvas) m_canvas->freeze(true);
@@ -682,9 +732,9 @@ void MainWindow::newSurvey() {
 #if KA_HGIS_HAS_QGIS
   if (m_canvas) m_canvas->freeze(false);
   applyStartupMap();
-  // applyStartupMap의 loadBootBasemaps는 m_isOpeningSurvey가 켜진 동안 취소된다.
-  // 새 조사에서도 조사 열기와 같이 위성·지적을 지금 올린다.
-  ensureDefaultBasemaps();
+  // 새 조사도 조사 열기와 같이 위성·지적을 올린다(사용자 요청). 다만 WMS 왕복은 창이 먼저
+  // 그려진 뒤, 열기 표시가 풀리면 바로 이어서 돈다(scheduleDefaultBasemaps).
+  scheduleDefaultBasemaps();
   // Factory에서 검증한 빈 작업공간을 이미 저장했다. 화면 준비 중 중복 저장하지 않는다.
 #endif
   if (auto* b86 = findChild<QToolButton*>(QStringLiteral("btnCrs5186")))
@@ -696,10 +746,13 @@ void MainWindow::newSurvey() {
   syncRecordTools();
   rememberSurvey(path, name);
   rememberSurveyDir(path);
+  SurveyFileFingerprint::remember(path);  // [F108] baseline: the file this session just created
+#if KA_HGIS_HAS_QGIS
+  MeasureOps::pinPlanarEllipsoid(QgsProject::instance());  // [pkg B1] F101
+#endif
   markSurveySaved();
   showMapWorkspace();
   updateNextActionStatus();
-  refreshWorkPanel();
 }
 
 void MainWindow::refreshLayerEmptyState() {
@@ -788,27 +841,32 @@ bool MainWindow::commitSurveyEdits(int* committedCount) {
       if (!v || !v->isValid() || !v->isEditable() || !v->isModified())
         continue;
       if (!v->commitChanges(false)) {
-        QString message = QStringLiteral("%1의 편집을 저장하지 못해 전체 저장을 마치지 못했습니다. "
-                                         "미저장 편집은 유지됩니다. 창을 닫지 말고 원인을 확인한 뒤 다시 저장하세요.")
-                              .arg(v->name());
+        QString reason = QStringLiteral("%1의 편집을 저장하지 못해 전체 저장을 마치지 못했습니다. "
+                                        "미저장 편집은 유지됩니다. 창을 닫지 말고 원인을 확인한 뒤 다시 저장하세요.")
+                             .arg(v->name());
         QString details = v->commitErrors().join(QLatin1Char('\n'));
         if (!committedLayers.isEmpty())
-          message += QStringLiteral(" 이미 저장한 레이어: %1.").arg(committedLayers.join(QStringLiteral(", ")));
+          reason += QStringLiteral(" 이미 저장한 레이어: %1.").arg(committedLayers.join(QStringLiteral(", ")));
         const QString recoveryDirectory = QDir(m_surveyPath.isEmpty()
             ? preferredSurveyDir() : QFileInfo(m_surveyPath).absolutePath()).filePath(QStringLiteral("복구사본"));
         QString recoveryError;
         const QString recovery = SurveyStorage::writeRecoverySnapshot(proj, recoveryDirectory, &recoveryError);
+        QString recoveryNote;
         if (!recovery.isEmpty()) {
-          message += QStringLiteral(" 현재 편집 도형의 복구 사본을 보관했습니다: %1").arg(QDir::toNativeSeparators(recovery));
+          recoveryNote = QStringLiteral(" 현재 편집 도형의 복구 사본을 보관했습니다: %1").arg(QDir::toNativeSeparators(recovery));
           details += QStringLiteral("\n복구 사본은 벡터 피처와 레이어 구성을 보관합니다. "
                                     "조판은 포함하지 않으며 사진·래스터는 외부 원본 참조로 남습니다. "
                                     "원본 파일도 함께 보관하세요. 현재 조사 저장은 아직 완료되지 않았습니다.");
+          if (!m_surveyPath.isEmpty()) {
+            QSettings st = RecentSurveys::userSettings();
+            KaRecoverySnapshots::rememberUnsaved(st, m_surveyPath, recovery);
+          }
         } else {
-          message += QStringLiteral(" 복구 사본도 만들지 못했습니다. 현재 창을 계속 열어 두세요.");
+          recoveryNote = QStringLiteral(" 복구 사본도 만들지 못했습니다. 현재 창을 계속 열어 두세요.");
           details += QStringLiteral("\n복구 사본 실패: %1").arg(recoveryError);
         }
-        KaCrashGuard::logLine(QStringLiteral("[save] %1 — %2").arg(message, details));
-        notify(Notice::Warning, QStringLiteral("저장 실패"), message, details);
+        KaCrashGuard::logLine(QStringLiteral("[save] %1%2 — %3").arg(reason, recoveryNote, details));
+        reportSaveFailure(QStringLiteral("저장 실패"), reason, recoveryNote, details);
         return false;
       }
       committedLayers << v->name();
@@ -827,14 +885,42 @@ bool MainWindow::persistSurveyWork() {
     saveProjectAs();
     return !m_surveyPath.isEmpty() && !m_workspaceRestoreSuppressesAutosave && !surveyHasUnsavedChanges();
   }
+  // [F108 via D1 API] Another PC or portable copy saved this survey after we opened/saved it.
+  // Warn only and let the user choose; the file is never locked.
+  if (QString elsewhere; SurveyFileFingerprint::replacedElsewhere(m_surveyPath, &elsewhere)) {
+    QMessageBox box(QMessageBox::Warning, QStringLiteral("다른 곳에서 저장된 조사 파일"), elsewhere,
+                    QMessageBox::NoButton, this);
+    QPushButton* saveAs = box.addButton(QStringLiteral("다른 이름으로 저장"), QMessageBox::AcceptRole);
+    QPushButton* overwrite = box.addButton(QStringLiteral("그래도 이 파일에 저장"), QMessageBox::DestructiveRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(saveAs);
+    box.exec();
+    if (box.clickedButton() == saveAs) {
+      saveProjectAs();
+      return !m_surveyPath.isEmpty() && !surveyHasUnsavedChanges();
+    }
+    if (box.clickedButton() != overwrite) return false;
+  }
   const auto updateTitle = qScopeGuard([this] { refreshWindowTitle(); });
   QScopedValueRollback<bool> saving(m_isOpeningSurvey, true);
-  if (m_canvas) m_canvas->stopRendering();
+  const SaveBusyScope busy(statusBar());
+  // [pkg D2] F176: no new render starts while the GPKG is replaced (CanvasWriteHold), and one
+  // repaint follows the save. A render still in flight is stopped, as before this change: this
+  // function must return the result synchronously (close, open, submit and the tests rely on
+  // it), and isDrawing() only turns false through the event loop, which src/app may not spin
+  // (tests/test_catch_log.cpp). Only the silent recovery copy waits for an idle canvas
+  // (captureRecoverySnapshot retries). The post-save GPKG reader reopen stays as it is.
+  const CanvasWriteHold hold(m_canvas);
+  if (m_canvas && m_canvas->isDrawing()) {
+    KaCrashGuard::logLine(QStringLiteral("[save] 지도를 그리는 중이라 그리기를 멈추고 저장합니다"));
+    m_canvas->stopRendering();
+  }
   QgsProject* project = QgsProject::instance();
   bool saved = false;
   const auto preserveUnsaved = qScopeGuard([&] {
     if (!saved) project->setDirty(true);
   });
+  const QString requestedPath = m_surveyPath;
   try {
     SurveySession::PersistInput in;
     in.surveyPath = m_surveyPath;
@@ -846,17 +932,21 @@ bool MainWindow::persistSurveyWork() {
       m_surveyPath = result.surveyPath;
     const auto& attempt = result.workspace;
     if (!result.saved) {
-      QString message = attempt.error.isEmpty()
+      const QString reason = attempt.error.isEmpty()
           ? QStringLiteral("저장을 마치지 못했습니다. 미저장 편집은 유지됩니다.")
           : attempt.error;
+      QString recoveryNote;
       QString details = attempt.failedLayers.join(QLatin1Char('\n'));
       if (!attempt.recoveryPath.isEmpty()) {
-        message += QStringLiteral(" 복구 사본: %1")
-                       .arg(QDir::toNativeSeparators(attempt.recoveryPath));
-        details += QStringLiteral("\n원본 조사 파일은 덮어쓰지 않았습니다.");
+        recoveryNote = QStringLiteral(" 복구 사본: %1")
+                           .arg(QDir::toNativeSeparators(attempt.recoveryPath));
+        // [pkg D1] F165: blocked-layer saves may have committed the saveable layers first.
+        details += QLatin1Char('\n') + SurveySession::originalStateNote(attempt);
+        QSettings st = RecentSurveys::userSettings();
+        KaRecoverySnapshots::rememberUnsaved(st, requestedPath, attempt.recoveryPath);
       }
-      KaCrashGuard::logLine(QStringLiteral("[save] %1 — %2").arg(message, details));
-      notify(Notice::Warning, QStringLiteral("저장 실패"), message, details);
+      KaCrashGuard::logLine(QStringLiteral("[save] %1%2 — %3").arg(reason, recoveryNote, details));
+      reportSaveFailure(QStringLiteral("저장 실패"), reason, recoveryNote, details);
       return false;
     }
     const QFileInfo file(m_surveyPath);
@@ -867,6 +957,13 @@ bool MainWindow::persistSurveyWork() {
              QStringLiteral("조사 데이터와 작업 구성은 GPKG에 저장했습니다. QGZ 사본은 갱신하지 "
                             "못했습니다. 해당 파일을 사용하는 프로그램을 닫고 다시 저장하세요."));
     }
+    {
+      // The survey file now holds every edit; the home page no longer points at a copy.
+      QSettings st = RecentSurveys::userSettings();
+      KaRecoverySnapshots::forgetUnsaved(st, requestedPath);
+      KaRecoverySnapshots::forgetUnsaved(st, m_surveyPath);
+    }
+    recordSurveyFacts();  // [P6] 홈 3점의 구역·유구 개수(featureCount 합만, 도형 검사 없음)
     rememberSurvey(m_surveyPath, file.completeBaseName());
     rememberSurveyDir(m_surveyPath);
     remapUndoFeatureIdsAfterSave();
@@ -898,13 +995,81 @@ bool MainWindow::persistSurveyWork() {
     });
   } catch (...) {
     KaCrashGuard::logLine(QStringLiteral("[save] 저장 예외로 중단 — 현재 작업 유지"));
-    notify(Notice::Warning, QStringLiteral("저장을 마치지 못했습니다"),
-           QStringLiteral("저장 중 오류가 발생했습니다. 창을 닫지 말고 여유 공간을 확인한 뒤 "
-                          "다시 저장하거나 다른 이름으로 저장하세요."));
+    reportSaveFailure(QStringLiteral("저장을 마치지 못했습니다"),
+                      QStringLiteral("저장 중 오류가 발생했습니다. 창을 닫지 말고 여유 공간을 확인한 뒤 "
+                                     "다시 저장하거나 다른 이름으로 저장하세요."));
     return false;
   }
 #endif
   return true;
+}
+
+// [pkg D2] F038: the notice bar lives on the map card, so a failed save made from the drawing
+// or section tab (Ctrl+S works everywhere) left only the title '*'. The failure also stays
+// in the status bar, and off the map tab it is raised once as a window. That window never
+// repeats the recovery path (user request); the path stays in the notice bar and the log.
+void MainWindow::reportSaveFailure(const QString& title, const QString& reason,
+                                   const QString& recoveryNote, const QString& details) {
+  notify(Notice::Warning, title, reason + recoveryNote, details);
+  statusBar()->showMessage(QStringLiteral("%1 — 미저장 편집은 그대로 있습니다. 다시 저장하세요.").arg(title));
+#if KA_HGIS_HAS_QGIS
+  const bool mapTabShown = m_viewTabs && m_mapPage && m_viewTabs->currentWidget() == m_mapPage;
+  if (mapTabShown || !isVisible() || m_closingWindow) return;
+  // After the save scope has unwound (wait cursor, frozen map, opening guard).
+  QTimer::singleShot(0, this, [this, title, reason]() {
+    if (m_closingWindow || !isVisible()) return;
+    QMessageBox::warning(this, title,
+                         QStringLiteral("%1\n\n지도 화면 위 알림 줄에 자세한 내용이 있습니다.").arg(reason));
+  });
+#endif
+}
+
+void MainWindow::scheduleDefaultBasemaps() {
+#if KA_HGIS_HAS_QGIS
+  // [pkg D2] F073: after an explicit open/new survey the satellite·cadastral pair is still
+  // added (user request, 2026-09-10), but from the event loop: loadBootBasemaps waits while a
+  // survey is opening and runs ensureDefaultBasemaps right after. Nothing loads at startup.
+  // Every explicit open gets the full retry budget, also when applyStartupMap queued the boot
+  // first (a chain that gave up earlier leaves the counter at its maximum).
+  m_basemapBootRetries = 0;
+  if (m_basemapBootPending) return;  // already queued; it runs once the open has finished
+  m_basemapBootPending = true;
+  QTimer::singleShot(0, this, &MainWindow::loadBootBasemaps);
+#endif
+}
+
+// [F114/F133 via D1 API] Explicit, user-confirmed cleanup of app staging left next to the survey
+// by a crash. Recovery copies, preserved failed generations, session TEMP folders and anything the
+// open project still uses are never offered.
+void MainWindow::cleanSurveyStaging() {
+#if KA_HGIS_HAS_QGIS
+  if (m_surveyPath.isEmpty()) return;
+  QStringList protect;
+  for (QgsMapLayer* layer : QgsProject::instance()->mapLayers()) protect << layer->source();
+  const auto stale = SurveyFileHygiene::staleStagingNear(m_surveyPath, protect);
+  if (stale.isEmpty()) {
+    notify(Notice::Info, QStringLiteral("정리할 임시 자료가 없습니다"),
+           QStringLiteral("조사 폴더에 남은 저장·내보내기 임시 자료가 없습니다."));
+    return;
+  }
+  QStringList lines;
+  qint64 bytes = 0;
+  for (const auto& item : stale) {
+    lines << QStringLiteral("%1 — %2").arg(item.kind, QFileInfo(item.path).fileName());
+    bytes += item.bytes;
+  }
+  const QString prompt = QStringLiteral("저장·내보내기 도중 끊겨 조사 폴더에 남은 임시 자료 %1개(약 %2 MB)를 지울까요?\n\n%3\n\n"
+                                        "복구 사본과 저장 실패로 남긴 세대는 지우지 않습니다.")
+      .arg(stale.size())
+      .arg(QString::number(bytes / (1024.0 * 1024.0), 'f', 1), lines.join(QLatin1Char('\n')));
+  if (QMessageBox::question(this, QStringLiteral("임시 자료 정리"), prompt, QMessageBox::Yes | QMessageBox::No,
+                            QMessageBox::No) != QMessageBox::Yes)
+    return;
+  QStringList failed;
+  const int removed = SurveyFileHygiene::removeStaleStaging(stale, protect, &failed);
+  notify(failed.isEmpty() ? Notice::Success : Notice::Warning, QStringLiteral("임시 자료 정리"),
+         QStringLiteral("%1개를 지웠습니다.").arg(removed), failed.join(QLatin1Char('\n')));
+#endif
 }
 
 void MainWindow::extractEmbeddedReferenceVectors() {
@@ -1076,9 +1241,11 @@ void MainWindow::markSurveySaved() {
 #if KA_HGIS_HAS_QGIS
   if (QgsProject* proj = QgsProject::instance())
     proj->setDirty(false);
+  pruneRetiredReferenceFolders();  // [pkg G1] F121: saved survey == project; drop download folders replaced this session
   if (!m_surveyPath.isEmpty()) {
     clearRecoveryOffer(QDir(QFileInfo(m_surveyPath).absolutePath()).filePath(QStringLiteral("복구사본")));
   }
+  m_recoverySignature.clear();  // a new clean baseline: the next unsaved edit gets a fresh copy
 #endif
   refreshWindowTitle();
 }
@@ -1098,20 +1265,34 @@ void MainWindow::captureRecoverySnapshot() {
   if (!m_surveySessionReady || m_surveyPath.isEmpty() || !surveyHasUnsavedChanges()) return;
   QgsProject* project = QgsProject::instance();
   if (!project) return;
-  QStringList ids;
-  for (QgsMapLayer* layer : project->mapLayers()) {
-    auto* vector = qobject_cast<QgsVectorLayer*>(layer);
-    if (!vector) continue;
-    const bool unsavedEdit = vector->isEditable() && vector->isModified();
-    if ((LayerOps::isReferenceLayer(vector) || LayerOps::isCadastralLayer(vector)) &&
-        !unsavedEdit)
-      continue;
-    ids << vector->id();
-  }
+  // [pkg D2] F072: only layers that hold unsaved edits (plus memory-only vectors that exist
+  // nowhere else). Unchanged survey layers are already on disk and are not rewritten.
+  const QStringList ids = KaRecoverySnapshots::layerIdsToCapture(project);
   if (ids.isEmpty()) return;
+  // F116 (package D1 API): no new edit since the last copy → the last copy is still current.
+  const QByteArray signature = SurveyRecovery::editSignature(project, ids);
+  if (!SurveyRecovery::snapshotNeeded(m_recoverySignature, signature)) return;
+  // F176: never abort a render in flight (WMS AV); try again shortly instead. After a full
+  // round of retries this tick gives up and the next two-minute tick starts a fresh round.
+  if (m_canvas && m_canvas->isDrawing()) {
+    if (m_recoverySnapshotRetryQueued) return;
+    if (m_recoverySnapshotRetries >= kRecoveryRetryMax) {
+      m_recoverySnapshotRetries = 0;
+      KaCrashGuard::logLine(QStringLiteral("[recovery] 지도 그리기가 끝나지 않아 이번 사본을 건너뜁니다"));
+      return;
+    }
+    m_recoverySnapshotRetryQueued = true;
+    ++m_recoverySnapshotRetries;
+    QTimer::singleShot(kRecoveryRetryMs, this, [this]() {
+      m_recoverySnapshotRetryQueued = false;
+      captureRecoverySnapshot();
+    });
+    return;
+  }
+  m_recoverySnapshotRetries = 0;
   m_recoverySnapshotBusy = true;
   const auto busy = qScopeGuard([this] { m_recoverySnapshotBusy = false; });
-  if (m_canvas) m_canvas->stopRendering();
+  const CanvasWriteHold hold(m_canvas);
   const QString recoveryDirectory = SurveySession::recoveryDirectoryFor(
       SurveyStorage::writableSurveyPath(m_surveyPath, preferredSurveyDir()));
   QString error;
@@ -1121,7 +1302,11 @@ void MainWindow::captureRecoverySnapshot() {
     KaCrashGuard::logLine(QStringLiteral("[recovery] 복구 사본 실패 — %1").arg(error));
     return;
   }
+  m_recoverySignature = signature;
   SurveyStorage::pruneRecoverySnapshots(recoveryDirectory, 3, path);
+  // Silent: no window, no status line. Only the home page shows a click-only note later.
+  QSettings st = RecentSurveys::userSettings();
+  KaRecoverySnapshots::rememberUnsaved(st, m_surveyPath, path);
   KaCrashGuard::logLine(QStringLiteral("[recovery] %1").arg(QDir::toNativeSeparators(path)));
 #else
   return;
@@ -1152,6 +1337,7 @@ void MainWindow::refreshWindowTitle() {
   const QString wanted = base + (surveyHasUnsavedChanges() ? QStringLiteral(" *") : QString());
   if (windowTitle() != wanted)
     QMainWindow::setWindowTitle(wanted);
+  syncShellChips();  // [P6] 배지 · 「저장 안 됨 n건」 · 「저장」 점 (300 ms 합치기)
 }
 
 QString MainWindow::preferredSurveyDir() const {
@@ -1226,38 +1412,6 @@ void MainWindow::logLayerCensus(const QString& tag) {
 #endif
 }
 
-void MainWindow::restoreLastSurvey() {
-  if (m_isOpeningSurvey || !m_restoreLastSurveyEnabled)
-    return;
-  if (!m_surveyPath.isEmpty())
-    return;
-  if (m_isLoadingBasemaps) {
-    // 배경지도 생성 중 WMS 공급자의 QEventLoop 스핀으로 인한 재진입 방지
-    QTimer::singleShot(100, this, &MainWindow::restoreLastSurvey);
-    return;
-  }
-  QSettings st = RecentSurveys::userSettings();
-  if (RecentSurveys::takeSkipAutoRestore(st)) {
-    KaCrashGuard::logLine(QStringLiteral("[boot] 지난 실행이 조사 복원 중 끊겨 홈에 머뭅니다"));
-    return;
-  }
-  const QString last = RecentSurveys::lastPath(st);
-  if (last.isEmpty() || !QFile::exists(last))
-    return;
-  RecentSurveys::setSkipAutoRestore(st, true);
-  const QString gpkg = QFileInfo(last).suffix().compare(QLatin1String("gpkg"), Qt::CaseInsensitive) == 0
-      ? last
-      : QFileInfo(last).dir().filePath(QFileInfo(last).completeBaseName() + QStringLiteral(".gpkg"));
-  const QString toOpen = QFile::exists(gpkg) ? gpkg : last;
-  if (QFileInfo(toOpen).suffix().compare(QLatin1String("gpkg"), Qt::CaseInsensitive) == 0) {
-    // 아이콘 재실행은 내장 작업공간을 읽지 않는다. 저장된 위성·지적 WMS 를
-    // 한꺼번에 그리면 crash-20260906-153833 / 153900
-    // (provider_wms deleteLater AV) 이 난다. 작업공간은 「조사 열기」만.
-    openSurveyGpkg(toOpen, OpenSurveyMode::LayersOnly);
-  } else
-    openRecentSurvey(toOpen);
-}
-
 void MainWindow::saveProject() {
 #if KA_HGIS_HAS_QGIS
   if (m_isOpeningSurvey) return;
@@ -1311,6 +1465,8 @@ void MainWindow::saveProjectAs() {
                           "덮어쓰지 않았습니다. 사용하지 않은 이름으로 저장하세요."));
     return;
   }
+  const SaveBusyScope busy(statusBar());  // F071: visible while the copy/absorb/write runs
+  const QString previousSurvey = m_surveyPath;
   try {
   if (!commitSurveyEdits()) return;
 
@@ -1392,9 +1548,9 @@ void MainWindow::saveProjectAs() {
         vl->setDataSource(targetGpkg + (options < 0 ? QString() : source.mid(options)),
                           vl->name(), QStringLiteral("ogr"));
         if (!vl->isValid()) {
-          notify(Notice::Warning, QStringLiteral("저장 실패"),
-                 QStringLiteral("새 파일에서 %1을 읽지 못했습니다. 현재 작업은 유지됩니다. "
-                                "다른 저장 폴더를 선택해 다시 저장하세요.").arg(vl->name()));
+          reportSaveFailure(QStringLiteral("저장 실패"),
+                            QStringLiteral("새 파일에서 %1을 읽지 못했습니다. 현재 작업은 유지됩니다. "
+                                           "다른 저장 폴더를 선택해 다시 저장하세요.").arg(vl->name()));
           return;
         }
       }
@@ -1431,10 +1587,10 @@ void MainWindow::saveProjectAs() {
   const SurveyStorage::AbsorbResult absorbed =
       SurveyStorage::absorbExternalVectors(QgsProject::instance(), targetGpkg);
   if (!absorbed.failed.isEmpty()) {
-    notify(Notice::Warning, QStringLiteral("저장을 마치지 못했습니다"),
-           QStringLiteral("%1을 보관하지 못했습니다. 현재 작업을 유지합니다. "
-                          "저장 공간을 확인한 뒤 다시 저장하세요.")
-               .arg(absorbed.failed.join(QStringLiteral(", "))));
+    reportSaveFailure(QStringLiteral("저장을 마치지 못했습니다"),
+                      QStringLiteral("%1을 보관하지 못했습니다. 현재 작업을 유지합니다. "
+                                     "저장 공간을 확인한 뒤 다시 저장하세요.")
+                          .arg(absorbed.failed.join(QStringLiteral(", "))));
     return;
   }
   QString serr;
@@ -1448,6 +1604,7 @@ void MainWindow::saveProjectAs() {
     return;
   }
   m_surveyPath = targetGpkg;
+  SurveyFileFingerprint::remember(targetGpkg);  // [F108] baseline: the file this session just wrote
   m_surveySessionReady = true;
   syncRecordTools();
   m_workspaceRestoreSuppressesAutosave = false;
@@ -1472,6 +1629,12 @@ void MainWindow::saveProjectAs() {
                .arg(absorbed.skippedRaster.join(QStringLiteral(", "))));
 
   // 3. 윈도우 타이틀 및 최근 조사 갱신
+  {
+    // The edits now live in the new file; neither survey needs a home-page recovery note.
+    QSettings st = RecentSurveys::userSettings();
+    KaRecoverySnapshots::forgetUnsaved(st, previousSurvey);
+    KaRecoverySnapshots::forgetUnsaved(st, targetGpkg);
+  }
   setWindowTitle(newFi.completeBaseName());
   rememberSurvey(targetGpkg, newFi.completeBaseName());
   rememberSurveyDir(targetGpkg);
@@ -1485,9 +1648,9 @@ void MainWindow::saveProjectAs() {
   } catch (...) {
     QgsProject::instance()->setDirty(true);
     KaCrashGuard::logLine(QStringLiteral("[saveas] 저장 예외로 중단 — 현재 작업 유지"));
-    notify(Notice::Warning, QStringLiteral("저장을 마치지 못했습니다"),
-           QStringLiteral("저장 중 오류가 발생했습니다. 창을 닫지 말고 저장 공간을 확인한 뒤 "
-                          "다른 이름으로 다시 저장하세요."));
+    reportSaveFailure(QStringLiteral("저장을 마치지 못했습니다"),
+                      QStringLiteral("저장 중 오류가 발생했습니다. 창을 닫지 말고 저장 공간을 확인한 뒤 "
+                                     "다른 이름으로 다시 저장하세요."));
   }
 #else
   QMessageBox::information(this, QStringLiteral("스텁"), QStringLiteral("다른 이름으로 저장 시뮬레이션"));
@@ -1520,8 +1683,6 @@ void MainWindow::openProject() {
   m_locator->cancel();
   if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); m_searchProgress = nullptr; }
   m_locationSearchBusy = false;
-  m_adminBoundary->cancel();
-  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
   QScopedValueRollback<bool> opening(m_isOpeningSurvey, true);
   stopAlignSession();
   stopCaptureTool();
@@ -1555,25 +1716,24 @@ void MainWindow::openProject() {
   }
   if (m_surveyPath.isEmpty() && QFile::exists(companionGpkg))
     m_surveyPath = companionGpkg;
-  if (!m_surveyPath.isEmpty())
+  if (!m_surveyPath.isEmpty()) {
     LayerOps::addNonEmptySavedGpkgLayers(QgsProject::instance(), m_surveyPath);
+    SurveyFileFingerprint::remember(m_surveyPath);  // [F108] baseline for the .qgz open
+  }
   m_surveySessionReady = true;
   syncRecordTools();
   m_workspaceRestoreSuppressesAutosave = false;
-  if (auto* cp = layerByKey(QStringLiteral("control_points")))
-    LayerOps::ensureControlPointQualityFields(cp);
-  for (QgsMapLayer* ml : QgsProject::instance()->mapLayers()) {
-    if (ml && ml->name() == QLatin1String("DEM") && ml->isValid()) {
-      if (auto* rl = qobject_cast<QgsRasterLayer*>(ml)) {
-        DemPresentation::restore(rl);
-        DemPresentation::followCanvas(rl, m_canvas);
-        if (LayerOps::isLayerVisible(QgsProject::instance(), QStringLiteral("DEM"))) {
-          LayerOps::ensureDemRelief(QgsProject::instance(), rl);
-        }
-      }
-      break;
+  // [pkg K] F112: opening never alters the GPKG; the save's generation copy adds the optional
+  // control-point columns (SurveySchema::migrateGenerationCopy), the draw path adds them for edits.
+  // Tagged DSM (renamed) or an untagged old-project layer titled "DEM".
+  if (QgsRasterLayer* rl = BasemapDsm::findDem(QgsProject::instance()); rl && rl->isValid()) {
+    DemPresentation::restore(rl);
+    DemPresentation::followCanvas(rl, m_canvas);
+    if (LayerOps::isLayerVisible(QgsProject::instance(), QStringLiteral("DEM"))) {
+      LayerOps::ensureDemRelief(QgsProject::instance(), rl);
     }
   }
+  MeasureOps::pinPlanarEllipsoid(QgsProject::instance());  // [pkg B1] F101: a .qgz may carry an ellipsoid
   if (QgsProject::instance()->crs().isValid())
     m_workCrs = QgsProject::instance()->crs().authid();
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
@@ -1588,7 +1748,7 @@ void MainWindow::openProject() {
   }
   m_startupViewApplied = true;
   if (m_canvas) m_canvas->refresh();
-  ensureDefaultBasemaps();
+  scheduleDefaultBasemaps();
   setWindowTitle(QFileInfo(path).completeBaseName());
   rememberSurvey(path, QFileInfo(path).completeBaseName());
   showMapWorkspace();
@@ -1596,134 +1756,6 @@ void MainWindow::openProject() {
 #else
   QMessageBox::information(this, QStringLiteral("스텁"), QStringLiteral("프로젝트 열기 시뮬레이션"));
 #endif
-}
-
-void MainWindow::setupWorkPanel() {
-  auto* dock = new QDockWidget(QStringLiteral("작업 제어"), this);
-  dock->setObjectName(QStringLiteral("workDock"));
-  dock->setAllowedAreas(Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea);
-  auto* box = new QWidget(dock);
-  auto* lay = new QVBoxLayout(box);
-  lay->setContentsMargins(10, 10, 10, 10);
-  lay->setSpacing(8);
-  auto* title = new QLabel(QStringLiteral("원하는 작업을 누르세요"), box);
-  m_workHint = new QLabel(box);
-  m_workHint->setObjectName(QStringLiteral("workHint"));
-  m_workHint->setWordWrap(true);
-  m_workList = new QListWidget(box);
-  m_workList->setObjectName(QStringLiteral("workControlList"));
-  m_workList->setSpacing(3);
-  connect(m_workList, &QListWidget::itemClicked, this, &MainWindow::onWorkControlClicked);
-  lay->addWidget(title);
-  lay->addWidget(m_workHint);
-  lay->addWidget(m_workList, 1);
-  dock->setWidget(box);
-  addDockWidget(Qt::RightDockWidgetArea, dock);
-  dock->setMinimumWidth(220);
-  dock->hide();
-  refreshWorkPanel();
-}
-
-void MainWindow::refreshWorkPanel() {
-  if (!m_workList) return;
-  const QJsonObject st = buildProjectState();
-#if KA_HGIS_HAS_QGIS
-  const bool hasBg = LayerOps::hasVisibleReferenceLayer(QgsProject::instance());
-#else
-  const bool hasBg = false;
-#endif
-  const int errCount = lastChecklistErrorCount();
-  const bool surveyReady = !m_surveyPath.isEmpty() ||
-                           st.value(QStringLiteral("survey_area_count")).toInt() > 0;
-  QJsonObject st2 = st;
-  if (surveyReady && st2.value(QStringLiteral("survey_area_count")).toInt() == 0)
-    st2.insert(QStringLiteral("layer_count"), 1);
-  const auto steps = WorkflowGuide::evaluate(st2, hasBg, errCount, m_packageCreated);
-
-  struct Extra {
-    QString id;
-    QString title;
-    QString hint;
-    bool done;
-  };
-  const QList<Extra> extras = {
-      {QStringLiteral("action_edit_attrs"), QStringLiteral("속성 고치기"),
-       QStringLiteral("그린 도형을 클릭해 종류·시대를 넣습니다."),
-       st.value(QStringLiteral("has_kind_period")).toBool() &&
-           st.value(QStringLiteral("feature_poly_count")).toInt() > 0},
-      {QStringLiteral("action_section"), QStringLiteral("단면선 그리기"),
-       QStringLiteral("층위·단면 기준선을 그립니다."), false},
-      {QStringLiteral("action_import_csv"), QStringLiteral("CSV 기준점"),
-       QStringLiteral("GPS CSV를 가져와 기준점을 채웁니다."),
-       st.value(QStringLiteral("control_points_count")).toInt() >= 2},
-      {QStringLiteral("action_drawing_studio"), QStringLiteral("도면 만들기"),
-       QStringLiteral("조사구역도 등 5종 PDF를 미리보고 저장합니다."), false},
-  };
-
-  const QString cur = m_workList->currentItem()
-                          ? m_workList->currentItem()->data(Qt::UserRole).toString()
-                          : QString();
-  m_workList->clear();
-  auto addItem = [&](const QString& id, const QString& title, const QString& hint, bool done) {
-    auto* it = new QListWidgetItem(
-        QStringLiteral("%1  %2\n    %3")
-            .arg(done ? QStringLiteral("완료") : QStringLiteral("실행"), title, hint),
-        m_workList);
-    it->setData(Qt::UserRole, id);
-    it->setToolTip(hint);
-  };
-  for (const auto& s : steps)
-    addItem(s.actionId, s.title, s.completionHint, s.complete);
-  for (const auto& e : extras)
-    addItem(e.id, e.title, e.hint, e.done);
-
-  if (!cur.isEmpty()) {
-    for (int i = 0; i < m_workList->count(); ++i) {
-      if (m_workList->item(i)->data(Qt::UserRole).toString() == cur) {
-        m_workList->setCurrentRow(i);
-        break;
-      }
-    }
-  }
-  if (m_workHint) {
-    QString next = QStringLiteral("아무 항목이나 눌러 바로 실행합니다.");
-    for (const auto& s : steps) {
-      if (!s.complete) {
-        next = QStringLiteral("다음: %1 — %2").arg(s.title, s.completionHint);
-        break;
-      }
-    }
-    m_workHint->setText(next);
-  }
-  updateUndoRedoActions();
-}
-
-void MainWindow::onWorkControlClicked(QListWidgetItem* item) {
-  if (!item) return;
-  const QString id = item->data(Qt::UserRole).toString();
-  if (id == QLatin1String("action_new_survey"))
-    newSurvey();
-  else if (id == QLatin1String("action_add_basemap"))
-    showSubToolsBasemap();
-  else if (id == QLatin1String("action_digitize_area"))
-    startEditSurveyArea();
-  else if (id == QLatin1String("action_digitize_feature"))
-    startEditFeaturePoly();
-  else if (id == QLatin1String("action_add_control_point"))
-    addControlPoint();
-  else if (id == QLatin1String("action_run_checklist"))
-    runChecklist();
-  else if (id == QLatin1String("action_export_package"))
-    exportShpPackage();
-  else if (id == QLatin1String("action_edit_attrs"))
-    startAttributeEditTool();
-  else if (id == QLatin1String("action_section"))
-    startEditSectionLine();
-  else if (id == QLatin1String("action_import_csv"))
-    importControlCsv();
-  else if (id == QLatin1String("action_drawing_studio"))
-    openLayoutDesigner();
-  refreshWorkPanel();
 }
 
 void MainWindow::setWorkCrs(const QString& authId) {
@@ -1757,20 +1789,6 @@ void MainWindow::setWorkCrs5187() {
   setWorkCrs(QStringLiteral("EPSG:5187"));
   if (auto* b86 = findChild<QToolButton*>(QStringLiteral("btnCrs5186"))) b86->setChecked(false);
   if (auto* b87 = findChild<QToolButton*>(QStringLiteral("btnCrs5187"))) b87->setChecked(true);
-}
-
-QString MainWindow::vworldApiKeyOrPrompt() {
-  QString key = VworldSettings::loadApiKey();
-  if (!key.isEmpty()) return key;
-  const auto choice = KaUserError::warn(this, {
-      QStringLiteral("VWorld API 키 필요"),
-      QStringLiteral("위성·지적 등 VWorld 배경지도를 켤 수 없습니다."),
-      QStringLiteral("이 PC에 저장한 VWorld API 키가 없습니다."),
-      QStringLiteral("더보기 → VWorld API 키에서 키를 넣은 뒤 다시 켜 주세요."),
-      QStringLiteral("VWorld API 키 입력"),
-  });
-  if (choice == KaUserError::Result::ActionChosen) configureVworldKey();
-  return {};
 }
 
 void MainWindow::configureVworldKey() {

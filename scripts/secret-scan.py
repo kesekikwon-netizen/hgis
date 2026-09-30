@@ -3,8 +3,11 @@
 
 Looks for:
   - GUID-shaped VWorld keys near key/vworld usage
-  - password= / password_portable= with a credential-like value
+  - password= / password_portable= / password_dpapi= with a credential-like value
+    (a DPAPI blob only opens for one Windows user, but it still is that user's password)
   - Authorization: Bearer <token>
+  - account/key files that must never be tracked (config/*-local.ini, *-account.ini,
+    secrets.ini, ka-hgis-vworld.ini), whatever their content
 
 Allowlisted test fakes: 11111111-2222-..., AAAAAAAA-BBBB-..., and a few other
 fixture GUIDs used in workflow tests.
@@ -27,7 +30,11 @@ GUID_RE = re.compile(
 )
 # Config-style assignment only (no space before '='). Value must look like a secret.
 PASSWORD_RE = re.compile(
-    r"(?i)(?<![\w])password(?:_portable)?=([A-Za-z0-9_./+\-]{4,})"
+    r"(?i)(?<![\w])password(?:_portable|_dpapi)?=([A-Za-z0-9_./+=\-]{4,})"
+)
+# Files that only ever hold accounts or keys. Tracking one is a leak even when empty now.
+SECRET_FILE_RE = re.compile(
+    r"(?i)(^|/)(secrets\.ini|ka-hgis-vworld\.ini|[^/]*-account\.ini|config/[^/]*-local\.ini)$"
 )
 BEARER_RE = re.compile(r"(?i)Authorization\s*:\s*Bearer\s+(\S+)")
 
@@ -45,6 +52,9 @@ for raw in files:
         continue
     path = raw.decode("utf-8", "surrogateescape")
     lower = path.lower()
+    if SECRET_FILE_RE.search(lower):
+        hits.append(f"{path}: account/key file is tracked (add it to .gitignore and untrack it)")
+        continue
     if any(lower.endswith(s) for s in SKIP_SUFFIX):
         continue
     try:

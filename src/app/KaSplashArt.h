@@ -14,7 +14,8 @@ namespace KaSplashArt {
 
 // Soft shadow, drawn in the window's transparent margin below the card.
 void paintShadow(QPainter& painter, const QRectF& card, double radius);
-// Gradient card with the texture inside it, a light sheen and a hairline edge.
+// Gradient card with the texture inside it, a light sheen, a darker foot under
+// the text lines and a hairline edge.
 void paintCard(QPainter& painter, const QRectF& card, double radius, const QImage& texture);
 // Contour lines of a mound whose summit sits at summit (card coordinates). The
 // summit itself stays clear for the app icon, and the lines fade out toward the

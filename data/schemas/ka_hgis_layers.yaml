@@ -1,25 +1,120 @@
-﻿version: 1
-default_crs: EPSG:5179
+# ka-hgis survey GeoPackage schema: the layers, geometry and fields that
+# SurveyProjectFactory::createNewSurvey writes into every new survey (.gpkg).
+# One declaration for the docs and the code: tests/test_workflow.cpp
+# (surveySchemaYaml_matchesFactory) creates a survey and fails when a layer, geometry,
+# field or type here differs from what the factory made. Change both together.
+# The app does not read this file at run time.
+#
+# required: true = the submit checklist (data/rules/drawing_checklist.v1.json) reports an
+# empty value (feature_poly kind/period and control point datum/ellipsoid/projection block
+# submit; the others warn). Fields the factory makes but no check needs are required: false.
+# Version 3 (SurveySchema::kCurrentVersion) adds optional record and audit fields; old surveys gain them only in the save generation copy (SurveySchema::migrateGenerationCopy), never on open.
+version: 3
+default_work_crs: EPSG:5187
+work_crs_choices: [EPSG:5186, EPSG:5187]
+submit_crs: EPSG:5179
 working_format: gpkg
 layers:
   - id: survey_area
     geometry: Polygon
     name_ko: 조사구역
+    fields:
+      - {name: survey_name, type: string, required: true}
+      - {name: site_name, type: string, required: false}
+      - {name: note, type: string, required: false}
+      - {name: uid, type: string, required: false}
+      - {name: created_at, type: string, required: false}
+      - {name: updated_at, type: string, required: false}
   - id: feature_poly
     geometry: Polygon
     name_ko: 유구_면
+    fields:
+      - {name: kind, type: string, required: true}
+      - {name: period, type: string, required: true}
+      - {name: feature_no, type: string, required: false}
+      - {name: note, type: string, required: false}
+      - {name: layer_no, type: string, required: false}
+      - {name: depth_m, type: double, required: false}
+      - {name: top_el, type: double, required: false}
+      - {name: bottom_el, type: double, required: false}
+      - {name: relation, type: string, required: false}
+      - {name: status, type: string, required: false}
+      - {name: photo, type: string, required: false}
+      - {name: surveyor, type: string, required: false}
+      - {name: surv_date, type: string, required: false}
+      - {name: uid, type: string, required: false}
+      - {name: created_at, type: string, required: false}
+      - {name: updated_at, type: string, required: false}
   - id: feature_line
     geometry: LineString
     name_ko: 유구_선
+    fields:
+      - {name: kind, type: string, required: true}
+      - {name: period, type: string, required: false}
+      - {name: note, type: string, required: false}
+      - {name: feature_no, type: string, required: false}
+      - {name: layer_no, type: string, required: false}
+      - {name: relation, type: string, required: false}
+      - {name: status, type: string, required: false}
+      - {name: photo, type: string, required: false}
+      - {name: surveyor, type: string, required: false}
+      - {name: surv_date, type: string, required: false}
+      - {name: uid, type: string, required: false}
+      - {name: created_at, type: string, required: false}
+      - {name: updated_at, type: string, required: false}
   - id: section_line
     geometry: LineString
     name_ko: 단면선
+    fields:
+      - {name: section_id, type: string, required: true}
+      - {name: note, type: string, required: false}
+      - {name: surveyor, type: string, required: false}
+      - {name: surv_date, type: string, required: false}
+      - {name: uid, type: string, required: false}
+      - {name: created_at, type: string, required: false}
+      - {name: updated_at, type: string, required: false}
   - id: control_points
     geometry: Point
     name_ko: 기준점
+    fields:
+      - {name: point_id, type: string, required: true}
+      - {name: x, type: double, required: false}
+      - {name: y, type: double, required: false}
+      - {name: z, type: double, required: false}
+      - {name: datum, type: string, required: true}
+      - {name: ellipsoid, type: string, required: true}
+      - {name: projection, type: string, required: true}
+      - {name: origin, type: string, required: true}
+      - {name: accuracy, type: string, required: false}
+      - {name: accuracy_m, type: double, required: false}
+      - {name: pdop, type: double, required: false}
+      - {name: fix_type, type: string, required: false}
+      - {name: pixel_x, type: double, required: false}
+      - {name: pixel_y, type: double, required: false}
+      - {name: uid, type: string, required: false}
+      - {name: created_at, type: string, required: false}
+      - {name: updated_at, type: string, required: false}
   - id: artifact_point
     geometry: Point
     name_ko: 유물
+    fields:
+      - {name: kind, type: string, required: false}
+      - {name: period, type: string, required: false}
+      - {name: artifact_no, type: string, required: false}
+      - {name: note, type: string, required: false}
+      - {name: in_feature, type: string, required: false}
+      - {name: z, type: double, required: false}
+      - {name: layer_no, type: string, required: false}
+      - {name: photo, type: string, required: false}
+      - {name: surveyor, type: string, required: false}
+      - {name: surv_date, type: string, required: false}
+      - {name: uid, type: string, required: false}
+      - {name: created_at, type: string, required: false}
+      - {name: updated_at, type: string, required: false}
   - id: trial_trench
     geometry: Polygon
     name_ko: 시굴격자
+    fields:
+      - {name: name, type: string, required: false}
+      - {name: width, type: double, required: false}
+      - {name: length, type: double, required: false}

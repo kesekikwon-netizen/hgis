@@ -1,6 +1,6 @@
 ---
 name: ka-hgis-sheet
-description: 조판 여백, 정합 지적 자석, 주변유적 번호·범례·표시, 추가 레이어 접힘, 수치지형도 가벼운 선이 깨졌을 때 복구한다. 완료된 현장 도면 계약을 보존한다. Use when 조판, 범례 번호, 주변유적 표시, 정합 자석, 지적도 그룹, 레이어 접힘, or 수치지형도 렉 regresses or a completed sheet behavior must be recorded.
+description: 조판 여백, 정합 지적 자석, 주변유적 번호·범례·표시, 추가 레이어 접힘, 수치지형도 가벼운 선이 깨졌을 때 복구한다. 완료된 현장 도면 계약을 보존한다. Use when 조판, 범례 번호, 주변유적 표시, 정합 자석, 지적도 루트 배치(옛 지적도 그룹 해체), 레이어 접힘, or 수치지형도 렉 regresses or a completed sheet behavior must be recorded.
 ---
 
 # ka-hgis 조판·정합 완료 계약

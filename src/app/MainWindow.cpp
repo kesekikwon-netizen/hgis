@@ -1,8 +1,12 @@
 #include "MainWindow.h"
+#include "core/KaLogExcept.h"
 #include "KaHgisVersion.h"
 #include <QDateTime>
 #include "KaStartupSplash.h"
 #include "KaLayerInformation.h"
+#include "KaLayerListChrome.h"  // [P6] 레이어 찾기 · 편집 중 ✎
+#include "KaLayerRefreshBatch.h"
+#include "KaLayerTreeUndo.h"
 #include "KaWindowGeometry.h"
 #include "core/DemPresentation.h"
 #include "KaTheme.h"
@@ -17,8 +21,8 @@
 #include "KaTerrain3dStudio.h"
 #include "KaTerrain3dLayoutStudio.h"
 #include "KaStartPage.h"
-#include "KaCoordPointMapTool.h"
 #include "KaMeasureMapTool.h"
+#include "KaEditErrors.h"
 #include "core/DemAnalyzer.h"
 #include "core/TilePackService.h"
 #include "core/TrenchGridGenerator.h"
@@ -26,7 +30,10 @@
 #include "KaCanvasGridOverlay.h"
 #include "KaTrenchMoveTool.h"
 #include "KaFeatureSelectTool.h"
-#include "KaFoundLocationMark.h"
+#include "KaShellFocus.h"
+#include "KaShellGridControls.h"
+#include "KaGridOriginButton.h"
+#include "KaShellUi.h"
 #include "KaStatusBar.h"
 #include "KaBeginnerRibbon.h"
 #include "KaSnapSettingsWidget.h"
@@ -41,6 +48,9 @@
 #include <QScopeGuard>
 #include <exception>
 #include "KaTrenchDialog.h"
+#include "core/TrenchLayerEdit.h"  // [pkg B2] F003/F156 grid placement
+#include "core/TrenchPlanCache.h"  // [pkg B2] F097 cached 10%/2% plans
+#include "core/BasemapDsm.h"       // [int W1] DEM lookup by kind, not by title
 #include "KaDemClassDialog.h"
 #include "KaTopographicBrowser.h"
 #include "KaTopographicImportDialog.h"
@@ -69,7 +79,6 @@
 #include "core/LocationSearch.h"
 #include "core/CadastralImport.h"
 #include "core/KoreaRegionCatalog.h"
-#include "core/AdminBoundaryService.h"
 #include "KaRegionLocator.h"
 #include "KaAppBar.h"
 #include "KaMapControls.h"
@@ -169,6 +178,7 @@
 #include <QCheckBox>
 #include <QLocale>
 #include <QLayout>
+#include <QGridLayout>
 
 #if KA_HGIS_HAS_QGIS
 #include <qgsmapcanvas.h>
@@ -218,16 +228,6 @@
 #include <qgsvectordataprovider.h>
 #include <qgsprovidersublayerdetails.h>
 #endif
-#include <QGraphicsDropShadowEffect>
-
-static void applyWidgetShadow(QWidget* w, int blur = 14, int yOffset = 3, int alpha = 35) {
-  if (!w) return;
-  auto* shadow = new QGraphicsDropShadowEffect(w);
-  shadow->setBlurRadius(blur);
-  shadow->setOffset(0, yOffset);
-  shadow->setColor(QColor(0, 0, 0, alpha));
-  w->setGraphicsEffect(shadow);
-}
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   setWindowTitle(QStringLiteral("Strata"));
@@ -244,12 +244,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   connect(m_locator, &LocationSearch::failed, this, [this](const QString& msg) {
     onLocationFailed(msg);
   });
-  m_adminBoundary = new AdminBoundaryService(this);
-  connect(m_adminBoundary, &AdminBoundaryService::fetched, this, &MainWindow::onAdminBoundaryFetched);
-  connect(m_adminBoundary, &AdminBoundaryService::failed, this, &MainWindow::onAdminBoundaryFailed);
   buildMenus();
   buildUi();
-  refreshWorkPanel();
   updateNextActionStatus();
   auto* delAct = new QAction(QStringLiteral("선택 도형 삭제"), this);
   delAct->setShortcut(QKeySequence::Delete);
@@ -287,14 +283,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // last closed. That row belongs to an active tool, so it must not reappear as an empty strip.
     if (m_subToolbar) m_subToolbar->hide();
     const QByteArray split = st.value(QStringLiteral("MainWindow/mainSplit")).toByteArray();
-    if (m_mainSplit && !split.isEmpty()) {
+    // A layout saved with another pane count (2 before the inspector) is left alone: the ratio default sizes all three.
+    const int savedPanes = st.value(QStringLiteral("MainWindow/mainSplitPanes"), 2).toInt();
+    if (m_mainSplit && !split.isEmpty() && savedPanes == m_mainSplit->count()) {
       m_mainSplit->restoreState(split);
+      if (m_shellFocus) m_shellFocus->markUserWidthRestored();
       const int totalW = m_mainSplit->width();
       if (totalW > 300) {
         const QList<int> sz = m_mainSplit->sizes();
         if (!sz.isEmpty() && sz.at(0) > totalW * 0.35) {
           const int leftW = qBound(160, int(totalW * 0.22), 360);
-          m_mainSplit->setSizes({leftW, totalW - leftW});
+          m_mainSplit->setSizes(KaShellFocus::sizesWithLeft(m_mainSplit, leftW));
         }
       }
     }
@@ -353,14 +352,17 @@ void MainWindow::closeEvent(QCloseEvent* event) {
   m_locator->cancel();
   if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); m_searchProgress = nullptr; }
   m_locationSearchBusy = false;
-  m_adminBoundary->cancel();
-  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
+  // 지도 넓게 보기·접은 왼쪽 패널은 이번 세션에만 쓴다. 다음 실행에 리본이 숨은 채 뜨지 않게
+  // 창 상태를 저장하기 전에 되돌린다.
+  if (m_shellFocus) m_shellFocus->restoreAll();
   QSettings st = RecentSurveys::userSettings();
   RecentSurveys::setSkipAutoRestore(st, false);
   st.setValue(QStringLiteral("MainWindow/geometry"), saveGeometry());
   st.setValue(QStringLiteral("MainWindow/state"), saveState());
-  if (m_mainSplit)
+  if (m_mainSplit) {
     st.setValue(QStringLiteral("MainWindow/mainSplit"), m_mainSplit->saveState());
+    st.setValue(QStringLiteral("MainWindow/mainSplitPanes"), m_mainSplit->count());  // restored only into this shape
+  }
   if (m_leftSplit)
     st.setValue(QStringLiteral("MainWindow/leftSplit"), m_leftSplit->saveState());
   QMainWindow::closeEvent(event);
@@ -396,7 +398,7 @@ void MainWindow::updateNextActionStatus() {
     const bool hasDraw = (m_stubSurveyArea + m_stubFeatures) > 0;
 #endif
     if (!hasBg)
-      msg = QStringLiteral("위성·지적이 없습니다. 더보기 → VWorld API 키를 확인하세요.");
+      msg = QStringLiteral("위성·지적이 없습니다. 더보기 → API 키 입력에서 VWorld 키를 확인하세요.");
     else if (!hasDraw)
       msg = QStringLiteral("「그리기」로 구역을 그리세요.");
     else
@@ -623,6 +625,17 @@ void MainWindow::buildUi() {
   m_layerTree->setObjectName(QStringLiteral("layerTree"));
   m_layerTree->setModel(model);
   KaLayerInformationModel::configureView(m_layerTree);
+  // [pkg E1] F186: Ctrl+Z also puts back the user's drag order and check marks.
+  m_layerTreeUndo = std::make_unique<KaLayerTreeUndo>(QgsProject::instance(), m_layerTree,
+      [this](std::shared_ptr<KaLayerTreeSnapshot> before) {
+        if (m_isOpeningSurvey || m_closingWindow) return;
+        KaUndoAction action;
+        action.type = KaUndoAction::LayerTreeChanged;
+        action.treeBefore = std::move(before);
+        action.description = QStringLiteral("레이어 순서·표시");
+        pushUndoAction(action);
+        updateUndoRedoActions();
+      });
   model->setScale(m_canvas->scale());
   connect(m_canvas, &QgsMapCanvas::scaleChanged, model, &KaLayerInformationModel::setScale);
   connect(model, &KaLayerInformationModel::labelsEdited, this, [this] {
@@ -733,6 +746,11 @@ void MainWindow::buildUi() {
       updateAlignOverlay();
     logCanvasPaintState();
   });
+  // [pkg E1] F131: many layers added/removed in a row cost one map sync.
+  m_layerRefreshBatch = std::make_unique<KaLayerRefreshBatch>(this, [this]() {
+    refreshMapCanvasNow();
+    syncThematicButtons();
+  });
   connect(QgsProject::instance(), &QgsProject::layersAdded, this, [this](const QList<QgsMapLayer*>& layers) {
     for (auto* layer : layers) {
       if (auto* vector = qobject_cast<QgsVectorLayer*>(layer)) watchUndoFeatureIds(vector);
@@ -742,12 +760,12 @@ void MainWindow::buildUi() {
     applySnapConfig();
     LayerOps::restoreThematicOverlayVisibility(QgsProject::instance());
     LayerOps::ensureSatelliteAtBottom(QgsProject::instance());
-    QTimer::singleShot(0, this, [this]() { refreshMapCanvasNow(); syncThematicButtons(); });
+    m_layerRefreshBatch->request();
   });
   connect(QgsProject::instance(), &QgsProject::layersRemoved, this, [this](const QStringList&) {
     if (m_isOpeningSurvey) return;
     LayerOps::ensureSatelliteAtBottom(QgsProject::instance());
-    QTimer::singleShot(0, this, [this]() { refreshMapCanvasNow(); syncThematicButtons(); });
+    m_layerRefreshBatch->request();
   });
   // 레이어의 체크를 끄고 켜는 것도 아이콘에 그대로 따라와야 한다.
   if (QgsLayerTree* legendRoot = QgsProject::instance()->layerTreeRoot()) {
@@ -760,7 +778,8 @@ void MainWindow::buildUi() {
   auto* layersCard = new QFrame(central);
   layersCard->setObjectName(QStringLiteral("layersCard"));
   m_layersCard = layersCard;
-  applyWidgetShadow(layersCard, 14, 3, 30);
+  // Flat Strata chrome: cards are set apart by their 1px QSS border and the layout spacing.
+  // A drop-shadow effect would also force the subtree through an offscreen pixmap.
   auto* layersLay = new QVBoxLayout(layersCard);
   layersLay->setContentsMargins(6, 6, 6, 6);
   layersLay->setSpacing(6);
@@ -773,6 +792,7 @@ void MainWindow::buildUi() {
   auto* layersInnerLay = new QVBoxLayout(layersInner);
   layersInnerLay->setContentsMargins(4, 4, 4, 4);
   layersInnerLay->addWidget(m_layerTree, 1);
+  layersInnerLay->insertWidget(0, new KaLayerListChrome(m_layerTree, layersInner));  // [P6] 레이어 찾기 · 편집 중 ✎
   layersInnerLay->addWidget(new KaLayerInformationPanel(model, m_layerTree, layersInner));
   m_layerEmpty = new QLabel(
       QStringLiteral("레이어가 없습니다.\n파일함에서 SHP·DXF·DWG를 끌어 넣거나\n위성·지적 배경을 올리세요."),
@@ -869,7 +889,6 @@ void MainWindow::buildUi() {
   m_filesPanel = filesPanel;
   m_filesCard = filesPanel;
   m_fileBrowser = filesPanel->listView();
-  applyWidgetShadow(filesPanel, 14, 3, 30);
   connect(filesPanel, &KaFileBrowserPanel::fileActivated, this, [this](const QString& path) {
     const bool raster = GeorefService::isImagePath(path);
     if (raster ? !addRasterFromPath(path) : !addVectorFromPath(path)) {
@@ -914,7 +933,6 @@ void MainWindow::buildUi() {
 
   auto* mapCard = new QFrame(central);
   mapCard->setObjectName(QStringLiteral("mapCard"));
-  applyWidgetShadow(mapCard, 16, 4, 30);
   auto* mapLay = new QVBoxLayout(mapCard);
   mapLay->setContentsMargins(4, 4, 4, 4);
   mapLay->setSpacing(4);
@@ -936,7 +954,8 @@ void MainWindow::buildUi() {
     });
     new KaMapScaleBar(m_canvas, railHost);
     // 좌표격자는 지도 오른쪽 아래에 떠 있는 작은 막대다. 지도 아래 따로 떨어진 띠에
-    // 체크 상자 하나만 두면 한 줄을 통째로 차지했다. 세부 칸은 켰을 때만 옆으로 펼친다.
+    // 체크 상자 하나만 두면 한 줄을 통째로 차지했다. 세부 칸은 켰을 때만 위로 두 줄 펼쳐
+    // 막대가 좁게 남는다. 그래야 왼쪽 아래 축척 막대를 덮지 않는다.
     m_mapGridBar = new KaMapCornerBar(railHost);
   }
   connect(m_layerOpacityRail, &KaLayerOpacityRail::brightnessChanged, this, [this](int value) {
@@ -952,8 +971,11 @@ void MainWindow::buildUi() {
   connect(m_layerOpacityRail, &KaLayerOpacityRail::percentChanged, this, [this](int value) {
     if (!m_layerTree) return;
     QgsMapLayer* cur = m_layerTree->currentLayer();
-    if (!cur || !LayerOps::isReferenceOrBasemapLayer(cur)) return;
-    LayerOps::setMapLayerOpacity(cur, value / 100.0, m_canvas);
+    // [pkg E1] F018: every valid layer can be see-through (display only).
+    if (!LayerOps::canAdjustOpacity(cur)) return;
+    LayerOps::applyLayerOpacity(cur, value / 100.0, m_canvas);
+    // A see-through survey layer leaves the above-labels pass: resync the map list.
+    if (!LayerOps::isReferenceOrBasemapLayer(cur)) refreshMapCanvasNow();
     if (m_drawingStudio) {
       m_drawingStudio->updateLayerOpacityControl();
       m_drawingStudio->repaintMapLayers();
@@ -961,9 +983,6 @@ void MainWindow::buildUi() {
   });
   updateLayerOpacityControl();
 
-  auto* scaleBar = new QHBoxLayout(m_mapGridBar);
-  scaleBar->setContentsMargins(10, 4, 10, 4);
-  scaleBar->setSpacing(6);
   m_scaleEdit = m_status->scaleEdit();
   m_scaleCombo = m_status->scaleCombo();
   connect(m_scaleEdit, &QLineEdit::returnPressed, this, &MainWindow::applyMapScaleFromUi);
@@ -976,105 +995,18 @@ void MainWindow::buildUi() {
       applyMapScaleFromUi();
     }
   });
-  m_mapGridCheck = new QCheckBox(QStringLiteral("좌표격자"), mapCard);
-  m_mapGridCheck->setObjectName(QStringLiteral("mapGridCheck"));
-  m_mapGridCheck->setToolTip(QStringLiteral("맵에 좌표 격자를 켭니다. Shift를 누른 채 켜면 경위도입니다."));
-  connect(m_mapGridCheck, &QCheckBox::toggled, this, &MainWindow::toggleMapGrid);
-  m_mapGridStep = new QDoubleSpinBox(mapCard);
-  m_mapGridStep->setObjectName(QStringLiteral("mapGridStep"));
-  m_mapGridStep->setRange(1.0, 10000.0);
-  m_mapGridStep->setDecimals(0);
-  m_mapGridStep->setSuffix(QStringLiteral(" m"));
-  m_mapGridStep->setValue(20);
-  m_mapGridStep->setMaximumWidth(80);
-  m_mapGridStep->setToolTip(QStringLiteral("격자 간격(미터). 시굴격자 이동 때도 이 간격에 붙습니다."));
-  connect(m_mapGridStep, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double) {
-    if (m_mapGridCheck && m_mapGridCheck->isChecked())
-      toggleMapGrid();
-  });
-  m_mapGridRot = new QDoubleSpinBox(mapCard);
-  m_mapGridRot->setRange(0.0, 360.0);
-  m_mapGridRot->setDecimals(1);
-  m_mapGridRot->setSuffix(QStringLiteral(" °"));
-  m_mapGridRot->setValue(0);
-  m_mapGridRot->setMaximumWidth(70);
-  m_mapGridRot->setToolTip(QStringLiteral("격자 회전 (동쪽 기준 시계 방향)"));
-  connect(m_mapGridRot, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double) {
-    if (m_mapGridCheck && m_mapGridCheck->isChecked())
-      toggleMapGrid();
-  });
-  m_mapGridWidth = new QDoubleSpinBox(mapCard);
-  m_mapGridWidth->setRange(0.5, 5.0);
-  m_mapGridWidth->setDecimals(1);
-  m_mapGridWidth->setSingleStep(0.1);
-  m_mapGridWidth->setValue(1.2);
-  m_mapGridWidth->setMaximumWidth(60);
-  m_mapGridWidth->setToolTip(QStringLiteral("격자 선 굵기"));
-  connect(m_mapGridWidth, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double) {
-    if (m_mapGridCheck && m_mapGridCheck->isChecked())
-      toggleMapGrid();
-  });
-  m_mapGridDash = new QComboBox(mapCard);
-  m_mapGridDash->addItem(QStringLiteral("실선"), static_cast<int>(Qt::SolidLine));
-  m_mapGridDash->addItem(QStringLiteral("점선"), static_cast<int>(Qt::DashLine));
-  m_mapGridDash->addItem(QStringLiteral("점"), static_cast<int>(Qt::DotLine));
-  m_mapGridDash->setCurrentIndex(1);
-  m_mapGridDash->setMaximumWidth(70);
-  m_mapGridDash->setToolTip(QStringLiteral("격자 선 모양"));
-  connect(m_mapGridDash, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
-    if (m_mapGridCheck && m_mapGridCheck->isChecked())
-      toggleMapGrid();
-  });
-  auto* gridDetail = new QWidget(mapCard);
-  gridDetail->setObjectName(QStringLiteral("gridDetail"));
-  auto* gridDetailLay = new QHBoxLayout(gridDetail);
-  gridDetailLay->setContentsMargins(0, 0, 0, 0);
-  gridDetailLay->setSpacing(3);
-  gridDetailLay->addWidget(m_mapGridStep);
-  gridDetailLay->addWidget(new QLabel(QStringLiteral("회전"), gridDetail));
-  gridDetailLay->addWidget(m_mapGridRot);
-  gridDetailLay->addWidget(new QLabel(QStringLiteral("굵기"), gridDetail));
-  gridDetailLay->addWidget(m_mapGridWidth);
-  gridDetailLay->addWidget(m_mapGridDash);
-
-  // 격자 선 색: 눌러 보면 바로 아는 색칠 단추 셋(빨강·파랑·검정)과 「그 밖의 색」.
-  gridDetailLay->addWidget(new QLabel(QStringLiteral("색"), gridDetail));
-  const QVector<QPair<QColor, QString>> gridSwatches = {
-      {QColor(0xD9, 0x2B, 0x2B), QStringLiteral("빨간색 격자")},
-      {QColor(0x1D, 0x4E, 0xD8), QStringLiteral("파란색 격자")},
-      {QColor(0x1F, 0x29, 0x37), QStringLiteral("검정색 격자")},
-  };
-  for (const auto& sw : gridSwatches) {
-    auto* b = new QToolButton(gridDetail);
-    b->setObjectName(QStringLiteral("gridColorSwatch"));
-    b->setFixedSize(20, 20);
-    b->setCheckable(true);
-    b->setAutoRaise(false);
-    b->setStyleSheet(KaTheme::colorSwatchStyle(sw.first));
-    b->setToolTip(sw.second);
-    const QColor c = sw.first;
-    connect(b, &QToolButton::clicked, this, [this, c]() { setMapGridColor(c); });
-    m_mapGridColorBtns.append(b);
-    gridDetailLay->addWidget(b);
-  }
-  auto* gridColorMore = new QToolButton(gridDetail);
-  gridColorMore->setObjectName(QStringLiteral("gridColorPick"));
-  gridColorMore->setText(QStringLiteral("…"));
-  gridColorMore->setFixedSize(22, 20);
-  gridColorMore->setToolTip(QStringLiteral("그 밖의 색을 직접 고릅니다"));
-  connect(gridColorMore, &QToolButton::clicked, this, [this]() {
-    const QColor picked = QColorDialog::getColor(m_mapGridColor, this,
-                                                 QStringLiteral("격자 선 색"),
-                                                 QColorDialog::ShowAlphaChannel);
-    if (picked.isValid())
-      setMapGridColor(picked);
-  });
-  gridDetailLay->addWidget(gridColorMore);
-  syncMapGridColorButtons();
-  gridDetail->setVisible(false);
-  connect(m_mapGridCheck, &QCheckBox::toggled, gridDetail, &QWidget::setVisible);
-  scaleBar->addWidget(gridDetail);
-  scaleBar->addWidget(m_mapGridCheck);
+  // 좌표격자 칸은 지도 오른쪽 아래 막대 안에 있다. 격자 종류(미터·경위도)는 콤보로
+  // 명시해 고르고 Shift 상태를 읽지 않는다. 값을 바꾸면 모아서 한 번만 다시 그린다.
+  auto* cornerLay = new QHBoxLayout(m_mapGridBar);
+  cornerLay->setContentsMargins(10, 4, 10, 4);
+  cornerLay->setSpacing(6);
+  m_gridControls = new KaShellGridControls(m_mapGridBar);
+  cornerLay->addWidget(m_gridControls);
+  connect(m_gridControls, &KaShellGridControls::settingsChanged, this, &MainWindow::applyMapGrid);
+  // [pkg F2] F070: excavation-grid origin; the button edits the overlay config directly.
+  if (auto* detail = m_gridControls->findChild<QWidget*>(QStringLiteral("gridDetail")))
+    if (auto* detailGrid = qobject_cast<QGridLayout*>(detail->layout()))
+      detailGrid->addWidget(new KaGridOriginButton(m_canvas, [this] { return m_mapGrid; }, detail), 0, 3);
 
   // 왼쪽 패널 ↔ 지도 사이를 끌어서 나눌 수 있게 한다. 나눈 폭은 창 상태와
   // 같이 저장돼 다음에 열 때 그대로 온다(MainWindow/mainSplit).
@@ -1088,6 +1020,13 @@ void MainWindow::buildUi() {
   m_mainSplit->setStretchFactor(1, 1);
   m_mainSplit->setSizes({348, 932});
   root->addWidget(m_mainSplit, 1);
+  // 작은 노트북에서 지도를 넓히는 방법은 사용자가 켤 때만 쓴다(더보기, Ctrl+F11 · F9).
+  // 리본 칸 크기·한 줄 배치는 그대로이고, 지도 넓게 보기는 리본을 잠시 숨길 뿐이다.
+  m_shellFocus = new KaShellFocus(m_mainSplit, this);
+  if (auto* ribbonBar = findChild<QToolBar*>(QStringLiteral("mainToolbar")))
+    m_shellFocus->setChrome({ribbonBar});
+  connect(m_shellFocus, &KaShellFocus::changed, this,
+          [this](const QString& message) { statusBar()->showMessage(message, 6000); });
 #else
   root->addWidget(new QLabel(QStringLiteral("QGIS SDK 스텁 모드"), central), 1);
   setCentralWidget(central);
@@ -1110,7 +1049,7 @@ void MainWindow::buildUi() {
   m_mapPage = central;
   // 탭 아이콘은 타일 없는 한 색 그림이다. 16px 타일은 뭉개져 무엇인지 안 보였다.
   const QColor tabInk = KaTheme::tokens().inkMuted;
-  const int homeIdx = m_viewTabs->addTab(m_startPage, KaIcons::icon(QStringLiteral("new"), tabInk),
+  const int homeIdx = m_viewTabs->addTab(m_startPage, KaIcons::icon(QStringLiteral("home"), tabInk),
                                          QStringLiteral("홈"));
   const int mapIdx = m_viewTabs->addTab(central, KaIcons::icon(QStringLiteral("map"), tabInk),
                                         QStringLiteral("지도"));
@@ -1118,11 +1057,12 @@ void MainWindow::buildUi() {
     bar->setTabButton(homeIdx, QTabBar::RightSide, nullptr);
     bar->setTabButton(mapIdx, QTabBar::RightSide, nullptr);
   }
+  setupStrataShell();  // [P6] 인스펙터(유구 카드 포함)·배지·안내 띠·배경 카드·홈 「설정」 (MainWindowChrome.cpp)
   connect(m_viewTabs, &QTabWidget::tabCloseRequested, this, &MainWindow::onViewTabCloseRequested);
   connect(m_viewTabs, &QTabWidget::currentChanged, this, [this](int i) {
     if (!m_viewTabs) return;
     QWidget* page = m_viewTabs->widget(i);
-    if (m_actMapGeoTiff) m_actMapGeoTiff->setEnabled(page == m_mapPage);
+    KaShellUi::setEnabledWithReason(m_actMapGeoTiff, page == m_mapPage, KaShellUi::mapTabOnlyReason());
     if (m_startPage && page == m_startPage)
       m_startPage->reload();
     if (m_status) {
@@ -1147,8 +1087,9 @@ void MainWindow::buildUi() {
       }
     }
     if (m_mapPage && page == m_mapPage) {
+      resumeParkedSketch();  // [pkg B1] F088: show a kept sketch's drawing row again
       QTimer::singleShot(0, this, [this]() { ensureStartupViewReady(); });
-    } else {
+    } else if (!parkSketchForOtherTab()) {  // [pkg B1] F088: keep unfinished sketch points
       hideSubTools();
     }
     if (m_drawingStudio && page == m_drawingStudio)
@@ -1188,8 +1129,7 @@ void MainWindow::buildUi() {
   m_recoverySnapshotTimer->setInterval(120000);
   connect(m_recoverySnapshotTimer, &QTimer::timeout, this, &MainWindow::captureRecoverySnapshot);
   m_recoverySnapshotTimer->start();
-  // 마지막 조사는 첫 showEvent 뒤에 복원한다. show() 안쪽 nested event 처리 중
-  // 프로젝트를 읽으면 WMS/캔버스 객체 정리가 겹친다.
+  // 시작은 홈 화면만 연다. 마지막 조사·배경지도·작업공간을 스스로 복원하지 않는다.
 #endif
 
 }
@@ -1258,20 +1198,20 @@ void MainWindow::refreshAboveLabelsOverlay() {
   if (!m_aboveLabels) return;
   const QList<QgsMapLayer*> above = LayerOps::layersDrawnAboveLabels(QgsProject::instance());
   m_aboveLabels->setLayers(above);
-  // 몇 개가 뽑혔는지 보여 준다. 0이면 규칙이 대상을 못 고른 것이라 바로 알 수 있다.
+  // 몇 개가 뽑혔는지 세션 로그에 남긴다. 0이면 규칙이 대상을 못 고른 것이다.
   if (m_aboveLabelsCount != above.size()) {
     m_aboveLabelsCount = above.size();
     QStringList names;
     for (QgsMapLayer* l : above) {
       if (l) names << l->name();
     }
-    statusBar()->showMessage(
+    // [pkg E1] F184: developer diagnostics go to the session log, not the status bar.
+    KaSessionLog::line(
         above.isEmpty()
-            ? QStringLiteral("글자 위로 올릴 레이어 없음")
-            : QStringLiteral("글자 위로 올릴 레이어 %1개: %2")
+            ? QStringLiteral("[labels] 글자 위로 올릴 레이어 없음")
+            : QStringLiteral("[labels] 글자 위로 올릴 레이어 %1개: %2")
                   .arg(above.size())
-                  .arg(names.join(QStringLiteral(", "))),
-        6000);
+                  .arg(names.join(QStringLiteral(", "))));
   }
 #endif
 }
@@ -1290,6 +1230,7 @@ void MainWindow::toggleAllLayersChecked() {
   QgsProject* proj = QgsProject::instance();
   QgsLayerTree* root = proj ? proj->layerTreeRoot() : nullptr;
   if (!root) return;
+  if (m_layerTreeUndo) m_layerTreeUndo->noteUserGesture();  // [pkg E1] F186: 전체 켜기/끄기 is the user's
   const QList<QgsLayerTreeLayer*> layers = root->findLayers();
   if (layers.isEmpty()) return;
   bool anyOn = false;
@@ -1335,7 +1276,7 @@ void MainWindow::updateLayerOpacityControl() {
 #if KA_HGIS_HAS_QGIS
   if (!m_layerOpacityRail || !m_layerTree) return;
   QgsMapLayer* cur = m_layerTree->currentLayer();
-  if (cur && LayerOps::isReferenceOrBasemapLayer(cur)) {
+  if (LayerOps::canAdjustOpacity(cur)) {  // [pkg E1] F018
     const int val = qBound(0, qRound(LayerOps::mapLayerOpacity(cur) * 100.0), 100);
     m_layerOpacityRail->setPercent(val, true);
   } else {
@@ -1345,7 +1286,7 @@ void MainWindow::updateLayerOpacityControl() {
   const bool bright = LayerOps::canAdjustBrightness(cur);
   m_layerOpacityRail->setBrightness(bright ? LayerOps::mapLayerBrightness(cur) : 0, bright);
   m_layerOpacityRail->setTarget(cur ? cur->name() : QString(),
-                cur && (bright || LayerOps::isReferenceOrBasemapLayer(cur)));
+                cur && (bright || LayerOps::canAdjustOpacity(cur)));
   if (m_drawingStudio)
     m_drawingStudio->updateLayerOpacityControl();
 #endif
@@ -1462,6 +1403,7 @@ void MainWindow::syncThematicButtons() {
   sync(m_actGeology, nullptr, QStringLiteral("지질도(KIGAM 1:5만)"));
   sync(m_actRiver, nullptr, QStringLiteral("수계도(하천망)"));
   updateHistoricalMapButtons();
+  syncBasemapCard();  // [P6] 「배경 지도」 카드도 범례를 따른다
 #endif
 }
 
@@ -1480,13 +1422,20 @@ void MainWindow::updateHistoricalMapButtons() {
 
 void MainWindow::syncRecordTools() {
   const bool ready = m_surveySessionReady;
-  if (m_actSelect) m_actSelect->setEnabled(ready);
-  if (m_actMeasure) m_actMeasure->setEnabled(ready);
-  if (m_btnDraw) m_btnDraw->setEnabled(ready);
-  if (auto* trench = findChild<QToolButton*>(QStringLiteral("btnTrenchGrid")))
-    trench->setEnabled(ready);
+  // A grey chip says why in its tooltip; the chip keeps its size and short label.
+  const QString why = KaShellUi::needSurveyReason();
+  KaShellUi::setEnabledWithReason(m_actSelect, ready, why);
+  KaShellUi::setEnabledWithReason(m_actMeasure, ready, why);
+  KaShellUi::setEnabledWithReason(m_btnDraw, ready, why);
+  if (auto* trench = findChild<QToolButton*>(QStringLiteral("btnTrenchGrid"))) {
+    // The chip mirrors its action's tooltip, so the reason goes on the action.
+    if (QAction* action = trench->defaultAction())
+      KaShellUi::setEnabledWithReason(action, ready, why);
+    else
+      KaShellUi::setEnabledWithReason(trench, ready, why);
+  }
   if (auto* buffer = findChild<QToolButton*>(QStringLiteral("btnBuffer")))
-    buffer->setEnabled(ready);
+    KaShellUi::setEnabledWithReason(buffer, ready, why);
 }
 
 void MainWindow::loadBootBasemaps() {
@@ -1601,7 +1550,7 @@ void MainWindow::bindMapDisplayScreen() {
           const QList<int> sz = m_mainSplit->sizes();
           if (!sz.isEmpty() && sz.at(0) > tw * 0.35) {
             const int lw = qBound(200, int(tw * 0.22), 360);
-            m_mainSplit->setSizes({lw, tw - lw});
+            m_mainSplit->setSizes(KaShellFocus::sizesWithLeft(m_mainSplit, lw));
           }
         }
       }
@@ -1621,13 +1570,15 @@ void MainWindow::showEvent(QShowEvent* event) {
     LayerOps::applyCanvasScreenDpi(m_canvas);
     scheduleMapDisplayRefresh();
   }
+  // No saved layout yet: size the left panel by window width (capped at the old 348 px).
+  if (m_shellFocus) m_shellFocus->applyDefaultWidthOnce();
   if (m_mainSplit) {
     const int tw = m_mainSplit->width();
     if (tw > 300) {
       const QList<int> sz = m_mainSplit->sizes();
       if (!sz.isEmpty() && sz.at(0) > tw * 0.35) {
         const int lw = qBound(200, int(tw * 0.22), 360);
-        m_mainSplit->setSizes({lw, tw - lw});
+        m_mainSplit->setSizes(KaShellFocus::sizesWithLeft(m_mainSplit, lw));
       }
     }
   }
@@ -1778,10 +1729,14 @@ void MainWindow::runDemHillshade() {
   opt.azimuthDeg = az->value();
   opt.altitudeDeg = alt->value();
   opt.zFactor = zf->value();
-  const QString out = QFileInfo(dem).completeBaseName().isEmpty()
-                          ? (dem + QStringLiteral("_hillshade.tif"))
-                          : (QFileInfo(dem).absolutePath() + QLatin1Char('/') +
-                             QFileInfo(dem).completeBaseName() + QStringLiteral("_hillshade.tif"));
+  // [pkg F2] F069: a new file in the survey's 지형분석 folder; with no survey open the user confirms where.
+  QString out = DemAnalyzer::hillshadeOutputPath(dem, m_surveyPath);
+  if (m_surveyPath.isEmpty()) {
+    out = QFileDialog::getSaveFileName(this, QStringLiteral("음영기복 저장"), out,
+                                       QStringLiteral("GeoTIFF (*.tif)"));
+    if (out.isEmpty())
+      return;
+  }
   QString err;
   if (!DemAnalyzer::runHillshadeFile(dem, out, opt, &err)) {
     notify(Notice::Warning, QStringLiteral("지형분석"),
@@ -1790,7 +1745,7 @@ void MainWindow::runDemHillshade() {
   }
   if (!addRasterFromPath(out)) {
     notify(Notice::Warning, QStringLiteral("지형분석"),
-           QStringLiteral("음영 래스터를 맵에 올리지 못했습니다."), out);
+           QStringLiteral("음영 지도를 지도 화면에 올리지 못했습니다."), out);
     return;
   }
   if (auto* rl = qobject_cast<QgsRasterLayer*>(QgsProject::instance()->mapLayersByName(
@@ -1832,13 +1787,13 @@ QString leftoverSurveyAreaHint(const TrenchGridGenerator::PickedArea& pick) {
   if (pick.totalCount <= pick.usedCount || pick.usedCount <= 0)
     return {};
   if (pick.usedSelection) {
-    return QStringLiteral("조사구역 %1곳 중 선택한 %2곳에만 시굴격자를 깝니다.")
+    return QStringLiteral("조사구역 %1곳 중 선택한 %2곳에만 시굴격자를 놓습니다.")
         .arg(pick.totalCount)
         .arg(pick.usedCount);
   }
   return QStringLiteral(
-             "조사구역 %1곳이 남아 있어 마지막에 그린 구역에만 깝니다. "
-             "예전 구역을 쓰려면 그 구역을 선택한 뒤 다시 깔으세요.")
+             "조사구역 %1곳이 남아 있어 마지막에 그린 구역에만 시굴격자를 놓습니다. "
+             "예전 구역에 놓으려면 그 구역을 선택한 뒤 다시 누르세요.")
       .arg(pick.totalCount);
 }
 #endif
@@ -1850,7 +1805,7 @@ void MainWindow::startTrenchGrid() {
     return;
   if (m_surveyPath.isEmpty()) {
     notify(Notice::Info, QStringLiteral("시굴격자"),
-           QStringLiteral("먼저 「새 조사」로 GPKG를 만드세요."));
+           QStringLiteral("먼저 「새 조사」를 만들거나 「열기」로 조사를 여세요."));
     return;
   }
   // 시굴조사 도메인: 선택한(없으면 마지막) 조사구역만 규칙 배치로 덮고,
@@ -1907,12 +1862,9 @@ TrenchGridGenerator::SlopeAspect MainWindow::terrainAspectForArea(const QByteArr
   QgsProject* proj = QgsProject::instance();
   if (!proj) return none;
 
-  QgsRasterLayer* dem = nullptr;
-  for (QgsMapLayer* l : proj->mapLayers()) {
-    if (auto* rl = qobject_cast<QgsRasterLayer*>(l)) {
-      if (rl->name() == QLatin1String("DEM")) { dem = rl; break; }
-    }
-  }
+  // [int W1] By kind (ka_hgis/reference_kind = dem), so the renamed Copernicus DSM and an
+  // older project's untagged "DEM" layer are both found.
+  QgsRasterLayer* dem = BasemapDsm::findDem(proj);
   if (!dem || !dem->dataProvider()) return none;
 
   QgsGeometry area;
@@ -1968,20 +1920,23 @@ bool MainWindow::applyTrenchFromDialog() {
     // 시굴 10% · 표본 2%는 길이·둑을 프로그램이 맞춘다. 「직접 지정」만 사용자 규격.
     const double target = m_trenchDlg->targetPct();
     std::vector<TrenchGridGenerator::Cell> cells;
-    if (target > 0.0) {
-      const auto plan = TrenchGridGenerator::buildForTargetRatio(
-          m_trenchDlg->areaWkb(), target, 2.0, sp.azimuthDeg);
+    QString noGridReason;  // [pkg B2] F047: why nothing fits (e.g. a self-crossing boundary)
+    if (m_trenchDlg->ratioMode()) {
+      // [pkg B2] F097: the plan the dialog preview already searched (cached), not a second search.
+      const auto plan = TrenchPlanCache::ratioPlan(m_trenchDlg->areaWkb(), target, 2.0, sp.azimuthDeg);
       if (plan.cells.empty()) {
         notify(Notice::Warning, QStringLiteral("시굴격자"), plan.error);
         return false;
       }
       cells = plan.cells;
     } else {
-      cells = TrenchGridGenerator::buildInArea(sp, m_trenchDlg->areaWkb());
+      cells = TrenchGridGenerator::buildInArea(sp, m_trenchDlg->areaWkb(), &noGridReason);
     }
     if (cells.empty()) {
       notify(Notice::Warning, QStringLiteral("시굴격자"),
-             QStringLiteral("현재 규격과 방향으로 구역 안에 격자를 배치하지 못했습니다. 회전이나 규격을 바꿔 다시 적용하세요. 기존 격자는 유지됩니다."));
+             noGridReason.isEmpty()
+                 ? QStringLiteral("현재 규격과 방향으로 구역 안에 격자를 배치하지 못했습니다. 회전이나 규격을 바꿔 다시 적용하세요. 기존 격자는 유지됩니다.")
+                 : noGridReason + QStringLiteral(" 기존 격자는 유지됩니다."));
       return false;
     }
     if (!applyTrenchCells(cells, m_trenchDlg->areaM2(), target, areaCrs))
@@ -2045,7 +2000,7 @@ void MainWindow::beginTrenchOriginPick() {
             });
   }
   m_canvas->setMapTool(m_trenchOriginTool);
-  statusBar()->showMessage(QStringLiteral("시굴격자: 원점을 맵에서 클릭하세요."), 0);
+  statusBar()->showMessage(QStringLiteral("시굴격자: 놓을 자리(원점)를 지도에서 누르세요."), 0);
 #endif
 }
 
@@ -2067,7 +2022,7 @@ void MainWindow::applyTrenchByRatio(double targetPct) {
 #if KA_HGIS_HAS_QGIS
   if (m_surveyPath.isEmpty()) {
     notify(Notice::Info, QStringLiteral("시굴격자"),
-           QStringLiteral("먼저 「새 조사」로 GPKG를 만드세요."));
+           QStringLiteral("먼저 「새 조사」를 만들거나 「열기」로 조사를 여세요."));
     return;
   }
   QgsVectorLayer* areaVl = LayerOps::findByLayerKey(QgsProject::instance(),
@@ -2091,9 +2046,9 @@ void MainWindow::applyTrenchByRatio(double targetPct) {
   if (!pick.usedSelection && pick.totalCount > 1) {
     QMessageBox box(this);
     box.setWindowTitle(QStringLiteral("시굴격자"));
-    box.setText(QStringLiteral("조사구역이 %1곳입니다. 어디에 깔까요?").arg(pick.totalCount));
+    box.setText(QStringLiteral("조사구역이 %1곳입니다. 시굴격자를 어디에 놓을까요?").arg(pick.totalCount));
     box.setInformativeText(
-        QStringLiteral("「전체」를 고르면 %1곳을 합친 면적으로 비율을 계산해 모든 구역에 깝니다.\n"
+        QStringLiteral("「전체」를 고르면 %1곳을 합친 면적으로 비율을 계산해 모든 구역에 시굴격자를 놓습니다.\n"
                        "예전 조사의 구역이 남아 있다면 「마지막 구역만」을 고르세요.")
             .arg(pick.totalCount));
     QPushButton* all = box.addButton(QStringLiteral("전체 %1곳").arg(pick.totalCount),
@@ -2115,8 +2070,11 @@ void MainWindow::applyTrenchByRatio(double targetPct) {
            QStringLiteral("조사구역 면을 찾지 못했습니다."));
     return;
   }
+  // [pkg B2] F022/F097: same terrain direction as the dialog (trenches across the contours;
+  // no DEM or flat ground = 0°), through the shared plan cache.
+  const TrenchGridGenerator::SlopeAspect aspect = terrainAspectForArea(pick.wkb, areaVl->crs().authid());
   const TrenchGridGenerator::RatioFill plan =
-      TrenchGridGenerator::buildForTargetRatio(pick.wkb, targetPct, 2.0);
+      TrenchPlanCache::ratioPlan(pick.wkb, targetPct, 2.0, aspect.valid ? aspect.azimuthDeg : 0.0);
   if (plan.cells.empty()) {
     notify(Notice::Warning, QStringLiteral("시굴격자"), plan.error);
     return;
@@ -2130,7 +2088,6 @@ void MainWindow::applyTrenchByRatio(double targetPct) {
 bool MainWindow::applyTrenchCells(const std::vector<TrenchGridGenerator::Cell>& cells,
                                   double areaM2, double targetPct, const QString& sourceCrs) {
 #if KA_HGIS_HAS_QGIS
-  QString err;
   if (cells.empty() || (targetPct > 0.0 &&
       (!(areaM2 > 0.0) || !std::isfinite(areaM2) ||
        std::abs(TrenchGridGenerator::totalArea(cells) - areaM2 * targetPct / 100.0) >
@@ -2139,32 +2096,29 @@ bool MainWindow::applyTrenchCells(const std::vector<TrenchGridGenerator::Cell>& 
            QStringLiteral("목표 면적에 맞는 격자를 계산하지 못했습니다. 방향과 규격을 확인해 다시 적용하세요. 기존 격자는 유지됩니다."));
     return false;
   }
-  if (auto* existing = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("trial_trench"));
-      existing && existing->isModified()) {
-    notify(Notice::Warning, QStringLiteral("시굴격자"),
-           QStringLiteral("시굴격자에 저장하지 않은 편집이 있습니다. 먼저 저장한 뒤 다시 만드세요. 현재 편집은 그대로 유지됩니다."));
-    return false;
-  }
   // Auto-fill cells are in the survey layer CRS, even if the canvas has since
   // changed work CRS. Preserve that identity; QGIS transforms them for display.
   const QString auth = !sourceCrs.isEmpty() ? sourceCrs
                        : QgsProject::instance() && QgsProject::instance()->crs().isValid()
                            ? QgsProject::instance()->crs().authid()
                            : QStringLiteral("EPSG:5186");
-  if (!TrenchGridGenerator::writeGpkg(m_surveyPath, QStringLiteral("trial_trench"), cells, auth, &err)) {
-    notify(Notice::Warning, QStringLiteral("시굴격자"),
-           QStringLiteral("격자를 조사 파일에 저장하지 못했습니다. 저장 위치와 파일 사용 상태를 확인하고 다시 적용하세요."), err);
+  // [pkg B2] F003/F156: a grid already on the map is replaced as one Ctrl+Z step (written on
+  // 저장); unsaved hand edits still block it and a hand-adjusted grid is replaced only after
+  // asking. The first grid of a survey is written and loaded as before.
+  const TrenchLayerEdit::PlaceResult placed = TrenchLayerEdit::placeGrid(
+      QgsProject::instance(), m_surveyPath, cells, auth,
+      [this] { return ensureDomainLayerForEdit(QStringLiteral("trial_trench"), QStringLiteral("시굴격자")); },
+      [this](qint64 count) { return KaTrenchDialog::confirmReplaceAdjusted(this, count); });
+  if (placed.outcome == TrenchLayerEdit::PlaceOutcome::Kept) {
+    statusBar()->showMessage(placed.message, 6000);
     return false;
   }
-  auto* vl = ensureDomainLayerForEdit(QStringLiteral("trial_trench"), QStringLiteral("시굴격자"));
-  if (!vl) {
-    notify(Notice::Warning, QStringLiteral("시굴격자"),
-           QStringLiteral("격자는 파일에 저장했지만 지도에 불러오지 못했습니다. 조사를 다시 열어 확인하세요."));
+  if (placed.outcome != TrenchLayerEdit::PlaceOutcome::Placed || !placed.layer) {
+    notify(Notice::Warning, QStringLiteral("시굴격자"), placed.message, placed.detail);
     return false;
   }
-  vl->dataProvider()->reloadData();
-  vl->updateExtents();
-  vl->triggerRepaint();
+  QgsProject::instance()->setDirty(true);
+  updateUndoRedoActions();
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   const double t = TrenchGridGenerator::totalArea(cells);
   QString msg = QStringLiteral("시굴격자 %1개 · 총 %2㎡")
@@ -2214,13 +2168,18 @@ void MainWindow::activateTrenchTool(bool single) {
     connect(m_trenchMoveTool, &KaTrenchMoveTool::statusMessage, this, [this](const QString& t) {
       statusBar()->showMessage(t, 6000);
     });
+    // [pkg B2] F003: moves/deletes are unsaved, undoable edits; the title ' *' and Ctrl+Z follow them.
+    connect(m_trenchMoveTool, &KaTrenchMoveTool::trenchesEdited, this, [this]() {
+      QgsProject::instance()->setDirty(true);
+      updateUndoRedoActions();
+    });
   }
   m_trenchMoveTool->setLayer(vl);
   double snapM = 0.0;
   if (m_mapGrid && m_mapGrid->isEnabled())
     snapM = m_mapGrid->stepMeters();
-  else if (m_mapGridStep)
-    snapM = m_mapGridStep->value();
+  else if (m_gridControls)
+    snapM = m_gridControls->stepMeters();
   m_trenchMoveTool->setSnapMeters(snapM);
   m_trenchMoveTool->setGridOverlay(m_mapGrid);
   m_trenchMoveTool->setMode(single ? KaTrenchMoveTool::Mode::Single
@@ -2232,28 +2191,27 @@ void MainWindow::activateTrenchTool(bool single) {
 #endif
 }
 
-void MainWindow::toggleMapGrid() {
+void MainWindow::applyMapGrid(bool announce) {
 #if KA_HGIS_HAS_QGIS
-  if (!m_canvas)
+  if (!m_canvas || !m_gridControls)
     return;
   if (!m_mapGrid)
     m_mapGrid = new KaCanvasGridOverlay(m_canvas);
+  const KaShellGridSettings s = m_gridControls->settings();
   KaCanvasGridOverlay::Config cfg = m_mapGrid->config();
-  cfg.enabled = m_mapGridCheck && m_mapGridCheck->isChecked();
-  cfg.stepMeters = m_mapGridStep ? m_mapGridStep->value() : 20.0;
-  cfg.rotationDeg = m_mapGridRot ? m_mapGridRot->value() : 0.0;
-  cfg.lineWidth = m_mapGridWidth ? m_mapGridWidth->value() : 1.2;
-  cfg.penStyle = m_mapGridDash
-                     ? static_cast<Qt::PenStyle>(m_mapGridDash->currentData().toInt())
-                     : Qt::DashLine;
-  if (m_mapGridColor.isValid())
-    cfg.color = m_mapGridColor;
-  cfg.type = (QApplication::keyboardModifiers() & Qt::ShiftModifier)
-                 ? KaCanvasGridOverlay::Type::GeographicDms
-                 : KaCanvasGridOverlay::Type::ProjectedMeters;
+  cfg.enabled = s.enabled;
+  cfg.type = s.geographic ? KaCanvasGridOverlay::Type::GeographicDms
+                          : KaCanvasGridOverlay::Type::ProjectedMeters;
+  cfg.stepMeters = s.stepMeters;
+  cfg.rotationDeg = s.rotationDeg;
+  cfg.lineWidth = s.lineWidth;
+  cfg.penStyle = s.penStyle;
+  if (s.color.isValid())
+    cfg.color = s.color;
+  // The grid is a canvas item: repainting it does not need a full map render.
   m_mapGrid->setConfig(cfg);
-  m_mapGrid->setEnabled(cfg.enabled);
-  m_canvas->refresh();
+  if (!announce)
+    return;
   statusBar()->showMessage(
       cfg.enabled
           ? (cfg.type == KaCanvasGridOverlay::Type::GeographicDms
@@ -2261,28 +2219,9 @@ void MainWindow::toggleMapGrid() {
                  : QStringLiteral("미터 좌표 격자를 켰습니다."))
           : QStringLiteral("좌표 격자를 껐습니다."),
       4000);
+#else
+  Q_UNUSED(announce);
 #endif
-}
-
-void MainWindow::setMapGridColor(const QColor& color) {
-  if (!color.isValid())
-    return;
-  m_mapGridColor = color;
-  syncMapGridColorButtons();
-  // 색만 바꿔도 바로 보이게 한다. 격자가 꺼져 있으면 켜지지 않고 값만 남는다.
-  if (m_mapGridCheck && m_mapGridCheck->isChecked())
-    toggleMapGrid();
-}
-
-void MainWindow::syncMapGridColorButtons() {
-  for (QToolButton* b : m_mapGridColorBtns) {
-    if (!b) continue;
-    const QSignalBlocker block(b);
-    // 툴팁 색과 현재 색이 같은 단추만 눌린 모양으로 둔다.
-    b->setChecked(b->toolTip().startsWith(QStringLiteral("빨간색")) ? m_mapGridColor == QColor(0xD9, 0x2B, 0x2B)
-                  : b->toolTip().startsWith(QStringLiteral("파란색")) ? m_mapGridColor == QColor(0x1D, 0x4E, 0xD8)
-                  : m_mapGridColor == QColor(0x1F, 0x29, 0x37));
-  }
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
@@ -2428,58 +2367,7 @@ void MainWindow::onLayerTreeRowsMoved() {
   LayerOps::refreshCanvasIfIdle(m_canvas);
 }
 
-void MainWindow::moveSelectedLayer(int dir) {
-#if KA_HGIS_HAS_QGIS
-  if (!m_layerTree || !QgsProject::instance()) return;
-  QgsLayerTreeNode* node = m_layerTree->currentNode();
-  if (!node || node->nodeType() != QgsLayerTreeNode::NodeLayer) return;
-  auto* parent = qobject_cast<QgsLayerTreeGroup*>(node->parent());
-  if (!parent) parent = QgsProject::instance()->layerTreeRoot();
-  if (!parent) return;
-  const int idx = parent->children().indexOf(node);
-  if (idx < 0) return;
-  const int dest = idx + dir;
-  if (dest < 0 || dest >= parent->children().size()) return;
-  QPointer<QgsMapLayer> layer = QgsLayerTree::toLayer(node)->layer();
-  if (LayerOps::moveLegendLayer(QgsLayerTree::toLayer(node), dest)) {
-    onLayerTreeRowsMoved();
-    if (layer) m_layerTree->setCurrentLayer(layer);
-  }
-#else
-  Q_UNUSED(dir);
-#endif
-}
-
 namespace {
-
-class FileListView : public QListWidget {
-public:
-  explicit FileListView(QWidget* parent = nullptr) : QListWidget(parent) {
-    setDragEnabled(true);
-    setDragDropMode(QAbstractItemView::DragOnly);
-    setDefaultDropAction(Qt::CopyAction);
-    setSelectionMode(QAbstractItemView::ExtendedSelection);
-    setUniformItemSizes(true);
-    setIconSize(QSize(0, 0));
-  }
-
-protected:
-  void startDrag(Qt::DropActions) override {
-    QList<QUrl> urls;
-    const auto items = selectedItems();
-    for (QListWidgetItem* it : items) {
-      if (!it || it->data(Qt::UserRole + 1).toBool()) continue;
-      const QString p = it->data(Qt::UserRole).toString();
-      if (!p.isEmpty()) urls.append(QUrl::fromLocalFile(p));
-    }
-    if (urls.isEmpty()) return;
-    auto* md = new QMimeData;
-    md->setUrls(urls);
-    QDrag drag(this);
-    drag.setMimeData(md);
-    drag.exec(Qt::CopyAction);
-  }
-};
 
 void kaPaintColorButton(QPushButton* b, const QColor& c, const QString& suffix) {
   if (!b) return;
@@ -2516,26 +2404,6 @@ QWidget* kaWrapLabeled(QWidget* parent, const QString& caption, QWidget* inner) 
   v->addWidget(lab);
   v->addWidget(inner);
   return box;
-}
-
-QDoubleSpinBox* kaMakeArrowSpin(QWidget* parent, QWidget** rowOut, double minV, double maxV,
-                                double step, int decimals, double value) {
-  auto* row = new QWidget(parent);
-  auto* h = new QHBoxLayout(row);
-  h->setContentsMargins(0, 0, 0, 0);
-  h->setSpacing(0);
-  auto* spin = new QDoubleSpinBox(row);
-  spin->setButtonSymbols(QAbstractSpinBox::UpDownArrows);
-  spin->setRange(minV, maxV);
-  spin->setSingleStep(step);
-  spin->setDecimals(decimals);
-  spin->setSuffix(QStringLiteral(" mm"));
-  spin->setValue(value);
-  spin->setMinimumHeight(29);
-  spin->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-  h->addWidget(spin, 1);
-  if (rowOut) *rowOut = row;
-  return spin;
 }
 
 }  // namespace
@@ -2661,7 +2529,7 @@ void MainWindow::importControlCsv() {
   box.setWindowTitle(QStringLiteral("기준점 미리보기"));
   box.setText(preview.summary);
   auto* keep = qobject_cast<QPushButton*>(box.addButton(QStringLiteral("이대로 가져오기"), QMessageBox::AcceptRole));
-  auto* swap = qobject_cast<QPushButton*>(box.addButton(QStringLiteral("X·Y 교환"), QMessageBox::ActionRole));
+  auto* swap = qobject_cast<QPushButton*>(box.addButton(QStringLiteral("X·Y 바꿔서 가져오기"), QMessageBox::ActionRole));
   box.addButton(QStringLiteral("취소"), QMessageBox::RejectRole);
   box.setDefaultButton(preview.swapSuggested ? swap : keep);
   box.exec();
@@ -2675,7 +2543,6 @@ void MainWindow::importControlCsv() {
   m_stubHasMeta = true;
   if (m_canvas) m_canvas->refresh();
   statusBar()->showMessage(QStringLiteral("CSV 기준점 %1개 저장 (합 %2)").arg(n).arg(m_stubGcp), 6000);
-  refreshWorkPanel();
 #else
   Q_UNUSED(path);
   statusBar()->showMessage(QStringLiteral("스텁: CSV"), 3000);
@@ -2720,7 +2587,7 @@ void MainWindow::openVectorLayer() {
                                    false);
   const QString nameField = LayerOps::detectNameField(layer);
   if (!nameField.isEmpty()) {
-    LayerOps::applyNameAttributeLabels(layer, nameField, 5.0, false);
+    LayerOps::applyNameAttributeLabels(layer, nameField, LayerOps::kDefaultLabelSizePt, false);  // [pkg E1] F145
   }
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
   if (!layer->crs().isValid() && QgsProject::instance() &&
@@ -2871,8 +2738,8 @@ void MainWindow::searchLocation(const QString& query, bool parcel) {
   m_locationSearchBusy = true;
   statusBar()->showMessage(QStringLiteral("위치 검색 중… %1").arg(q), 0);
   if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); }
-  m_searchProgress = createDownloadProgress(QStringLiteral("위치 자료"));
-  m_searchProgress->setWindowTitle(QStringLiteral("위치 검색"));
+  // 검색은 내려받기가 아니다. 무엇을 찾는지 말하는 전용 문구를 쓴다(「위치 자료 자료」 겹침 없음).
+  m_searchProgress = KaShellUi::createSearchProgress(this, q);
   connect(m_searchProgress, &QProgressDialog::canceled, this, [this]() {
     m_locator->cancel();
     m_locationSearchBusy = false;
@@ -2882,94 +2749,6 @@ void MainWindow::searchLocation(const QString& query, bool parcel) {
   m_searchProgress->show();
   if (parcel) m_locator->searchParcel(q);
   else m_locator->search(q);
-}
-
-void MainWindow::applySurfaceSurveyFieldMap(const QString& sido, const QString& city,
-                                            const QString& dong) {
-#if KA_HGIS_HAS_QGIS
-  if (!m_adminBoundary) return;
-  statusBar()->showMessage(
-      QStringLiteral("읍면동 경계를 받는 중… %1 %2 %3").arg(sido, city, dong), 0);
-  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); }
-  m_boundaryProgress = createDownloadProgress(QStringLiteral("읍면동 경계"));
-  connect(m_boundaryProgress, &QProgressDialog::canceled, this, [this]() {
-    m_adminBoundary->cancel();
-    if (m_boundaryProgress) { m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
-    statusBar()->showMessage(QStringLiteral("읍면동 경계 내려받기를 취소했습니다."), 4000);
-  });
-  m_boundaryProgress->show();
-  m_adminBoundary->fetchEmd(sido, city, dong);
-#else
-  Q_UNUSED(sido);
-  Q_UNUSED(city);
-  Q_UNUSED(dong);
-#endif
-}
-
-void MainWindow::onAdminBoundaryFailed(const QString& message) {
-  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
-  statusBar()->showMessage(message, 8000);
-  QMessageBox::warning(this, QStringLiteral("현장 지도"), message);
-}
-
-void MainWindow::onAdminBoundaryFetched(const AdminBoundaryParse& parsed) {
-  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
-#if KA_HGIS_HAS_QGIS
-  if (!parsed.ok) {
-    onAdminBoundaryFailed(parsed.error);
-    return;
-  }
-  const QgsGeometry geom = QgsGeometry::fromWkt(parsed.wkt);
-  if (geom.isEmpty()) {
-    onAdminBoundaryFailed(QStringLiteral("읍면동 경계를 읽지 못했습니다"));
-    return;
-  }
-  QgsProject* proj = QgsProject::instance();
-  QString satErr;
-  const bool satAdded = LayerOps::addVworldSatelliteMap(proj, m_canvas, VworldSettings::loadApiKey(),
-                                                        &satErr);
-  bool hasSat = satAdded;
-  if (!hasSat) {
-    for (QgsMapLayer* l : proj->mapLayers()) {
-      if (l && l->name().contains(QStringLiteral("위성"))) {
-        hasSat = true;
-        break;
-      }
-    }
-  }
-  if (!hasSat) {
-    onAdminBoundaryFailed(satErr.isEmpty() ? QStringLiteral("위성을 올리지 못했습니다") : satErr);
-    return;
-  }
-  QgsVectorLayer* mask = LayerOps::upsertAdminEmdMask(
-      QgsProject::instance(), geom, QgsCoordinateReferenceSystem(parsed.crsAuthId), m_workCrs,
-      parsed.title);
-  if (!mask) {
-    onAdminBoundaryFailed(QStringLiteral("읍면동 마스크를 만들지 못했습니다"));
-    return;
-  }
-  QgsVectorLayer* site = LayerOps::findImportedSiteLayer(QgsProject::instance());
-  if (!site) {
-    QMessageBox::information(
-        this, QStringLiteral("현장 지도"),
-        QStringLiteral("유적 SHP를 고르세요. 번호·이름 필드가 있으면 라벨로 씁니다."));
-    openVectorLayer();
-    site = LayerOps::findImportedSiteLayer(QgsProject::instance());
-  }
-  LayerOps::isolateSurfaceSurveyView(QgsProject::instance(), m_canvas, site);
-  LayerOps::ensureSatelliteAtBottom(QgsProject::instance());
-  if (m_canvas) {
-    LayerOps::zoomToLayerMax(m_canvas, mask);
-    LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
-    LayerOps::refreshCanvasIfIdle(m_canvas);
-  }
-  if (m_drawingStudio)
-    m_drawingStudio->repaintMapLayers();
-  statusBar()->showMessage(
-      QStringLiteral("현장 지도: %1 — 위성은 이 읍면동만, 위는 유적").arg(parsed.title), 8000);
-#else
-  Q_UNUSED(parsed);
-#endif
 }
 
 void MainWindow::onLocationFailed(const QString& message) {
@@ -3007,34 +2786,8 @@ void MainWindow::onLocationResults(const QVector<LocationHit>& hits) {
     zoomToLocation(hits.at(idx));
 }
 
-// 핀과 이름표를 지운다. 검색은 지도만 옮기고 이 표식을 다시 그리지 않는다.
-void MainWindow::markFoundLocation(const QgsPointXY& mapPt, const QString& title) {
-#if KA_HGIS_HAS_QGIS
-  if (!m_canvas) return;
-  if (!m_locationMark)
-    m_locationMark = new KaFoundLocationMark(m_canvas);
-  m_locationMark->setLocation(mapPt, title);
-  m_locationMark->show();
-  m_locationMarkTitle = title;
-#else
-  Q_UNUSED(mapPt);
-  Q_UNUSED(title);
-#endif
-}
-
-void MainWindow::clearFoundLocationMark() {
-#if KA_HGIS_HAS_QGIS
-  if (m_locationMark) {
-    delete m_locationMark;
-    m_locationMark = nullptr;
-  }
-  m_locationMarkTitle.clear();
-#endif
-}
-
 void MainWindow::zoomToLocation(const LocationHit& hit) {
 #if KA_HGIS_HAS_QGIS
-  clearFoundLocationMark();
   if (!m_canvas) return;
   double lon = hit.lon;
   double lat = hit.lat;
@@ -3086,9 +2839,13 @@ void MainWindow::zoomToLocation(const LocationHit& hit) {
             .arg(dest.authid()),
         10000);
   } catch (const QgsCsException& e) {
-    QMessageBox::warning(this, QStringLiteral("좌표 변환"), e.what());
+    // [pkg B1] F077: the exception text goes only under 자세히 (QgsException::what() is a QString).
+    KaEditErrors::show(this, {QStringLiteral("위치"), QStringLiteral("찾은 위치로 지도를 옮기지 못했습니다."),
+                              QStringLiteral("찾은 좌표를 지금 작업 좌표계로 바꾸지 못했습니다."),
+                              QStringLiteral("작업 좌표계(5186/5187)를 확인한 뒤 다시 검색하세요.")},
+                       e.what());
   } catch (...) {
-    KaCrashGuard::logLine(QStringLiteral("[except] app/MainWindow.cpp:8404"));
+    KA_LOG_EXCEPT();
     QMessageBox::warning(this, QStringLiteral("위치"), QStringLiteral("좌표 변환 실패"));
   }
 #else
@@ -3206,10 +2963,10 @@ bool MainWindow::addVectorFromPath(const QString& path) {
       LayerOps::markSurveyLayer(layer, QStringLiteral("user:%1").arg(title));
     LayerOps::applySimpleVectorStyle(layer, QColor(0, 0, 0, 0), QColor(0, 0, 0), 0.2, 3.5, true,
                                      false);
-    // SHP 등 벡터 레이어 추가 시 명칭 속성 5PT 자동 라벨링 적용
+    // SHP 등 벡터 레이어 추가 시 명칭 속성 기본 크기 자동 라벨링
     const QString nameField = LayerOps::detectNameField(layer);
     if (!nameField.isEmpty()) {
-      LayerOps::applyNameAttributeLabels(layer, nameField, 5.0, false);
+      LayerOps::applyNameAttributeLabels(layer, nameField, LayerOps::kDefaultLabelSizePt, false);  // [pkg E1] F145
     }
     LayerOps::applyLegendCrsLabel(layer);
     QgsProject::instance()->addMapLayer(layer, true);
@@ -3299,7 +3056,7 @@ void MainWindow::showAbout() {
       QStringLiteral("\n") + KaSessionLog::buildLabel() +
       QStringLiteral("\n동국문화재연구원 · 만든이: 권영인 · 조유량 · 박종환\n\n"
                      "QGIS를 포크하지 않고 qgis_core / qgis_gui를 링크합니다.\n"
-                     "작업 CRS: EPSG:5186/5187 · 업로드: EPSG:5179\n\n"
+                     "작업 좌표계: EPSG:5186/5187 · 제출: EPSG:5179\n\n"
                      "저작권·라이선스\n") + KaStartupSplash::attributionText() +
       QStringLiteral("\n선택한 지도에 따라 OpenStreetMap·CARTO·OpenTopoMap·NASA GIBS·"
                      "Copernicus DEM·Google 자료를 사용합니다. 각 제공처의 표시·이용조건을 따릅니다.\n\n"
@@ -3399,7 +3156,7 @@ void MainWindow::ensureHeritageBrowser() {
 // 판정 결과를 확인받고 받기를 시작한다. 시·군 경계에 걸친 조사가 흔해서 이 한 번은 묻는다.
 void MainWindow::openHeritageBrowserFor(const HeritageRegion& region, const QString& reason) {
   ensureHeritageBrowser();
-  KaHeritageRegionDialog choice(region.sido, region.city, reason, m_heritageBrowser);
+  KaHeritageRegionDialog choice(region, reason, m_heritageBrowser);  // F120: 5 km neighbours listed
   if (choice.exec() != QDialog::Accepted) {
     m_heritageBrowser->showWaiting(QStringLiteral("취소했습니다."));
     return;
@@ -3431,6 +3188,7 @@ void MainWindow::openHeritageBrowserFor(const HeritageRegion& region, const QStr
 
   m_heritageBrowser->setDownloadRoot(root);
   m_heritageBrowser->setTarget(sido, city, HeritageStyle::allDatasets());
+  m_heritageBrowser->setFetchPlan(choice.plan());  // F120 neighbours, F174 reuse
   m_heritageBrowser->show();
   m_heritageBrowser->raise();
   m_heritageBrowser->start();
@@ -3450,12 +3208,16 @@ HeritageImport::Result MainWindow::importHeritageDataset(HeritageDataset dataset
   QDir().mkpath(archiveRoot);
 
   const HeritageImport::Result result =
-      HeritageImport::loadDataset(QgsProject::instance(), dataset, files, archiveRoot);
+      HeritageImport::loadDataset(QgsProject::instance(), dataset, files, archiveRoot,
+                                  m_heritageBrowser ? m_heritageBrowser->regionLabelForImport()
+                                                    : QString());
   for (const QString& message : result.messages)
     statusBar()->showMessage(message, 8000);
   if (!result.ok()) {
     return result;
   }
+  // F120: nothing of this 시·군 lies inside 5 km. The message above already says so.
+  if (result.emptyInScope) return result;
   LayerOps::applyLayerOrderToLabels(QgsProject::instance(), m_canvas);
   if (m_canvas)
     LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);

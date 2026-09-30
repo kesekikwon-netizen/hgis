@@ -13,13 +13,43 @@
 #include <cmath>
 #include <gdal.h>
 #include <memory>
-#include <qgsmaprendererparalleljob.h>
+#include <QPainter>
+#include <qgsmaprenderersequentialjob.h>
 #include <qgsmapsettings.h>
 #include <qgsproject.h>
 #include <qgsproviderregistry.h>
 #include <qgsrasterlayer.h>
+#include <qgsvectorlayer.h>
 
 namespace {
+enum class RenderResult { Ok, Canceled, Failed };
+
+// Same job type as the canvas with parallel rendering off: one worker renders
+// the layers in order. QgsMapRendererParallelJob and provider_wms nested loops
+// crashed in the field (2026-08-31), so the export never uses it.
+RenderResult renderSequential(const QgsMapSettings& settings, const std::function<bool()>& isCanceled,
+                              QImage* image) {
+  QgsMapRendererSequentialJob job(settings);
+  QEventLoop loop;
+  QTimer cancellationTimer;
+  bool wasCanceled = false;
+  QObject::connect(&job, &QgsMapRendererJob::finished, &loop, &QEventLoop::quit);
+  QObject::connect(&cancellationTimer, &QTimer::timeout, &loop, [&]() {
+    if (isCanceled()) {
+      wasCanceled = true;
+      job.cancelWithoutBlocking();
+    }
+  });
+  cancellationTimer.start(50);
+  job.start();
+  if (job.isActive()) loop.exec();
+  cancellationTimer.stop();
+  if (wasCanceled || isCanceled()) return RenderResult::Canceled;
+  if (!job.errors().isEmpty()) return RenderResult::Failed;
+  *image = job.renderedImage();
+  return image->isNull() ? RenderResult::Failed : RenderResult::Ok;
+}
+
 bool fail(QString* error, const QString& message) {
   if (error) *error = message;
   return false;
@@ -55,7 +85,8 @@ bool isSourceRaster(const QgsMapSettings& settings, const QString& path) {
 }
 
 bool MapGeoTiffExport::write(const QgsMapSettings& snapshot, const QString& path,
-                           QString* error, std::function<bool()> canceled) {
+                           QString* error, std::function<bool()> canceled,
+                           const QList<QgsMapLayer*>& overlayLayers) {
   if (error) error->clear();
   const auto isCanceled = [&]() { return canceled && canceled(); };
   const auto cancel = [&]() { return fail(error, QStringLiteral("GeoTIFF 내보내기를 취소했습니다.")); };
@@ -70,7 +101,13 @@ bool MapGeoTiffExport::write(const QgsMapSettings& snapshot, const QString& path
   if (size.width() <= 0 || size.height() <= 0 || size.width() > 8192 || size.height() > 8192 ||
       qint64(size.width()) * size.height() > 32000000)
     return fail(error, QStringLiteral("지도 영상은 한 변 8,192픽셀, 총 3,200만 픽셀 이내여야 합니다."));
-  if (settings.layers().isEmpty())
+  // The canvas leaves the above-labels layers out of its own list; they come back here.
+  QList<QgsMapLayer*> overlay;
+  for (QgsMapLayer* layer : overlayLayers) {
+    if (layer && layer->isValid() && !settings.layers().contains(layer) && !overlay.contains(layer))
+      overlay.append(layer);
+  }
+  if (settings.layers().isEmpty() && overlay.isEmpty())
     return fail(error, QStringLiteral("현재 지도에 표시할 레이어가 없습니다."));
   for (QgsMapLayer* layer : settings.layers()) {
     if (!layer || !layer->isValid())
@@ -81,25 +118,40 @@ bool MapGeoTiffExport::write(const QgsMapSettings& snapshot, const QString& path
   if (isSourceRaster(settings, path))
     return fail(error, QStringLiteral("현재 조사의 원본 영상은 덮어쓸 수 없습니다. 다른 파일 이름을 지정해 주세요."));
 
-  QgsMapRendererParallelJob job(settings);
-  QEventLoop loop;
-  QTimer cancellationTimer;
-  bool wasCanceled = false;
-  QObject::connect(&job, &QgsMapRendererJob::finished, &loop, &QEventLoop::quit);
-  QObject::connect(&cancellationTimer, &QTimer::timeout, &loop, [&]() {
-    if (isCanceled()) {
-      wasCanceled = true;
-      job.cancelWithoutBlocking();
+  const QString partial =
+      QStringLiteral("지도 일부를 그리지 못해 저장하지 않았습니다. 배경 지도 연결과 레이어 상태를 확인해 주세요.");
+  QImage rendered;
+  RenderResult result = renderSequential(settings, isCanceled, &rendered);
+  if (result == RenderResult::Canceled) return cancel();
+  if (result == RenderResult::Failed) return fail(error, partial);
+  rendered = rendered.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+  if (!overlay.isEmpty()) {
+    // Shapes once without labels, then only the labels of labelled layers, like
+    // KaAboveLabelsOverlay does on screen.
+    QgsMapSettings above(settings);
+    above.setLayers(overlay);
+    above.setBackgroundColor(Qt::transparent);
+    above.setFlag(Qgis::MapSettingsFlag::DrawLabeling, false);
+    QList<QgsMapLayer*> labeled;
+    for (QgsMapLayer* layer : overlay) {
+      auto* vector = qobject_cast<QgsVectorLayer*>(layer);
+      if (vector && vector->labelsEnabled() && vector->labeling()) labeled.append(layer);
     }
-  });
-  cancellationTimer.start(50);
-  job.start();
-  if (job.isActive()) loop.exec();
-  cancellationTimer.stop();
-  if (wasCanceled || isCanceled()) return cancel();
-  if (!job.errors().isEmpty())
-    return fail(error, QStringLiteral("지도 일부를 그리지 못해 저장하지 않았습니다. 배경 지도 연결과 레이어 상태를 확인해 주세요."));
-  const QImage image = job.renderedImage().convertToFormat(QImage::Format_RGB888);
+    QgsMapSettings labels(above);
+    labels.setLayers(labeled);
+    labels.setFlag(Qgis::MapSettingsFlag::DrawLabeling, true);
+    labels.setFlag(Qgis::MapSettingsFlag::SkipSymbolRendering, true);
+    QPainter painter(&rendered);
+    for (const QgsMapSettings* pass : {&above, &labels}) {
+      if (pass->layers().isEmpty()) continue;
+      QImage layerImage;
+      result = renderSequential(*pass, isCanceled, &layerImage);
+      if (result == RenderResult::Canceled) return cancel();
+      if (result == RenderResult::Failed) return fail(error, partial);
+      painter.drawImage(0, 0, layerImage);
+    }
+  }
+  const QImage image = rendered.convertToFormat(QImage::Format_RGB888);
   if (image.isNull() || image.size() != size)
     return fail(error, QStringLiteral("지도 영상을 만들지 못했습니다."));
 

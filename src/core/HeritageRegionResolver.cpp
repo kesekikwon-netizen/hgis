@@ -1,5 +1,6 @@
 #include "HeritageRegionResolver.h"
 
+#include "HeritageNearbyRegions.h"
 #include "KoreaRegionCatalog.h"
 #include "VworldSettings.h"
 
@@ -63,11 +64,20 @@ HeritageRegionResolver::HeritageRegionResolver(std::unique_ptr<QNetworkAccessMan
   connect(&m_deadline, &QTimer::timeout, this, [this]() {
     QgsProject* project = m_fallbackProject.data();
     const QgsPointXY point = m_lastPoint;
+    if (m_nearbyPhase) {
+      // 판정은 끝났다. 이웃 확인이 늦을 뿐이니 판정한 시/군으로 계속한다.
+      const HeritageRegion primary = m_primary;
+      const QList<HeritageCity> local = HeritageNearbyRegions::fromBoundaryLayers(project, m_scope);
+      cancel();
+      emitWithNearby(primary, local,
+                     QStringLiteral("주변 5km에 걸친 이웃 시·군 확인이 늦어 목록이 비어 있을 수 있습니다."));
+      return;
+    }
     cancel();
     // 시간 초과라고 바로 포기하지 않는다. 올라와 있는 행정경계로 한 번 더 본다.
     const HeritageRegion local = fromBoundaryLayers(project, point);
     if (local.ok()) {
-      emit resolved(local);
+      finishResolved(local, false);
       return;
     }
     emit failed(QStringLiteral("행정구역 서버의 응답 시간이 초과되었습니다. 시·군을 직접 고르세요."));
@@ -79,6 +89,7 @@ HeritageRegionResolver::~HeritageRegionResolver() { cancel(); }
 void HeritageRegionResolver::cancel() {
   m_deadline.stop();
   m_pending = false;
+  m_nearbyPhase = false;
   if (m_reply) {
     QNetworkReply* reply = m_reply.data();
     m_reply.clear();
@@ -174,7 +185,7 @@ HeritageRegion HeritageRegionResolver::parseAddress(const QByteArray& body, QStr
       if (code == QLatin1String("INVALID_KEY") || code == QLatin1String("INCORRECT_KEY")) {
         // Do not echo server text or a request URL: either can contain the key.
         *errorOut = QStringLiteral("VWorld API 키가 서버에서 거절되었습니다 (%1).\n"
-                                  "더보기 → VWorld API 키에 유효한 키를 저장한 뒤 다시 누르세요.\n"
+                                  "더보기 → API 키 입력에서 유효한 VWorld 키를 저장한 뒤 다시 누르세요.\n"
                                   "이 키는 조사구역의 자동 시·도 판정과 지적도에 함께 사용됩니다.").arg(code);
       } else {
         *errorOut = QStringLiteral("VWorld에서 조사구역의 주소를 받지 못했습니다. 잠시 뒤 다시 시도하세요.");
@@ -293,12 +304,13 @@ void HeritageRegionResolver::resolve(const QgsGeometry& surveyArea,
   const QgsPointXY wgs = toWgs84(lookupPoint(surveyArea), crs);
   m_fallbackProject = fallbackProject;
   m_lastPoint = wgs;
+  m_scope = HeritageNearbyRegions::scopeWgs84(surveyArea, crs);
 
   const QString key = VworldSettings::loadApiKey().trimmed();
   if (key.isEmpty()) {
     const HeritageRegion local = fromBoundaryLayers(fallbackProject, wgs);
     if (local.ok()) {
-      emit resolved(local);
+      finishResolved(local, false);
       return;
     }
     emit failed(QStringLiteral("VWorld 키가 없어 시·군을 판정하지 못했습니다. 더보기에서 키를 넣거나 시·군을 직접 고르세요."));
@@ -336,6 +348,6 @@ void HeritageRegionResolver::resolve(const QgsGeometry& surveyArea,
       return;
     }
     region.insideSidoBounds = insideSido(region.sido, wgs);
-    emit resolved(region);
+    finishResolved(region, true);
   });
 }

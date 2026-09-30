@@ -43,6 +43,8 @@ public:
   static std::optional<HeritageDataset> fromLayerName(const QString& name);
 
   // 조사 성과물과 섞이면 안 되는 색. 빨강은 조사구역, 회색은 수치지형도 밑그림이 쓴다.
+  // 앱이 스스로 색을 고를 때(종류별 자동 색)는 LayerStyleDefaults::isNearReservedColor 가
+  // 이 판정에 조사 기본색·주변유적 여섯 색 근처를 더해 피한다. 사용자가 고른 색은 검사하지 않는다.
   static bool isReservedColor(const QColor& c);
 
   static double outlineWidthMm();       // 조사 도형보다 얇게, 밑그림(0.2)보다는 굵게

@@ -3,28 +3,21 @@
 #include "KaIcons.h"
 #include "KaTheme.h"
 #include "core/ChecklistEngine.h"
-#include "core/ExportService.h"
+#include "core/GeometryEditOps.h"  // [int W4] F083 merge conflict question
 #include "core/LayerOps.h"
 #include "core/LayoutService.h"
 #include "core/MapGeoTiffExport.h"
 #include "core/ProjectStateBuilder.h"
 
-#include <QAction>
 #include <QCoreApplication>
-#include <QDateTime>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QInputDialog>
-#include <QLabel>
-#include <QLineEdit>
 #include <QMessageBox>
 #include <QProgressDialog>
-#include <QRandomGenerator>
 #include <QSet>
 #include <QStatusBar>
 #include <QTabWidget>
-#include <QToolBar>
 
 #include "KaDrawingStudio.h"
 #include "KaFeatureSelectTool.h"
@@ -54,56 +47,18 @@
 int MainWindow::lastChecklistErrorCount() const {
   if (m_lastChecklistErrors >= 0) return m_lastChecklistErrors;
   if (!m_checklist) return -1;
-  int err = 0;
-  for (const auto& r : m_checklist->evaluate(buildProjectState())) {
-    if (!r.passed && r.severity == QLatin1String("error")) ++err;
-  }
-  return err;
-}
-
-void MainWindow::showSubToolsSubmit() {
-#if KA_HGIS_HAS_QGIS
-  if (!m_subToolbar) return;
-  if (m_subToolsMode == QLatin1String("submit") && m_subToolbar->isVisible()) {
-    hideSubTools();
-    return;
-  }
-  clearSubToolbar();
-  m_subToolsMode = QStringLiteral("submit");
-  auto* lab = new QLabel(QStringLiteral("  제출 › "));
-  lab->setObjectName(QStringLiteral("subToolbarCaption"));
-  m_subToolbar->addWidget(lab);
-  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("check")), QStringLiteral("도면검수"),
-                          this, &MainWindow::runChecklist);
-  m_subToolbar->addAction(QStringLiteral("폴리곤 묶기"), this, &MainWindow::mergeFeaturePolygons);
-  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("export")), QStringLiteral("SHP패키지(5179)"),
-                          this, &MainWindow::exportShpPackage);
-  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("pdf")), QStringLiteral("도면만들기"),
-                          this, &MainWindow::openLayoutDesigner);
-  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("pdf")), QStringLiteral("도면PDF"),
-                          this, &MainWindow::exportReportLayout);
-  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("upload")), QStringLiteral("5179변환"),
-                          this, &MainWindow::convertSelectedTo5179);
-  auto* closeAct = m_subToolbar->addAction(QStringLiteral("닫기"));
-  connect(closeAct, &QAction::triggered, this, &MainWindow::hideSubTools);
-  m_subToolbar->setVisible(true);
-  statusBar()->showMessage(
-      QStringLiteral("다 그렸으면 도면을 만들고, 필요할 때만 업로드용으로 보내세요."),
-      12000);
-#endif
-}
-
-void MainWindow::rebuildLayouts() {
-#if KA_HGIS_HAS_QGIS
-  openLayoutDesigner();
-  statusBar()->showMessage(QStringLiteral("도면만들기에서 용지를 다시 배치하세요."), 6000);
-#endif
+  // A missing rule file blocks like an error; it must never read as "0 errors".
+  if (m_checklist->ruleCount() == 0 && !m_checklist->loadRules(rulesPath())) return 1;
+  return ChecklistEngine::failedCount(m_checklist->evaluate(buildProjectState()), QStringLiteral("error"));
 }
 
 void MainWindow::exportMapGeoTiff() {
 #if KA_HGIS_HAS_QGIS
   if (!m_canvas || !m_viewTabs || m_viewTabs->currentWidget() != m_mapPage) return;
-  if (m_canvas->layers().isEmpty()) {
+  // The canvas list leaves out survey shapes and heritage drawn above labels;
+  // the GeoTIFF adds them back on top so the file matches the screen.
+  const QList<QgsMapLayer*> aboveLabels = LayerOps::layersDrawnAboveLabels(QgsProject::instance());
+  if (m_canvas->layers().isEmpty() && aboveLabels.isEmpty()) {
     QMessageBox::information(this, QStringLiteral("GeoTIFF 저장"),
                              QStringLiteral("지도에 저장할 레이어가 없습니다."));
     return;
@@ -127,7 +82,7 @@ void MainWindow::exportMapGeoTiff() {
   progress.show();
   QString error;
   const bool ok = MapGeoTiffExport::write(snapshot, path, &error,
-                                         [&progress]() { return progress.wasCanceled(); });
+                                         [&progress]() { return progress.wasCanceled(); }, aboveLabels);
   progress.hide();
   if (ok) {
     statusBar()->showMessage(QStringLiteral("GeoTIFF 저장 완료 · %1 · %2")
@@ -145,8 +100,9 @@ void MainWindow::convertSelectedTo5179() {
   QgsMapLayer* cur = m_layerTree ? m_layerTree->currentLayer() : nullptr;
   auto* vl = qobject_cast<QgsVectorLayer*>(cur);
   if (!vl || !vl->isValid()) {
-    notify(Notice::Info, QStringLiteral("5179 변환"),
-           QStringLiteral("지도 목록에서 변환할 레이어를 선택한 뒤 다시 누르세요."));
+    notify(Notice::Info, QStringLiteral("레이어 5179 변환"),
+           QStringLiteral("지도 목록에서 변환할 레이어를 선택한 뒤 다시 누르세요. "
+                          "SHP·조사도면.pdf·MANIFEST를 함께 내려면 「검수·제출」의 제출 꾸러미를 쓰세요."));
     return;
   }
   const QString startDir = preferredSurveyDir();
@@ -158,66 +114,15 @@ void MainWindow::convertSelectedTo5179() {
   if (out.isEmpty()) return;
   QString err;
   if (LayerOps::convertToShp5179(vl, out, QgsProject::instance(), &err, false).isEmpty())
-    notify(Notice::Warning, QStringLiteral("5179 변환"), QStringLiteral("저장하지 못했습니다."), err);
+    notify(Notice::Warning, QStringLiteral("레이어 5179 변환"), QStringLiteral("저장하지 못했습니다."), err);
   else {
     statusBar()->showMessage(QStringLiteral("5179 파일만 저장: %1").arg(QDir::toNativeSeparators(out)), 8000);
-    notify(Notice::Success, QStringLiteral("5179 변환"),
-           QStringLiteral("파일로만 저장했습니다. 지도에는 올리지 않았습니다."),
+    notify(Notice::Success, QStringLiteral("레이어 5179 변환"),
+           QStringLiteral("이 레이어만 파일로 저장했습니다. 지도에는 올리지 않았고, 검수·PDF·MANIFEST는 없습니다."),
            QDir::toNativeSeparators(out));
   }
 #else
   QMessageBox::warning(this, QStringLiteral("CRS"), QStringLiteral("QGIS 빌드 필요"));
-#endif
-}
-
-void MainWindow::convertSelected5186To5179() {
-#if KA_HGIS_HAS_QGIS
-  QgsMapLayer* cur = m_layerTree ? m_layerTree->currentLayer() : nullptr;
-  auto* vl = qobject_cast<QgsVectorLayer*>(cur);
-  if (!vl) {
-    notify(Notice::Info, QStringLiteral("중부 → 업로드용"),
-           QStringLiteral("보낼 면을 선택한 뒤 누르세요."));
-    return;
-  }
-  if (!vl->crs().isValid() || vl->crs().authid() != QLatin1String("EPSG:5186"))
-    vl->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
-  convertSelectedTo5179();
-#endif
-}
-
-void MainWindow::convertSelected5187To5179() {
-#if KA_HGIS_HAS_QGIS
-  QgsMapLayer* cur = m_layerTree ? m_layerTree->currentLayer() : nullptr;
-  auto* vl = qobject_cast<QgsVectorLayer*>(cur);
-  if (!vl) {
-    notify(Notice::Info, QStringLiteral("동부 → 업로드용"),
-           QStringLiteral("보낼 면을 선택한 뒤 누르세요."));
-    return;
-  }
-  if (!vl->crs().isValid() || vl->crs().authid() != QLatin1String("EPSG:5187"))
-    vl->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
-  convertSelectedTo5179();
-#endif
-}
-
-void MainWindow::convertShpFileTo5179() {
-#if KA_HGIS_HAS_QGIS
-  const QString in = QFileDialog::getOpenFileName(
-      this, QStringLiteral("5186/5187 SHP 선택"), QString(),
-      QStringLiteral("Vector (*.shp *.gpkg *.geojson)"));
-  if (in.isEmpty()) return;
-  const QString out = QFileDialog::getSaveFileName(
-      this, QStringLiteral("5179 SHP 저장"),
-      QFileInfo(in).completeBaseName() + QStringLiteral("_5179.shp"),
-      QStringLiteral("SHP (*.shp)"));
-  if (out.isEmpty()) return;
-  QString err;
-  if (LayerOps::convertFileToShp5179(in, out, QgsProject::instance(), &err, false).isEmpty())
-    notify(Notice::Warning, QStringLiteral("5179 변환"), QStringLiteral("변환하지 못했습니다."), err);
-  else
-    notify(Notice::Success, QStringLiteral("5179 변환"),
-           QStringLiteral("업로드용 EPSG:5179 SHP 파일만 만들었습니다. 지도에는 올리지 않았습니다."),
-           QDir::toNativeSeparators(out));
 #endif
 }
 
@@ -239,18 +144,20 @@ QJsonObject MainWindow::buildProjectState() const {
 #endif
 }
 
+// Headless check (automatic QA and the dead work dock call it). The list with
+// 「위치 보기」 lives in 「검수·제출」 (openSubmitReview).
 void MainWindow::runChecklist() {
   if (!m_checklist) return;
-  if (m_checklist->ruleCount() == 0) m_checklist->loadRules(rulesPath());
-  const auto results = m_checklist->evaluate(buildProjectState());
-  int err = 0, warn = 0;
-  for (const auto& r : results) {
-    if (r.passed) continue;
-    if (r.severity == QLatin1String("error")) err++; else warn++;
+  if (!ensureChecklistRules()) {
+    m_lastChecklistErrors = 1;
+    statusBar()->showMessage(QStringLiteral("검수 규칙 파일을 찾지 못했습니다. 제출 꾸러미를 만들 수 없습니다."), 8000);
+    return;
   }
-  m_lastChecklistErrors = err;
-  statusBar()->showMessage(QStringLiteral("검수: error %1 / warn %2").arg(err).arg(warn), 8000);
-  refreshWorkPanel();
+  const QVector<CheckResult> results = evaluateChecklist();
+  statusBar()->showMessage(QStringLiteral("검수: 오류 %1 · 주의 %2 — 「검수·제출」에서 목록을 봅니다")
+                               .arg(ChecklistEngine::failedCount(results, QStringLiteral("error")))
+                               .arg(ChecklistEngine::failedCount(results, QStringLiteral("warn"))),
+                           8000);
 }
 
 void MainWindow::exportPdf() {
@@ -263,104 +170,9 @@ void MainWindow::exportPdf() {
 #endif
 }
 
-void MainWindow::exportShpPackage() {
-  const auto results = m_checklist->evaluate(buildProjectState());
-  bool hasErr = false;
-  QString summary;
-  for (const auto& r : results) {
-    if (!r.passed) {
-      summary += QStringLiteral("- [%1] %2\n").arg(r.severity, r.messageKo);
-      if (r.severity == QLatin1String("error")) hasErr = true;
-    }
-  }
-  if (summary.isEmpty()) summary = QStringLiteral("OK\n");
-  const QString enc = QInputDialog::getItem(this, QStringLiteral("인코딩"), QStringLiteral("SHP 인코딩"),
-                                      {QStringLiteral("UTF-8"), QStringLiteral("EUC-KR")}, 0, false);
-  if (enc.isEmpty()) return;
-  const QString dir = QFileDialog::getExistingDirectory(this, QStringLiteral("제출 결과를 저장할 위치"));
-  if (dir.isEmpty()) return;
-  m_packageCreated = false;
-  refreshWorkPanel();
-  if (hasErr) {
-    QMessageBox::warning(
-        this, QStringLiteral("제출 차단"),
-        QStringLiteral("도면 검수 error가 있어 제출 패키지를 만들 수 없습니다.\n"
-                       "「도면검수」로 항목을 고친 뒤 다시 시도하세요.\n\n%1")
-            .arg(summary));
-    statusBar()->showMessage(QStringLiteral("제출 차단: 검수 error 잔존"), 8000);
-    return;
-  }
-  QString err;
-#if KA_HGIS_HAS_QGIS
-  const QString packageName = QStringLiteral("제출_%1_%2")
-      .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz")),
-           QString::number(QRandomGenerator::global()->generate(), 16));
-  const QString out = ExportService::exportSubmissionPackage(
-      QgsProject::instance(), QDir(dir).filePath(packageName), enc, summary, /*blockOnError=*/true, hasErr, &err);
-#else
-  const QString out;
-  err = QStringLiteral("QGIS required");
-#endif
-  if (out.isEmpty())
-    notify(Notice::Warning, QStringLiteral("내보내기"),
-           QStringLiteral("제출 패키지를 만들지 못했습니다."), err);
-  else {
-    m_packageCreated = true;
-    statusBar()->showMessage(QStringLiteral("제출 패키지: %1").arg(out), 6000);
-    notify(Notice::Success, QStringLiteral("내보내기"),
-           QStringLiteral("제출 패키지를 만들었습니다."), QDir::toNativeSeparators(out));
-    refreshWorkPanel();
-  }
-}
-
-void MainWindow::crsDefineOnly() {
-  QMessageBox::warning(this, QStringLiteral("위험"),
-    QStringLiteral("「이름만 지정」은 좌표값을 바꾸지 않습니다.\n실제 이동이 필요하면 「좌표 변환」을 쓰세요."));
-#if KA_HGIS_HAS_QGIS
-  QgsMapLayer* cur = m_layerTree ? m_layerTree->currentLayer() : nullptr;
-  auto* l = qobject_cast<QgsVectorLayer*>(cur);
-  if (!l) {
-    statusBar()->showMessage(QStringLiteral("CRS 이름만 지정 — 벡터 레이어를 선택하세요"), 5000);
-    return;
-  }
-  const QString auth = QInputDialog::getText(this, QStringLiteral("CRS 이름만 지정"),
-      QStringLiteral("EPSG 코드 (예: EPSG:5179)"), QLineEdit::Normal, QStringLiteral("EPSG:5179"));
-  if (auth.isEmpty()) return;
-  const QgsCoordinateReferenceSystem crs(auth);
-  if (!crs.isValid()) {
-    QMessageBox::warning(this, QStringLiteral("CRS"), QStringLiteral("잘못된 CRS"));
-    return;
-  }
-  l->setCrs(crs);
-  statusBar()->showMessage(QStringLiteral("CRS 라벨만 변경: %1 (좌표 미변환)").arg(auth), 6000);
-#endif
-}
-
-void MainWindow::crsReproject() {
-#if KA_HGIS_HAS_QGIS
-  QgsMapLayer* cur = m_layerTree ? m_layerTree->currentLayer() : nullptr;
-  auto* vl = qobject_cast<QgsVectorLayer*>(cur);
-  if (!vl) {
-    QMessageBox::information(this, QStringLiteral("좌표 변환"), QStringLiteral("레이어 트리에서 벡터 레이어를 선택하세요."));
-    return;
-  }
-  const QString auth = QInputDialog::getText(this, QStringLiteral("좌표 변환(재투영)"),
-      QStringLiteral("대상 CRS"), QLineEdit::Normal, QStringLiteral("EPSG:4326"));
-  if (auth.isEmpty()) return;
-  const QString out = QFileDialog::getSaveFileName(this, QStringLiteral("재투영 저장"),
-      vl->name() + QStringLiteral("_reproj.gpkg"), QStringLiteral("GPKG (*.gpkg);;SHP (*.shp)"));
-  if (out.isEmpty()) return;
-  QString err;
-  if (LayerOps::reprojectVectorLayer(vl, auth, out, QgsProject::instance(), &err).isEmpty())
-    QMessageBox::warning(this, QStringLiteral("재투영 실패"), err);
-  else {
-    if (m_canvas) m_canvas->refresh();
-    statusBar()->showMessage(QStringLiteral("재투영 완료: %1").arg(out), 6000);
-  }
-#else
-  QMessageBox::warning(this, QStringLiteral("CRS"), QStringLiteral("QGIS 빌드 필요"));
-#endif
-}
+// Kept for the layer menu and the work dock: same flow as the 「검수·제출」 package button.
+// The checklist runs first; with an error or no rule file the review list opens instead.
+void MainWindow::exportShpPackage() { makeSubmitPackage(); }
 
 void MainWindow::exportReportLayout() {
 #if KA_HGIS_HAS_QGIS
@@ -709,22 +521,30 @@ void MainWindow::mergeFeaturePolygons() {
   }
   if (!targetLayer) return;
 
+  // [pkg E1] F083: say which records differ before the merge keeps the first-drawn one.
+  const auto conflicts = GeometryEditOps::mergeConflicts(targetLayer, selectedIds);
+  if (!conflicts.isEmpty() &&
+      QMessageBox::question(this, QStringLiteral("폴리곤 묶기"),
+                            GeometryEditOps::mergeConflictSummary(conflicts) + QStringLiteral("\n\n묶을까요?"),
+                            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+    return;
   QString err;
   const bool ok = LayerOps::mergePolygonFeatures(targetLayer, selectedIds, &err);
   if (!ok) {
     QMessageBox::warning(this, QStringLiteral("폴리곤 묶기"), err);
     return;
   }
+  // The merge stays in the edit buffer (Ctrl+Z); the survey save writes it.
+  QgsProject::instance()->setDirty(true);
   if (m_canvas) m_canvas->refresh();
   const QString msg =
-      QStringLiteral("「%1」의 폴리곤 %2개를 1개로 묶었습니다")
+      QStringLiteral("「%1」의 폴리곤 %2개를 1개로 묶었습니다. Ctrl+Z로 되돌릴 수 있습니다.")
           .arg(targetLayer->name())
           .arg(selectedIds.size());
   statusBar()->showMessage(msg, 10000);
   notify(Notice::Success, QStringLiteral("폴리곤 묶기 완료"),
-         QStringLiteral("선택된 폴리곤들을 하나의 지오메트리로 합쳤습니다."),
-         QStringLiteral("문화재 인트라넷 제출 시 「SHP내보내기」하면 "
-                        "feature_poly.shp 한 파일(EPSG:5179)로 등록하면 됩니다."));
+         QStringLiteral("고른 면을 하나로 합쳤습니다."),
+         QStringLiteral("「검수·제출」의 제출 꾸러미에서 feature_poly.shp 한 파일(EPSG:5179)로 나갑니다."));
 #else
   statusBar()->showMessage(QStringLiteral("스텁: 폴리곤 묶기"), 3000);
 #endif

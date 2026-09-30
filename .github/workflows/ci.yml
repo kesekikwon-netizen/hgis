@@ -13,9 +13,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Always runs on GitHub-hosted runners — no OSGeo4W required
+  # Always runs on GitHub-hosted runners — no OSGeo4W required.
+  # It compiles nothing: a green "Sanity checks" is never a Windows build or CTest pass
+  # (AGENTS.md: the Windows machine remains the build gate). See "Windows build gate" below.
   sanity:
-    name: Sanity checks
+    name: Sanity checks (no build)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -65,6 +67,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/secret-scan.py
+
+      # F213: no new C++ file over 300 lines; files already over (docs/quality/line-limit-baseline.txt)
+      # may shrink but not grow.
+      - name: Source line limit
+        shell: pwsh
+        run: ./scripts/scorecard.ps1 -LineLimitOnly
 
   # Full Windows build — needs a self-hosted runner with OSGeo4W + VS2022
   # Register runner: https://github.com/kwonyoungin11/hgis/settings/actions/runners
@@ -153,9 +161,47 @@ jobs:
           . .\scripts\dev-env.ps1
           .\scripts\run-ka-hgis.ps1 --smoke-quit
 
+      # CTest and the Korean-TEMP step already ran the test executables and "Smoke quit"
+      # started the app; e2e-smoke only adds the rule-file and hard-coded-path checks here.
       - name: E2E smoke
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           . .\scripts\dev-env.ps1
-          .\scripts\e2e-smoke.ps1
+          .\scripts\e2e-smoke.ps1 -SkipTests -SkipSmoke
+
+  # F189: make a missing Windows build visible. The self-hosted job is skipped when
+  # vars.ENABLE_SELF_HOSTED_BUILD is not 'true', and then the workflow used to be green with
+  # nothing compiled. This job always runs, says so in the run summary, and fails when the
+  # Windows build failed or was cancelled. Set vars.REQUIRE_WINDOWS_BUILD to 'true' (and make
+  # this check required in branch protection) to fail when the build did not run at all.
+  windows-gate:
+    name: Windows build gate
+    needs: [sanity, windows-build]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report Windows build result
+        env:
+          RESULT: ${{ needs.windows-build.result }}
+          ENABLED: ${{ vars.ENABLE_SELF_HOSTED_BUILD }}
+          REQUIRED: ${{ vars.REQUIRE_WINDOWS_BUILD }}
+        run: |
+          set -euo pipefail
+          echo "windows-build result: ${RESULT} (ENABLE_SELF_HOSTED_BUILD=${ENABLED:-unset})"
+          case "${RESULT}" in
+            success)
+              echo "### Windows build, CTest and smoke passed on the self-hosted runner" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            skipped)
+              msg="Windows build, CTest and smoke did NOT run (self-hosted runner disabled or sanity failed). This run proves only the sanity checks."
+              echo "::warning title=Windows build not run::${msg}"
+              echo "### ${msg}" >> "$GITHUB_STEP_SUMMARY"
+              if [ "${REQUIRED:-}" = "true" ]; then exit 1; fi
+              ;;
+            *)
+              echo "::error title=Windows build ${RESULT}::The self-hosted Windows build did not pass (${RESULT})."
+              echo "### Windows build ${RESULT}" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+              ;;
+          esac

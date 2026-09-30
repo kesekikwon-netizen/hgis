@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -17,6 +18,7 @@
 #include <QFileInfo>
 #include <QImage>
 #include <QRectF>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QTextStream>
 #include <QDateTime>
@@ -29,6 +31,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTranslator>
+#include <QScopeGuard>
 
 #include <qgsvectorfilewriter.h>
 
@@ -39,6 +42,7 @@
 #include "core/HeritageImport.h"
 #include "core/LayoutService.h"
 #include "core/LayerOps.h"
+#include "core/ReferenceKind.h"
 #include <qgslayoutitempage.h>
 #include <qgslayoutpagecollection.h>
 #include "core/KaPortableRuntime.h"
@@ -178,6 +182,7 @@ private slots:
   void vworldLayerOpsTest();
   void workflowGuideTracksSevenRealMilestones();
   void vworldSettingsAndNoKeyTests();
+  void surveySchemaYaml_matchesFactory();
   void koreaRegionCatalog_gyeonggiGangwonAddressQuery();
   void regionLocator_sitsInAppBarRegionMenu();
   void adminBoundary_buildsEmdUrlWithoutHardcodedKey();
@@ -190,8 +195,8 @@ private slots:
   void applySnapSettingsKeepsCadastralUnchecked();
   void topologicalVertexMove_movesSharedVertexOnBothFeatures();
   void featureForm_cancelKeepsGeometryAndOkWritesNameNumber();
-  void captureVertexDrag_preservesEditsAndReportsOutcome_data();
-  void captureVertexDrag_preservesEditsAndReportsOutcome();
+  void captureClickOnSavedVertex_startsNewSketch_data();
+  void captureClickOnSavedVertex_startsNewSketch();
   void importControlCsvWritesFeatures();
   void importControlCsv_keepsKoreanAxesAndEncoding();
   void suggestControlPointAxisSwap_matchesCsvRule();
@@ -305,7 +310,7 @@ private slots:
   void fieldAndongCopy_embeddedRelativePathOpensWithoutCwd();
   void leftoverRestore_keepsUserFillColorNotFactoryDomainStyle();
   void restoreLastSurvey_prefersEmbeddedWorkspaceWhenSafe();
-  void restoreLastSurvey_bootUsesLayersOnlyToAvoidWmsAv();
+  void bootNeverRestoresLastSurvey();
   void finishOpenedProject_doesNotBareRefreshWhileWms();
   void test_export_failure_aborts_and_reports_error();
   void test_section_sheet_bundling();
@@ -327,35 +332,46 @@ static bool projectHasLayerNamedLike(QgsProject* proj, const QString& base) {
   return false;
 }
 
-static QString readLayerOpsSources() {
+// Repo root for the source-text checks: ctest runs from the source tree; a direct run from
+// the build folder finds the tree next to this file (F210).
+static QDir sourceRoot() {
+  if (QFileInfo::exists(QStringLiteral("src/app/MainWindow.cpp"))) return QDir::current();
+  const QString probe = QFINDTESTDATA("../src/app/MainWindow.cpp");
+  return probe.isEmpty() ? QDir::current() : QDir(QFileInfo(probe).absolutePath() + QStringLiteral("/../.."));
+}
+
+static QString readSources(const QStringList& paths) {
+  const QDir root = sourceRoot();
   QString out;
-  for (const QString& path : {QStringLiteral("src/core/LayerOps.cpp"),
-                              QStringLiteral("src/core/BasemapOps.cpp"),
-                              QStringLiteral("src/core/LabelOps.cpp"),
-                              QStringLiteral("src/core/ControlPointCsv.cpp")}) {
-    QFile f(path);
+  for (const QString& path : paths) {
+    QFile f(root.filePath(path));
     if (f.open(QIODevice::ReadOnly | QIODevice::Text))
       out += QString::fromUtf8(f.readAll());
   }
   return out;
 }
 
+static QString readLayerOpsSources() {
+  return readSources({QStringLiteral("src/core/LayerOps.cpp"), QStringLiteral("src/core/BasemapOps.cpp"),
+                      QStringLiteral("src/core/LabelOps.cpp"), QStringLiteral("src/core/ControlPointCsv.cpp")});
+}
+
 static QString readMainWindowSources() {
-  QString out;
-  for (const QString& path : {QStringLiteral("src/app/MainWindow.cpp"),
-                              QStringLiteral("src/app/MainWindowExport.cpp"),
-                              QStringLiteral("src/app/MainWindowEditing.cpp"),
-                              QStringLiteral("src/app/MainWindowSession.cpp"),
-                              QStringLiteral("src/app/MainWindowRibbon.cpp"),
-                              QStringLiteral("src/app/MainWindowOffline.cpp"),
-                              QStringLiteral("src/app/MainWindowAlign.cpp"),
-                              QStringLiteral("src/app/MainWindowOverlay.cpp"),
-                              QStringLiteral("src/app/MainWindowFiles.cpp")}) {
-    QFile f(path);
-    if (f.open(QIODevice::ReadOnly | QIODevice::Text))
-      out += QString::fromUtf8(f.readAll());
+  QStringList paths{QStringLiteral("src/app/MainWindow.cpp"),        QStringLiteral("src/app/MainWindowExport.cpp"),
+                    QStringLiteral("src/app/MainWindowEditing.cpp"), QStringLiteral("src/app/MainWindowSession.cpp"),
+                    QStringLiteral("src/app/MainWindowRibbon.cpp"),  QStringLiteral("src/app/MainWindowOffline.cpp"),
+                    QStringLiteral("src/app/MainWindowAlign.cpp"),   QStringLiteral("src/app/MainWindowOverlay.cpp"),
+                    QStringLiteral("src/app/MainWindowFiles.cpp")};
+  // Files split out of MainWindow.cpp later (Cadastral, Downloads, Topographic, Undo, ...) were
+  // invisible to these checks. Append every other MainWindow*.cpp after the original list so
+  // the original order, and the text each check slices out of it, stay as before.
+  const QStringList split = QDir(sourceRoot().filePath(QStringLiteral("src/app")))
+                                .entryList({QStringLiteral("MainWindow*.cpp")}, QDir::Files, QDir::Name);
+  for (const QString& name : split) {
+    const QString path = QStringLiteral("src/app/") + name;
+    if (!paths.contains(path)) paths << path;
   }
-  return out;
+  return readSources(paths);
 }
 
 static QString rulesFile() {
@@ -401,7 +417,8 @@ void TestWorkflow::fullWorkflowSurveyToPackage() {
   QVERIFY2(!gpkg.isEmpty(), qPrintable(err));
 
   QgsProject proj;
-  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5179")));
+  // The survey GPKG is EPSG:5187 and the sheet extent below is in 5187 metres.
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
   for (const char* n : {"survey_area", "feature_poly", "feature_line", "section_line", "control_points"}) {
     auto* vl = new QgsVectorLayer(QStringLiteral("%1|layername=%2").arg(gpkg, QString::fromUtf8(n)),
                                   QString::fromUtf8(n), QStringLiteral("ogr"));
@@ -832,8 +849,9 @@ void TestWorkflow::exportLayoutPdf_userSheetMissing_doesNotSeedFiveTemplates() {
 }
 
 void TestWorkflow::shpKoreanRoundTripUtf8() {
-  const QString dir = QDir::temp().filePath(QStringLiteral("ka_shp_kr_") + QString::number(QDateTime::currentMSecsSinceEpoch()));
-  QDir().mkpath(dir);
+  QTemporaryDir tempDir;  // removed afterwards (F211)
+  QVERIFY(tempDir.isValid());
+  const QString dir = tempDir.path();
   QgsVectorLayer mem(QStringLiteral("Polygon?crs=EPSG:5179"), QStringLiteral("kr"), QStringLiteral("memory"));
   QVERIFY(mem.isValid());
   QgsFields fields;
@@ -871,9 +889,9 @@ void TestWorkflow::shpKoreanRoundTripUtf8() {
   QString period = lf.attribute(QStringLiteral("period")).toString();
   if (kind.isEmpty() && loaded.fields().count() >= 1) kind = lf.attribute(0).toString();
   if (period.isEmpty() && loaded.fields().count() >= 2) period = lf.attribute(1).toString();
-  QVERIFY2(kind.contains(QStringLiteral("수혈")) || kind.contains(QStringLiteral("주거")) || !kind.isEmpty(),
-           qPrintable(QStringLiteral("kind=%1").arg(kind)));
-  QVERIFY2(!period.isEmpty(), qPrintable(QStringLiteral("period empty")));
+  // The Korean values must come back exactly; any non-empty (possibly garbled) text used to pass.
+  QCOMPARE(kind, QStringLiteral("수혈주거지"));
+  QCOMPARE(period, QStringLiteral("청동기시대"));
 }
 
 // 흙토람 토양도 SHP 임포트: 좌표계 지정(.prj 유무 모두)과 분류색 렌더러를 검증.
@@ -1829,15 +1847,22 @@ void TestWorkflow::demColorRelief_is3857XyzNotTerrainMap() {
   QVERIFY2(app.contains(QLatin1String("setText(QStringLiteral(\"DEM\"))")),
            "DEM button label is DEM");
 
-  QFile boot(QStringLiteral("src/app/KaApplication.cpp"));
+  QFile boot(sourceRoot().filePath(QStringLiteral("src/app/KaApplication.cpp")));
   QVERIFY2(boot.open(QIODevice::ReadOnly | QIODevice::Text), "KaApplication.cpp");
   const QString smoke = QString::fromUtf8(boot.readAll());
   QVERIFY2(smoke.contains(QLatin1String("toolbar_dem")) &&
                smoke.contains(QStringLiteral("DEM")),
            "smoke looks for DEM, not the old 고도맵 label");
-  QVERIFY2(smoke.contains(QLatin1String("toolbar_terrain")) &&
-               smoke.contains(QStringLiteral("지형맵")),
-           "smoke looks for 지형맵");
+  // --qa-phase1 must check the terrain chip by its object name and the label the ribbon really
+  // gives it (지형; the old text 지형맵 was a stale expectation, F191), not a label that no chip has.
+  const QRegularExpression terrainLabelRe(
+      QStringLiteral("m_btnTerrain->setText\\(QStringLiteral\\(\"([^\"]+)\"\\)\\)"));
+  const QRegularExpressionMatch terrainLabel = terrainLabelRe.match(app);
+  QVERIFY2(terrainLabel.hasMatch(), "ribbon terrain chip label (m_btnTerrain->setText)");
+  QVERIFY2(smoke.contains(QLatin1String("toolbar_terrain")) && smoke.contains(QLatin1String("btnTerrain")) &&
+               smoke.contains(QStringLiteral("QStringLiteral(\"%1\")").arg(terrainLabel.captured(1))),
+           qPrintable(QStringLiteral("smoke must check the terrain chip by its real label 「%1」")
+                          .arg(terrainLabel.captured(1))));
 }
 
 void TestWorkflow::demElevationStyle_legendListsHeightMeters() {
@@ -2638,13 +2663,33 @@ void TestWorkflow::workflowGuideTracksSevenRealMilestones() {
 }
 
 void TestWorkflow::vworldSettingsAndNoKeyTests() {
+  // This test writes the native store on purpose (legacy vworld/apiKey migration). A fresh
+  // key scope turns that store and ka-hgis-vworld.ini into files in a temporary folder, so
+  // the user's registry and AppData keys are never read or written (F037).
+  QTemporaryDir keyDir;
+  QVERIFY(keyDir.isValid());
+  const VworldSettings::Scope scopeBefore = VworldSettings::scope();
+  VworldSettings::Scope isolatedScope = scopeBefore;
+  isolatedScope.folder = keyDir.path();
+  VworldSettings::setScope(isolatedScope);
+  const bool hadEnvKey = qEnvironmentVariableIsSet("VWORLD_API_KEY");
+  const QByteArray envKeyBefore = qgetenv("VWORLD_API_KEY");
+  const auto restoreScope = qScopeGuard([&] {
+    VworldSettings::setScope(scopeBefore);
+    if (hadEnvKey)
+      qputenv("VWORLD_API_KEY", envKeyBefore);
+    else
+      qunsetenv("VWORLD_API_KEY");
+  });
   qputenv("VWORLD_API_KEY", QByteArray());
   VworldSettings::saveApiKey(QString());
 
-  QSettings legacy(QStringLiteral("ka-hgis"), QStringLiteral("ka-hgis"));
-  legacy.remove(QStringLiteral("VWorld/ApiKey"));
-  legacy.setValue(QStringLiteral("vworld/apiKey"), QStringLiteral("LEGACY_MIGRATE_KEY"));
-  legacy.sync();
+  {
+    const std::unique_ptr<QSettings> legacy = VworldSettings::openNativeStore();
+    legacy->remove(QStringLiteral("VWorld/ApiKey"));
+    legacy->setValue(QStringLiteral("vworld/apiKey"), QStringLiteral("LEGACY_MIGRATE_KEY"));
+    legacy->sync();
+  }
 
   QCOMPARE(VworldSettings::loadApiKey(), QStringLiteral("LEGACY_MIGRATE_KEY"));
   QCOMPARE(VworldSettings::loadApiKey(), QStringLiteral("LEGACY_MIGRATE_KEY"));
@@ -2668,6 +2713,99 @@ void TestWorkflow::vworldSettingsAndNoKeyTests() {
   QVERIFY2(!LayerOps::addVworldBaseMap(&proj2, nullptr, QString(), &err),
            "empty api key must reject basemap add");
   QVERIFY(!projectHasLayerNamedLike(&proj2, QStringLiteral("VWorld 배경")));
+}
+
+// F201: data/schemas/ka_hgis_layers.yaml is the one declaration of the survey GPKG schema
+// (docs/domain/data-model.md points to it). A new survey from SurveyProjectFactory must have
+// exactly its layers, geometry kinds, fields and types, so the document cannot drift again.
+void TestWorkflow::surveySchemaYaml_matchesFactory() {
+  QString yamlPath = QStringLiteral("data/schemas/ka_hgis_layers.yaml");
+  if (!QFileInfo::exists(yamlPath)) yamlPath = QFINDTESTDATA("../data/schemas/ka_hgis_layers.yaml");
+  QFile yamlFile(yamlPath);
+  QVERIFY2(yamlFile.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(QStringLiteral("스키마 YAML: ") + yamlPath));
+  struct FieldSpec {
+    QString name;
+    QString type;
+  };
+  struct LayerSpec {
+    QString id;
+    QString geometry;
+    QList<FieldSpec> fields;
+  };
+  QList<LayerSpec> layers;
+  QHash<QString, QString> top;
+  const QRegularExpression topRe(QStringLiteral("^([a-z_]+):\\s*(.*)$"));
+  const QRegularExpression idRe(QStringLiteral("^\\s*-\\s*id:\\s*(\\S+)\\s*$"));
+  const QRegularExpression geometryRe(QStringLiteral("^\\s+geometry:\\s*(\\S+)\\s*$"));
+  const QRegularExpression fieldRe(
+      QStringLiteral("^\\s*-\\s*\\{name:\\s*([A-Za-z0-9_]+),\\s*type:\\s*(string|double),\\s*required:\\s*(true|false)\\}\\s*$"));
+  const QStringList lines = QString::fromUtf8(yamlFile.readAll()).split(QLatin1Char('\n'));
+  for (QString line : lines) {
+    line.remove(QChar(0xFEFF));
+    line.remove(QLatin1Char('\r'));
+    if (line.trimmed().isEmpty() || line.trimmed().startsWith(QLatin1Char('#'))) continue;
+    if (const auto m = idRe.match(line); m.hasMatch()) {
+      layers.append({m.captured(1), QString(), {}});
+    } else if (const auto g = geometryRe.match(line); g.hasMatch() && !layers.isEmpty()) {
+      layers.last().geometry = g.captured(1);
+    } else if (const auto f = fieldRe.match(line); f.hasMatch() && !layers.isEmpty()) {
+      layers.last().fields.append({f.captured(1), f.captured(2)});
+    } else if (const auto t = topRe.match(line); t.hasMatch()) {
+      top.insert(t.captured(1), t.captured(2).trimmed());
+    } else {
+      QVERIFY2(line.trimmed().startsWith(QLatin1String("name_ko:")) || line.trimmed() == QLatin1String("fields:"),
+               qPrintable(QStringLiteral("스키마 YAML 에서 읽지 못한 줄: ") + line));
+    }
+  }
+  QCOMPARE(top.value(QStringLiteral("default_work_crs")),
+           QString::fromLatin1(SurveyProjectFactory::defaultWorkCrsAuthId()));
+  QCOMPARE(top.value(QStringLiteral("submit_crs")), QString::fromLatin1(SurveyProjectFactory::uploadCrsAuthId()));
+  QVERIFY(top.value(QStringLiteral("work_crs_choices")).contains(QLatin1String("EPSG:5186")));
+  QVERIFY(top.value(QStringLiteral("work_crs_choices")).contains(QLatin1String("EPSG:5187")));
+
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  QString error;
+  const QString gpkg = SurveyProjectFactory::createNewSurvey(dir.path(), QStringLiteral("스키마"), &error,
+                                                             QStringLiteral("EPSG:5186"));
+  QVERIFY2(!gpkg.isEmpty(), qPrintable(error));
+  QStringList tables;
+  {
+    GDALDatasetH ds = GDALOpenEx(gpkg.toUtf8().constData(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr);
+    QVERIFY(ds);
+    for (int i = 0; i < GDALDatasetGetLayerCount(ds); ++i)
+      tables << QString::fromUtf8(OGR_L_GetName(GDALDatasetGetLayer(ds, i)));
+    GDALClose(ds);
+  }
+  QStringList declared;
+  for (const LayerSpec& spec : layers) declared << spec.id;
+  tables.sort();
+  declared.sort();
+  QCOMPARE(tables, declared);
+  const QHash<QString, Qgis::GeometryType> kinds{{QStringLiteral("Polygon"), Qgis::GeometryType::Polygon},
+                                                 {QStringLiteral("LineString"), Qgis::GeometryType::Line},
+                                                 {QStringLiteral("Point"), Qgis::GeometryType::Point}};
+  for (const LayerSpec& spec : layers) {
+    QgsVectorLayer layer(gpkg + QStringLiteral("|layername=") + spec.id, spec.id, QStringLiteral("ogr"));
+    QVERIFY2(layer.isValid(), qPrintable(spec.id));
+    QVERIFY2(kinds.contains(spec.geometry), qPrintable(spec.id + QStringLiteral(" geometry ") + spec.geometry));
+    QCOMPARE(layer.geometryType(), kinds.value(spec.geometry));
+    QStringList made;
+    for (const QgsField& field : layer.fields())
+      if (field.name().compare(QLatin1String("fid"), Qt::CaseInsensitive) != 0) made << field.name();
+    QStringList listed;
+    for (const FieldSpec& field : spec.fields) {
+      listed << field.name;
+      const int index = layer.fields().lookupField(field.name);
+      QVERIFY2(index >= 0, qPrintable(spec.id + QStringLiteral(".") + field.name + QStringLiteral(" 가 조사 파일에 없다")));
+      const QMetaType::Type want = field.type == QLatin1String("double") ? QMetaType::Double : QMetaType::QString;
+      QVERIFY2(layer.fields().at(index).type() == want,
+               qPrintable(spec.id + QStringLiteral(".") + field.name + QStringLiteral(" 형이 스키마와 다르다")));
+    }
+    made.sort();
+    listed.sort();
+    QCOMPARE(made, listed);
+  }
 }
 
 void TestWorkflow::koreaRegionCatalog_gyeonggiGangwonAddressQuery() {
@@ -3160,31 +3298,26 @@ void TestWorkflow::featureForm_cancelKeepsGeometryAndOkWritesNameNumber() {
            "폼은 도형을 넣은 뒤에만");
 }
 
-void TestWorkflow::captureVertexDrag_preservesEditsAndReportsOutcome_data() {
+void TestWorkflow::captureClickOnSavedVertex_startsNewSketch_data() {
   QTest::addColumn<QString>("canvasCrs");
   QTest::addColumn<QString>("layerCrs");
-  QTest::addColumn<int>("failure"); // 0: success, 1: commit veto, 2: missing feature, 3: removed layer
-  QTest::newRow("success-5186") << QStringLiteral("EPSG:5186") << QStringLiteral("EPSG:5186") << 0;
-  QTest::newRow("success-5187") << QStringLiteral("EPSG:5187") << QStringLiteral("EPSG:5187") << 0;
-  QTest::newRow("commit-failure-5186") << QStringLiteral("EPSG:5186") << QStringLiteral("EPSG:5186") << 1;
-  QTest::newRow("commit-failure-5187") << QStringLiteral("EPSG:5187") << QStringLiteral("EPSG:5187") << 1;
-  QTest::newRow("success-reprojected") << QStringLiteral("EPSG:5186") << QStringLiteral("EPSG:5187") << 0;
-  QTest::newRow("commit-failure-reprojected") << QStringLiteral("EPSG:5186") << QStringLiteral("EPSG:5187") << 1;
-  QTest::newRow("missing-feature") << QStringLiteral("EPSG:5186") << QStringLiteral("EPSG:5186") << 2;
-  QTest::newRow("removed-layer") << QStringLiteral("EPSG:5186") << QStringLiteral("EPSG:5186") << 3;
+  QTest::newRow("5186") << QStringLiteral("EPSG:5186") << QStringLiteral("EPSG:5186");
+  QTest::newRow("5187") << QStringLiteral("EPSG:5187") << QStringLiteral("EPSG:5187");
+  QTest::newRow("reprojected") << QStringLiteral("EPSG:5186") << QStringLiteral("EPSG:5187");
 }
 
-void TestWorkflow::captureVertexDrag_preservesEditsAndReportsOutcome() {
+// Saved shapes are changed in 도형선택, never by the drawing tool: the first click starts a
+// new shape even on top of a saved vertex (neighbouring features may share that corner), and
+// neither the saved geometry nor edits buffered before the click change.
+void TestWorkflow::captureClickOnSavedVertex_startsNewSketch() {
   QFETCH(QString, canvasCrs);
   QFETCH(QString, layerCrs);
-  QFETCH(int, failure);
   auto layer = std::make_unique<QgsVectorLayer>(
       QStringLiteral("LineString?crs=%1&field=note:string").arg(layerCrs),
       QStringLiteral("유구선"), QStringLiteral("memory"));
   QVERIFY(layer->isValid());
   LayerOps::markSurveyLayer(layer.get(), QStringLiteral("feature_line"));
   const QgsPointXY original(200000, 450000);
-  const QgsPointXY moved(200025, 450015);
   const QgsPointXY other(200080, 450080);
   QVERIFY(layer->startEditing());
   QgsFeature feature(layer->fields());
@@ -3194,7 +3327,6 @@ void TestWorkflow::captureVertexDrag_preservesEditsAndReportsOutcome() {
   QVERIFY(layer->commitChanges(false));
   const QgsFeatureId fid = *layer->allFeatureIds().constBegin();
   const QgsGeometry originalGeometry = layer->getFeature(fid).geometry();
-  // A failed vertex commit must also preserve edits made before this gesture.
   QVERIFY(layer->changeAttributeValue(fid, 0, QStringLiteral("pending note")));
 
   QgsProject project;
@@ -3205,64 +3337,33 @@ void TestWorkflow::captureVertexDrag_preservesEditsAndReportsOutcome() {
   QVERIFY(LayerOps::ensureOtfEnabled(&project, &canvas, canvasCrs));
   const QgsCoordinateTransform toMap(layer->crs(), canvas.mapSettings().destinationCrs(), project.transformContext());
   const QgsPointXY mapOriginal = toMap.transform(original);
-  const QgsPointXY mapMoved = toMap.transform(moved);
   canvas.setExtent(QgsRectangle(mapOriginal.x() - 100, mapOriginal.y() - 100,
                                 mapOriginal.x() + 100, mapOriginal.y() + 100));
   KaCaptureMapTool tool(&canvas);
   tool.setMode(KaCaptureMapTool::Mode::Line);
   tool.setTargetLayer(layer.get());
   tool.setSnapEnabled(false);
-  QSignalSpy success(&tool, &KaCaptureMapTool::vertexMoved);
-  QSignalSpy error(&tool, &KaCaptureMapTool::vertexMoveFailed);
   QSignalSpy capture(&tool, &KaCaptureMapTool::geometryCaptured);
   QgsMapMouseEvent press(&canvas, QEvent::MouseButtonPress, QPoint(320, 240), Qt::LeftButton, Qt::LeftButton);
   press.setMapPoint(mapOriginal);
   tool.canvasPressEvent(&press);
-  QCOMPARE(tool.pointCount(), 0); // The existing vertex must be picked even across CRS.
-  if (failure == 1)
-    layer->setAllowCommit(false);
-  else if (failure == 2)
-    QVERIFY(layer->deleteFeature(fid));
-  else if (failure == 3)
-    layer.reset();
   QgsMapMouseEvent release(&canvas, QEvent::MouseButtonRelease, QPoint(360, 220), Qt::LeftButton);
-  release.setMapPoint(mapMoved);
+  release.setMapPoint(toMap.transform(QgsPointXY(200025, 450015)));
   tool.canvasReleaseEvent(&release);
-  QCOMPARE(success.count(), failure == 0 ? 1 : 0);
-  QCOMPARE(error.count(), failure == 0 ? 0 : 1);
+  QCOMPARE(tool.pointCount(), 1);
+  QVERIFY(tool.hasSketch());
   QCOMPARE(capture.count(), 0);
-  if (failure != 0)
-    QVERIFY(!error.at(0).at(0).toString().isEmpty());
-  // A duplicate release must not repeat either result or mutate another feature.
-  tool.canvasReleaseEvent(&release);
-  QCOMPARE(success.count(), failure == 0 ? 1 : 0);
-  QCOMPARE(error.count(), failure == 0 ? 0 : 1);
-  if (!layer) return;
   QCOMPARE(layer->crs().authid(), layerCrs);
   QCOMPARE(canvas.mapSettings().destinationCrs().authid(), canvasCrs);
   QVERIFY(layer->isEditable());
-  if (failure == 2) {
-    QVERIFY(!layer->getFeature(fid).isValid());
-    QVERIFY(layer->isModified());
-    return;
-  }
-  const QgsFeature edited = layer->getFeature(fid);
-  QVERIFY(QgsPointXY(edited.geometry().vertexAt(0)).sqrDist(moved) < 1e-8);
-  QVERIFY(QgsPointXY(edited.geometry().vertexAt(1)).sqrDist(other) < 1e-8);
-  QCOMPARE(edited.attribute(QStringLiteral("note")).toString(), QStringLiteral("pending note"));
+  const QgsFeature buffered = layer->getFeature(fid);
+  QCOMPARE(buffered.geometry().asWkb(), originalGeometry.asWkb());
+  QCOMPARE(buffered.attribute(QStringLiteral("note")).toString(), QStringLiteral("pending note"));
   QgsFeature stored;
   QVERIFY(layer->dataProvider()->getFeatures(QgsFeatureRequest().setFilterFid(fid)).nextFeature(stored));
-  if (failure == 1) {
-    QVERIFY(layer->isModified());
-    QCOMPARE(stored.geometry().asWkb(), originalGeometry.asWkb());
-    QCOMPARE(stored.attribute(QStringLiteral("note")).toString(), QStringLiteral("saved"));
-    layer->setAllowCommit(true);
-    QVERIFY(layer->commitChanges(false)); // The same buffered work remains saveable.
-    QVERIFY(layer->dataProvider()->getFeatures(QgsFeatureRequest().setFilterFid(fid)).nextFeature(stored));
-  }
-  QVERIFY(!layer->isModified());
-  QVERIFY(QgsPointXY(stored.geometry().vertexAt(0)).sqrDist(moved) < 1e-8);
-  QCOMPARE(stored.attribute(QStringLiteral("note")).toString(), QStringLiteral("pending note"));
+  QCOMPARE(stored.geometry().asWkb(), originalGeometry.asWkb());
+  QCOMPARE(stored.attribute(QStringLiteral("note")).toString(), QStringLiteral("saved"));
+  QVERIFY(layer->isModified());
 }
 
 void TestWorkflow::importControlCsvWritesFeatures() {
@@ -3629,6 +3730,11 @@ void TestWorkflow::satelliteDuplicatePrunedToOneInstance() {
   QgsProject proj;
   QVERIFY(LayerOps::ensureOtfEnabled(&proj, nullptr, QStringLiteral("EPSG:5186")));
 
+  // The app's satellite backgrounds carry ka_hgis/reference_kind=satellite (F035). Three
+  // copies (a survey saved twice, VWorld added again) must collapse to one, which sinks to
+  // the bottom. A user's own layer that merely has 위성 in its title is not ours: it is
+  // neither pruned nor moved.
+  const QString satelliteKind = QString::fromLatin1(ReferenceKind::kSatellite);
   auto* sat1 = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
                                   QStringLiteral("위성"), QStringLiteral("memory"));
   auto* sat2 = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
@@ -3637,34 +3743,37 @@ void TestWorkflow::satelliteDuplicatePrunedToOneInstance() {
                                   QStringLiteral("VWorld 위성"), QStringLiteral("memory"));
   auto* cad = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
                                  QStringLiteral("지적"), QStringLiteral("memory"));
+  auto* userPhoto = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                       QStringLiteral("위성사진_판독"), QStringLiteral("memory"));
 
-  LayerOps::markReferenceLayer(sat1);
-  LayerOps::markReferenceLayer(sat2);
-  LayerOps::markReferenceLayer(sat3);
+  for (QgsVectorLayer* sat : {sat1, sat2, sat3}) {
+    LayerOps::markReferenceLayer(sat);
+    ReferenceKind::tag(sat, satelliteKind);
+  }
   LayerOps::markReferenceLayer(cad);
 
   proj.addMapLayer(sat1);
   proj.addMapLayer(sat2);
   proj.addMapLayer(sat3);
   proj.addMapLayer(cad);
+  proj.addMapLayer(userPhoto);
+  const QString userPhotoId = userPhoto->id();
+  const QString cadId = cad->id();
 
-  // 4개의 레이어 중 위성이 3개
-  int satCountBefore = 0;
-  for (QgsMapLayer* l : proj.mapLayers()) {
-    if (l && l->name().contains(QStringLiteral("위성")))
-      satCountBefore++;
-  }
-  QCOMPARE(satCountBefore, 3);
+  const auto satellites = [&proj] {
+    int count = 0;
+    for (QgsMapLayer* l : proj.mapLayers())
+      if (ReferenceKind::of(l) == QLatin1String(ReferenceKind::kSatellite)) ++count;
+    return count;
+  };
+  QCOMPARE(satellites(), 3);
 
   // prune 및 최하단 보장 실행
   LayerOps::ensureSatelliteAtBottom(&proj);
 
-  int satCountAfter = 0;
-  for (QgsMapLayer* l : proj.mapLayers()) {
-    if (l && l->name().contains(QStringLiteral("위성")))
-      satCountAfter++;
-  }
-  QCOMPARE(satCountAfter, 1);
+  QCOMPARE(satellites(), 1);
+  QVERIFY2(proj.mapLayer(userPhotoId), "a user layer titled 위성사진_판독 must survive the prune");
+  QVERIFY(proj.mapLayer(cadId));
 
   // 트리 노드에서도 위성 노드는 단 1개만 존재해야 함
   QgsLayerTree* root = proj.layerTreeRoot();
@@ -3672,17 +3781,17 @@ void TestWorkflow::satelliteDuplicatePrunedToOneInstance() {
   int satTreeNodeCount = 0;
   for (QgsLayerTreeNode* child : root->children()) {
     if (auto* lnode = qobject_cast<QgsLayerTreeLayer*>(child)) {
-      const QString name = lnode->name().isEmpty() ? (lnode->layer() ? lnode->layer()->name() : QString()) : lnode->name();
-      if (name.contains(QStringLiteral("위성")))
+      if (ReferenceKind::of(lnode->layer()) == QLatin1String(ReferenceKind::kSatellite))
         satTreeNodeCount++;
     }
   }
   QCOMPARE(satTreeNodeCount, 1);
 
-  // 최하단 확인
+  // 최하단 확인: 남은 위성이 맨 아래, 사용자 레이어는 내려가지 않는다.
   auto* lastNode = qobject_cast<QgsLayerTreeLayer*>(root->children().last());
   QVERIFY(lastNode && lastNode->layer());
-  QVERIFY(lastNode->layer()->name().contains(QStringLiteral("위성")));
+  QCOMPARE(ReferenceKind::of(lastNode->layer()), satelliteKind);
+  QVERIFY(lastNode->layerId() != userPhotoId);
 }
 
 void TestWorkflow::xyzBasemap_layerCrsForced3857() {
@@ -4164,7 +4273,9 @@ void TestWorkflow::shapeEditing_livesInsideSelectTool() {
   QVERIFY2(!app.contains(QLatin1String("startVertexEditTool")),
            "도형수정을 따로 켜는 항목을 두지 말 것 — 도형선택에 들어 있다");
   QVERIFY2(app.contains(QLatin1String("m_featureSelectTool->setSnapEnabled")),
-           "자석은 수정점을 끌 때도 걸려야 한다");
+           "자석 설정은 도형선택(수정점 편집기)까지 전달돼야 한다");
+  QVERIFY2(src.contains(QLatin1String("snapMapPointExcludingTarget")),
+           "수정점은 기본이 커서 위치이고, Ctrl을 누른 채 끌 때만 자기 도형을 뺀 자석이 걸린다");
 }
 
 void TestWorkflow::subToolbar_marksTheActiveToolForTheBlueUnderline() {
@@ -4747,7 +4858,7 @@ void TestWorkflow::redLineDrawsOverLowerLayerLabels_layoutAndPdf() {
   if (!pdfImg.isNull()) {
     QVERIFY2(redCount(pdfImg) > 0, "PDF 에도 빨간 선이 남아야 한다");
   } else {
-    QWARN("PDF 래스터화 플러그인이 없어 화소 비교는 건너뜀 (내보내기 자체는 확인됨)");
+    qWarning("PDF 래스터화 플러그인이 없어 화소 비교는 건너뜀 (내보내기 자체는 확인됨)");
   }
 }
 
@@ -4776,20 +4887,52 @@ void TestWorkflow::perf_labelOrderAnalysisIsCheapPerRefresh() {
   (void)LayerOps::layersDrawnAboveLabels(&proj);
 
   const int kRuns = 20;
-  QElapsedTimer t;
-  t.start();
-  for (int r = 0; r < kRuns; ++r) {
-    LayerOps::applyLayerOrderToLabels(&proj, nullptr);
-    (void)LayerOps::layersDrawnAboveLabels(&proj);
+  // One 20-refresh batch under a parallel ctest load measured 0.674 ms once (F188). Judge the
+  // median of many batches so one descheduled batch cannot fail the gate, and list every batch.
+  const int kBatches = 15;
+  QList<double> batchMs;
+  for (int b = 0; b < kBatches; ++b) {
+    QElapsedTimer t;
+    t.start();
+    for (int r = 0; r < kRuns; ++r) {
+      LayerOps::applyLayerOrderToLabels(&proj, nullptr);
+      (void)LayerOps::layersDrawnAboveLabels(&proj);
+    }
+    batchMs << double(t.nsecsElapsed()) / 1e6 / kRuns;
   }
-  const double perRefreshMs = double(t.nsecsElapsed()) / 1e6 / kRuns;
-  qInfo("label-order analysis: %.3f ms per refresh (%d layers)", perRefreshMs, kLayers);
+  QList<double> sorted = batchMs;
+  std::sort(sorted.begin(), sorted.end());
+  const double perRefreshMs = sorted.at(kBatches / 2);
+  QStringList samples;
+  for (double ms : batchMs) samples << QString::number(ms, 'f', 3);
+  qInfo("label-order analysis: %.3f ms per refresh median of %d batches (%d layers)", perRefreshMs, kBatches,
+        kLayers);
 
   // 60fps 한 프레임이 16ms 다. 결과를 캐시하므로 상태가 그대로면 거의 공짜여야 한다.
-  // 캐시를 넣기 전 실측 1.856ms → 넣은 뒤 0.063ms.
-  QVERIFY2(perRefreshMs < 0.5,
-           qPrintable(QStringLiteral("갱신마다 도는 분석이 너무 비싸다: %1 ms")
-                          .arg(perRefreshMs, 0, 'f', 3)));
+  // 캐시를 넣기 전 실측 1.856ms → 넣은 뒤 0.063ms. 상한 0.5ms 는 그대로 두고, 느린 PC 는
+  // KA_PERF_BUDGET_LABEL_ORDER=<ms> 또는 KA_PERF_BUDGET_SCALE=<배수> 로 올린다(test_perf 와 같은 규칙).
+  double budgetMs = 0.5;
+  QJsonObject budgetJson;
+  if (!qEnvironmentVariableIsEmpty("KA_PERF_BUDGETS")) {
+    QFile budgetFile(qEnvironmentVariable("KA_PERF_BUDGETS"));
+    if (budgetFile.open(QIODevice::ReadOnly)) budgetJson = QJsonDocument::fromJson(budgetFile.readAll()).object();
+  }
+  const auto budgetSetting = [&budgetJson](const char* env, const QString& key) {
+    bool ok = false;
+    const double fromEnv = qEnvironmentVariable(env).toDouble(&ok);
+    if (ok && fromEnv > 0) return fromEnv;
+    const double fromFile = budgetJson.value(key).toDouble(0.0);
+    return fromFile > 0 ? fromFile : 0.0;
+  };
+  if (const double exact = budgetSetting("KA_PERF_BUDGET_LABEL_ORDER", QStringLiteral("label_order")); exact > 0)
+    budgetMs = exact;
+  else if (const double scale = budgetSetting("KA_PERF_BUDGET_SCALE", QStringLiteral("scale")); scale > 0)
+    budgetMs *= scale;
+  QVERIFY2(perRefreshMs < budgetMs,
+           qPrintable(QStringLiteral("갱신마다 도는 분석이 너무 비싸다: 중앙값 %1 ms > %2 ms (묶음별 %3)")
+                          .arg(perRefreshMs, 0, 'f', 3)
+                          .arg(budgetMs, 0, 'f', 3)
+                          .arg(samples.join(QStringLiteral(", ")))));
 
   // 지도 갱신 본체도 같은 규모에서 재 둔다. 여기가 느려지면 팬·줌이 끊긴다.
   QgsMapCanvas canvas;
@@ -5523,7 +5666,7 @@ void TestWorkflow::layoutExtentForPaperScale_keepsTypedDenominator() {
 
 void TestWorkflow::layoutNiceScaleDenominator_endsOnTen() {
   QCOMPARE(LayoutService::niceScaleDenominator(20.0), 20);
-  QCOMPARE(LayoutService::niceScaleDenominator(23.0), 40);
+  QCOMPARE(LayoutService::niceScaleDenominator(23.0), 30);  // 1:30 is a standard excavation scale (StandardScales)
   QCOMPARE(LayoutService::niceScaleDenominator(37.0), 40);
   QCOMPARE(LayoutService::niceScaleDenominator(40.0), 40);
   QCOMPARE(LayoutService::niceScaleDenominator(487.0), 500);
@@ -5981,9 +6124,19 @@ void TestWorkflow::startupLoadsSatelliteAndCadastralWithoutToolbarIcons() {
   const int newEnd = sessionSrc.indexOf(QLatin1String("void MainWindow::"), newAt + 10);
   const QString newBody = sessionSrc.mid(newAt, newEnd - newAt);
   const int applyAt = newBody.indexOf(QLatin1String("applyStartupMap()"));
-  const int ensureAt = newBody.indexOf(QLatin1String("ensureDefaultBasemaps()"));
-  QVERIFY2(applyAt >= 0 && ensureAt > applyAt,
-           "새 조사는 예약만 하지 말고 위성·지적을 바로 올려야 함");
+  const int scheduleAt = newBody.indexOf(QLatin1String("scheduleDefaultBasemaps()"));
+  QVERIFY2(applyAt >= 0 && scheduleAt > applyAt,
+           "새 조사도 위성·지적을 올려야 한다(이벤트 루프 뒤로 미룰 뿐)");
+  const int schedAt = sessionSrc.indexOf(QLatin1String("void MainWindow::scheduleDefaultBasemaps"));
+  QVERIFY2(schedAt >= 0, "scheduleDefaultBasemaps");
+  QVERIFY2(sessionSrc.mid(schedAt, 900).contains(QLatin1String("loadBootBasemaps")),
+           "예약한 적재는 loadBootBasemaps 로 실제로 돌아야 한다");
+  const int bootAt = src.indexOf(QLatin1String("void MainWindow::loadBootBasemaps"));
+  QVERIFY2(bootAt >= 0, "loadBootBasemaps");
+  const QString bootBody = src.mid(bootAt, 1800);
+  QVERIFY2(bootBody.contains(QLatin1String("m_isOpeningSurvey")) &&
+               bootBody.contains(QLatin1String("ensureDefaultBasemaps()")),
+           "열기가 끝나기를 기다렸다가 반드시 위성·지적을 올려야 한다(취소하지 않는다)");
 }
 
 void TestWorkflow::layoutCoordPointHasIconAndCallout() {
@@ -6122,8 +6275,16 @@ void TestWorkflow::portableRuntime_discoversUnicodeFolderAndKoreaCrs() {
     if (QFile::exists(fromOsgeo + QStringLiteral("/proj.db")))
       projDir = fromOsgeo;
   }
-  if (projDir.isEmpty() && QFile::exists(QStringLiteral("L:/ka-hgis-portable/share/proj/proj.db")))
-    projDir = QStringLiteral("L:/ka-hgis-portable/share/proj");
+  if (projDir.isEmpty()) {
+    // OSGeo4W layout: <root>/apps/qgis-dev is the QGIS prefix, PROJ data is <root>/share/proj.
+    const QString fromPrefix = QDir(QgsApplication::prefixPath()).absoluteFilePath(QStringLiteral("../../share/proj"));
+    if (QFile::exists(fromPrefix + QStringLiteral("/proj.db"))) projDir = QDir::cleanPath(fromPrefix);
+  }
+  // Opt-in for a portable folder instead of the SDK (was a fixed L: drive path).
+  const QString portableRoot = qEnvironmentVariable("KA_HGIS_PORTABLE_DIR");
+  if (projDir.isEmpty() && !portableRoot.isEmpty() &&
+      QFile::exists(portableRoot + QStringLiteral("/share/proj/proj.db")))
+    projDir = portableRoot + QStringLiteral("/share/proj");
   QVERIFY2(!projDir.isEmpty(), "테스트 PC에 proj.db가 있어야 함");
   QVERIFY2(KaPortableRuntime::bindProjSearchPaths(projDir), "PROJ 검색 경로");
   QVERIFY2(KaPortableRuntime::koreaWorkAndWebCrsValid(),
@@ -6426,8 +6587,10 @@ void TestWorkflow::nameAttributeLabeling_5ptAndAreaCheck() {
   delete vl;
 
   // 5. 실제 수신된 한국어 SHP(CP949, .cpg 없음) 인코딩 자동 보정 검증
-  const QString sampleShp = QStringLiteral("C:/Users/kyi25/OneDrive/바탕 화면/안동시/발굴조사구역_260904142329633/발굴사업허가구역.shp");
-  if (QFile::exists(sampleShp)) {
+  // Opt-in: a real field SHP stays on the developer's PC, never in the test (F211).
+  // KA_HGIS_FIELD_CP949_SHP=<...>/발굴사업허가구역.shp (CP949, no .cpg, 사업명 field).
+  const QString sampleShp = qEnvironmentVariable("KA_HGIS_FIELD_CP949_SHP");
+  if (!sampleShp.isEmpty() && QFile::exists(sampleShp)) {
     const QString enc = LayerOps::prepareShapefileEncoding(sampleShp);
     QCOMPARE(enc, QStringLiteral("CP949"));
     auto* shpL = new QgsVectorLayer(sampleShp, QStringLiteral("허가구역"), QStringLiteral("ogr"));
@@ -7248,20 +7411,12 @@ void TestWorkflow::restoreLastSurvey_prefersEmbeddedWorkspaceWhenSafe() {
            "저장 때 GPKG layer_styles 에 색을 남겨 LayersOnly 폴백도 복원해야 한다");
 }
 
-void TestWorkflow::restoreLastSurvey_bootUsesLayersOnlyToAvoidWmsAv() {
+void TestWorkflow::bootNeverRestoresLastSurvey() {
+  // F137: the dead auto-restore path is gone; startup opens the home screen only.
   const QString src = readMainWindowSources();
   QVERIFY2(!src.isEmpty(), "MainWindow.cpp + Session");
-  const int fn = src.indexOf(QLatin1String("void MainWindow::restoreLastSurvey()"));
-  QVERIFY2(fn >= 0, "restoreLastSurvey 가 있어야 한다");
-  const int next = src.indexOf(QLatin1String("void MainWindow::"), fn + 10);
-  QVERIFY2(next > fn, "restoreLastSurvey body");
-  const QString body = src.mid(fn, next - fn);
-  QVERIFY2(body.contains(QLatin1String("OpenSurveyMode::LayersOnly")),
-           "아이콘 재실행은 GPKG 테이블+위성만 — 내장 24레이어 WMS AV 방지");
-  QVERIFY2(!body.contains(QLatin1String("OpenSurveyMode::PreferWorkspace")),
-           "부팅 복원에 PreferWorkspace 를 넣으면 crash-20260906-153900 이 재발한다");
-  QVERIFY2(!body.contains(QLatin1String("setSkipAutoRestore(st, false)")),
-           "복원 직후 skip 을 내리면 타일 AV 다음 실행이 또 복원해서 꺼진다");
+  QVERIFY2(!src.contains(QLatin1String("void MainWindow::restoreLastSurvey")),
+           "죽은 자동 복원 코드가 되살아나면 홈 시작 규칙을 어길 수 있다");
 }
 
 void TestWorkflow::finishOpenedProject_doesNotBareRefreshWhileWms() {
@@ -8276,11 +8431,32 @@ void TestWorkflow::test_challenge_manifest_self_exclusion_and_regex_format() {
 }
 
 int main(int argc, char** argv) {
-  QgsApplication app(argc, argv, false);
+  // Keep the user's own settings out of reach (F037). QStandardPaths test mode moves
+  // AppConfig/AppData (ka-hgis-vworld.ini, caches) under qttest, the QGIS profile and every
+  // IniFormat QSettings live in a folder that disappears with this process, and direct runs
+  // log outside the user's session log. VworldSettings keeps its keys (ka-hgis-vworld.ini
+  // and the native registry store) as files in a scope folder here, so no test reads or
+  // writes the user's real VWorld key store.
+  QStandardPaths::setTestModeEnabled(true);
+  QTemporaryDir isolatedSettings;
+  if (!isolatedSettings.isValid()) {
+    qCritical("Cannot create a temporary settings folder");
+    return 1;
+  }
+  if (qEnvironmentVariableIsEmpty("KA_HGIS_LOG_DIR"))
+    qputenv("KA_HGIS_LOG_DIR", isolatedSettings.filePath(QStringLiteral("logs")).toUtf8());
+  const QString profile = isolatedSettings.filePath(QStringLiteral("qgis-profile"));
+  QDir().mkpath(profile);
+  QgsApplication app(argc, argv, false, profile);
   const QString prefix = qEnvironmentVariable("QGIS_PREFIX_PATH", QStringLiteral("C:/OSGeo4W/apps/qgis-dev"));
   QgsApplication::setPrefixPath(prefix, true);
   QgsApplication::setPluginPath(prefix + QStringLiteral("/plugins"));
   QgsApplication::initQgis();
+  QSettings::setDefaultFormat(QSettings::IniFormat);
+  QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, isolatedSettings.path());
+  VworldSettings::Scope keyScope;
+  keyScope.folder = isolatedSettings.filePath(QStringLiteral("vworld-keys"));
+  VworldSettings::setScope(keyScope);
   TestWorkflow tc;
   const int rc = QTest::qExec(&tc, argc, argv);
   QgsApplication::exitQgis();

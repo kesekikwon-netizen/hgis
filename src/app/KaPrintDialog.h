@@ -41,6 +41,9 @@ public:
   void setOverlapMm(double mm);
   void setMarks(bool on);
   void setOverview(bool on);
+  // 그림 해상도 상한(300 또는 600 DPI). 같은 도면 PDF 를 그리므로 모양은 같고 선만 곱다.
+  void setPrintDpi(double dpi);
+  double printDpi() const;
   // 미리보기에서 장을 누른 것과 같다. 뺀 장은 이번 인쇄에서 찍지 않는다.
   void toggleSheet(int index);
   QList<int> chosenSheets() const;  // 이번에 찍을 장(0부터)
@@ -97,6 +100,7 @@ private:
   QComboBox* m_output = nullptr;
   QComboBox* m_sheet = nullptr;
   QDoubleSpinBox* m_overlap = nullptr;
+  QComboBox* m_dpi = nullptr;
   QCheckBox* m_marks = nullptr;
   QCheckBox* m_overview = nullptr;
   QLabel* m_summary = nullptr;

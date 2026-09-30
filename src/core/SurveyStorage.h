@@ -30,11 +30,14 @@ QString writableSurveyPath(const QString& requestedPath, const QString& fallback
 
 // 커밋된 WAL과 내장 작업공간까지 일관된 사본으로 만든 뒤 대상 파일을 원자적으로 교체한다.
 // 실패하면 원본과 기존 대상 파일을 유지한다. 원본·대상이 같으면 아무것도 바꾸지 않는다.
-// 대상이 열려 있으면 옆의 -저장.gpkg 로 두고 writtenPath에 그 경로를 넣는다.
+// 대상이 열려 이름 교체를 계속 거부당하면 대상을 제자리에서 덮어쓰지 않고 옆의 -저장.gpkg 로
+// 두고 writtenPath에 그 경로를 넣는다. 그것도 못 하면 새 사본(<대상>.ka-new)을 남기고 알린다.
+// 새 사본은 디스크까지 기록(FlushFileBuffers)하고 교체는 MOVEFILE_WRITE_THROUGH 로 한다.
 bool copySurvey(const QString& sourceGpkg, const QString& targetGpkg, QString* errorOut = nullptr,
                 QString* writtenPath = nullptr);
 
-// 검증된 다음 세대 GPKG로 원본을 원자적으로 교체한다. 실패하면 원본 바이트를 유지한다.
+// 검증된 다음 세대 GPKG로 원본을 원자적으로 교체한다. 실패하면 원본 바이트를 유지하고
+// writtenPath 는 바꾸지 않는다. 성공하면 SurveyFileFingerprint 에 새 상태를 기억한다.
 bool publishSurveyGeneration(const QString& generationGpkg, const QString& targetGpkg,
                              QString* errorOut = nullptr, QString* writtenPath = nullptr);
 
@@ -68,7 +71,11 @@ AbsorbResult absorbExternalVectors(QgsProject* project, const QString& gpkgPath,
                                    const QString& alsoSurveyGpkg = {});
 
 // 다음 세대 GPKG에 편집·흡수·내장 쓰기를 한 뒤 검증하고 원본을 교체한다.
-// 한 단계라도 실패하면 saved=false 이고 원본 바이트와 미저장 편집을 유지한다.
+// 한 단계라도 실패하면 saved=false 이고 원본 바이트와 미저장 편집을 유지한다. 조사 파일
+// 레이어의 편집은 세대 파일에만 쓰고, 원본에는 교체가 성공할 때만 반영된다.
+// 예외 하나(사용자 결정 2026-09-20): 커밋이 막힌 레이어가 있으면 저장할 수 있는 조사 파일
+// 레이어는 원본에 먼저 커밋한다. 그 레이어 이름은 originalCommittedLayers 에 담기고 error 에도
+// 적힌다(원본 일부 갱신). 이때도 세대 교체는 하지 않고 복구 사본을 남긴다.
 struct PersistAttempt {
     bool saved = false;
     QString surveyPath;
@@ -79,6 +86,7 @@ struct PersistAttempt {
     QStringList skippedRaster;
     QStringList skippedReference;
     QStringList collectedLayers;  // 조사 폴더로 모아 온 바깥 자료
+    QStringList originalCommittedLayers;  // 실패했지만 원본 조사 파일에 먼저 커밋한 레이어
   };
 PersistAttempt persistWorkspace(QgsProject* project, const QString& gpkgPath,
                                 const QString& recoveryDirectory,

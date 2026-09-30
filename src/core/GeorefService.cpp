@@ -1,4 +1,5 @@
 #include "GeorefService.h"
+#include "GeorefBackup.h"
 #include "LayerOps.h"
 
 #include <QFile>
@@ -40,18 +41,8 @@ namespace GeorefService {
 namespace {
 
 constexpr double kDetEps = 1e-18;
-
-bool solve3(double a11, double a12, double a13, double a21, double a22, double a23,
-            double a31, double a32, double a33, double b1, double b2, double b3,
-            double& x1, double& x2, double& x3) {
-  const double det = a11 * (a22 * a33 - a23 * a32) - a12 * (a21 * a33 - a23 * a31)
-                     + a13 * (a21 * a32 - a22 * a31);
-  if (std::abs(det) < kDetEps) return false;
-  x1 = (b1 * (a22 * a33 - a23 * a32) - a12 * (b2 * a33 - a23 * b3) + a13 * (b2 * a32 - a22 * b3)) / det;
-  x2 = (a11 * (b2 * a33 - a23 * b3) - b1 * (a21 * a33 - a23 * a31) + a13 * (a21 * b3 - b2 * a31)) / det;
-  x3 = (a11 * (a22 * b3 - b2 * a32) - a12 * (a21 * b3 - b2 * a31) + b1 * (a21 * a32 - a22 * a31)) / det;
-  return true;
-}
+// Collinear source points: the centred normal matrix is singular relative to its size.
+constexpr double kRelDetEps = 1e-10;
 
 // 그림 픽셀은 위에서 아래로 y 가 커지고(행 번호), 지도는 아래에서 위로 커진다.
 // 그래서 그림 → 지도 변환에는 반드시 상하 뒤집기가 들어가야 한다(행렬식 < 0).
@@ -85,39 +76,46 @@ Affine helmertFromTwo(const Pair& p0, const Pair& p1, bool sourceYDown) {
   return out;
 }
 
+// Least squares on coordinates centred at their means. Raw sums of 200000-class map
+// coordinates (CAD sources) cancel out their significant digits in the normal equations;
+// centred sums stay at the size of the drawing, and the translation comes back at the end.
 Affine affineLeastSquares(const QVector<Pair>& pairs) {
   Affine out;
-  if (pairs.size() < 3) return out;
-  double sxx = 0, sxy = 0, sx = 0, syy = 0, sy = 0, sn = 0;
-  double sxX = 0, syX = 0, sX = 0, sxY = 0, syY = 0, sY = 0;
+  const int n = pairs.size();
+  if (n < 3) return out;
+  double mx = 0, my = 0, mX = 0, mY = 0;
   for (const Pair& g : pairs) {
-    const double x = g.srcX, y = g.srcY;
+    mx += g.srcX;
+    my += g.srcY;
+    mX += g.mapX;
+    mY += g.mapY;
+  }
+  mx /= n;
+  my /= n;
+  mX /= n;
+  mY /= n;
+  double sxx = 0, sxy = 0, syy = 0, sxX = 0, syX = 0, sxY = 0, syY = 0;
+  for (const Pair& g : pairs) {
+    const double x = g.srcX - mx, y = g.srcY - my;
+    const double X = g.mapX - mX, Y = g.mapY - mY;
     sxx += x * x;
     sxy += x * y;
-    sx += x;
     syy += y * y;
-    sy += y;
-    sn += 1;
-    sxX += x * g.mapX;
-    syX += y * g.mapX;
-    sX += g.mapX;
-    sxY += x * g.mapY;
-    syY += y * g.mapY;
-    sY += g.mapY;
+    sxX += x * X;
+    syX += y * X;
+    sxY += x * Y;
+    syY += y * Y;
   }
-  double a = 0, b = 0, c = 0, d = 0, e = 0, f = 0;
-  if (!solve3(sxx, sxy, sx, sxy, syy, sy, sx, sy, sn, sxX, syX, sX, a, b, c))
-    return out;
-  if (!solve3(sxx, sxy, sx, sxy, syy, sy, sx, sy, sn, sxY, syY, sY, d, e, f))
-    return out;
-  out.a = a;
-  out.b = b;
-  out.c = c;
-  out.d = d;
-  out.e = e;
-  out.f = f;
+  const double det = sxx * syy - sxy * sxy;
+  if (!(sxx > 0.0 && syy > 0.0) || std::abs(det) <= kRelDetEps * sxx * syy) return out;
+  out.a = (sxX * syy - syX * sxy) / det;
+  out.b = (syX * sxx - sxX * sxy) / det;
+  out.d = (sxY * syy - syY * sxy) / det;
+  out.e = (syY * sxx - sxY * sxy) / det;
+  out.c = mX - out.a * mx - out.b * my;
+  out.f = mY - out.d * mx - out.e * my;
   out.valid = true;
-  out.pairCount = pairs.size();
+  out.pairCount = n;
   return out;
 }
 
@@ -266,6 +264,8 @@ bool writeSidecarPrj(const QString& imagePath, const QgsCoordinateReferenceSyste
   return true;
 }
 
+// Writes the geotransform into the file's own tags; a file GDAL cannot update (read-only
+// medium) gets it in the PAM sidecar (.aux.xml) instead.
 bool stampGdalGeoTransform(const QString& imagePath, const Affine& a) {
   if (!a.valid || imagePath.isEmpty()) return false;
   GDALAllRegister();
@@ -279,14 +279,11 @@ bool stampGdalGeoTransform(const QString& imagePath, const Affine& a) {
   return err == CE_None;
 }
 
+// Only a PAM file that carries georeferencing overrides the world file; statistics and
+// metadata stay. The aligner backs every sidecar up (GeorefBackup) before this runs.
 void dropGdalPamSidecar(const QString& imagePath) {
-  const QFileInfo fi(imagePath);
-  const QStringList pam = {
-      imagePath + QStringLiteral(".aux.xml"),
-      fi.path() + QLatin1Char('/') + fi.completeBaseName() + QStringLiteral(".aux.xml"),
-  };
-  for (const QString& p : pam) {
-    if (QFile::exists(p)) QFile::remove(p);
+  for (const QString& p : GeorefBackup::pamSidecarPaths(imagePath)) {
+    if (GeorefBackup::pamCarriesGeoref(p)) QFile::remove(p);
   }
 }
 
@@ -297,13 +294,30 @@ bool applyWorldFileToRaster(QgsRasterLayer* layer, const Affine& a,
     return false;
   }
   const QString src = layer->source();
+  // The provider's open GDAL handle re-serialises the PAM state it loaded (QGIS put the
+  // band statistics it computed into it) when it closes. Close it before the sidecars
+  // change: otherwise that flush lands on top of them, and a PAM GeoTransform written back
+  // that way overrides the new world file (a GeoTIFF reads PAM first, so it would not move
+  // at all). Probed against qgis-dev 3.44; test_georef_backup covers PNG and TIFF.
+  GeorefBackup::releaseRasterHandle(layer);
   if (!writeWorldFile(src, a, errorOut)) return false;
   if (crs.isValid()) writeSidecarPrj(src, crs, nullptr);
   dropGdalPamSidecar(src);
-  stampGdalGeoTransform(src, a);
-  if (crs.isValid()) layer->setCrs(crs);
-  if (QgsDataProvider* p = layer->dataProvider()) p->reloadData();
-  if (crs.isValid()) layer->setCrs(crs);
+  // GDAL ignores a world file when a GeoTIFF has its own georeferencing; only then are the
+  // file's tags replaced (backed up first). Plain scans, JPG and PNG keep their bytes and
+  // follow the world file alone, so 「되돌리기」 only has to put the sidecars back.
+  if (GeorefBackup::hasInternalGeoref(src)) stampGdalGeoTransform(src, a);
+  // Same layer object, same id: only its data source is read again. A handle released
+  // during that reopen may still have flushed a georeferencing PAM: once more.
+  GeorefBackup::reopenRasterLayer(layer, crs);
+  if (GeorefBackup::pamGeorefPresent(src)) {
+    dropGdalPamSidecar(src);
+    GeorefBackup::reopenRasterLayer(layer, crs);
+  }
+  if (!layer->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("맞춰진 그림을 다시 열지 못했습니다");
+    return false;
+  }
   LayerOps::setAlignPending(layer, false);
   if (QgsProject* proj = QgsProject::instance()) {
     if (QgsLayerTree* root = proj->layerTreeRoot()) {
@@ -312,20 +326,12 @@ bool applyWorldFileToRaster(QgsRasterLayer* layer, const Affine& a,
     }
   }
   layer->triggerRepaint();
-  return layer->isValid();
+  return true;
 }
 
 bool persistAlignedRaster(QgsRasterLayer* layer, const Affine& a,
                           const QgsCoordinateReferenceSystem& crs, QString* errorOut) {
   if (!applyWorldFileToRaster(layer, a, crs, errorOut)) return false;
-  const QString src = layer->source();
-  const QString name = layer->name();
-  layer->setDataSource(src, name, QStringLiteral("gdal"), false);
-  if (crs.isValid()) layer->setCrs(crs);
-  if (!layer->isValid()) {
-    if (errorOut) *errorOut = QStringLiteral("맞춰진 그림을 다시 열지 못했습니다");
-    return false;
-  }
   if (looksUnreferencedRaster(layer)) {
     if (errorOut)
       *errorOut = QStringLiteral("그림을 지도 좌표로 붙이지 못했습니다. 점을 다시 찍고 이동하세요.");

@@ -11,7 +11,11 @@ Windows 10/11 64비트용 전체 폴더 배포다. Qt6, QGIS, GDAL, PROJ 좌표�
 .\scripts\verify-portable-pack.ps1 -OutDir "$([Environment]::GetFolderPath('Desktop'))\HGIS-포터블-새버전"
 ```
 
-`-IncludeLocalCredentials`는 사용자가 요청한 개인용 배포에서만 사용한다. 기본값은 계정 미포함이다. 현재 앱의 `LocalAppData/ka-hgis/ka-hgis` 설정을 우선하며 옛 org-only VWorld 키가 현재 키를 덮지 않는다. 개인용 폴더에는 VWorld 키, 수치지형도 계정, 국가유산 인트라넷 계정이 들어간다. 키·계정 갱신은 앱의 더보기 메뉴에서 한다. 인터넷 서비스는 연결과 유효한 인증이 필요하다.
+`-IncludeLocalCredentials`는 사용자가 요청한 개인용 배포에서만 사용한다. 기본값은 계정 미포함이다. **개인용 포터블 예외:** 사용자가 요청한 개인용 포터블(`make-portable.ps1 -IncludeLocalCredentials`)만 이 PC 의 VWorld 키와 계정 비밀번호를 폴더 `config` 에 **암호화 없이** 담는다(키는 그대로, 비밀번호는 앱과 같은 가림 형식 `password_portable=` 이며 암호화가 아니다). 다른 PC 에서 로그인 없이 쓰려는 사용자 결정이다. 기본값은 미포함이고, 담을 때 스크립트가 경고를 띄우며 `PORTABLE-MANIFEST.json` 의 `credentialsIncluded` 가 `true` 가 된다. 그 폴더는 본인 USB·PC 에만 두고 남에게 주거나 올리지 않는다. [other-pc-setup.md](other-pc-setup.md)의 「git·번들로 옮기지 않는다」와 [deploy-windows.md](deploy-windows.md)의 「폴더에 넣지 않음」은 기본 포터블 이야기이고, 이 개인용 예외만 다르다. 현재 앱의 `LocalAppData/ka-hgis/ka-hgis` 설정을 우선하며 옛 org-only VWorld 키가 현재 키를 덮지 않는다. 개인용 폴더에는 VWorld 키, 수치지형도 계정, 국가유산 인트라넷 계정이 들어간다. 키·계정 갱신은 앱의 더보기 메뉴에서 한다. 인터넷 서비스는 연결과 유효한 인증이 필요하다.
+
+## 무엇이 어떤 판인지 (검증됨/미검증)
+
+포터블 생성은 사용자가 요청할 때만 하며 검증 실패로 막지 않는다. 대신 `PORTABLE-MANIFEST.json` 에 `executableSha256`, `releaseStatus`(`verified` = 그 EXE 가 `scripts/verify-release.ps1` 의 빌드·전체 CTest·시작 검사를 통과했고 소스가 그 뒤로 바뀌지 않음, 아니면 `unverified`), `releaseStatusNote`, `gitDescribe`, `qgisPin` 을 적는다. `publish-desktop.ps1` 로 EXE 만 바꿔도 이 파일을 다시 쓴다. 받은 PC 에서는 폴더 안의 `verify-portable-pack.ps1` 로 EXE 해시를 대조하고 판 상태를 본다.
 
 ## 다른 PC의 Windows 실행 차단과 서명
 

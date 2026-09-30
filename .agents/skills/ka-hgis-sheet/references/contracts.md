@@ -16,10 +16,10 @@
 
 ## 정합·지적
 
-- 지적도는 `ka_hgis/cadastral` + 역할 `cadastral` + 범례 그룹 **지적도**. 참조 지도가 아니다.
+- 지적도는 `ka_hgis/cadastral` + 역할 `cadastral`. 받은 지적도와 VWorld 지적 그림은 레이어 트리 루트에 한 줄씩 놓는다(옛 **지적도** 그룹은 `placeCadastralLayer`가 풀어 루트로 올린다). 참조 지도가 아니다.
 - `LayerOps::markReferenceLayer`는 지적이면 바로 반환한다. `isCadastralLayer`가 `isReferenceLayer`보다 앞선다.
 - `LayerOps::isSnapSourceLayer` = 지적 또는 비참조. `applySnapSettings`는 이 레이어에만 자석을 건다. 범례에서 끈 지적도는 다시 켜지 않는다.
-- `placeCadastralLayer`는 이미 지적도 그룹에 있는 레이어의 켜짐/꺼짐을 바꾸지 않는다. 수치지형도·토양도를 받을 때 `layersAdded` → 자석 갱신이 지적을 다시 켜던 길을 막는다.
+- `placeCadastralLayer`는 이미 루트에 있는 지적 레이어의 켜짐/꺼짐을 바꾸지 않는다. 수치지형도·토양도를 받을 때 `layersAdded` → 자석 갱신이 지적을 다시 켜던 길을 막는다.
 - 정합 중 `MainWindowEditing`은 `SurveyLayers`를 강제한다. 현재 레이어가 사진이어도 조사 도형·지적 선에 붙는다.
 - 위성·VWorld 지적 WMS는 그림이다. 자석 대상이 아니다. 수치지형도 합친 레이어는 켜지 않는다.
 - 지적도 레이어·지적도 묶음은 Delete와 우클릭 삭제로 목록에서 뺀다. 원본 파일은 그대로다. 지운 뒤에는 `ka_hgis/skip_auto_cadastral`로 자동 VWorld 지적을 다시 올리지 않는다. 이미 받은 공식 지적(`isCadastralLayer`)이 있으면 같은 그림도 추가하지 않는다.
@@ -33,7 +33,7 @@
 ## 참조 지도 묶음 삭제
 
 - 참조 지도 루트와 그 아래 모든 묶음(유산·지형·가져온 SHP)은 펼치지 않고 맨 위에 「레이어 삭제」가 있다. Delete 키도 같다.
-- 표시·유산 여부와 관계없이 묶음 아래 레이어를 모은다. 조사 데이터(`layer_key`)와 지적도 그룹은 넣지 않는다.
+- 표시·유산 여부와 관계없이 묶음 아래 레이어를 모은다. 조사 데이터(`layer_key`)와 루트의 지적 레이어는 넣지 않는다.
 - 자식 하나만 고르면 그 레이어만 지운다. 묶음 노드는 아래를 모두 뺀다. 원본 파일은 그대로다.
 
 파일: `LayerOps.cpp` (`removableReferenceLayersFromNode`, `removableLegendLayersFromNode`), `MainWindowContextMenus.cpp`, `MainWindowUndo.cpp`.

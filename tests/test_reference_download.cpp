@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QDateTime>
 #include <QElapsedTimer>
 #include <QEvent>
 #include <QBuffer>
@@ -27,6 +28,7 @@
 
 #include "core/GeologyMapService.h"
 #include "core/LayerOps.h"
+#include "core/ReferenceTiledFetch.h"
 #include "core/RiverMapService.h"
 #include "core/SoilMapService.h"
 #include "core/TilePackService.h"
@@ -49,6 +51,10 @@ private slots:
   void preparedFilesAreOwnedUntilAccepted();
   void partialSoilFailurePreservesOriginal();
   void riverPageLimitIsFailure();
+  void riverRetriesDroppedPieceOnce();
+  void geologySplitsPartialResponseIntoQuarters();
+  void tiledFetchMergesAndBoundsRetries();
+  void steadySlowResponseOutlivesIdleTimeout();
   void failedRegistrationPreservesOldLayer();
   void cancelledPreparationCanRetry();
   void noResponseTimesOut();
@@ -156,9 +162,180 @@ void TestReferenceDownload::riverPageLimitIsFailure() {
         *body = fullPage;
         return true;
       });
-  QCOMPARE(calls, 10);
+  // A full page set is split into quarters. Every piece here stays full, so the
+  // download descends whole -> quarter -> leaf once (10 pages each) and fails
+  // instead of silently truncating; the old map is kept.
+  QCOMPARE(calls, 30);
   QCOMPARE(result.status, PreparedReferenceMap::Status::Failed);
   QVERIFY(result.error.contains(QStringLiteral("양을 넘었습니다")));
+}
+
+void TestReferenceDownload::riverRetriesDroppedPieceOnce() {
+  QTemporaryDir directory;
+  int calls = 0;
+  const auto result = RiverMapService::prepare(kExtent, QStringLiteral("TEST_KEY"),
+      directory.filePath(QStringLiteral("river.gpkg")), {}, nullptr,
+      [&](const QNetworkRequest&, QByteArray* body, QString* error, QgsFeedback*) {
+        if (++calls == 1) {
+          *error = QStringLiteral("시험 연결 끊김");
+          return false;
+        }
+        *body = riverData();
+        return true;
+      });
+  QVERIFY2(result.isReady(), qPrintable(result.error));
+  QCOMPARE(calls, 2);
+}
+
+void TestReferenceDownload::geologySplitsPartialResponseIntoQuarters() {
+  QTemporaryDir directory;
+  const QString base = directory.filePath(QStringLiteral("geology.gpkg"));
+  int featureRequests = 0;
+  int quarterSerial = 0;
+  const auto feature = [](const QString& id, double x) {
+    const double y = 450000.;
+    // A braced list with one QJsonArray element copies it instead of nesting it
+    // (the ring would become the polygon), so the ring list is wrapped explicitly.
+    const QJsonArray ring{QJsonArray{x, y}, QJsonArray{x + 10, y}, QJsonArray{x + 10, y + 10},
+                          QJsonArray{x, y + 10}, QJsonArray{x, y}};
+    QJsonArray rings;
+    rings.append(ring);
+    return QJsonObject{{QStringLiteral("type"), QStringLiteral("Feature")},
+        {QStringLiteral("id"), id},
+        {QStringLiteral("properties"), QJsonObject{{QStringLiteral("기호"), QStringLiteral("Qa")},
+            {QStringLiteral("지층"), QStringLiteral("시험 충적층")}, {QStringLiteral("시대"), QStringLiteral("제4기")}}},
+        {QStringLiteral("geometry"), QJsonObject{{QStringLiteral("type"), QStringLiteral("Polygon")},
+            {QStringLiteral("coordinates"), rings}}}};
+  };
+  const QJsonObject crs{{QStringLiteral("type"), QStringLiteral("name")},
+      {QStringLiteral("properties"), QJsonObject{{QStringLiteral("name"), QStringLiteral("EPSG:5186")}}}};
+  const auto result = GeologyMapService::prepare(kExtent, base, {}, nullptr,
+      [&](const QNetworkRequest& request, QByteArray* body, QString*, QgsFeedback*) {
+        const QUrlQuery query(request.url());
+        if (query.queryItemValue(QStringLiteral("request")) == QLatin1String("GetMap")) {
+          QImage image(query.queryItemValue(QStringLiteral("width")).toInt(),
+                       query.queryItemValue(QStringLiteral("height")).toInt(), QImage::Format_ARGB32);
+          image.fill(QColor(249, 249, 127));
+          QBuffer buffer(body);
+          return buffer.open(QIODevice::WriteOnly) && image.save(&buffer, "PNG");
+        }
+        ++featureRequests;
+        const QStringList bbox = query.queryItemValue(QStringLiteral("bbox")).split(QLatin1Char(','));
+        const double width = bbox.value(3).toDouble() - bbox.value(1).toDouble();
+        QJsonObject collection{{QStringLiteral("type"), QStringLiteral("FeatureCollection")},
+                               {QStringLiteral("crs"), crs}};
+        if (width > 0.6) {
+          // The server truncated the 80 km request: 1 of 5 matched features.
+          collection.insert(QStringLiteral("numberMatched"), 5);
+          collection.insert(QStringLiteral("features"), QJsonArray{feature(QStringLiteral("litho.1"), 200000.)});
+        } else {
+          // Every quarter repeats the boundary polygon litho.1 and adds its own.
+          const int serial = ++quarterSerial;
+          collection.insert(QStringLiteral("numberMatched"), 2);
+          collection.insert(QStringLiteral("features"), QJsonArray{feature(QStringLiteral("litho.1"), 200000.),
+              feature(QStringLiteral("litho.q%1").arg(serial), 200000. + 20. * serial)});
+        }
+        *body = QJsonDocument(collection).toJson(QJsonDocument::Compact);
+        return true;
+      });
+  const auto releaseProviders = qScopeGuard([] {
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  });
+  QVERIFY2(result.isReady(), qPrintable(result.error));
+  QCOMPARE(featureRequests, 5);
+  QgsVectorLayer check(result.gpkgPath + QStringLiteral("|layername=geology_map"), {}, QStringLiteral("ogr"));
+  QVERIFY(check.isValid());
+  QCOMPARE(check.featureCount(), 5);  // the shared boundary polygon appears once
+}
+
+void TestReferenceDownload::tiledFetchMergesAndBoundsRetries() {
+  QString error;
+  const QByteArray merged = ReferenceTiledFetch::mergeFeatureCollections({
+      R"({"type":"FeatureCollection","numberMatched":2,"features":[{"type":"Feature","id":"a","properties":{},"geometry":null},{"type":"Feature","properties":{"n":1},"geometry":null}]})",
+      R"({"type":"FeatureCollection","numberMatched":2,"features":[{"type":"Feature","id":"a","properties":{},"geometry":null},{"type":"Feature","properties":{"n":1},"geometry":null},{"type":"Feature","id":"b","properties":{},"geometry":null}]})"},
+      &error);
+  const QJsonObject object = QJsonDocument::fromJson(merged).object();
+  QCOMPARE(object.value(QStringLiteral("features")).toArray().size(), 3);
+  QCOMPARE(object.value(QStringLiteral("numberMatched")).toInt(), 3);
+  QVERIFY(ReferenceMapPreparation::validateCompleteFeatureCollection(merged, &error));
+
+  int requests = 0;
+  const auto dropped = ReferenceTiledFetch::fetch(QgsRectangle(0, 0, 1, 1), [&](const QgsRectangle&) {
+    ++requests;
+    return ReferenceTiledFetch::Piece{ReferenceTiledFetch::Outcome::Transient, {}, QStringLiteral("끊김")};
+  });
+  QVERIFY(!dropped.ok);
+  QCOMPARE(requests, 2);  // one retry, never an endless loop
+  QVERIFY(dropped.error.contains(QStringLiteral("끊김")));
+
+  requests = 0;
+  const auto fatal = ReferenceTiledFetch::fetch(QgsRectangle(0, 0, 1, 1), [&](const QgsRectangle&) {
+    ++requests;
+    return ReferenceTiledFetch::Piece{ReferenceTiledFetch::Outcome::Fatal, {}, QStringLiteral("잘못된 응답")};
+  });
+  QVERIFY(!fatal.ok);
+  QCOMPARE(requests, 1);  // a bad server answer is neither split nor repeated
+
+  requests = 0;
+  ReferenceTiledFetch::Options spent;
+  spent.budgetMs = 0;  // no time left: the first request runs, nothing more
+  const auto overBudget = ReferenceTiledFetch::fetch(QgsRectangle(0, 0, 1, 1), [&](const QgsRectangle&) {
+    ++requests;
+    return ReferenceTiledFetch::Piece{ReferenceTiledFetch::Outcome::TooLarge, {}, QStringLiteral("많음")};
+  }, nullptr, spent);
+  QVERIFY(!overBudget.ok);
+  QCOMPARE(requests, 1);
+}
+
+void TestReferenceDownload::steadySlowResponseOutlivesIdleTimeout() {
+  QTcpServer server;
+  QVERIFY(server.listen(QHostAddress::LocalHost));
+  QObject::connect(&server, &QTcpServer::newConnection, &server, [&] {
+    auto* socket = server.nextPendingConnection();
+    socket->write("HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\n");
+    auto sent = std::make_shared<int>(0);
+    auto* steady = new QTimer(socket);
+    connect(steady, &QTimer::timeout, socket, [socket, steady, sent] {
+      socket->write("x");
+      if (++*sent >= 12) { steady->stop(); socket->disconnectFromHost(); }
+    });
+    steady->start(60);  // 12 bytes over ~720 ms, never silent for the 400 ms idle limit
+  });
+  // One URL per run: QgsBlockingNetworkRequest stores every successful reply in
+  // the QGIS disk cache with a 30 s expiry, so a second request for the same URL
+  // would be answered from the cache instantly instead of by the slow stream.
+  const QString base = QStringLiteral("http://127.0.0.1:%1/steady/%2/")
+                           .arg(server.serverPort()).arg(QDateTime::currentMSecsSinceEpoch());
+  struct Outcome { bool ok = false; QByteArray body; qint64 elapsed = 0; ReferenceTransferFailure failure{}; };
+  const auto run = [base](Outcome& outcome, const ReferenceTransferLimits& limits, const QString& name) {
+    const QNetworkRequest request(QUrl(base + name));
+    QElapsedTimer timer;
+    timer.start();
+    QString error;
+    outcome.ok = ReferenceMapPreparation::download(request, &outcome.body, &error, nullptr, {},
+                                                   limits, &outcome.failure);
+    outcome.elapsed = timer.elapsed();
+  };
+  auto separated = std::make_shared<Outcome>();
+  auto absolute = std::make_shared<Outcome>();
+  bool complete = false;
+  auto* task = new KaReferenceDownloadJob(QStringLiteral("느린 전송 검사"),
+      [separated, absolute, run](QgsFeedback*) {
+        run(*separated, ReferenceTransferLimits{400, 5000}, QStringLiteral("separated"));  // idle and total separated
+        run(*absolute, ReferenceTransferLimits{400, 500}, QStringLiteral("absolute"));      // same stream, short total cap
+        return PreparedReferenceMap{};
+      }, [&](const PreparedReferenceMap&) { complete = true; });
+  const QPointer<KaReferenceDownloadJob> guard(task);
+  QgsApplication::taskManager()->addTask(task);
+  QTRY_VERIFY_WITH_TIMEOUT(complete, 10000);
+  QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 2000);
+  QVERIFY2(separated->ok, qPrintable(QString::number(separated->elapsed)));
+  QCOMPARE(separated->body, QByteArray(12, 'x'));
+  QVERIFY(separated->elapsed > 400);  // it outlived the idle limit because data kept arriving
+  QCOMPARE(separated->failure, ReferenceTransferFailure::None);
+  QVERIFY(!absolute->ok);
+  QCOMPARE(absolute->failure, ReferenceTransferFailure::Timeout);
+  QVERIFY(absolute->elapsed < 1500);
 }
 
 void TestReferenceDownload::failedRegistrationPreservesOldLayer() {

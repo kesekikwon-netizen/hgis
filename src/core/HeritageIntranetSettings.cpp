@@ -27,21 +27,24 @@ HeritageIntranetSettings::Credentials readIni(const QString& path, bool migrate)
           KaSecretStore::readPassword(settings, QStringLiteral("heritage"), migrate)};
 }
 
+QStringList bundledFiles() {
+  const QDir app(QCoreApplication::applicationDirPath());
+  return {app.filePath(QStringLiteral("config/heritage-local.ini")),
+          app.filePath(QStringLiteral("../../config/heritage-local.ini"))};
+}
+
 }  // namespace
 
 HeritageIntranetSettings::Credentials HeritageIntranetSettings::credentials() {
-  const QDir app(QCoreApplication::applicationDirPath());
-  return readFromFiles(personalPath(), {
-      app.filePath(QStringLiteral("config/heritage-local.ini")),
-      app.filePath(QStringLiteral("../../config/heritage-local.ini"))});
+  return readFromFiles(personalPath(), bundledFiles());
 }
 
 HeritageIntranetSettings::Credentials HeritageIntranetSettings::readFromFiles(
-    const QString& personalFile, const QStringList& fallbackFiles) {
+    const QString& personalFile, const QStringList& fallbackFiles, bool migrate) {
   // 존재 여부가 우선순위를 정한다. 빈 값을 저장하면 이 PC의 기본 로그인을 끄는 것이지
   // 번들 계정으로 되돌아가는 것이 아니다. (TopographicSettings 와 같은 규칙)
   if (!personalFile.isEmpty() && QFileInfo::exists(personalFile)) {
-    const Credentials personal = readIni(personalFile, true);
+    const Credentials personal = readIni(personalFile, migrate);
     if (!personal.password.isEmpty()) return personal;
     QSettings probe(personalFile, QSettings::IniFormat);
     probe.setFallbacksEnabled(false);
@@ -54,7 +57,7 @@ HeritageIntranetSettings::Credentials HeritageIntranetSettings::readFromFiles(
 }
 
 bool HeritageIntranetSettings::hasCredentials() {
-  const Credentials c = credentials();
+  const Credentials c = readFromFiles(personalPath(), bundledFiles(), false);
   return !c.username.trimmed().isEmpty() && !c.password.isEmpty();
 }
 

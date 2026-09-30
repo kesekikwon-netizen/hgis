@@ -1,4 +1,5 @@
 #include "KaCrashGuard.h"
+#include "core/KaLogExcept.h"
 #include "KaVertexEditTool.h"
 #include "core/LayerOps.h"
 
@@ -22,6 +23,21 @@
 #include <qgsvectorlayer.h>
 #include <qgsvertexmarker.h>
 #include <qgswkbtypes.h>
+
+namespace {
+// Snapping for a dragged vertex must not see the feature being edited.
+class ExcludeFeatureFilter : public QgsPointLocator::MatchFilter {
+public:
+  ExcludeFeatureFilter(const QgsVectorLayer* layer, QgsFeatureId fid) : m_layer(layer), m_fid(fid) {}
+  bool acceptMatch(const QgsPointLocator::Match& match) override {
+    return !(match.layer() == m_layer && match.featureId() == m_fid);
+  }
+
+private:
+  const QgsVectorLayer* m_layer = nullptr;
+  QgsFeatureId m_fid = -1;
+};
+}  // namespace
 
 KaVertexEditTool::KaVertexEditTool(QgsMapCanvas* canvas) : QgsMapTool(canvas) {
   setCursor(Qt::ArrowCursor);
@@ -135,6 +151,7 @@ void KaVertexEditTool::clearSelection() {
   }
   m_fid = -1;
   m_dragIndex = -1;
+  m_activeIndex = -1;
   m_dragging = false;
 }
 
@@ -162,13 +179,28 @@ void KaVertexEditTool::showVertexMarkers() {
     const QgsPoint p = *it;
     auto* m = new QgsVertexMarker(mCanvas);
     m->setIconType(QgsVertexMarker::ICON_BOX);
-    m->setIconSize(14);
     m->setPenWidth(2);
-    m->setColor(QColor(30, 103, 198));
-    m->setFillColor(QColor(255, 255, 255));
     m->setCenter(toMap(QgsPointXY(p.x(), p.y())));
     m_marks.append(m);
+    styleMarker(i);
   }
+  if (m_activeIndex >= m_marks.size()) m_activeIndex = -1;
+}
+
+void KaVertexEditTool::styleMarker(int index) {
+  if (index < 0 || index >= m_marks.size() || !m_marks[index]) return;
+  QgsVertexMarker* m = m_marks[index];
+  const bool active = index == m_activeIndex;
+  m->setIconSize(active ? 16 : 14);
+  m->setColor(active ? QColor(220, 38, 38) : QColor(30, 103, 198));
+  m->setFillColor(active ? QColor(254, 226, 226) : QColor(255, 255, 255));
+}
+
+void KaVertexEditTool::setActiveVertex(int index) {
+  const int previous = m_activeIndex;
+  m_activeIndex = (index >= 0 && index < m_marks.size()) ? index : -1;
+  styleMarker(previous);
+  styleMarker(m_activeIndex);
 }
 
 QgsPointXY KaVertexEditTool::snapMapPoint(QgsMapMouseEvent* e, bool* snapped) const {
@@ -178,7 +210,7 @@ QgsPointXY KaVertexEditTool::snapMapPoint(QgsMapMouseEvent* e, bool* snapped) co
   try {
     pt = e->mapPoint();
   } catch (...) {
-    KaCrashGuard::logLine(QStringLiteral("[except] app/KaVertexEditTool.cpp:178"));
+    KA_LOG_EXCEPT();
     pt = const_cast<KaVertexEditTool*>(this)->toMapCoordinates(e->pos());
   }
   if (!m_snapEnabled || !mCanvas->snappingUtils()) return pt;
@@ -188,6 +220,24 @@ QgsPointXY KaVertexEditTool::snapMapPoint(QgsMapMouseEvent* e, bool* snapped) co
     return hit.point();
   }
   return pt;
+}
+
+QgsPointXY KaVertexEditTool::snapMapPointExcludingTarget(QgsMapMouseEvent* e, bool* snapped) const {
+  if (snapped) *snapped = false;
+  if (!e || !mCanvas) return QgsPointXY();
+  QgsPointXY pt;
+  try {
+    pt = e->mapPoint();
+  } catch (...) {
+    KaCrashGuard::logLine(QStringLiteral("[except] app/KaVertexEditTool.cpp:snapExcluding"));
+    pt = const_cast<KaVertexEditTool*>(this)->toMapCoordinates(e->pos());
+  }
+  if (!m_snapEnabled || !mCanvas->snappingUtils()) return pt;
+  ExcludeFeatureFilter filter(m_layer.data(), m_fid);
+  const QgsPointLocator::Match hit = mCanvas->snappingUtils()->snapToMap(e->pos(), &filter);
+  if (!hit.isValid()) return pt;
+  if (snapped) *snapped = true;
+  return hit.point();
 }
 
 int KaVertexEditTool::vertexNear(const QgsPointXY& mapPt_, int tolPx) const {
@@ -250,7 +300,7 @@ void KaVertexEditTool::selectAt(const QgsPointXY& mapPt_) {
   for (QgsVectorLayer* layer : layers) {
     m_layer = layer;
     const QgsPointXY mapPt = toLayer(mapPt_);
-    const double tol = layerTolerance(10);
+    const double tol = layerTolerance(KaEditTolerance::kFeaturePickPx);
     const QgsRectangle box(mapPt.x() - tol, mapPt.y() - tol, mapPt.x() + tol, mapPt.y() + tol);
     QgsFeatureRequest req;
     req.setFilterRect(box);
@@ -319,7 +369,9 @@ bool KaVertexEditTool::deleteVertexAt(int index) {
     return false;
   }
   if (!geom.deleteVertex(index)) return false;
-  return applyGeometryChange(geom, QStringLiteral("꼭짓점 삭제"));
+  if (!applyGeometryChange(geom, QStringLiteral("꼭짓점 삭제"))) return false;
+  m_activeIndex = -1;  // indices after the removed vertex moved down
+  return true;
 }
 
 bool KaVertexEditTool::insertVertexAt(int index, const QgsPointXY& at) {
@@ -328,7 +380,9 @@ bool KaVertexEditTool::insertVertexAt(int index, const QgsPointXY& at) {
   QgsGeometry geom = selectedGeometry();
   if (geom.isNull()) return false;
   if (!geom.insertVertex(at.x(), at.y(), index)) return false;
-  return applyGeometryChange(geom, QStringLiteral("꼭짓점 추가"));
+  if (!applyGeometryChange(geom, QStringLiteral("꼭짓점 추가"))) return false;
+  m_activeIndex = -1;
+  return true;
 }
 
 bool KaVertexEditTool::applyGeometryChange(QgsGeometry geom, const QString& commandText) {
@@ -346,7 +400,7 @@ bool KaVertexEditTool::applyGeometryChange(QgsGeometry geom, const QString& comm
   QgsFeature before;
   if (!layer->getFeatures(QgsFeatureRequest(m_fid)).nextFeature(before))
     return fail(QStringLiteral("수정할 도형을 찾지 못했습니다. 도형을 다시 선택하세요."));
-  if (before.geometry().equals(geom)) return true;
+  if (before.geometry().isExactlyEqual(geom)) return true;
   QString error;
   if (!LayerOps::runEditCommand(layer, commandText, [&]() {
         return layer->changeGeometry(before.id(), geom);
@@ -362,10 +416,10 @@ void KaVertexEditTool::showLineVertexMenu(QgsMapMouseEvent* e) {
   const QgsPointXY mapPt = snapMapPoint(e);
   if (m_fid < 0)
     selectAt(mapPt);
-  const int vIdx = vertexNear(mapPt, 20);
+  const int vIdx = vertexNear(mapPt);
   QgsPointXY onLine;
-  const int segAfter = segmentNear(mapPt, &onLine, 16);
-  const int nearDel = vIdx >= 0 ? vIdx : vertexNear(mapPt, 28);
+  const int segAfter = segmentNear(mapPt, &onLine);
+  const int nearDel = vIdx >= 0 ? vIdx : vertexNear(mapPt, KaEditTolerance::kVertexMenuFarPx);
   if (m_fid < 0 && vIdx < 0 && segAfter < 0) {
     emit statusMessage(QStringLiteral("선이나 면 위에서 우클릭하세요."));
     return;
@@ -400,7 +454,7 @@ void KaVertexEditTool::canvasPressEvent(QgsMapMouseEvent* e) {
   if (e->button() != Qt::LeftButton) return;
 
   if (m_fid >= 0) {
-    const int idx = vertexNear(mapPt, 20);
+    const int idx = vertexNear(mapPt);
     if (idx >= 0) {
       m_dragIndex = idx;
       m_dragging = true;
@@ -453,10 +507,12 @@ void KaVertexEditTool::keyPressEvent(QKeyEvent* e) {
   }
   if (e->key() != Qt::Key_Delete && e->key() != Qt::Key_Backspace) return;
   if (m_fid < 0 || !mCanvas) return;
-  // 마우스가 얹힌 꼭짓점을 지운다.
-  const QPoint cursor = mCanvas->mapFromGlobal(QCursor::pos());
-  const QgsPointXY mapPt = mCanvas->getCoordinateTransform()->toMapCoordinates(cursor);
-  const int idx = vertexNear(mapPt);
+  // 고른 꼭짓점을 먼저, 없으면 마우스가 얹힌 꼭짓점을 지운다.
+  int idx = m_activeIndex;
+  if (idx < 0) {
+    const QPoint cursor = mCanvas->mapFromGlobal(QCursor::pos());
+    idx = vertexNear(mCanvas->getCoordinateTransform()->toMapCoordinates(cursor));
+  }
   if (idx >= 0 && deleteVertexAt(idx)) {
     showVertexMarkers();
     emit statusMessage(QStringLiteral("꼭짓점을 지웠습니다."));

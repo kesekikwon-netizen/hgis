@@ -2083,7 +2083,7 @@ private slots:
     const QString directory = qa.isEmpty() ? output.path() : qa;
     QVERIFY(QDir().mkpath(directory));
     const QString path = QDir(directory).filePath(QStringLiteral("compact-tail-crs-rotation.pdf"));
-    QVERIFY2(numbers.exportPdf(map, legend, path, 300., &error, true), qPrintable(error));
+    QVERIFY2(numbers.exportPdf(map, legend, path, 300., &error), qPrintable(error));
     const QString sequenceError = consecutiveLegendError(legend, numbers.entries());
     QVERIFY2(sequenceError.isEmpty(), qPrintable(sequenceError));
     QCOMPARE(legendNumberKeys(legend), numbers.visibleKeys());

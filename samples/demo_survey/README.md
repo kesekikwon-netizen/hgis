@@ -1,7 +1,20 @@
-﻿# demo_survey (happy path fixture notes)
-crs: EPSG:5179
-survey_area_count: 1
-control_points_count: 2
-has_meta: true
-feature_poly_count: 1
-expected_checklist_errors: 0
+﻿# demo_survey — 연습용 조사 (EPSG:5186)
+
+`demo.gpkg` 는 앱이 여는 조사 파일이다. 실제 유적이 아닌 **합성 자료**이고, 앱이 켤 때 자동으로 열지 않는다. 연습하려면 이 폴더를 쓰기 가능한 곳(예: 문서 폴더)에 **복사한 뒤** 홈의 **조사 열기**(Ctrl+O)로 사본의 `demo.gpkg` 를 연다. 저장하면 파일이 바뀌므로 원본을 직접 열지 않는다.
+
+| 항목 | 값 |
+| --- | --- |
+| 작업 좌표계 | EPSG:5186 (중부원점). 좌표는 중부원점 기준 동향 약 200000 m, 북향 약 450000 m (충청권, 경도 127° 부근) |
+| 조사구역 | 1개 (약 120 m × 100 m) |
+| 유구 면 / 유구 선 / 단면선 | 2 / 1 / 1 (종류·시대 입력됨) |
+| 기준점 | 2개 (측지기준계·타원체·투영·원점·정확도 입력됨) |
+| 유물 / 시굴격자 | 1 / 1 |
+| 제출 좌표계 | EPSG:5179 (검수·제출로 꾸러미를 만들 때만) |
+
+검수: 기준점·속성·도형은 다 채웠으므로 자료에서 나오는 error(기준점 2점·측지 메타·유구 종류/시대·도형 유효성)는 없다. 위치도·유구 배치도 같은 도면 항목(`REQ_DRAWING_*`)은 **도면**(Ctrl+L)으로 직접 만들며 채운다.
+
+`gcp.csv` 는 **CSV 기준점**(기타 › 더보기) 연습용이다. 같은 두 점을 5186 좌표로 담았다(열: point_id, x, y, z, datum, ellipsoid, projection, origin, accuracy_m, pdop, fix_type). 5186 조사에 불러온다. 5187(동부원점) 조사에 불러오면 좌표계가 달라 엉뚱한 곳에 찍힌다.
+
+`demo.ka-survey.json` 은 이 표본의 기대값 메타데이터다(CI 가 JSON 문법만 확인한다). 앱은 이 JSON 을 열지 않는다.
+
+만든 방법: OSGeo4W GDAL 로 `data/schemas/ka_hgis_layers.yaml` 과 같은 7개 테이블·필드를 만들고 합성 도형을 넣었다(2026-09-29).

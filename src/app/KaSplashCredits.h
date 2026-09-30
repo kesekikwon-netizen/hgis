@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QPointF>
 #include <QRectF>
 #include <QString>
@@ -33,5 +34,8 @@ QString plainText();
 void paintTitle(QPainter& painter, const QPointF& baseline, double unit, const QString& version);
 // Copyright line over the data line, each kept on one line inside area.
 void paintNotices(QPainter& painter, const QRectF& area, double unit);
+// The two notice inks (with alpha) paintNotices uses, for contrast checks.
+QColor copyrightInk();
+QColor dataInk();
 
 }  // namespace KaSplashCredits

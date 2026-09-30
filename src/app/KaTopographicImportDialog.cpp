@@ -1,4 +1,5 @@
 #include "KaCrashGuard.h"
+#include "core/KaLogExcept.h"
 #include "KaTopographicImportDialog.h"
 #include "core/LayerOps.h"
 #include "core/SurveyScopeClip.h"
@@ -20,6 +21,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSet>
+#include <QStandardPaths>
 #include <QMap>
 #include <QStringList>
 #include <QScopedValueRollback>
@@ -84,12 +86,70 @@ bool discardsWithoutOpen(const TopographicCatalog::Record& record) {
   if (record.category == C::ElevationPoint || record.category == C::PlaceName) return true;
   return !record.geometryType.isEmpty() && !isLineGeometryName(record.geometryType);
 }
-QgsVectorLayer* mergeTopographicLayers(const QList<QgsVectorLayer*>& srcs, const QString& name) {
+// Where a merged sheet GPKG is written. A clipped memory layer has no folder:
+// its "source" is a URI such as "LineString?crs=..." that would otherwise resolve
+// against the process working directory. Prefer the survey's topographic folder.
+QString mergeFolder(const QList<QgsVectorLayer*>& srcs, const QString& preferred) {
+  if (!preferred.isEmpty() && QDir().mkpath(preferred)) return QDir(preferred).absolutePath();
+  for (const QgsVectorLayer* src : srcs) {
+    if (!src || src->providerType() != QLatin1String("ogr")) continue;
+    const QFileInfo file(src->source().section(QLatin1Char('|'), 0, 0));
+    if (file.isAbsolute() && file.isFile()) return file.absolutePath();
+  }
+  // App-managed fallback; saving a survey collects it into 「가져온자료」.
+  const QString app = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) +
+                      QStringLiteral("/topographic-merged");
+  return QDir().mkpath(app) ? app : QString();
+}
+bool isGeneratedMerge(const QgsVectorLayer* layer) {
+  return layer && layer->providerType() == QLatin1String("ogr") &&
+         QFileInfo(layer->source().section(QLatin1Char('|'), 0, 0)).fileName()
+             .startsWith(QStringLiteral("수치지형도-합침-"));
+}
+// Appends only the new sheets' lines to the already published merged GPKG
+// instead of rewriting every earlier feature. Originals are never written.
+bool appendToMerged(QgsVectorLayer* merged, const QList<QgsVectorLayer*>& additions) {
+  if (!isGeneratedMerge(merged) || !merged->dataProvider()) return false;
+  const QgsFields fields = merged->fields();
+  QgsFeatureList batch;
+  for (QgsVectorLayer* src : additions) {
+    if (!src || !src->isValid()) return false;
+    QgsCoordinateTransform transform;
+    if (src->crs().isValid() && merged->crs().isValid() && src->crs() != merged->crs())
+      transform = QgsCoordinateTransform(src->crs(), merged->crs(), QgsProject::instance());
+    QgsFeatureIterator it = src->getFeatures();
+    QgsFeature feature;
+    while (it.nextFeature(feature)) {
+      if (!feature.hasGeometry()) continue;
+      QgsGeometry geometry = feature.geometry();
+      try {
+        if (transform.isValid() && geometry.transform(transform) != Qgis::GeometryOperationResult::Success)
+          return false;
+      } catch (const QgsCsException&) {
+        return false;
+      }
+      if (!geometry.convertToMultiType()) return false;
+      QgsFeature out(fields);
+      out.setGeometry(geometry);
+      for (int i = 0; i < fields.size(); ++i) {
+        if (fields.at(i).name().compare(QLatin1String("fid"), Qt::CaseInsensitive) == 0) continue;
+        const int srcIdx = src->fields().indexOf(fields.at(i).name());
+        if (srcIdx >= 0) out.setAttribute(i, feature.attribute(srcIdx));
+      }
+      batch.append(out);
+    }
+  }
+  if (!batch.isEmpty() && !merged->dataProvider()->addFeatures(batch)) return false;
+  merged->updateExtents();
+  merged->triggerRepaint();
+  return true;
+}
+QgsVectorLayer* mergeTopographicLayers(const QList<QgsVectorLayer*>& srcs, const QString& name,
+                                       const QString& preferredFolder) {
   if (srcs.isEmpty() || !srcs.first()) return nullptr;
   QgsVectorLayer* first = srcs.first();
-  QString dir = QFileInfo(first->source().section(QLatin1Char('|'), 0, 0)).absolutePath();
-  if (dir.isEmpty() || !QFileInfo(dir).isDir())
-    dir = QDir::tempPath();
+  const QString dir = mergeFolder(srcs, preferredFolder);
+  if (dir.isEmpty()) return nullptr;
   const QString path = QDir(dir).filePath(
       QStringLiteral("수치지형도-합침-%1.gpkg").arg(QDateTime::currentMSecsSinceEpoch()));
   QgsVectorFileWriter::SaveVectorOptions options;
@@ -207,7 +267,7 @@ public:
     connect(&feedback, &QgsFeedback::progressChanged, &feedback, [this](double p) { setProgress(p); });
     try { m_result = TopographicCatalog::scan(m_folder, &feedback, {}, [this] { return isCanceled(); }); }
     catch (...) {
-      KaCrashGuard::logLine(QStringLiteral("[except] app/KaTopographicImportDialog.cpp:213")); m_result.error = QStringLiteral("수치지형도 파일을 확인하지 못했습니다. 원본은 변경하지 않았습니다."); }
+      KA_LOG_EXCEPT(); m_result.error = QStringLiteral("수치지형도 파일을 확인하지 못했습니다. 원본은 변경하지 않았습니다."); }
     return !isCanceled() && m_result.error.isEmpty();
   }
   void finished(bool) override {
@@ -310,6 +370,9 @@ KaTopographicImportDialog::~KaTopographicImportDialog() {
 void KaTopographicImportDialog::clearPreview() {
   m_preview->stopRendering(); m_preview->setLayers({});
   delete m_previewLayer; m_previewLayer = nullptr;
+}
+void KaTopographicImportDialog::setMergeDirectory(const QString& directory) {
+  m_mergeDirectory = directory.isEmpty() ? QString() : QDir(directory).absolutePath();
 }
 void KaTopographicImportDialog::setMapsEnabled(bool enabled) {
   if (m_mapsEnabled == enabled) {
@@ -870,12 +933,27 @@ void KaTopographicImportDialog::publishPrepared() {
     }
     Q_UNUSED(geom);
     const QString name = QStringLiteral("수치지형도");
+    // Incremental path: a published merged GPKG only receives the new sheets.
+    // Skip it while the canvas draws from that file; the rewrite below never
+    // touches a file a render job is reading.
+    if (existing && isGeneratedMerge(existing) && !(m_canvas && m_canvas->isDrawing())) {
+      const QList<QgsVectorLayer*> additions = srcs.mid(1);
+      if (appendToMerged(existing, additions)) {
+        existing->setCustomProperty(QStringLiteral("ka_hgis/topographic_source"), keys.first());
+        existing->setCustomProperty(QStringLiteral("ka_hgis/topographic_source_keys"), keys);
+        existing->setCustomProperty(QStringLiteral("ka_hgis/topographic_sources"), sources);
+        for (const QString& key : keys) m_loaded.insert(key, existing->id());
+        // Same visibility rule as a rewritten merge layer.
+        if (auto* node = project->layerTreeRoot()->findLayer(existing)) node->setItemVisibilityChecked(visible);
+        continue;  // the temporary per-sheet layers are released with `prepared`
+      }
+    }
     QgsVectorLayer* out = nullptr;
     if (srcs.size() == 1) {
       out = srcs.first();
       out->setName(name);
     } else {
-      out = mergeTopographicLayers(srcs, name);
+      out = mergeTopographicLayers(srcs, name, m_mergeDirectory);
       if (!out) continue;
       if (existing) {
         const QString oldFile = existing->source().section(QLatin1Char('|'), 0, 0);

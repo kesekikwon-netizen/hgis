@@ -37,11 +37,18 @@ void hillshadeHorn(const std::vector<float>& z, const RasterInfo& info, const Op
 void slopeDegrees(const std::vector<float>& z, const RasterInfo& info, double zFactor,
                   std::vector<float>* outDeg);
 
-// Writes a Byte GeoTIFF (same grid as source) for QgsRasterLayer overlay.
+// Writes a Byte GeoTIFF (same grid as source) for QgsRasterLayer overlay. 0 is NoData.
 bool writeByteGeoTiff(const QString& outPath, const RasterInfo& info,
                       const std::vector<std::uint8_t>& gray, QString* errorOut);
 
+// Hillshade of band 1 as a Byte GeoTIFF. Like gdaldem, 0 is NoData only (edges, source NoData
+// cells and their neighbours); a fully shaded cell is written as 1 so it stays visible. The DEM is processed
+// in strips of rows, never loaded whole. stripRows <= 0 picks a strip of about 4 million cells.
 bool runHillshadeFile(const QString& demPath, const QString& outPath, const Options& opt,
-                      QString* errorOut);
+                      QString* errorOut, int stripRows = 0);
+
+// Where a new hillshade goes: the survey's 지형분석 folder when a survey is open, else next to
+// the DEM. Never an existing file; a numbered name is chosen instead of overwriting.
+QString hillshadeOutputPath(const QString& demPath, const QString& surveyPath);
 
 }  // namespace DemAnalyzer

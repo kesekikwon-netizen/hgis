@@ -126,6 +126,12 @@ CadastralPortal::Credentials CadastralPortal::credentials() {
           KaSecretStore::readPassword(settings, QStringLiteral("vworld_account"), true)};
 }
 
+bool CadastralPortal::hasCredentials() {
+  QSettings settings(accountPath(), QSettings::IniFormat); settings.setFallbacksEnabled(false);
+  return !settings.value(QStringLiteral("vworld_account/username")).toString().trimmed().isEmpty() &&
+         KaSecretStore::hasReadablePassword(settings, QStringLiteral("vworld_account"));
+}
+
 bool CadastralPortal::saveCredentials(const Credentials& account, QString* error) {
   const QString path = accountPath();
   QTemporaryDir temp(QFileInfo(path).absolutePath() + QStringLiteral("/.vworld-account-XXXXXX"));
@@ -205,7 +211,7 @@ PreparedReferenceMap CadastralPortal::prepare(const Request& request, const Cada
       request.workCrs.mapUnits() != Qgis::DistanceUnit::Meters || !std::isfinite(request.bufferMeters) || request.bufferMeters <= 0.) {
     result.error = QStringLiteral("조사구역과 미터 단위 작업 좌표계를 먼저 확인하세요."); return result;
   }
-  if (request.apiKey.isEmpty()) { result.error = QStringLiteral("5km 범위의 시·군·구를 찾으려면 더보기 → VWorld API 키를 설정하세요."); return result; }
+  if (request.apiKey.isEmpty()) { result.error = QStringLiteral("5km 범위의 시·군·구를 찾으려면 더보기 → API 키 입력에서 VWorld 키를 설정하세요."); return result; }
   if (request.credentials.username.isEmpty() || request.credentials.password.isEmpty()) {
     result.error = QStringLiteral("지적도 메뉴에서 VWorld 계정을 설정하세요."); return result;
   }

@@ -237,7 +237,7 @@ private slots:
                             .arg(window.width())
                             .arg(window.height())));
     QTRY_VERIFY(tree->viewport()->height() >= tree->minimumListHeight() - tree->header()->height());
-    const int row = qMax(22, tree->sizeHintForRow(0));
+    const int row = qMax(22, tree->baseRowHeight());  // the 10 px row, without the first section band
     QVERIFY2(tree->viewport()->height() >= row * KaLayerInformationView::kMinVisibleRows,
              qPrintable(QStringLiteral("viewport=%1 row=%2 window=%3x%4")
                             .arg(tree->viewport()->height())
@@ -265,8 +265,9 @@ private slots:
              QColor(QStringLiteral("#52606d")));
     designated->setItemVisibilityChecked(false);
     QCoreApplication::processEvents();
+    // Hidden rows keep 4.5:1 on the hover tint too (#64727e read 4.13:1 there).
     QCOMPARE(model.data(model.node2index(designated), Qt::ForegroundRole).value<QBrush>().color(),
-             QColor(QStringLiteral("#64727e")));
+             QColor(QStringLiteral("#5c6a76")));
   }
 
   void heritageNamesStayReadableOnEveryRowTint() {

@@ -33,7 +33,7 @@ QString safeStem(QString name) {
   return name.isEmpty() ? QStringLiteral("측량") : name;
 }
 
-QString surveyAreaClipWkt(const QString& crsAuthId) {
+QgsGeometry surveyAreaGeometry(const QString& crsAuthId) {
   QgsGeometry area;
   const QgsCoordinateReferenceSystem dest(crsAuthId);
   for (QgsVectorLayer* layer : LayerOps::findAllByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"))) {
@@ -54,7 +54,7 @@ QString surveyAreaClipWkt(const QString& crsAuthId) {
       area = area.isNull() ? geometry : area.combine(geometry);
     }
   }
-  return area.isEmpty() ? QString() : area.asWkt();
+  return area;
 }
 
 class SurveyContourTask final : public QgsTask {
@@ -65,18 +65,23 @@ public:
 
 protected:
   bool run() override {
-    const SurveyReadReport report = SurveyPointReader::read(m_job.read);
+    // The dialog already read and arranged the points; read again only when it did not.
+    QVector<SurveyPoint> source = m_job.points;
+    if (source.isEmpty()) {
+      const SurveyReadReport report = SurveyPointReader::read(m_job.read);
+      if (!report.fatal.isEmpty()) {
+        m_result.error = report.fatal;
+        return false;
+      }
+      source = report.points;
+    }
     if (isCanceled()) {
       m_result.canceled = true;
       m_result.error = QStringLiteral("등고선 만들기를 취소했습니다.");
       return false;
     }
-    if (!report.fatal.isEmpty()) {
-      m_result.error = report.fatal;
-      return false;
-    }
     QVector<SurveyPoint> points;
-    for (const SurveyPoint& point : report.points) {
+    for (const SurveyPoint& point : source) {
       if (m_job.excludeSuspicious && point.suspicious) continue;
       points.push_back(point);
     }
@@ -112,7 +117,10 @@ void MainWindow::createSurveyContours() {
   }
   const QString crs = QgsProject::instance()->crs().isValid() ? QgsProject::instance()->crs().authid()
                                                               : QStringLiteral("EPSG:5186");
+  // The dialog places points in this CRS, so the survey area is taken in the same CRS.
+  const QgsGeometry area = surveyAreaGeometry(crs);
   KaSurveyContourDialog dialog(crs, this);
+  if (!area.isEmpty()) dialog.setReferenceExtent(area.boundingBox());
   if (dialog.exec() != QDialog::Accepted) return;
 
   SurveyContourJob job = dialog.job();
@@ -120,7 +128,7 @@ void MainWindow::createSurveyContours() {
   const QString folder = QDir(QFileInfo(m_surveyPath).absolutePath()).filePath(QStringLiteral("측량등고선/") + stem);
   job.groupTitle = QStringLiteral("측량 등고선 · ") + stem;
   job.outputDir = QDir(folder).filePath(QStringLiteral("_new"));
-  job.clipWkt = surveyAreaClipWkt(job.read.crsAuthId);
+  job.clipWkt = area.isEmpty() ? QString() : area.asWkt();
   auto* progress = new QProgressDialog(QStringLiteral("측량점으로 등고선을 계산하고 있습니다."),
                                        QStringLiteral("취소"), 0, 100, this);
   progress->setObjectName(QStringLiteral("contourProgress"));
@@ -148,16 +156,22 @@ void MainWindow::createSurveyContours() {
       return;
     }
     auto* project = QgsProject::instance();
+    const QString gpkg = QDir(folder).filePath(QStringLiteral("contours.gpkg"));
+    // On Windows the loaded layers hold the old files open; they must go before the swap.
     SurveyContourStyle::removeGroup(project, group);
     QString error;
-    if (!SurveyContourBuilder::installFiles(QDir(folder).filePath(QStringLiteral("_new")), folder, &error) ||
-        !SurveyContourStyle::apply(project, QDir(folder).filePath(QStringLiteral("contours.gpkg")), group, result,
-                                   &error)) {
+    const bool installed =
+        SurveyContourBuilder::installFiles(QDir(folder).filePath(QStringLiteral("_new")), folder, &error);
+    if (!installed || !SurveyContourStyle::apply(project, gpkg, group, result, &error)) {
+      // A failed swap keeps the previous files; show them again rather than leave a gap.
+      const bool restored = !installed && SurveyContourStyle::reapply(project, gpkg, group);
+      if (restored && window->m_canvas) LayerOps::syncMapCanvas(project, window->m_canvas, false);
       KaUserError::warn(window, {
           QStringLiteral("측량 등고선"),
           QStringLiteral("계산은 끝났지만 지도에 올리지 못했습니다."),
           error,
-          QStringLiteral("조사 폴더의 측량등고선 파일을 다시 열어 보세요."),
+          restored ? QStringLiteral("이전 등고선을 다시 올려 두었습니다. 측량등고선 파일을 연 프로그램을 닫고 다시 만드세요.")
+                   : QStringLiteral("조사 폴더의 측량등고선 파일을 다시 열어 보세요."),
       });
       return;
     }
@@ -170,11 +184,9 @@ void MainWindow::createSurveyContours() {
     if (lines && window->m_canvas) LayerOps::zoomToLayerMax(window->m_canvas, lines);
     if (window->m_canvas) LayerOps::syncMapCanvas(project, window->m_canvas, false);
     project->setDirty(true);
-    window->statusBar()->showMessage(
-        result.warning.isEmpty()
-            ? QStringLiteral("등고선 %1줄, 색 구간 %2개를 올렸습니다.").arg(result.lineCount).arg(result.bandCount)
-            : result.warning,
-        8000);
+    QString message = QStringLiteral("등고선 %1줄, 색 구간 %2개를 올렸습니다.").arg(result.lineCount).arg(result.bandCount);
+    if (!result.warning.isEmpty()) message += QLatin1Char(' ') + result.warning;
+    window->statusBar()->showMessage(message, 10000);
   });
   connect(progress, &QProgressDialog::canceled, task, &QgsTask::cancel);
   connect(task, &QgsTask::progressChanged, progress, [dialogProgress](double value) {

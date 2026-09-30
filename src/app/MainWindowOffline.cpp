@@ -17,16 +17,15 @@
 #include "KaTerrain3dStudio.h"
 #include "KaTerrain3dLayoutStudio.h"
 #include "KaStartPage.h"
-#include "KaCoordPointMapTool.h"
 #include "KaMeasureMapTool.h"
 #include "core/DemAnalyzer.h"
+#include "core/BasemapPolicy.h"
 #include "core/TilePackService.h"
 #include "core/TrenchGridGenerator.h"
 #include "KaAboveLabelsOverlay.h"
 #include "KaCanvasGridOverlay.h"
 #include "KaTrenchMoveTool.h"
 #include "KaFeatureSelectTool.h"
-#include "KaFoundLocationMark.h"
 #include "KaStatusBar.h"
 #include "KaBeginnerRibbon.h"
 #include "KaSnapSettingsWidget.h"
@@ -35,6 +34,7 @@
 #include "KaLayerOpacityRail.h"
 #include "KaCrashGuard.h"
 #include "KaReferenceDownloadJob.h"
+#include "KaReferenceStatusDialog.h"
 #include <QProgressDialog>
 #include <QElapsedTimer>
 #include <QScopeGuard>
@@ -241,6 +241,21 @@ void MainWindow::saveOfflineTilePack() {
     return;
   }
   if (!m_canvas) return;
+  // Provider terms (BasemapPolicy, F059): VWorld/NASA packs are allowed; hosts that
+  // forbid bulk copies are refused; an unknown host needs the user's confirmation.
+  const BasemapPolicy::OfflineDecision policy = BasemapPolicy::offlineCaching(rl);
+  if (!policy.allowed) {
+    notify(Notice::Info, QStringLiteral("오프라인 저장"), policy.message);
+    return;
+  }
+  if (policy.askFirst &&
+      QMessageBox::question(this, QStringLiteral("오프라인 저장"),
+                            policy.message + QStringLiteral("\n계속할까요?"),
+                            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+    return;
+  // The MBTiles file is kept beside the survey so the saved survey can use it offline.
+  const QString dir = referenceDownloadFolder(QStringLiteral("오프라인 저장"));
+  if (dir.isEmpty()) return;
 
   // 화면 범위를 웹메르카토르로 옮긴다. 타일은 3857로만 잘려 있다.
   QgsRectangle ext = m_canvas->extent();
@@ -261,7 +276,8 @@ void MainWindow::saveOfflineTilePack() {
   TilePackService::Options opt;
   opt.urlTemplate = tmpl;
   opt.jpeg = tmpl.contains(QLatin1String(".jpeg")) || tmpl.contains(QLatin1String(".jpg"));
-  opt.referer = QStringLiteral("https://localhost");
+  // Only VWorld needs (and receives) the Referer that authenticates its key.
+  opt.referer = BasemapPolicy::refererForUrl(tmpl);
   // 지금 화면의 해상도에서 한 단계 더 자세한 데까지 받는다.
   const double mupp = qMax(m_canvas->mapUnitsPerPixel(), 1e-6);
   int z = 0;
@@ -273,27 +289,28 @@ void MainWindow::saveOfflineTilePack() {
                                                   ext.yMaximum(), opt.minZoom, opt.maxZoom);
   if (tiles <= 0) {
     notify(Notice::Warning, QStringLiteral("오프라인 저장"),
-           QStringLiteral("범위가 비었습니다. 조사지역으로 확대한 뒤 다시 하세요."));
+           QStringLiteral("범위가 비었습니다. 조사구역으로 확대한 뒤 다시 하세요."));
     return;
   }
   if (tiles > 20000) {
     notify(Notice::Warning, QStringLiteral("오프라인 저장"),
-           QStringLiteral("타일 %1장은 너무 많습니다. 조사지역으로 더 확대한 뒤 하세요.")
+           QStringLiteral("타일 %1장은 너무 많습니다. 조사구역으로 더 확대한 뒤 하세요.")
                .arg(QLocale().toString(tiles)));
     return;
   }
+  // A rough size helps the field decision; typical aerial tiles are ~20-35 KB.
+  const qint64 estimatedBytes = tiles * (opt.jpeg ? 20 : 35) * 1024;
   if (QMessageBox::question(
           this, QStringLiteral("오프라인 저장"),
-          QStringLiteral("지금 화면 범위를 타일 %1장(줌 %2~%3)으로 받아 둡니다.\n"
+          QStringLiteral("지금 화면 범위를 타일 %1장(줌 %2~%3, 예상 크기 약 %4)으로 받아 둡니다.\n"
                          "받는 동안 지도 작업을 계속할 수 있습니다. 계속할까요?")
               .arg(QLocale().toString(tiles))
               .arg(opt.minZoom)
-              .arg(opt.maxZoom),
+              .arg(opt.maxZoom)
+              .arg(QLocale().formattedDataSize(estimatedBytes, 0, QLocale::DataSizeTraditionalFormat)),
           QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) != QMessageBox::Yes)
     return;
 
-  const QString dir = m_surveyPath.isEmpty() ? QDir::tempPath()
-                                             : QFileInfo(m_surveyPath).absolutePath();
   const QString safe = QString(rl->name()).replace(QRegularExpression(QStringLiteral("[^\\w가-힣]")),
                                                    QStringLiteral("_"));
   const QString out = QDir(dir).filePath(QStringLiteral("%1_오프라인.mbtiles").arg(safe));
@@ -320,6 +337,22 @@ void MainWindow::saveOfflineTilePack() {
     QgsProject::instance()->setDirty(true);
     notify(Notice::Success, QStringLiteral("오프라인 지도"), QStringLiteral("내려받기를 마쳤습니다. 인터넷 없이 이 범위의 지도를 볼 수 있습니다.\n%1").arg(QDir::toNativeSeparators(result.rasterUri)));
   });
+#endif
+}
+
+void MainWindow::showReferenceStatus() {
+#if KA_HGIS_HAS_QGIS
+  // Read-only; reopening the command refreshes the same table instead of stacking windows.
+  auto* dialog = findChild<KaReferenceStatusDialog*>(QStringLiteral("referenceStatusDialog"));
+  if (!dialog) {
+    dialog = new KaReferenceStatusDialog(QgsProject::instance(), this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+  } else {
+    dialog->refresh();
+  }
+  dialog->show();
+  dialog->raise();
+  dialog->activateWindow();
 #endif
 }
 
@@ -419,48 +452,6 @@ void MainWindow::refreshMapCanvasNow() {
   refreshAboveLabelsOverlay();
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   updateNextActionStatus();
-#endif
-}
-
-void MainWindow::addBasemapVworld() {
-#if KA_HGIS_HAS_QGIS
-  const QString key = vworldApiKeyOrPrompt();
-  if (key.isEmpty()) return;
-  QString err;
-  if (!LayerOps::addVworldBaseMap(QgsProject::instance(), m_canvas, key, &err))
-    notify(Notice::Warning, QStringLiteral("배경"),
-           QStringLiteral("배경지도를 올리지 못했습니다."), err);
-  else
-    afterBasemapAdded(this, m_canvas, m_workCrs, QStringLiteral("배경"));
-#endif
-}
-
-void MainWindow::addBasemapVworldSat() {
-#if KA_HGIS_HAS_QGIS
-  const QString key = VworldSettings::loadApiKey();
-  QString err;
-  if (!LayerOps::addVworldSatelliteMap(QgsProject::instance(), m_canvas, key, &err))
-    notify(Notice::Warning, QStringLiteral("위성"),
-           QStringLiteral("위성영상을 올리지 못했습니다."), err);
-  else
-    afterBasemapAdded(this, m_canvas, m_workCrs, QStringLiteral("위성"));
-#endif
-}
-
-void MainWindow::addBasemapVworldCadastral() {
-#if KA_HGIS_HAS_QGIS
-  const QString key = vworldApiKeyOrPrompt();
-  if (key.isEmpty()) return;
-  LayerOps::clearUserRemovedCadastral(QgsProject::instance());
-  QString err;
-  if (!LayerOps::addVworldCadastralMap(QgsProject::instance(), m_canvas, key, &err))
-    notify(Notice::Warning, QStringLiteral("지적도"),
-           QStringLiteral("지적도를 올리지 못했습니다."), err);
-  else {
-    afterBasemapAdded(this, m_canvas, m_workCrs, QStringLiteral("지적"));
-    if (m_canvas && m_canvas->scale() > 8000.0)
-      m_canvas->zoomScale(5000.0, true);
-  }
 #endif
 }
 

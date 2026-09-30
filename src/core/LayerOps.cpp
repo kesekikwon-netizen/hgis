@@ -1,7 +1,13 @@
+#include "KaLogExcept.h"
 #include "KaSessionLog.h"
 #include "LayerOps.h"
 #include "LayerOpsInternal.h"
 #include "LayerLabelControls.h"
+#include "LayerRole.h"
+#include "LayerStyleDefaults.h"
+#include "LayerStyleKinds.h"
+#include "LayerTreeRecovery.h"
+#include "FeaturePresets.h"
 #include "HeritageStyle.h"
 #include "DemPresentation.h"
 #include "DemColorRampLegend.h"
@@ -78,7 +84,6 @@
 #include <qgsrenderer.h>
 #include <qgsrectangle.h>
 #include <qgslayertree.h>
-#include <qgslayertreelayer.h>
 #include <qgslayertreelayer.h>
 #include <qgsbilinearrasterresampler.h>
 #include <qgsrasterresamplefilter.h>
@@ -175,109 +180,56 @@ bool LayerOps::applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerK
   const QString key = layerKeyIn.isEmpty() ? layerKeyOf(layer) : layerKeyIn;
   const Qgis::GeometryType gt = layer->geometryType();
 
-  QColor fill(37, 99, 235, 90);
-  QColor stroke(37, 99, 235, 255);
-  double strokeW = 1.2;
-  double markerSize = 3.5;
-
-  if (key == QLatin1String("survey_area")) {
-    fill = QColor(180, 83, 9, 70);
-    stroke = QColor(146, 64, 14, 255);
-    strokeW = 1.6;
-  } else if (key == QLatin1String("feature_poly")) {
-    fill = QColor(22, 163, 74, 90);
-    stroke = QColor(17, 94, 44, 255);
-    strokeW = 1.8;
-  } else if (key == QLatin1String("feature_line") || key == QLatin1String("section_line")) {
-    stroke = key == QLatin1String("section_line") ? QColor(190, 24, 93, 255) : QColor(202, 138, 4, 255);
-    strokeW = 1.8;
-  } else if (key == QLatin1String("control_points")) {
-    fill = QColor(234, 179, 8, 255);
-    stroke = QColor(161, 98, 7, 255);
-    markerSize = 4.0;
-  } else if (key == QLatin1String("artifact_point")) {
-    fill = QColor(185, 28, 28, 255);
-    stroke = QColor(127, 29, 29, 255);
-    markerSize = 3.6;
-  } else if (key == QLatin1String("trial_trench")) {
-    // 시굴 트렌치 도면 관례: 붉은 외곽선 0.5, 채움은 거의 없음(위성·지적 위 판독).
-    fill = QColor(220, 38, 38, 18);
-    stroke = QColor(220, 38, 38, 255);
-    strokeW = 0.5;
-  }
-
+  // Defaults come from the one table; saved user choices (ka_hgis/style_*) win.
+  const LayerStyleDefaults::DomainStyle base = LayerStyleDefaults::forKey(key);
+  QColor fill = base.fill;
+  QColor stroke = base.stroke;
+  double strokeW = base.strokeWidthMm;
+  double markerSize = base.markerSizeMm;
   const QString savedStroke = layer->customProperty(QStringLiteral("ka_hgis/style_stroke")).toString();
   const QString savedFill = layer->customProperty(QStringLiteral("ka_hgis/style_fill")).toString();
   const double savedWidth = layer->customProperty(QStringLiteral("ka_hgis/style_width_mm")).toDouble();
-  if (!savedStroke.isEmpty() && QColor(savedStroke).isValid()) {
-    stroke = QColor(savedStroke);
-  }
-  if (!savedFill.isEmpty() && QColor(savedFill).isValid()) {
-    fill = QColor(savedFill);
-  }
-  if (savedWidth > 0.05) {
-    strokeW = savedWidth;
-  }
+  const double savedMarker = layer->customProperty(QStringLiteral("ka_hgis/style_marker_mm")).toDouble();
+  if (!savedStroke.isEmpty() && QColor(savedStroke).isValid()) stroke = QColor(savedStroke);
+  if (!savedFill.isEmpty() && QColor(savedFill).isValid()) fill = QColor(savedFill);
+  if (savedWidth > 0.05) strokeW = savedWidth;
+  if (savedMarker > 0.05) markerSize = savedMarker;
+  const bool noFill = layer->customProperty(QStringLiteral("ka_hgis/style_no_fill")).toBool();
+  const bool noStroke = layer->customProperty(QStringLiteral("ka_hgis/style_no_stroke")).toBool();
+  const bool dashed = layer->customProperty(QStringLiteral("ka_hgis/style_dashed")).toBool();
 
-  QgsSymbol* sym = nullptr;
-  if (gt == Qgis::GeometryType::Polygon) {
-    auto fs = QgsFillSymbol::createSimple({
-        {QStringLiteral("color"), fill.name(QColor::HexArgb)},
-        {QStringLiteral("outline_color"), stroke.name(QColor::HexArgb)},
-        {QStringLiteral("outline_width"), QString::number(strokeW)},
-        {QStringLiteral("outline_width_unit"), QStringLiteral("MM")},
-    });
-    sym = fs.release();
-  } else if (gt == Qgis::GeometryType::Line) {
-    if (key == QLatin1String("section_line")) {
-      auto ls = QgsLineSymbol::createSimple({
-          {QStringLiteral("line_color"), QStringLiteral("#FFFFFF")},
-          {QStringLiteral("line_width"), QStringLiteral("3.0")},
-          {QStringLiteral("line_width_unit"), QStringLiteral("MM")},
-          {QStringLiteral("line_style"), QStringLiteral("solid")},
-      });
-      auto* core = new QgsSimpleLineSymbolLayer(stroke, strokeW, Qt::SolidLine);
-      core->setWidthUnit(Qgis::RenderUnit::Millimeters);
-      ls->appendSymbolLayer(core);
-      sym = ls.release();
-    } else {
-      auto ls = QgsLineSymbol::createSimple({
-          {QStringLiteral("line_color"), stroke.name(QColor::HexArgb)},
-          {QStringLiteral("line_width"), QString::number(strokeW)},
-          {QStringLiteral("line_width_unit"), QStringLiteral("MM")},
-      });
-      sym = ls.release();
-    }
-  } else if (gt == Qgis::GeometryType::Point) {
-    auto ms = QgsMarkerSymbol::createSimple({
-        {QStringLiteral("name"), QStringLiteral("circle")},
-        {QStringLiteral("color"), fill.name(QColor::HexArgb)},
-        {QStringLiteral("outline_color"), stroke.name(QColor::HexArgb)},
-        {QStringLiteral("outline_width"), QStringLiteral("0.6")},
-        {QStringLiteral("size"), QString::number(markerSize)},
-        {QStringLiteral("size_unit"), QStringLiteral("MM")},
-    });
-    sym = ms.release();
-  } else {
+  QgsSymbol* sym = LayerStyleDefaults::buildSymbol(static_cast<int>(gt), base, fill, stroke, strokeW,
+                                                   markerSize, noFill, noStroke, dashed);
+  if (!sym) {
     sym = QgsSymbol::defaultSymbol(gt);
-    if (sym)
-      sym->setColor(stroke);
+    if (sym) sym->setColor(stroke);
   }
   if (!sym) return false;
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_fill"), fill.name(QColor::HexArgb));
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_stroke"), stroke.name(QColor::HexArgb));
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_width_mm"), strokeW);
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_marker_mm"), markerSize);
-  layer->setRenderer(new QgsSingleSymbolRenderer(sym));
+  // 「종류별 자동 색」 survives drawing and attribute edits: rebuild its categories
+  // (new kinds included) instead of resetting the layer to one symbol.
+  if (LayerStyleKinds::isByKind(layer) && LayerStyleKinds::apply(layer)) {
+    delete sym;
+  } else if (LayerStyleKinds::hasOtherAutomaticLook(layer)) {
+    // Another automatic look (FeaturePresets) keeps its classes and 미분류 catch-all.
+    delete sym;
+    FeaturePresets::refreshIfPresetStyled(layer);  // [pkg K] F041: new kind×period classes after drawing/edits
+  } else {
+    LayerStyleKinds::clearMode(layer);
+    layer->setRenderer(new QgsSingleSymbolRenderer(sym));
+  }
   // Drawing and attribute edits also call this function. Initialize labels
   // only once so a later edit cannot reset size, content or visibility.
   if (!layer->labeling()) {
     if (key == QLatin1String("trial_trench"))
-      applyNameAttributeLabels(layer, QStringLiteral("name"), 5.0, true);
+      applyNameAttributeLabels(layer, QStringLiteral("name"), kDefaultLabelSizePt, true);
     else if (gt == Qgis::GeometryType::Polygon)
       applyAreaM2Labels(layer);
     else if (const QString field = detectNameField(layer); !field.isEmpty())
-      applyNameAttributeLabels(layer, field, 5.0, false);
+      applyNameAttributeLabels(layer, field, kDefaultLabelSizePt, false);
   }
   layer->triggerRepaint();
   return true;
@@ -535,8 +487,10 @@ bool LayerOps::applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fillI
                                       double strokeWidthMm, double markerSizeMm, bool noFill,
                                       bool noStroke, bool dashed) {
   if (!layer || !layer->isValid()) return false;
-  QColor fill = fillIn.isValid() ? fillIn : QColor(37, 99, 235, 90);
-  QColor stroke = strokeIn.isValid() ? strokeIn : QColor(37, 99, 235, 255);
+  const LayerStyleDefaults::DomainStyle base = LayerStyleDefaults::forKey(layerKeyOf(layer));
+  const LayerStyleDefaults::DomainStyle generic = LayerStyleDefaults::forKey(QString());
+  QColor fill = fillIn.isValid() ? fillIn : generic.fill;
+  QColor stroke = strokeIn.isValid() ? strokeIn : generic.stroke;
   if (strokeWidthMm <= 0.0) strokeWidthMm = 1.0;
   if (markerSizeMm <= 0.0) markerSizeMm = 3.5;
   if (noFill) fill = QColor(0, 0, 0, 0);
@@ -546,44 +500,10 @@ bool LayerOps::applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fillI
     stroke = QColor(100, 100, 100, 255);
     strokeWidthMm = 0.4;
   }
-
-  const Qgis::GeometryType gt = layer->geometryType();
-  QgsSymbol* sym = nullptr;
-  if (gt == Qgis::GeometryType::Polygon) {
-    QVariantMap props{
-        {QStringLiteral("color"), fill.name(QColor::HexArgb)},
-        {QStringLiteral("style"), noFill ? QStringLiteral("no") : QStringLiteral("solid")},
-        {QStringLiteral("outline_color"), stroke.name(QColor::HexArgb)},
-        {QStringLiteral("outline_width"), QString::number(noStroke ? 0.0 : strokeWidthMm)},
-        {QStringLiteral("outline_width_unit"), QStringLiteral("MM")},
-        {QStringLiteral("outline_style"),
-         noStroke ? QStringLiteral("no") : (dashed ? QStringLiteral("dash") : QStringLiteral("solid"))},
-    };
-    auto fs = QgsFillSymbol::createSimple(props);
-    sym = fs.release();
-  } else if (gt == Qgis::GeometryType::Line) {
-    auto ls = QgsLineSymbol::createSimple({
-        {QStringLiteral("line_color"), stroke.name(QColor::HexArgb)},
-        {QStringLiteral("line_width"), QString::number(noStroke ? 0.0 : strokeWidthMm)},
-        {QStringLiteral("line_width_unit"), QStringLiteral("MM")},
-        {QStringLiteral("line_style"),
-         noStroke ? QStringLiteral("no") : (dashed ? QStringLiteral("dash") : QStringLiteral("solid"))},
-    });
-    sym = ls.release();
-  } else if (gt == Qgis::GeometryType::Point) {
-    auto ms = QgsMarkerSymbol::createSimple({
-        {QStringLiteral("name"), QStringLiteral("circle")},
-        {QStringLiteral("color"), noFill ? QStringLiteral("#00000000") : fill.name(QColor::HexArgb)},
-        {QStringLiteral("outline_color"), stroke.name(QColor::HexArgb)},
-        {QStringLiteral("outline_width"), noStroke ? QStringLiteral("0") : QStringLiteral("0.6")},
-        {QStringLiteral("outline_style"), noStroke ? QStringLiteral("no") : QStringLiteral("solid")},
-        {QStringLiteral("size"), QString::number(markerSizeMm)},
-        {QStringLiteral("size_unit"), QStringLiteral("MM")},
-    });
-    sym = ms.release();
-  } else {
-    return false;
-  }
+  // A section line keeps its white casing: a colour edit changes the core line only.
+  QgsSymbol* sym = LayerStyleDefaults::buildSymbol(static_cast<int>(layer->geometryType()), base, fill,
+                                                   stroke, strokeWidthMm, markerSizeMm, noFill, noStroke,
+                                                   dashed);
   if (!sym) return false;
 
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_fill"), fill.name(QColor::HexArgb));
@@ -593,6 +513,8 @@ bool LayerOps::applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fillI
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_no_fill"), noFill);
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_no_stroke"), noStroke);
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_dashed"), dashed);
+  // An explicit single colour ends any automatic look until the user picks it again.
+  LayerStyleKinds::clearAnyAutomaticLook(layer);
   layer->setRenderer(new QgsSingleSymbolRenderer(sym));
   layer->triggerRepaint();
   return true;
@@ -603,38 +525,14 @@ bool LayerOps::readSimpleVectorStyle(const QgsVectorLayer* layer, QColor* fill, 
                                      bool* noStroke, bool* dashed) {
   if (!layer) return false;
 
-  QColor f(37, 99, 235, 90);
-  QColor s(37, 99, 235, 255);
-  double w = 1.2;
-  double m = 3.5;
+  const LayerStyleDefaults::DomainStyle base = LayerStyleDefaults::forKey(layerKeyOf(layer));
+  QColor f = base.fill;
+  QColor s = base.stroke;
+  double w = base.strokeWidthMm;
+  double m = base.markerSizeMm;
   bool nf = false;
   bool ns = false;
   bool dash = false;
-
-  const QString key = layerKeyOf(layer);
-  if (key == QLatin1String("survey_area")) {
-    f = QColor(180, 83, 9, 70);
-    s = QColor(146, 64, 14, 255);
-    w = 1.6;
-  } else if (key == QLatin1String("feature_poly")) {
-    f = QColor(22, 163, 74, 90);
-    s = QColor(17, 94, 44, 255);
-    w = 1.8;
-  } else if (key == QLatin1String("feature_line")) {
-    s = QColor(202, 138, 4, 255);
-    w = 1.8;
-  } else if (key == QLatin1String("section_line")) {
-    s = QColor(190, 24, 93, 255);
-    w = 1.8;
-  } else if (key == QLatin1String("control_points")) {
-    f = QColor(234, 179, 8, 255);
-    s = QColor(161, 98, 7, 255);
-    m = 4.0;
-  } else if (key == QLatin1String("artifact_point")) {
-    f = QColor(185, 28, 28, 255);
-    s = QColor(127, 29, 29, 255);
-    m = 3.6;
-  }
 
   const QVariant cf = layer->customProperty(QStringLiteral("ka_hgis/style_fill"));
   const QVariant cs = layer->customProperty(QStringLiteral("ka_hgis/style_stroke"));
@@ -662,11 +560,19 @@ bool LayerOps::readSimpleVectorStyle(const QgsVectorLayer* layer, QColor* fill, 
   if (const QgsFeatureRenderer* ren = layer->renderer()) {
     if (const auto* single = dynamic_cast<const QgsSingleSymbolRenderer*>(ren)) {
       if (const QgsSymbol* sym = single->symbol()) {
-        if (sym->color().isValid()) {
+        // A cased line (section_line) lists the white casing first; the colour the
+        // user sees and edits is the core line on top.
+        const QgsSymbolLayer* top = sym->symbolLayerCount() > 0
+                                        ? sym->symbolLayer(sym->symbolLayerCount() - 1)
+                                        : nullptr;
+        const QColor shown = layer->geometryType() == Qgis::GeometryType::Line && top
+                                 ? top->color()
+                                 : sym->color();
+        if (shown.isValid()) {
           if (layer->geometryType() == Qgis::GeometryType::Line)
-            s = sym->color();
+            s = shown;
           else if (!nf)
-            f = sym->color();
+            f = shown;
         }
       }
     }
@@ -684,125 +590,9 @@ bool LayerOps::readSimpleVectorStyle(const QgsVectorLayer* layer, QColor* fill, 
 
 bool LayerOps::applyFeaturePolyStyle(QgsVectorLayer* featurePoly) {
   if (!featurePoly || !featurePoly->isValid()) return false;
-  QString field = QStringLiteral("kind");
-  if (featurePoly->fields().indexOf(field) < 0) field = QStringLiteral("period");
-  if (featurePoly->fields().indexOf(field) < 0)
-    return applyDomainDrawStyle(featurePoly, QStringLiteral("feature_poly"));
-
-  QSet<QString> values;
-  QgsFeatureIterator it = featurePoly->getFeatures();
-  QgsFeature f;
-  while (it.nextFeature(f)) {
-    const QString v = f.attribute(field).toString().trimmed();
-    if (!v.isEmpty()) values.insert(v);
-  }
-  if (values.isEmpty())
-    return applyDomainDrawStyle(featurePoly, QStringLiteral("feature_poly"));
-
-  QgsCategoryList cats;
-  int i = 0;
-  const QList<QString> sorted = values.values();
-  for (const QString& v : sorted) {
-    QColor c = QColor::fromHsv((i * 47) % 360, 180, 230, 160);
-    QgsSymbol* sym = QgsSymbol::defaultSymbol(featurePoly->geometryType());
-    if (sym) {
-      sym->setColor(c);
-      cats.append(QgsRendererCategory(QVariant(v), sym, v));
-    }
-    ++i;
-  }
-  if (cats.isEmpty())
-    return applyDomainDrawStyle(featurePoly, QStringLiteral("feature_poly"));
-  auto* renderer = new QgsCategorizedSymbolRenderer(field, cats);
-  featurePoly->setRenderer(renderer);
-  featurePoly->triggerRepaint();
-  return true;
-}
-
-bool LayerOps::mergePolygonFeatures(QgsVectorLayer* layer, QString* errorOut) {
-  if (!layer || !layer->isValid()) {
-    if (errorOut) *errorOut = QStringLiteral("Invalid layer");
-    return false;
-  }
-  const QgsFeatureIds sel = layer->selectedFeatureIds();
-  if (sel.size() >= 2) {
-    return mergePolygonFeatures(layer, sel, errorOut);
-  }
-  return mergePolygonFeatures(layer, QgsFeatureIds(), errorOut);
-}
-
-bool LayerOps::mergePolygonFeatures(QgsVectorLayer* layer, const QgsFeatureIds& featureIds, QString* errorOut) {
-  if (!layer || !layer->isValid()) {
-    if (errorOut) *errorOut = QStringLiteral("Invalid layer");
-    return false;
-  }
-  if (layer->geometryType() != Qgis::GeometryType::Polygon) {
-    if (errorOut) *errorOut = QStringLiteral("폴리곤 레이어만 묶을 수 있습니다");
-    return false;
-  }
-
-  QVector<QgsGeometry> geoms;
-  QgsFeatureIds ids;
-  QgsFeature first;
-  bool hasFirst = false;
-  QgsFeature f;
-  const bool useSpecificIds = !featureIds.isEmpty();
-  QgsFeatureIterator it = useSpecificIds ? layer->getFeatures(QgsFeatureRequest().setFilterFids(featureIds))
-                                         : layer->getFeatures();
-  while (it.nextFeature(f)) {
-    if (!f.hasGeometry() || f.geometry().isEmpty()) continue;
-    QgsGeometry g = f.geometry();
-    if (!g.isGeosValid())
-      g = g.makeValid();
-    if (g.isEmpty()) continue;
-    geoms.append(g);
-    ids.insert(f.id());
-    if (!hasFirst) {
-      first = QgsFeature(f);
-      hasFirst = true;
-    }
-  }
-  if (geoms.size() < 2) {
-    if (errorOut) *errorOut = QStringLiteral("묶을 폴리곤이 2개 이상 필요합니다 (선택: %1개)").arg(geoms.size());
-    return false;
-  }
-
-  QgsGeometry multi = QgsGeometry::unaryUnion(geoms);
-  if (multi.isEmpty() || !multi.isGeosValid()) {
-    multi = QgsGeometry::collectGeometry(geoms);
-  }
-  if (multi.isEmpty()) {
-    if (errorOut) *errorOut = QStringLiteral("폴리곤 결합 실패");
-    return false;
-  }
-  if (!multi.isGeosValid())
-    multi = multi.makeValid();
-
-  const bool startedHere = !layer->isEditable();
-  if (startedHere && !layer->startEditing()) {
-    if (errorOut) *errorOut = QStringLiteral("편집 모드 시작 실패");
-    return false;
-  }
-  if (!layer->deleteFeatures(ids)) {
-    if (errorOut) *errorOut = QStringLiteral("기존 피처 삭제 실패");
-    if (startedHere) layer->rollBack();
-    return false;
-  }
-  QgsFeature out(layer->fields());
-  out.setAttributes(first.attributes());
-  out.setGeometry(multi);
-  if (!layer->addFeature(out)) {
-    if (errorOut) *errorOut = QStringLiteral("결합 피처 추가 실패");
-    if (startedHere) layer->rollBack();
-    return false;
-  }
-  if (startedHere && !layer->commitChanges()) {
-    if (errorOut) *errorOut = layer->commitErrors().join(QLatin1Char(';'));
-    layer->rollBack();
-    return false;
-  }
-  layer->triggerRepaint();
-  return true;
+  // Stable per-kind colours plus a 「미분류」 class; the choice survives later edits.
+  if (LayerStyleKinds::apply(featurePoly)) return true;
+  return applyDomainDrawStyle(featurePoly, QStringLiteral("feature_poly"));
 }
 
 bool LayerOps::explodeMultipartFeatures(QgsVectorLayer* layer, const QgsFeatureIds& featureIds, QString* errorOut) {
@@ -920,7 +710,7 @@ QgsVectorLayer* LayerOps::clipLayerByBoundary(QgsVectorLayer* sourceLayer,
       try {
         if (bg.transform(xf) != Qgis::GeometryOperationResult::Success) continue;
       } catch (...) {
-        KaSessionLog::line(QStringLiteral("[except] core/LayerOps.cpp:1322"));
+        KaSessionLog::line(KaLogExceptDetail::exceptLine(__FILE__, __LINE__));
         continue;
       }
     }
@@ -1119,7 +909,7 @@ bool LayerOps::splitTwoOverlappingFeatures(QgsVectorLayer* layer1, qint64 fid1,
         return false;
       }
     } catch (...) {
-      KaSessionLog::line(QStringLiteral("[except] core/LayerOps.cpp:1520"));
+      KaSessionLog::line(KaLogExceptDetail::exceptLine(__FILE__, __LINE__));
       if (errorOut) *errorOut = QStringLiteral("좌표계 변환 예외가 발생했습니다.");
       return false;
     }
@@ -1155,7 +945,7 @@ bool LayerOps::splitTwoOverlappingFeatures(QgsVectorLayer* layer1, qint64 fid1,
     try {
       diff2.transform(invXf);
     } catch (...) {
-      KaSessionLog::line(QStringLiteral("[except] core/LayerOps.cpp:1555"));
+      KaSessionLog::line(KaLogExceptDetail::exceptLine(__FILE__, __LINE__));
     }
   }
 
@@ -1227,15 +1017,13 @@ bool LayerOps::splitTwoOverlappingFeatures(QgsVectorLayer* layer1, qint64 fid1,
   return true;
 }
 
-QgsLayerTreeGroup* LayerOps::ensureLegendGroup(QgsProject* project, const QString& groupName) {
-  Q_UNUSED(project);
-  Q_UNUSED(groupName);
-  // ORIG-3: never create empty legend groups. Flat additive layer list only.
-  return nullptr;
-}
-
 void LayerOps::placeInLegendGroup(QgsProject* project, QgsMapLayer* layer, const QString& groupName,
                                   bool insertAtBottom) {
+  // The layer list is flat and additive (PO goal ORIG-3: flat list, no empty
+  // groups). The persisted role (ka_hgis/layer_role), not a parent heading,
+  // separates survey data from reference maps. Only the heritage and survey
+  // contour imports build their own "참조 지도" bundles. groupName records the
+  // caller's intent for the reader; it does not create or move into a group.
   Q_UNUSED(groupName);
   Q_UNUSED(insertAtBottom);
   if (!project || !layer) return;
@@ -1394,15 +1182,8 @@ void LayerOps::applyLegendCrsLabel(QgsMapLayer* layer) {
 bool LayerOps::isCadastralLayer(const QgsMapLayer* layer) {
   if (!layer) return false;
   if (!layerKeyOf(layer).isEmpty()) return false;
-  if (layer->customProperty(QStringLiteral("ka_hgis/cadastral")).toBool()) return true;
-  if (layer->customProperty(QString::fromUtf8(kPropLayerRole)).toString() ==
-      QLatin1String(kRoleCadastral))
-    return true;
-  if (isBasemapLayer(layer)) return false;
-  const QString n = layer->name();
-  if (n.contains(QStringLiteral("VWorld"))) return false;
-  if (!n.contains(QStringLiteral("지적"))) return false;
-  return layer->providerType().compare(QLatin1String("ogr"), Qt::CaseInsensitive) == 0;
+  // Stored role first; the "지적" title guess only covers layers saved without one.
+  return LayerRole::resolve(layer) == LayerRole::Kind::Cadastral;
 }
 
 bool LayerOps::isVworldCadastralPicture(const QgsMapLayer* layer) {
@@ -1487,20 +1268,10 @@ QList<QgsMapLayer*> LayerOps::removableLegendLayersFromNode(QgsLayerTreeNode* no
 }
 
 bool LayerOps::isReferenceLayer(const QgsMapLayer* layer) {
-  if (!layer) return false;
-  // Downloaded cadastral has its own role for snap/edit; it is not a generic reference layer.
-  if (isCadastralLayer(layer)) return false;
-  if (layer->customProperty(QString::fromUtf8(kPropLayerRole)).toString() ==
-      QLatin1String(kRoleReference))
-    return true;
-  const QString n = layer->name();
-  return n.contains(QStringLiteral("OSM")) || n.contains(QStringLiteral("VWorld")) ||
-         n.contains(QStringLiteral("Carto")) || n.contains(QStringLiteral("Google")) ||
-         n.contains(QStringLiteral("고도맵")) || n.contains(QStringLiteral("지형맵")) ||
-         n == QLatin1String("DEM") || n.contains(QStringLiteral("OpenTopoMap")) ||
-         n.contains(QStringLiteral("고지형")) || n == QLatin1String("위성") ||
-         n.startsWith(QLatin1String("지적")) || n.contains(QStringLiteral("대동여지도")) ||
-         n.contains(QStringLiteral("1919 조선지형도"));
+  // Downloaded cadastral has its own role for snap/edit; it is not a generic reference
+  // layer. Survey data (stored role or any layer_key, including imported "user:" SHP)
+  // is never reference because of its title.
+  return layer && LayerRole::resolve(layer) == LayerRole::Kind::Reference;
 }
 
 bool LayerOps::isSnapSourceLayer(const QgsVectorLayer* layer) {
@@ -1520,50 +1291,18 @@ bool LayerOps::isReferenceOrBasemapLayer(const QgsMapLayer* layer) {
   if (!layer) return false;
   // 조사 도메인 레이어(survey_area, feature_poly, feature_line 등)는 절대 배경지도가 아니다.
   if (!layerKeyOf(layer).isEmpty()) return false;
-  if (isCadastralLayer(layer)) return true;
-
-  // 명시적 참조 역할
-  if (layer->customProperty(QString::fromUtf8(kPropLayerRole)).toString() ==
-      QLatin1String(kRoleReference))
-    return true;
-
-  // 기존 isBasemapLayer 또는 isReferenceLayer 확인
-  if (isBasemapLayer(layer) || isReferenceLayer(layer))
-    return true;
-
-  // 레이어 트리의 "참조 지도" 그룹 소속 여부 확인
-  if (auto* proj = QgsProject::instance()) {
-    if (auto* root = proj->layerTreeRoot()) {
-      if (auto* node = root->findLayer(layer->id())) {
-        auto* parent = node->parent();
-        while (parent) {
-          if (parent->name() == QString::fromUtf8(kGroupReference) ||
-              parent->name().contains(QStringLiteral("참조"))) {
-            return true;
-          }
-          parent = parent->parent();
-        }
-      }
-    }
+  switch (LayerRole::resolve(layer)) {
+    case LayerRole::Kind::Cadastral:
+    case LayerRole::Kind::Reference:
+      return true;
+    case LayerRole::Kind::Survey:
+      return false;
+    case LayerRole::Kind::Unknown:
+      break;
   }
-
-  // 지질도, 토양도, 수계도, 고지형, 음영기복, 위성, 지적, DEM 등 명칭 또는 소스 검사
-  const QString n = layer->name();
-  if (n.contains(QStringLiteral("지질")) || n.contains(QStringLiteral("토양")) ||
-      n.contains(QStringLiteral("수계")) || n.contains(QStringLiteral("음영")) ||
-      n.contains(QStringLiteral("단면")) || n.contains(QStringLiteral("배경")) ||
-      n.contains(QStringLiteral("정사")) || n.contains(QStringLiteral("위성")) ||
-      n.contains(QStringLiteral("지적")) || n.contains(QStringLiteral("DEM")) ||
-      n.contains(QStringLiteral("지형")) || n.contains(QStringLiteral("등고"))) {
-    return true;
-  }
-
-  // 도메인 키가 없는 모든 래스터 레이어는 배경/참조 지도로 간주
-  if (layer->type() == Qgis::LayerType::Raster) {
-    return true;
-  }
-
-  return false;
+  if (isBasemapLayer(layer)) return true;
+  // 역할이 저장되기 전의 조사: 참조 묶음 소속·주제도 이름·키 없는 래스터.
+  return LayerRole::legacyLooksLikeBackground(layer);
 }
 
 QgsVectorLayer* LayerOps::findByLayerKey(QgsProject* project, const QString& layerKey) {
@@ -2384,7 +2123,7 @@ static QString kaResolvePersistedSource(const QString& source, const QString& ho
   return source;
 }
 
-int LayerOps::repairPersistedFileSources(QgsProject* project) {
+int LayerOps::repairPersistedFileSources(QgsProject* project, bool throttled) {
   if (!project) return 0;
   const QString fileName = project->fileName();
   QString surveyGpkg;
@@ -2423,6 +2162,8 @@ int LayerOps::repairPersistedFileSources(QgsProject* project) {
   int n = 0;
   for (QgsMapLayer* layer : project->mapLayers()) {
     if (!layer || layer->isValid()) continue;
+    // Canvas syncs skip a source already confirmed missing until its next probe time.
+    if (throttled && !LayerTreeRecovery::shouldProbe(layer)) continue;
     QString provider = layer->providerType().toLower();
     if (provider.isEmpty()) {
       const QString file = layer->source().section(QLatin1Char('|'), 0, 0).toLower();
@@ -2464,7 +2205,11 @@ int LayerOps::reviveInvalidLayers(QgsProject* project, QStringList* revived,
   if (!project) return 0;
   int n = 0;
   for (QgsMapLayer* l : project->mapLayers()) {
-    if (!l || l->isValid()) continue;
+    if (!l) continue;
+    if (l->isValid()) {
+      LayerTreeRecovery::noteFound(l);
+      continue;
+    }
     // 편집 중인 버퍼는 건드리지 않는다. 다시 열면 커밋 안 된 도형이 날아간다.
     if (auto* v = qobject_cast<QgsVectorLayer*>(l)) {
       if (v->isEditable()) {
@@ -2472,19 +2217,28 @@ int LayerOps::reviveInvalidLayers(QgsProject* project, QStringList* revived,
         continue;
       }
     }
+    // 파일 기반이 아닌 원본(xyz/wms)은 파일 존재 검사를 건너뛴다.
+    const QString src = l->source();
+    const QString file = src.section(QLatin1Char('|'), 0, 0);
+    const bool fileBacked = l->providerType().compare(QLatin1String("ogr"), Qt::CaseInsensitive) == 0 ||
+                            l->providerType().compare(QLatin1String("gdal"), Qt::CaseInsensitive) == 0;
+    // 원본 파일이 없다고 확인된 레이어(빠진 USB·끊긴 네트워크 드라이브)는 간격을 늘려 가며
+    // 다시 본다. 매번 reloadData·exists 로 GUI 를 붙잡지 않는다. 진단 목록에는 계속 남는다.
+    if (fileBacked && !LayerTreeRecovery::shouldProbe(l)) {
+      if (stillBroken) *stillBroken << l->name();
+      continue;
+    }
     if (QgsDataProvider* p = l->dataProvider())
       p->reloadData();
     if (!l->isValid()) {
       // 같은 URI로 다시 연다. GPKG에 쓰는 동안 끊긴 핸들은 이걸로 돌아온다.
-      // 파일 기반이 아닌 원본(xyz/wms)은 파일 존재 검사를 건너뛴다.
-      const QString src = l->source();
-      const QString file = src.section(QLatin1Char('|'), 0, 0);
-      const bool fileBacked = l->providerType().compare(QLatin1String("ogr"), Qt::CaseInsensitive) == 0 ||
-                              l->providerType().compare(QLatin1String("gdal"), Qt::CaseInsensitive) == 0;
       if (!fileBacked || QFileInfo::exists(file))
         l->setDataSource(src, l->name(), l->providerType());
+      else
+        LayerTreeRecovery::noteMissing(l);
     }
     if (l->isValid()) {
+      LayerTreeRecovery::noteFound(l);
       if (auto* v = qobject_cast<QgsVectorLayer*>(l))
         v->updateExtents();
       l->triggerRepaint();
@@ -2512,9 +2266,12 @@ void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoo
   // visibleLayersPaintOrder는 무효한 레이어를 화면 목록에서 뺀다. GPKG에 쓰는 동안
   // 잠깐 끊긴 레이어가 여기서 빠지면 다시 넣어 주는 곳이 없어 재시작 전까지 사라진
   // 채로 남는다. 목록을 만들기 전에 되살릴 수 있는 것은 되살린다.
-  repairPersistedFileSources(project);
+  // 원본이 사라진 레이어(빠진 USB·끊긴 네트워크 드라이브)는 간격을 늘려 가며 다시 찾는다.
+  repairPersistedFileSources(project, true);
   reviveInvalidLayers(project);
 
+  // 글자 순서를 여기서 명시적으로 건다. 아래 목록 조회는 레이어를 바꾸지 않는다.
+  applyLayerOrderToLabels(project, nullptr);
   // 덧그림 조사·유적은 캔버스 목록에서 뺀다. 오버레이가 그 도형을 한 번만 그린다.
   // 지적 지번은 이 목록에 남아 그 선 아래에 있다.
   QList<QgsMapLayer*> visible = sheetBasePaintLayers(project);
@@ -2668,7 +2425,7 @@ bool LayerOps::setWorkCrs(QgsProject* project, QgsMapCanvas* canvas, const QStri
         xf.setBallparkTransformsAreAppropriate(true);
         canvas->setExtent(xf.transformBoundingBox(prev));
       } catch (...) {
-        KaSessionLog::line(QStringLiteral("[except] core/LayerOps.cpp:4842"));
+        KaSessionLog::line(KaLogExceptDetail::exceptLine(__FILE__, __LINE__));
         zoomToKorea(canvas, epsgAuthId);
       }
     } else if (!prev.isEmpty()) {
@@ -3136,129 +2893,6 @@ LayerOps::SnapSettings LayerOps::readSnapSettings(const QgsProject* project) {
   const QString topo = project->readEntry(QStringLiteral("ka_hgis"), QStringLiteral("topological"));
   settings.topological = topo.isEmpty() ? true : topo != QLatin1String("0");
   return settings;
-}
-
-bool LayerOps::moveFeatureVertex(QgsVectorLayer* layer, qint64 featureId, int vertex,
-                                 double x, double y, QString* errorOut) {
-  if (!layer || !layer->isValid()) {
-    if (errorOut) *errorOut = QStringLiteral("레이어가 없습니다.");
-    return false;
-  }
-  if (isCadastralLayer(layer)) {
-    if (errorOut) *errorOut = QStringLiteral("지적도는 고칠 수 없습니다.");
-    return false;
-  }
-  if (isReferenceLayer(layer)) {
-    if (errorOut) *errorOut = QStringLiteral("참조 지도는 고칠 수 없습니다.");
-    return false;
-  }
-  if (vertex < 0) {
-    if (errorOut) *errorOut = QStringLiteral("꼭짓점이 없습니다.");
-    return false;
-  }
-  const QgsFeatureId fid = static_cast<QgsFeatureId>(featureId);
-  QgsFeature existing = layer->getFeature(fid);
-  if (!existing.isValid() || !existing.hasGeometry()) {
-    if (errorOut) *errorOut = QStringLiteral("고칠 도형을 찾지 못했습니다.");
-    return false;
-  }
-  const bool startedHere = !layer->isEditable();
-  if (startedHere && !layer->startEditing()) {
-    if (errorOut) *errorOut = QStringLiteral("편집을 열 수 없습니다.");
-    return false;
-  }
-  const bool topological = layer->project() && layer->project()->topologicalEditing();
-  if (!applyVertexMove(layer, featureId, vertex, x, y, topological, errorOut)) {
-    if (startedHere) layer->rollBack();
-    return false;
-  }
-  return true;
-}
-
-bool LayerOps::applyVertexMove(QgsVectorLayer* layer, qint64 featureId, int vertex,
-                               double x, double y, bool topological, QString* errorOut) {
-  if (!layer || !layer->isValid()) {
-    if (errorOut) *errorOut = QStringLiteral("레이어가 없습니다.");
-    return false;
-  }
-  if (isCadastralLayer(layer)) {
-    if (errorOut) *errorOut = QStringLiteral("지적도는 고칠 수 없습니다.");
-    return false;
-  }
-  if (isReferenceLayer(layer)) {
-    if (errorOut) *errorOut = QStringLiteral("참조 지도는 고칠 수 없습니다.");
-    return false;
-  }
-  if (vertex < 0) {
-    if (errorOut) *errorOut = QStringLiteral("꼭짓점이 없습니다.");
-    return false;
-  }
-  if (!layer->isEditable()) {
-    if (errorOut) *errorOut = QStringLiteral("편집을 열 수 없습니다.");
-    return false;
-  }
-  const QgsFeatureId fid = static_cast<QgsFeatureId>(featureId);
-  QgsFeature existing = layer->getFeature(fid);
-  if (!existing.isValid() || !existing.hasGeometry()) {
-    if (errorOut) *errorOut = QStringLiteral("고칠 도형을 찾지 못했습니다.");
-    return false;
-  }
-  const QgsPoint origin = existing.geometry().vertexAt(vertex);
-  const QgsPointXY from(origin.x(), origin.y());
-  const double tol2 = 0.001 * 0.001;
-
-  struct Hit {
-    QgsFeatureId id = FID_NULL;
-    QgsGeometry geom;
-    QList<int> verts;
-  };
-  QHash<QgsFeatureId, Hit> hits;
-  const auto addHit = [&](const QgsFeature& feature, int vi) {
-    Hit& hit = hits[feature.id()];
-    hit.id = feature.id();
-    if (hit.geom.isNull()) hit.geom = feature.geometry();
-    if (!hit.verts.contains(vi)) hit.verts.append(vi);
-  };
-
-  if (topological) {
-    QgsFeature feature;
-    QgsFeatureIterator it = layer->getFeatures();
-    while (it.nextFeature(feature)) {
-      if (!feature.hasGeometry()) continue;
-      const QgsGeometry geom = feature.geometry();
-      const int count = geom.constGet() ? static_cast<int>(geom.constGet()->nCoordinates()) : 0;
-      for (int i = 0; i < count; ++i) {
-        const QgsPoint pt = geom.vertexAt(i);
-        if (QgsPointXY(pt.x(), pt.y()).sqrDist(from) <= tol2) addHit(feature, i);
-      }
-    }
-  } else {
-    addHit(existing, vertex);
-    const QgsGeometry geom = existing.geometry();
-    const int count = geom.constGet() ? static_cast<int>(geom.constGet()->nCoordinates()) : 0;
-    if (geom.type() == Qgis::GeometryType::Polygon && count > 1) {
-      if (vertex == 0) addHit(existing, count - 1);
-      if (vertex == count - 1) addHit(existing, 0);
-    }
-  }
-  if (!hits.contains(fid)) addHit(existing, vertex);
-
-  for (auto it = hits.begin(); it != hits.end(); ++it) {
-    Hit& hit = it.value();
-    for (int vi : hit.verts) {
-      if (!hit.geom.moveVertex(x, y, vi)) {
-        if (errorOut) *errorOut = QStringLiteral("꼭짓점을 옮기지 못했습니다.");
-        return false;
-      }
-    }
-    if (!layer->changeGeometry(hit.id, hit.geom)) {
-      if (errorOut) *errorOut = QStringLiteral("도형을 고치지 못했습니다.");
-      return false;
-    }
-  }
-  layer->updateExtents();
-  layer->triggerRepaint();
-  return true;
 }
 
 bool LayerOps::hasVisibleReferenceLayer(QgsProject* project) {

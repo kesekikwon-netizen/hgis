@@ -1,0 +1,61 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Survey save replace retry",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "win", "label": "MainWindow" },
+    { "id": "storage", "label": "SurveyStorage" },
+    { "id": "disk", "label": "Disk" }
+  ],
+  "phases": [
+    { "id": "save", "label": "Save", "fromCol": 0, "toCol": 1 },
+    { "id": "gen", "label": "Generation", "fromCol": 2, "toCol": 3 },
+    { "id": "swap", "label": "Replace", "fromCol": 4, "toCol": 5, "variant": "emphasis" }
+  ],
+  "mainPath": ["save", "persist", "workspace", "publish", "replace", "sibling"],
+  "nodes": [
+    { "id": "save", "lane": "win", "col": 0, "type": "external", "label": "Ctrl+S / close", "sublabel": "MainWindow.cpp:321-364", "width": 130 },
+    { "id": "persist", "lane": "win", "col": 1, "type": "frontend", "label": "persistSurveyWork", "sublabel": "MainWindowSession.cpp:885", "width": 170 },
+    { "id": "workspace", "lane": "storage", "col": 2, "type": "backend", "label": "persistWorkspace", "sublabel": "SurveyStorage.cpp:787-1058", "width": 170 },
+    { "id": "publish", "lane": "storage", "col": 3, "type": "backend", "label": "publishSurveyGeneration", "sublabel": "SurveyStorage.cpp:509-518", "width": 190 },
+    { "id": "replace", "lane": "disk", "col": 4, "type": "backend", "label": "replaceWithStaged (10 s)", "sublabel": "SurveyStorage.cpp:397-407", "width": 190 },
+    { "id": "sibling", "lane": "disk", "col": 5, "type": "backend", "label": "-저장.gpkg fallback", "sublabel": "SurveyStorage.cpp:432-446", "width": 170 }
+  ],
+  "edges": [
+    { "from": "save", "to": "persist", "label": "Save" },
+    { "from": "persist", "to": "workspace", "label": "SurveySession::persistWork" },
+    { "from": "workspace", "to": "publish", "label": "generation verified" },
+    { "from": "publish", "to": "replace", "label": "finishStagedSurvey :420", "variant": "emphasis" },
+    { "from": "replace", "to": "sibling", "label": "lock outlasts retries" }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Was",
+      "items": [
+        "Retry window 3.9 s (20 attempts)",
+        "Cancelled render thread held the GPKG 5-7 s under load",
+        "Save then went to the sibling file; test reopened the original"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Now",
+      "items": [
+        "Retry up to ~10 s (40 attempts)",
+        "Transient codes only: ACCESS_DENIED, SHARING, LOCK"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Keep",
+      "items": [
+        "Original bytes never truncated in place",
+        "Sibling fallback stays; session log names it"
+      ]
+    }
+  ]
+}

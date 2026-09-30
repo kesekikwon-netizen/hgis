@@ -86,6 +86,15 @@ private:
   QWidget* m_compactActions = nullptr;
   QPushButton* m_expandButton = nullptr;
   QPushButton* m_compactCancel = nullptr;
+  // Sheets about to be applied for (shown before the official order starts).
+  QLabel* m_orderSheets = nullptr;
+  QString m_orderSheetsText;
+  // Fail-closed stop: where it stopped (no query strings or form values) and the
+  // existing manual route, 「받은 자료 불러오기」.
+  QLabel* m_failureOutline = nullptr;
+  QPushButton* m_importFallback = nullptr;
+  QString m_failureOutlineText;
+  QString pageOutline() const;
   bool m_compactMode = true;
   bool m_processing = false;
   bool m_cancelNotified = false;

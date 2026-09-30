@@ -1,4 +1,10 @@
 <!-- Recent window only. Older entries: docs/archive/NOW-before-2026-09-25.md -->
+## 2026-09-30 Strata 시각 재설계 P6 배선
+
+- P1~P5 위젯을 창에 붙였다(`src/app/MainWindowChrome.cpp`). 「선택한 유구」 인스펙터가 `m_mainSplit` 셋째 칸(F10·〉 접기)이고 유구 카드는 그 안으로 옮겼다. 탭줄 오른쪽 「조사 열림 · 이름」 배지, 상태줄 「자석 켬/끔」·「저장 안 됨 n건」 칩, 리본 「저장」 미저장 점은 `refreshWindowTitle()`·`applySnapConfig()`에서 값을 받는다. 그리기 안내 띠는 `updateToolChip()`, 「배경 지도」 카드는 `syncThematicButtons()`, 홈 「설정」은 `openAccountSetup()`. 저장 성공 뒤 `SurveyFacts::rememberCounts`(개수만).
+- 레이어 목록 위 「레이어 찾기」(`KaLayerListChrome`), 홈 탭 글리프 `home`. `MainWindow.cpp` 순증 +1. 커밋·푸시 없음. 자세한 계약은 `docs/HANDOFF.md`.
+- 리뷰 수정(같은 날): 홈 「설정」 뒤 연결 상태 행 갱신(`KaStartPage::refreshConnections`, 다음 턴), 그리기 잠금 전 유구 카드 입력 커밋(`m_readOnly` 가드), `MainWindow/mainSplitPanes`로 2칸 저장 상태 무시, 왼쪽 패널 1500 미만 260 캡(1366 최대화 캔버스 772 px 실측), `ka_perf_tests` 소스 목록 보충, `shellSyncTimer` 이름(save_open_open 자동저장 검사 제외), QA 전용 `KA_HGIS_SETTINGS_DIR`. 스모크 0·전체 ctest 118/120(topographic_import은 -j4 부하 타임아웃)·캡처 5장은 scratchpad `visual-impl/fix-report.md`.
+
 ## 2026-09-28 측량 등고선이 맞다
 
 - 사용자가 화면의 측량 등고선을 맞다고 확인했다. 이 남북 방향을 되돌리지 않는다.

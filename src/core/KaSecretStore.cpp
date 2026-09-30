@@ -150,11 +150,9 @@ QString KaSecretStore::readPassword(QSettings& settings, const QString& group, b
     if (unprotectBytes(stored.toLatin1(), &plain)) {
       const QString secret = QString::fromUtf8(plain);
       SecureZeroMemory(plain.data(), static_cast<size_t>(plain.size()));
-      if (migrate && usePortableSecrets()) {
-        QString error;
-        writePassword(settings, group, secret, &error);
-        settings.sync();
-      }
+      // Reading never lowers the storage form. A DPAPI value stays DPAPI even in the
+      // portable build; only an explicit save (writePassword) or the personal-package
+      // script turns it into the travelling form.
       return secret;
     }
   }
@@ -166,6 +164,13 @@ QString KaSecretStore::readPassword(QSettings& settings, const QString& group, b
   settings.sync();
   if (settings.status() != QSettings::NoError) return legacy;
   return legacy;
+}
+
+bool KaSecretStore::hasReadablePassword(QSettings& settings, const QString& group) {
+  QString secret = readPassword(settings, group, false);
+  const bool readable = !secret.isEmpty();
+  secret.fill(QLatin1Char('\0'));
+  return readable;
 }
 
 bool KaSecretStore::hasUndecryptablePassword(QSettings& settings, const QString& group) {

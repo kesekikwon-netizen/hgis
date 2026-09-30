@@ -1,28 +1,33 @@
 #include "KaCrashGuard.h"
+#include "core/KaLogExcept.h"
 #include "KaCaptureMapTool.h"
-#include "core/LayerOps.h"
+#include "KaEditTolerance.h"
+#include "core/EditGeometryRepair.h"
 #include <qgsmapcanvas.h>
 #include <qgsvectorlayer.h>
-#include <qgsfeature.h>
-#include <qgsfeatureiterator.h>
 #include <qgsrubberband.h>
 #include <qgsvertexmarker.h>
 #include <qgssnappingutils.h>
 #include <qgspointlocator.h>
 #include <qgsgeometry.h>
 #include <qgscoordinatetransform.h>
-#include <qgsexception.h>
 #include <qgsproject.h>
 #include <qgsmapsettings.h>
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QColor>
+#include <QTimer>
 #include <QWidget>
+#include <algorithm>
 #include <cmath>
 
 KaCaptureMapTool::KaCaptureMapTool(QgsMapCanvas* canvas)
     : QgsMapTool(canvas) {
   setCursor(Qt::CrossCursor);
+  m_dwell = new QTimer(this);
+  m_dwell->setSingleShot(true);
+  m_dwell->setInterval(KaEditTolerance::kEasyDrawDwellMs);
+  connect(m_dwell, &QTimer::timeout, this, &KaCaptureMapTool::addDwellPoint);
 }
 
 KaCaptureMapTool::~KaCaptureMapTool() {
@@ -40,13 +45,15 @@ void KaCaptureMapTool::setMode(Mode mode) {
 }
 
 void KaCaptureMapTool::setTargetLayer(QgsVectorLayer* layer) {
-  if (m_layer != layer && m_draggingVertex) cancelVertexDrag();
   m_layer = layer;
 }
 
 void KaCaptureMapTool::setSnapEnabled(bool on) {
   m_snapEnabled = on;
-  if (!on) destroySnapMarker();
+  if (!on) {
+    stopDwell();
+    destroySnapMarker();
+  }
 }
 
 void KaCaptureMapTool::setEasyDraw(bool on) {
@@ -54,14 +61,23 @@ void KaCaptureMapTool::setEasyDraw(bool on) {
   if (on) {
     m_snapEnabled = true;
     setCursor(Qt::CrossCursor);
+  } else {
+    stopDwell();
   }
 }
 
 void KaCaptureMapTool::resetSession() {
   m_finishing = false;
   m_points.clear();
-  cancelVertexDrag();
+  stopDwell();
   destroyRubber();
+  announceSketch();
+}
+
+void KaCaptureMapTool::announceSketch() {
+  if (m_announcedCount == m_points.size()) return;
+  m_announcedCount = m_points.size();
+  emit sketchChanged(m_announcedCount);
 }
 
 void KaCaptureMapTool::destroyRubber() {
@@ -106,7 +122,7 @@ bool KaCaptureMapTool::nearPoint(const QgsPointXY& a, const QgsPointXY& b) const
   double tol = 0.15;
   if (canvas()) {
     const double mupp = canvas()->mapUnitsPerPixel();
-    if (mupp > 0) tol = std::max(mupp * 10.0, 0.05);
+    if (mupp > 0) tol = std::max(mupp * KaEditTolerance::kSketchVertexPx, 0.05);
   }
   return a.sqrDist(b) <= tol * tol;
 }
@@ -118,18 +134,20 @@ int KaCaptureMapTool::indexOfSketchVertex(const QgsPointXY& pt) const {
   return -1;
 }
 
-bool KaCaptureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, bool* snappedOut) {
+bool KaCaptureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, bool* snappedOut,
+                                         bool* onVertexOut) {
   if (!e || !out || !canvas()) return false;
   bool snapped = false;
   bool isInter = false;
+  bool onVertex = false;
   try {
     *out = e->mapPoint();
   } catch (...) {
-    KaCrashGuard::logLine(QStringLiteral("[except] app/KaCaptureMapTool.cpp:127"));
+    KA_LOG_EXCEPT();
     try {
       *out = toMapCoordinates(e->pos());
     } catch (...) {
-      KaCrashGuard::logLine(QStringLiteral("[except] app/KaCaptureMapTool.cpp:129"));
+      KA_LOG_EXCEPT();
       return false;
     }
   }
@@ -140,11 +158,14 @@ bool KaCaptureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, b
       snapped = true;
       // QGIS PointLocator에서 교차점(intersection)에 스냅된 경우 hit.layer()는 null이다.
       isInter = (hit.layer() == nullptr);
+      // Intersections come back as vertex matches too; only an edge match is "on a line".
+      onVertex = hit.hasVertex() || hit.hasLineEndpoint();
     }
   }
   if (!std::isfinite(out->x()) || !std::isfinite(out->y())) return false;
   updateSnapMarker(*out, snapped, isInter);
   if (snappedOut) *snappedOut = snapped;
+  if (onVertexOut) *onVertexOut = onVertex;
   return true;
 }
 
@@ -190,29 +211,31 @@ void KaCaptureMapTool::activate() {
   }
   QgsMapTool::activate();
   setCursor(Qt::CrossCursor);
+  announceSketch();
 }
 
 void KaCaptureMapTool::deactivate() {
   if (canvas())
     canvas()->setContextMenuPolicy(m_savedMenuPolicy);
-  cancelVertexDrag();
+  stopDwell();
   destroyRubber();
   destroySnapMarker();
   if (!m_finishing)
     m_points.clear();
   m_finishing = false;
+  // No signal here: the canvas also deactivates its tool while the window is being torn
+  // down. Whoever switched tools hears it through QgsMapCanvas::mapToolSet.
+  m_announcedCount = m_points.size();
   QgsMapTool::deactivate();
 }
 
 void KaCaptureMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
   if (!e || !canvas() || m_finishing) return;
+  stopDwell();
 
   if (e->button() == Qt::RightButton) {
     e->accept();
-    if (m_draggingVertex)
-      cancelVertexDrag();
-    else
-      finish();
+    finish();
     return;
   }
 
@@ -228,58 +251,31 @@ void KaCaptureMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
       finish();
       return;
     }
-    if (m_points.isEmpty() && m_mode != Mode::Point) {
-      QgsFeatureId fid = -1;
-      int vertex = -1;
-      try {
-        if (hitSavedVertex(mapPt, &fid, &vertex)) {
-          m_draggingVertex = true;
-          m_dragFid = fid;
-          m_dragVertex = vertex;
-          previewMovedVertex(mapPt);
-          return;
-        }
-      } catch (const QgsCsException&) {
-        emit vertexMoveFailed(QStringLiteral("지도와 도형의 위치를 맞추지 못했습니다. 작업을 저장한 뒤 조사를 다시 열어 주세요."));
-        return;
-      }
-    }
     if (m_easyDraw && !m_points.isEmpty()) {
       const int idx = indexOfSketchVertex(mapPt);
       if (idx >= 0) {
         m_points.resize(idx + 1);
         rebuildRubber(&mapPt);
+        announceSketch();
         return;
       }
     }
     if (m_points.isEmpty() || !nearPoint(m_points.last(), mapPt))
       m_points.append(mapPt);
     rebuildRubber(&mapPt);
+    announceSketch();
   }
 }
 
 void KaCaptureMapTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
-  if (!e || !canvas() || m_finishing) return;
-  if (e->button() == Qt::LeftButton && m_draggingVertex) {
-    e->accept();
-    QgsPointXY mapPt;
-    if (mapPointFromEvent(e, &mapPt))
-      finishVertexDrag(mapPt);
-    else {
-      cancelVertexDrag();
-      emit vertexMoveFailed(QStringLiteral("꼭짓점 위치를 읽지 못했습니다. 지도 안에서 다시 옮겨 주세요."));
-    }
-    return;
-  }
-  if (e->button() != Qt::RightButton) return;
-  e->accept();
-  if (!m_points.isEmpty())
-    finish();
+  // Right-click finishes on press; the release is only kept away from the canvas.
+  if (e && e->button() == Qt::RightButton) e->accept();
 }
 
 void KaCaptureMapTool::canvasDoubleClickEvent(QgsMapMouseEvent* e) {
   if (!e || m_finishing || m_mode == Mode::Point) return;
   e->accept();
+  stopDwell();
   QgsPointXY mapPt;
   if (mapPointFromEvent(e, &mapPt)) {
     if (m_points.isEmpty() || m_points.last() != mapPt)
@@ -292,21 +288,51 @@ void KaCaptureMapTool::canvasMoveEvent(QgsMapMouseEvent* e) {
   if (!e || m_finishing) return;
   QgsPointXY mapPt;
   bool snapped = false;
-  if (!mapPointFromEvent(e, &mapPt, &snapped)) return;
-  if (m_draggingVertex) {
-    previewMovedVertex(mapPt);
-    return;
-  }
+  bool onVertex = false;
+  if (!mapPointFromEvent(e, &mapPt, &snapped, &onVertex)) return;
   if (m_points.isEmpty() || m_mode == Mode::Point) {
+    stopDwell();
     return;
   }
-  if (m_easyDraw && snapped && indexOfSketchVertex(mapPt) < 0)
-    m_points.append(mapPt);
+  if (m_easyDraw && snapped && indexOfSketchVertex(mapPt) < 0) {
+    if (onVertex) {
+      // A corner of another shape is an unambiguous point: take it right away.
+      stopDwell();
+      m_points.append(mapPt);
+      announceSketch();
+    } else {
+      // Sweeping along an edge must not drop a point every few pixels.
+      startDwell(mapPt);
+    }
+  } else {
+    stopDwell();
+  }
   rebuildRubber(&mapPt);
+}
+
+void KaCaptureMapTool::startDwell(const QgsPointXY& mapPt) {
+  m_dwellPoint = mapPt;
+  m_dwellValid = true;
+  if (m_dwell) m_dwell->start();
+}
+
+void KaCaptureMapTool::stopDwell() {
+  m_dwellValid = false;
+  if (m_dwell) m_dwell->stop();
+}
+
+void KaCaptureMapTool::addDwellPoint() {
+  if (!m_dwellValid || !m_easyDraw || m_finishing || m_points.isEmpty()) return;
+  m_dwellValid = false;
+  if (indexOfSketchVertex(m_dwellPoint) >= 0) return;
+  m_points.append(m_dwellPoint);
+  rebuildRubber(&m_dwellPoint);
+  announceSketch();
 }
 
 bool KaCaptureMapTool::undoLastVertex() {
   if (m_finishing || m_points.isEmpty()) return false;
+  stopDwell();
   m_points.removeLast();
   if (m_points.isEmpty())
     destroyRubber();
@@ -314,7 +340,16 @@ bool KaCaptureMapTool::undoLastVertex() {
     const QgsPointXY cur = toMapCoordinates(canvas()->mouseLastXY());
     rebuildRubber(&cur);
   }
+  announceSketch();
   return true;
+}
+
+void KaCaptureMapTool::finishSketch() {
+  finish();
+}
+
+void KaCaptureMapTool::cancelSketch() {
+  cancel();
 }
 
 void KaCaptureMapTool::keyPressEvent(QKeyEvent* e) {
@@ -343,6 +378,8 @@ void KaCaptureMapTool::keyPressEvent(QKeyEvent* e) {
 
 void KaCaptureMapTool::finish() {
   if (m_finishing) return;
+  stopDwell();
+  m_repairNotice.clear();
 
   const int need = (m_mode == Mode::Point) ? 1 : (m_mode == Mode::Line ? 2 : 3);
   if (m_points.size() < need) {
@@ -367,52 +404,19 @@ void KaCaptureMapTool::finish() {
     geom = QgsGeometry::fromPolylineXY(line);
     ok = !geom.isEmpty();
   } else {
-    QgsPolylineXY ring;
-    for (const QgsPointXY& p : m_points) {
-      if (ring.isEmpty() || !nearPoint(ring.last(), p))
-        ring.append(p);
-    }
-    if (ring.size() >= 3 && ring.first() != ring.last())
-      ring.append(ring.first());
-    geom = QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring);
-    ok = !geom.isEmpty();
-    if (ok && !geom.isGeosValid()) {
-      const QgsGeometry fixed = geom.makeValid();
-      if (!fixed.isEmpty())
-        geom = fixed;
-    }
-    if (!geom.isEmpty() && (geom.isMultipart() || geom.type() != Qgis::GeometryType::Polygon)) {
-      QgsGeometry best;
-      double bestA = -1;
-      const QVector<QgsGeometry> parts = geom.asGeometryCollection();
-      for (const QgsGeometry& part : parts) {
-        if (part.type() != Qgis::GeometryType::Polygon) continue;
-        if (part.isMultipart()) {
-          const QgsMultiPolygonXY mp = part.asMultiPolygon();
-          for (const QgsPolygonXY& poly : mp) {
-            const QgsGeometry one = QgsGeometry::fromPolygonXY(poly);
-            const double a = one.area();
-            if (a > bestA) {
-              bestA = a;
-              best = one;
-            }
-          }
-        } else {
-          const double a = part.area();
-          if (a > bestA) {
-            bestA = a;
-            best = part;
-          }
-        }
-      }
-      if (!best.isEmpty())
-        geom = best;
-    }
+    double spacing = 0.15;
+    if (canvas() && canvas()->mapUnitsPerPixel() > 0)
+      spacing = std::max(canvas()->mapUnitsPerPixel() * KaEditTolerance::kSketchVertexPx, 0.05);
+    const EditGeometryRepair::PolygonResult closed =
+        EditGeometryRepair::closePolygon(m_points, spacing);
+    geom = closed.geometry;
     ok = !geom.isEmpty() && geom.type() == Qgis::GeometryType::Polygon;
+    if (ok) m_repairNotice = EditGeometryRepair::notice(closed);
   }
 
   if (!ok) {
     m_finishing = false;
+    m_repairNotice.clear();
     emit captureCanceled();
     return;
   }
@@ -428,12 +432,14 @@ void KaCaptureMapTool::finish() {
         xf.setBallparkTransformsAreAppropriate(true);
         if (geom.transform(xf) != Qgis::GeometryOperationResult::Success) {
           m_finishing = false;
+          m_repairNotice.clear();
           emit captureCanceled();
           return;
         }
       } catch (...) {
-        KaCrashGuard::logLine(QStringLiteral("[except] app/KaCaptureMapTool.cpp:431"));
+        KA_LOG_EXCEPT();
         m_finishing = false;
+        m_repairNotice.clear();
         emit captureCanceled();
         return;
       }
@@ -443,122 +449,16 @@ void KaCaptureMapTool::finish() {
   m_points.clear();
   destroyRubber();
   m_finishing = false;
+  announceSketch();
   emit geometryCaptured(geom);
 }
 
-bool KaCaptureMapTool::hitSavedVertex(const QgsPointXY& mapPt, QgsFeatureId* fid, int* vertex) {
-  if (!fid || !vertex || !m_layer || !m_layer->isValid() || !canvas())
-    return false;
-  const double px = std::max(1e-6, canvas()->mapSettings().mapUnitsPerPixel());
-  const double tol2 = (px * 16.0) * (px * 16.0);
-  const QgsPointXY layerPt = toLayerCoordinates(m_layer, mapPt);
-  QgsFeature f;
-  QgsFeatureIterator it = m_layer->getFeatures();
-  double best = 1e300;
-  QgsFeatureId bestFid = -1;
-  int bestV = -1;
-  while (it.nextFeature(f)) {
-    if (!f.hasGeometry())
-      continue;
-    int at = -1, before = -1, after = -1;
-    double d2 = 0.0;
-    const QgsPointXY closest = f.geometry().closestVertex(layerPt, at, before, after, d2);
-    if (at >= 0)
-      d2 = mapPt.sqrDist(toMapCoordinates(m_layer, closest));
-    if (at < 0 || d2 > tol2 || d2 >= best)
-      continue;
-    best = d2;
-    bestFid = f.id();
-    bestV = at;
-  }
-  if (bestFid < 0)
-    return false;
-  *fid = bestFid;
-  *vertex = bestV;
-  return true;
-}
-
-void KaCaptureMapTool::previewMovedVertex(const QgsPointXY& mapPt) {
-  if (!m_layer || m_dragFid < 0 || m_dragVertex < 0 || !canvas())
-    return;
-  QgsFeature f = m_layer->getFeature(m_dragFid);
-  if (!f.isValid() || !f.hasGeometry())
-    return;
-  QgsGeometry g = f.geometry();
-  QgsPointXY layerPt;
-  try {
-    layerPt = toLayerCoordinates(m_layer, mapPt);
-  } catch (const QgsCsException&) {
-    cancelVertexDrag();
-    emit vertexMoveFailed(QStringLiteral("지도와 도형의 위치를 맞추지 못했습니다. 작업을 저장한 뒤 조사를 다시 열어 주세요."));
-    return;
-  }
-  if (!g.moveVertex(layerPt.x(), layerPt.y(), m_dragVertex))
-    return;
-  if (!m_rubber) {
-    const Qgis::GeometryType gt = m_layer->geometryType();
-    m_rubber = new QgsRubberBand(canvas(), gt);
-    m_rubber->setStrokeColor(QColor(30, 103, 198));
-    m_rubber->setFillColor(QColor(30, 103, 198, 50));
-    m_rubber->setWidth(2);
-  }
-  m_rubber->setToGeometry(g, m_layer);
-}
-
-void KaCaptureMapTool::finishVertexDrag(const QgsPointXY& mapPt) {
-  if (!m_draggingVertex) return;
-  if (!m_layer || m_dragFid < 0 || m_dragVertex < 0) {
-    cancelVertexDrag();
-    emit vertexMoveFailed(QStringLiteral("꼭짓점을 옮기지 못했습니다. 고칠 도형을 다시 선택해 주세요."));
-    return;
-  }
-  const QPointer<QgsVectorLayer> layer = m_layer;
-  const QgsFeatureId fid = m_dragFid;
-  const int vertex = m_dragVertex;
-  // Finish the gesture before editing/commit signals can invoke another UI action.
-  cancelVertexDrag();
-  QgsPointXY layerPt;
-  try {
-    layerPt = toLayerCoordinates(layer, mapPt);
-  } catch (const QgsCsException&) {
-    emit vertexMoveFailed(QStringLiteral("지도와 도형의 위치를 맞추지 못했습니다. 작업을 저장한 뒤 조사를 다시 열어 주세요."));
-    return;
-  }
-  QString err;
-  const bool ok = LayerOps::moveFeatureVertex(layer, static_cast<qint64>(fid), vertex,
-                                              layerPt.x(), layerPt.y(), &err);
-  if (!ok) {
-    emit vertexMoveFailed(QStringLiteral("꼭짓점을 옮기지 못했습니다. %1 고칠 도형을 다시 선택해 주세요.").arg(err));
-    return;
-  }
-  if (!layer) {
-    emit vertexMoveFailed(QStringLiteral("꼭짓점을 저장하지 못했습니다. 조사 레이어가 열려 있는지 확인해 주세요."));
-    return;
-  }
-  if (!layer->commitChanges(false)) {
-    // QGIS retains the complete edit buffer on failure so the user can retry.
-    emit vertexMoveFailed(QStringLiteral("꼭짓점 변경을 저장하지 못했습니다. 편집 내용은 화면에 남아 있습니다. "
-                                        "저장 위치의 권한과 여유 공간을 확인한 뒤 Ctrl+S로 다시 저장해 주세요."));
-    return;
-  }
-  if (!layer) return;
-  if (layer->geometryType() == Qgis::GeometryType::Polygon)
-    LayerOps::applyAreaM2Labels(layer);
-  if (layer) layer->triggerRepaint();
-  emit vertexMoved();
-}
-
-void KaCaptureMapTool::cancelVertexDrag() {
-  m_draggingVertex = false;
-  m_dragFid = -1;
-  m_dragVertex = -1;
-  destroyRubber();
-}
-
 void KaCaptureMapTool::cancel() {
+  const bool hadSketch = !m_points.isEmpty();
   m_points.clear();
-  cancelVertexDrag();
+  stopDwell();
   destroyRubber();
   m_finishing = false;
-  emit captureCanceled();
+  announceSketch();
+  if (hadSketch) emit sketchCanceled();
 }

@@ -64,7 +64,13 @@ PickedArea pickAutoFillArea(const std::vector<SurveyPoly>& features,
 // anchored at the polygon envelope centre. Only complete rectangles inside
 // the polygon are retained; boundary cells may be shortened.
 // rows/cols/origin of the spec are ignored.
-std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb);
+// An empty result sets reasonOut to a user-facing reason (no area, not a polygon,
+// self-intersecting boundary, bad spec, too many cells, nothing fits).
+std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb,
+                              QString* reasonOut = nullptr);
+
+// Every cell is a finite rectangle within the 2 m x 20 m limit matching its attributes.
+bool cellsValid(const std::vector<Cell>& cells, QString* errorOut = nullptr);
 
 // 표고 표본 하나(작업 CRS 미터 + 표고 m).
 struct ElevSample {
@@ -107,7 +113,8 @@ double totalArea(const std::vector<Cell>& cells);
 bool writeGpkg(const QString& gpkgPath, const QString& layerName, const std::vector<Cell>& cells,
                const QString& authid, QString* errorOut);
 
-// Deletes every feature of the layer (no-op when file/layer is missing).
+// Deletes every feature of the layer (no-op when file/layer is missing). A file that
+// exists but cannot be opened or written is a failure.
 // "새로 만들기" must replace the previous grid instead of stacking on top of it.
 bool clearLayer(const QString& gpkgPath, const QString& layerName, QString* errorOut);
 

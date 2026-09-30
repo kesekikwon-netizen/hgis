@@ -1,4 +1,5 @@
 #include "KaSessionLog.h"
+#include "KaLogExcept.h"
 #include "DemDownloadService.h"
 
 #include <QDir>
@@ -73,7 +74,7 @@ struct Progress {
             std::clamp(fraction, 0.0, 1.0) * progress->span);
       return TRUE;
     } catch (...) {
-      KaSessionLog::line(QStringLiteral("[except] core/DemDownloadService.cpp:74"));
+      KA_LOG_EXCEPT();
       // GDAL must not unwind through a C callback.
       progress->callbackFailed = true;
       return FALSE;
@@ -126,7 +127,7 @@ PreparedReferenceMap DemDownloadService::prepare(
     if (wgs84Extent.isEmpty() || !wgs84Extent.isFinite() ||
         wgs84Extent.xMinimum() < -180.0 || wgs84Extent.xMaximum() > 180.0 ||
         wgs84Extent.yMinimum() < -90.0 || wgs84Extent.yMaximum() > 90.0) {
-      fail(QStringLiteral("DEM을 받을 지도 범위가 올바르지 않습니다. 조사지역으로 이동한 뒤 다시 내려받으세요."));
+      fail(QStringLiteral("DEM을 받을 지도 범위가 올바르지 않습니다. 조사구역으로 이동한 뒤 다시 내려받으세요."));
       return result;
     }
     if (targetBasePath.trimmed().isEmpty() || QFileInfo(targetBasePath).fileName().isEmpty()) {
@@ -140,7 +141,7 @@ PreparedReferenceMap DemDownloadService::prepare(
     const int latTo = static_cast<int>(std::ceil(wgs84Extent.yMaximum())) - 1;
     const int tileCount = (lonTo - lonFrom + 1) * (latTo - latFrom + 1);
     if (tileCount <= 0 || tileCount > kMaximumTiles) {
-      fail(QStringLiteral("DEM을 받을 범위가 너무 넓습니다. 한 번에 최대 %1칸까지 받을 수 있습니다. 조사지역으로 확대하고 다시 내려받으세요.")
+      fail(QStringLiteral("DEM을 받을 범위가 너무 넓습니다. 한 번에 최대 %1칸까지 받을 수 있습니다. 조사구역으로 확대하고 다시 내려받으세요.")
                .arg(kMaximumTiles));
       return result;
     }
@@ -203,7 +204,7 @@ PreparedReferenceMap DemDownloadService::prepare(
       }
     }
     if (sources.empty()) {
-      fail(QStringLiteral("이 범위에는 제공되는 DEM 자료가 없습니다. 바다를 제외한 조사지역으로 이동하고 다시 내려받으세요."));
+      fail(QStringLiteral("이 범위에는 제공되는 DEM 자료가 없습니다. 바다를 제외한 조사구역으로 이동하고 다시 내려받으세요."));
       return result;
     }
     if (missingTiles > 0)
@@ -248,7 +249,7 @@ PreparedReferenceMap DemDownloadService::prepare(
     const int y0 = static_cast<int>(std::clamp(std::floor((wgs84Extent.yMaximum() - transform[3]) / transform[5]), 0.0, height));
     const int y1 = static_cast<int>(std::clamp(std::ceil((wgs84Extent.yMinimum() - transform[3]) / transform[5]), 0.0, height));
     if (x1 <= x0 || y1 <= y0) {
-      fail(QStringLiteral("선택 범위에 표고 자료가 없습니다. 조사지역을 확인한 뒤 다시 내려받으세요."));
+      fail(QStringLiteral("선택 범위에 표고 자료가 없습니다. 조사구역을 확인한 뒤 다시 내려받으세요."));
       return result;
     }
     CPLStringList translateArguments;
@@ -297,7 +298,7 @@ PreparedReferenceMap DemDownloadService::prepare(
     result.rasterUri = rasterPath;
     result.status = PreparedReferenceMap::Status::Ready;
   } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/DemDownloadService.cpp:297"));
+    KA_LOG_EXCEPT();
     fail(QStringLiteral("DEM 내려받기를 완료하지 못했습니다. 인터넷 연결과 저장 공간을 확인한 뒤 다시 시도하세요. 기존 지도는 유지됩니다."));
   }
   return result;

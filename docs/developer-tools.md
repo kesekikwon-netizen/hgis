@@ -66,8 +66,19 @@ Graft의 기본 추출은 실제 호출 표본 10개 중 1개, Windows clangd �
 
 Grok이 여섯 도구를 빠뜨리던 이유는 지시가 `AGENTS.md` 안에만 있고, 빼먹어도 턴이 끝났기 때문이다. `src/`·`tests/` C++를 고친 Windows 세션은 `.cursor/hooks.json`의 `stop`이 Graft·clangd·Archify·ctest 기록이 없을 때 follow-up을 보낸다. 훅은 Node라서 Ubuntu 클라우드에서도 실행된다. https://cursor.com/docs/hooks
 
+기록은 명령 이름이 아니라 **출력에 남은 결과**로만 세운다(2026-09-29, `.cursor/hooks/dev-loop.mjs`). Cursor 는 `afterShellExecution` 에 `command`·`output` 만 주고 종료 코드는 주지 않는다. 그래서:
+
+| 도구 | 통과로 치는 증거 | 통과가 아닌 경우 |
+| --- | --- | --- |
+| ctest | `N% tests passed, 0 tests failed out of M`(M>0). `--output-junit` 을 썼으면 그 파일이 있고 `failures`·`errors` 가 0 | 실패 1개 이상, 0개 실행, 요약 없음, JUnit 없음 |
+| clangd | `clangd-definition.py` 출력에 `"locations"` 와 `"file"` | `clangd-definition:` 오류, 파이썬 Traceback, 위치 없음 |
+| Archify | `archify.ps1 validate`/`deliver`/`visual-check` 가 FAIL·Error 없이 끝나고 명령에 적은 `.html`/`.json` 이 있음 | 다른 하위 명령, 실패 문구, 없는 산출물 |
+| Graft | `hgis_graft` MCP 호출(오류 없음) 또는 서버 스크립트 응답 | 오류 응답 |
+
+실패는 `state/<도구>.failed` 에 이유를 남기고, `stop` follow-up 이 그 이유를 그대로 보여 준다(예: `ctest (ctest: 3 of 30 tests failed)`). `loop_limit` 2 뒤에는 멈추므로 끝까지 통과하지 못한 도구는 보고에 "미완료"로 적는다. 여섯 도구 필수 정책 자체는 그대로다.
+
 클라우드 에이전트는 Ubuntu다. 설정은 `.cursor/environment.json`과 `.cursor/Dockerfile`이다. https://cursor.com/docs/cloud-agent/setup 그 VM에는 OSGeo4W와 Visual Studio가 없다. Release·CTest·smoke는 이 Windows PC에서만 한다. 클라우드에 비밀키를 파일로 넣지 않는다. 대시보드 Secrets를 쓴다. https://cursor.com/dashboard/cloud-agents#environments
 
-Windows CI는 비공개 저장소의 self-hosted runner다. https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners 이 문서 수정은 제품 C++를 바꾸지 않는다.
+Windows CI는 비공개 저장소의 self-hosted runner다. 러너가 꺼져 있거나 `vars.ENABLE_SELF_HOSTED_BUILD` 가 없으면 `Windows build gate` 잡이 "Windows build not run" 경고를 남긴다(`vars.REQUIRE_WINDOWS_BUILD=true` 면 실패). Linux `Sanity checks (no build)` 초록은 빌드 통과가 아니다. 저장소가 비공개여도 GPL 대응 소스는 포터블의 `source/ka-hgis-source.zip` 으로 함께 간다. https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners 이 문서 수정은 제품 C++를 바꾸지 않는다.
 
 과거 Codex 설정 근거(호환): [프로젝트 MCP 설정](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), [프로젝트 스킬](https://learn.chatgpt.com/docs/build-skills). Cursor는 USER MCP와 위 Cursor 설정을 우선한다. 실제 이 PC의 유효 설정과 실행 결과를 우선한다.

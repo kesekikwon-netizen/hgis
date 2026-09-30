@@ -127,22 +127,11 @@ KaTopographicBrowser::KaTopographicBrowser(QWidget* parent, const QString& downl
   auto* statusCard = KaDownloadUi::statusCard(this);
   auto* statusLayout = qobject_cast<QVBoxLayout*>(statusCard->layout());
   layout->addWidget(statusCard);
+  // Colours come from the application theme (object names below), not from
+  // widget-local style sheets, so the official details follow light/dark themes.
   m_details=new QWidget(this);m_details->setObjectName(QStringLiteral("topographicOfficialDetails"));
-  m_details->setStyleSheet(QStringLiteral(
-      "QWidget#topographicOfficialDetails { background: #eef5fa; }"
-      "QToolButton { color: #263f54; background: #e5eef6; border: 1px solid #b5cddd; border-radius: 4px; padding: 4px; }"
-      "QToolButton:hover { background: #d9edf9; }"
-      "QLineEdit { background: white; color: #263f54; border: 1px solid #b5cddd; border-radius: 4px; padding: 4px; }"
-      "QTreeWidget { background: white; color: #263f54; border: 1px solid #cedeea; }"
-      "QHeaderView::section { background: #e5eef6; color: #263f54; border: 1px solid #cedeea; padding: 4px; }"));
   auto* detailsLayout=new QVBoxLayout(m_details);detailsLayout->setContentsMargins(0,0,0,0);
   m_detailsScroll=new QScrollArea(this);m_detailsScroll->setObjectName(QStringLiteral("topographicDetailsScroll"));
-  auto detailsPalette=m_detailsScroll->palette();
-  detailsPalette.setColor(QPalette::Window,QColor(QStringLiteral("#eef5fa")));
-  detailsPalette.setColor(QPalette::Base,QColor(QStringLiteral("#eef5fa")));
-  detailsPalette.setColor(QPalette::Button,QColor(QStringLiteral("#cedeea")));
-  detailsPalette.setColor(QPalette::ButtonText,QColor(QStringLiteral("#263f54")));
-  m_detailsScroll->setPalette(detailsPalette);
   m_detailsScroll->setWidgetResizable(true);m_detailsScroll->setFrameShape(QFrame::NoFrame);
   m_detailsScroll->setWidget(m_details);m_details->setMinimumSize(680,480);
   layout->addWidget(m_detailsScroll,1);
@@ -190,6 +179,13 @@ KaTopographicBrowser::KaTopographicBrowser(QWidget* parent, const QString& downl
   auto stageFont=m_currentStage->font();stageFont.setBold(true);m_currentStage->setFont(stageFont);
   m_currentStage->setWordWrap(true);m_currentStage->hide();statusLayout->addWidget(m_currentStage);
   m_compactStatus->setWordWrap(true);m_compactStatus->hide();statusLayout->addWidget(m_compactStatus);
+  m_orderSheets=new QLabel(this);m_orderSheets->setObjectName(QStringLiteral("topographicOrderSheets"));
+  m_orderSheets->setWordWrap(true);m_orderSheets->setTextFormat(Qt::PlainText);m_orderSheets->hide();
+  statusLayout->addWidget(m_orderSheets);
+  m_failureOutline=new QLabel(this);m_failureOutline->setObjectName(QStringLiteral("topographicFailureOutline"));
+  m_failureOutline->setWordWrap(true);m_failureOutline->setTextFormat(Qt::PlainText);
+  m_failureOutline->setTextInteractionFlags(Qt::TextSelectableByMouse);m_failureOutline->hide();
+  statusLayout->addWidget(m_failureOutline);
   m_transferSummary=new QLabel(this);m_transferSummary->setObjectName(QStringLiteral("topographicTransferSummary"));
   m_transferSummary->setWordWrap(true);detailsLayout->insertWidget(1,m_transferSummary);
   m_progress = new QProgressBar(this); m_progress->setRange(0, 1);
@@ -212,7 +208,13 @@ KaTopographicBrowser::KaTopographicBrowser(QWidget* parent, const QString& downl
   compactCancel->setObjectName(QStringLiteral("topographicCompactCancel"));
   connect(m_expandButton,&QPushButton::clicked,this,[this]{setCompactMode(!m_compactMode);});
   connect(compactCancel,&QPushButton::clicked,this,&KaTopographicBrowser::reject);
-  compactActions->addWidget(m_expandButton);compactActions->addStretch();compactActions->addWidget(compactCancel);
+  m_importFallback=new QPushButton(QStringLiteral("받은 자료 불러오기…"),m_compactActions);
+  m_importFallback->setObjectName(QStringLiteral("topographicImportFallback"));
+  m_importFallback->setToolTip(QStringLiteral("공식 화면에서 직접 받은 DXF·ZIP 폴더를 골라 지도에 올립니다. 자동 신청은 다시 하지 않습니다."));
+  m_importFallback->hide();
+  connect(m_importFallback,&QPushButton::clicked,this,&KaTopographicBrowser::importFolderRequested);
+  compactActions->addWidget(m_expandButton);compactActions->addWidget(m_importFallback);
+  compactActions->addStretch();compactActions->addWidget(compactCancel);
   layout->addWidget(m_compactActions);m_compactActions->hide();
   m_automationTimer = new QTimer(this); m_automationTimer->setInterval(400);
   connect(m_automationTimer,&QTimer::timeout,this,&KaTopographicBrowser::pollAutomation);
@@ -372,10 +374,30 @@ void KaTopographicBrowser::failAutomation(const QString& message) {
   const QString activity=m_activityAttention;
   const QString activityPhase=m_activityFailurePhase;
   const QPointer<KaTopographicBrowser> alive(this);
+  // Capture where the official site stopped before the stop resets page state.
+  const QString outline=pageOutline();
+  const QString ordered=m_orderSheetsText;
   stopAutomatic();
   if(!alive)return;
   m_failurePhase=phase;m_activityAttention=activity;m_activityFailurePhase=activityPhase;
+  m_failureOutlineText=outline;m_orderSheetsText=ordered;
   automationMessage(message);
+}
+
+QString KaTopographicBrowser::pageOutline() const {
+  // Diagnostic outline for a changed site: page titles and paths only. Query
+  // strings, fragments and form values may hold personal data and are omitted.
+  QStringList pages;
+  if(m_tabs) for(int i=0;i<m_tabs->count()&&pages.size()<6;++i) {
+    const auto* view=qobject_cast<QWebEngineView*>(m_tabs->widget(i));
+    if(!view)continue;
+    const QUrl url=view->url();
+    if(url.isEmpty())continue;
+    const QString where=url.host()+url.path();
+    const QString title=view->title().left(40).trimmed();
+    pages.append(title.isEmpty()||title==where?where:QStringLiteral("%1 (%2)").arg(title,where));
+  }
+  return pages.isEmpty()?QString():QStringLiteral("멈춘 화면: ")+pages.join(QStringLiteral(" · "));
 }
 
 void KaTopographicBrowser::updateProgress() {
@@ -411,11 +433,21 @@ void KaTopographicBrowser::updateProgress() {
   m_progress->setTextVisible(true);m_progress->setRange(0,1);m_progress->setValue(0);
   m_progress->setFormat(QStringLiteral("진행률 확인 중"));
   m_compactCancel->setText(QStringLiteral("취소"));
+  // The hidden scope panel orders sheets automatically; the list is shown here
+  // before and during the official application (no extra request is made).
+  const bool failedClosed=!m_failurePhase.isEmpty();
+  m_orderSheets->setText(m_orderSheetsText);
+  m_orderSheets->setVisible(!m_orderSheetsText.isEmpty() && !completed && (!stopped || failedClosed));
+  m_failureOutline->setText(m_failureOutlineText);
+  m_failureOutline->setVisible(failedClosed && !m_failureOutlineText.isEmpty());
+  m_importFallback->setVisible(failedClosed);
   if(!attention.isEmpty()) {
     const QString failurePhase=!m_failurePhase.isEmpty()?m_failurePhase:
         (m_activityFailurePhase.isEmpty()?phase:m_activityFailurePhase);
     m_currentStage->setText((m_failurePhase.isEmpty()?QStringLiteral("확인 필요 · %1"):QStringLiteral("다운로드 실패 · %1")).arg(failurePhase));
-    m_compactStatus->setTextFormat(Qt::PlainText);m_compactStatus->setText(attention);
+    m_compactStatus->setTextFormat(Qt::PlainText);
+    m_compactStatus->setText(failedClosed ? attention+QStringLiteral("\n자동 진행은 안전하게 멈췄습니다. 공식 화면에서 직접 받은 자료는 "
+        "「받은 자료 불러오기」로 지도에 올릴 수 있습니다.") : attention);
     m_progress->setFormat(m_failurePhase.isEmpty()?QStringLiteral("확인 필요"):QStringLiteral("실패"));
     if(!m_failurePhase.isEmpty())m_compactCancel->setText(QStringLiteral("닫기"));
   } else if(completed) {
@@ -628,6 +660,7 @@ void KaTopographicBrowser::stopAutomatic() {
   for(auto* request:m_profile->findChildren<QWebEngineDownloadRequest*>())
     if(request->property("kaTopographicAutomatic").toBool() && !request->isFinished())request->cancel();
   m_status->setText(QStringLiteral("자동 진행을 중지했습니다. 이미 신청한 자료는 공식 신청 내역에서 확인할 수 있습니다."));
+  m_orderSheetsText.clear();m_failureOutlineText.clear();
   m_automationAttention.clear();m_activityAttention.clear();updateProgress();
   m_failurePhase.clear();m_activityFailurePhase.clear();m_transferClock.invalidate();updateProgress();
 }
@@ -661,6 +694,7 @@ void KaTopographicBrowser::prepareSheets(double x, double y, double radius, cons
 
 void KaTopographicBrowser::startAutomation(const QJsonObject& scope) {
   m_cancelNotified=false;m_automationAttention.clear();m_failurePhase.clear();
+  m_orderSheetsText.clear();m_failureOutlineText.clear();
   m_currentFileName.clear();m_receivedBytes=0;m_totalBytes=-1;m_sheetFileCount=0;m_receivedFileCount=0;
   m_phase=QStringLiteral("도엽 확인");m_phaseClock.restart();m_transferClock.invalidate();
   ++m_automationGeneration; m_scriptInFlight=false; m_waitTicks=0;
@@ -820,6 +854,19 @@ void KaTopographicBrowser::pollAutomation() {
         return;
       }
       if(self->m_sheetIndex>=self->m_officialRecords.size())return;
+      {
+        // Show exactly which sheets the automatic order is about to apply for.
+        QStringList order;
+        for(const auto& item:std::as_const(self->m_officialRecords)) {
+          const auto record=item.toObject();
+          order.append(QStringLiteral("%1 %2").arg(record.value(QStringLiteral("num")).toString(),
+              record.value(QStringLiteral("name")).toString()).trimmed());
+        }
+        const int total=order.size();
+        if(total>8){order=order.mid(0,8);order.append(QStringLiteral("외 %1장").arg(total-8));}
+        self->m_orderSheetsText=QStringLiteral("공식 신청할 도엽 %1장 · %2 — 중지하려면 「취소」를 누르세요.")
+            .arg(total).arg(order.join(QStringLiteral(", ")));
+      }
       self->m_currentRecord=self->m_officialRecords[self->m_sheetIndex].toObject();
       self->m_automationStage=QStringLiteral("openForm"); self->m_waitTicks=0;
       emit self->selectionUpdated(QJsonObject{{QStringLiteral("items"),all},

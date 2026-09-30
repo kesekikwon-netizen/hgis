@@ -1,60 +1,48 @@
 # Project: ka-hgis (Korean Field Archaeology Desktop HGIS)
 
+> 현재 상태의 짧은 요약이다. 제품 규칙은 `AGENTS.md`, 제품 현황 정본은 `docs/HANDOFF.md`. 이 파일은 2026-09-29 에 코드와 맞췄다(F032).
+
 ## Architecture
 - Architecture B: Standalone C++20/Qt6 desktop application linked to OSGeo4W `qgis_core` and `qgis_gui`. No QGIS fork; do not reimplement PROJ/GDAL/renderer.
-- Domain Layers: `survey_area`, `feature_poly`, `feature_line`, `section_line`, `control_points`, `artifact_point`, `trial_trench`. Logic property `ka_hgis/layer_key`.
-- Legend Groups: `조사 데이터` (Domain data) vs `참조 지도` (Basemap & references).
-- CRS Policy: Working CRS EPSG:5186 / EPSG:5187; Submission package export CRS strictly EPSG:5179.
-- Sub-controllers: `ProjectLifecycleController`, `DigitizingStateController`, `LayerStateController` — 계획했으나 하지 않음. `src/app/controllers/`는 없다. 조사 열기·디지타이즈·레이어 동작은 `MainWindow*.cpp`와 `LayerOps`에 있다.
+- Domain Layers: `survey_area`, `feature_poly`, `feature_line`, `section_line`, `control_points`, `artifact_point`, `trial_trench`. Logic property `ka_hgis/layer_key`. Schema: `data/schemas/ka_hgis_layers.yaml` (checked against `SurveyProjectFactory` by `workflow_engine`).
+- Legend Groups: `조사 데이터` (Domain data) vs `참조 지도` (Basemap & references). Downloaded cadastral and VWorld cadastral pictures sit at the layer-tree root.
+- CRS Policy: Working CRS EPSG:5186 / EPSG:5187 (new survey default 5187); Submission package export CRS strictly EPSG:5179.
+- UI: one-row ribbon (조사 · 기록 · 자료 받기 · 배경 지도 · 정합 · 내보내기 · 기타). `MainWindow` is one class split over `MainWindow*.cpp` files; there are no controller classes.
 
-## Feature Inventory
-| # | Feature | Description | Milestone | Source |
-|---|---------|-------------|-----------|--------|
-| 1 | Layout Composition Validation | Prevent empty/dummy `layout_blank` memory layers from passing `isComposedStudioSheet` | M1 | Survey R1 |
-| 2 | Checklist Rule Tightening | Tighten `drawing_checklist.v1.json` & `ProjectStateBuilder` so uncomposed templates fail | M1 | Survey R1 |
-| 3 | Submission Package Layout Bundling | Seamlessly export `user_sheet` -> `조사도면.pdf`, check errors, support `section_sheet` | M1 | Survey R1 |
-| 4 | Streamed Package Hashing | Chunked 64KB hashing for `MANIFEST.sha256` avoiding memory spikes | M1 | Survey R1 / R3 |
-| 5 | Geometry Auto-Repair Pipeline | `sanitizeAndRepairGeometry` — 계획했으나 하지 않음. `src`에 그 심볼이 없다. | M2 | Survey R2 |
-| 6 | Digitizing Flow Intranet Guard | Enforce geometry repair in `onGeometryCaptured` and vertex edits to prevent upload rejection | M2 | Survey R2 |
-| 7 | VWorld Key Flexible Regex | Update `withVworldApiKey` regex to handle non-hyphenated, empty, or custom keys | M2 | Survey R2 |
-| 8 | Cadastral XML Key Refresh | Update local `vworld-cadastral.xml` and reload raster data provider in `refreshVworldApiKeyInLayers` | M2 | Survey R2 |
-| 9 | UI VWorld Key Sync | Wire `MainWindow::configureVworldKey` to refresh active project layer sources and tile caches | M2 | Survey R2 |
-| 10 | Hotspot Controller Extraction | 계획했으나 하지 않음. 컨트롤러 클래스 대신 `MainWindow`를 cpp 파일로만 나눈다. | M2 | Survey R2 |
-| 11 | Baseline Test Regression Fix | Fix aspect margin in `TestWorkflow::zoomToKorea_5186StaysInsideMercatorSatelliteQuad` | M2 | Survey R2 / R3 |
-| 12 | Async Submission Export | GUI 스레드 밖 제출 내보내기 — 계획했으나 하지 않음. `ExportService.cpp`에 `QThread`/`QtConcurrent`가 없다. | M3 | Survey R3 |
-| 13 | High-DPI Scale Flutter Fix | `extentsChanged`에서 `applyCanvasScreenDpi`를 떼기 — 계획했으나 하지 않음. `MainWindow.cpp`의 `extentsChanged` 슬롯이 아직 `applyCanvasScreenDpi`를 부른다. | M3 | Survey R3 |
-| 14 | Tile Heal Loop Elimination | `extentsChanged`마다 `m_tileHealCount`를 비우지 않기 — 계획했으나 하지 않음. 그 슬롯이 아직 `m_tileHealCount.clear()`를 한다. | M3 | Survey R3 |
-| 15 | In-Memory Tile Cache Tuning | Tune `QgsSettings` tile cache size to 256 and standardize tile datasource URIs | M3 | Survey R3 |
-| 16 | 100% CTest & Smoke Pass | Verify all 14 test suites pass, 0 compiler warnings under /W4, clean smoke-quit | M4 | Survey Baseline |
-| 17 | Forensic Integrity Audit | Pass adversarial forensic audit against cheating/dummy facades | M4 | Survey Baseline |
+## Feature Inventory (what the code has)
+| # | Feature | Where |
+|---|---------|-------|
+| 1 | Layout composition validation (`layout_blank`/uncomposed sheets fail) | `LayoutService::isComposedStudioSheet` |
+| 2 | Checklist rules and project state (error blocks submit) | `data/rules/drawing_checklist.v1.json`, `ChecklistEngine`, `ProjectStateBuilder`, `ChecklistState*` |
+| 3 | Submission package: `user_sheet` → `조사도면.pdf`, 5179 SHP, README, encoding | `ExportService::exportSubmissionPackage` |
+| 4 | Streamed SHA-256 `MANIFEST.sha256` | `ExportService::writeSha256Manifest` |
+| 7–9 | VWorld key handling and refresh in saved layers | `LayerOps::withVworldApiKey`, `LayerOps::refreshVworldApiKeyInLayers` (in `BasemapOps.cpp`), `MainWindow::configureVworldKey` |
+| 11 | Mercator satellite quad regression test | `TestWorkflow::zoomToKorea_5186StaysInsideMercatorSatelliteQuad` |
+| — | Old-version survey compatibility | `tests/data/compat`, `save_open_portable` |
 
-## Milestones
-| # | Name | Scope | Dependencies | Status |
-|---|------|-------|-------------|--------|
-| M1 | R1: Submission Package & Layout Integration | `isComposedStudioSheet`, checklist, `user_sheet` PDF, streamed SHA256 are in `LayoutService` / `ExportService` / `ProjectStateBuilder` | none | 코드 있음. 이 표의 예전 상태 칸(IN_PROGRESS)은 현재 완료 기록이 아니다. |
-| M2 | R2: Hotspot De-risking, VWorld Lifecycle & Geometry Repair | VWorld 키 갱신(`withVworldApiKey`, `refreshVworldApiKeyInLayers`, `configureVworldKey`)은 코드에 있다. 기하 자동수리와 서브컨트롤러 추출은 계획했으나 하지 않음. | M1 | 일부만 코드에 있음 |
-| M3 | R3: Async Operations & High-DPI Tile Stability | 비동기 제출, `extentsChanged`와 DPI/타일힐 분리, 타일 캐시 256 고정은 계획했으나 하지 않음. | M2 | 계획했으나 하지 않음 |
-| M4 | Final E2E Test Suite Pass & Adversarial Verification | "CTest 14개 · /W4 경고 0 · forensic audit"은 계획했으나 하지 않음. 현재 스위트 수는 14가 아니다. | M3 | 계획했으나 하지 않음 |
+## Planned but not done (kept as a record)
+These came from the 2026-08 survey rounds (R1–R3) and are **not** in the code. Do not assume them.
+- Geometry auto-repair pipeline (`sanitizeAndRepairGeometry`) and the digitizing guard built on it (items 5–6).
+- Sub-controllers `ProjectLifecycleController`, `DigitizingStateController`, `LayerStateController`; `src/app/controllers/` does not exist (item 10).
+- Asynchronous submission export: `exportSubmissionPackage` runs on the calling thread (item 12).
+- Detaching `applyCanvasScreenDpi` and `m_tileHealCount.clear()` from `extentsChanged` (items 13–14); tile cache fixed at 256 (item 15).
+- The M4 target "14 suites, 0 /W4 warnings, forensic audit" (items 16–17); the suite count is no longer 14.
 
 ## Interface Contracts
 ### `LayoutService` ↔ `ProjectStateBuilder` ↔ `ExportService`
-- `bool LayoutService::isComposedStudioSheet(QgsProject* project, const QString& layoutName = QStringLiteral("user_sheet"))`: Returns true only if map frame exists, has positive scale, valid finite extent, and non-empty vector/raster layers (excluding `layout_blank` and reference layers).
-- `bool ExportService::exportSubmissionPackage(QgsProject* project, const QString& outDir, const QString& encoding, QString* errorOut)`: Validates composed sheet, calls `LayoutService::exportLayoutPdf`, writes `조사도면.pdf`, writes 5179 SHPs, and computes streamed `MANIFEST.sha256`.
+- `bool LayoutService::isComposedStudioSheet(QgsProject* project, const QString& layoutName = QStringLiteral("user_sheet"))`: true only if a map frame exists with positive scale, finite extent and non-empty layers (excluding `layout_blank` and reference-only layers).
+- `QString ExportService::exportSubmissionPackage(QgsProject* project, const QString& outDir, const QString& encoding, const QString& checklistSummary, bool blockOnError, bool hasChecklistErrors, QString* errorOut = nullptr, const SubmitPackageInfo& info = {})`: `outDir` must be absent or empty. With `blockOnError && hasChecklistErrors` nothing is written. Writes `조사도면.pdf` from the composed `user_sheet`, EPSG:5179 SHPs, `README_submit.txt`, `encoding.txt` and a streamed `MANIFEST.sha256` into a staging folder and publishes it only when complete. Returns `outDir` on success, an empty string on failure (a previous package is never overwritten). `SubmitPackageInfo` carries the survey name/path for the README and an optional cancelable progress callback.
 
 ### `LayerOps` ↔ `MainWindow`
-- `sanitizeAndRepairGeometry` / `DigitizingStateController`: 계획했으나 하지 않음.
-- `int LayerOps::refreshVworldApiKeyInLayers(QgsProject* project, const QString& currentKey, QStringList* changed)`: Updates WMTS/WMS URLs and cadastral GDAL XML files, reloading providers. 선언은 `LayerOps.h`, 구현은 `BasemapOps.cpp`.
-
-### `ExportService` Async Pipeline
-- 계획했으나 하지 않음. 제출 패키지는 `ExportService::exportSubmissionPackage`가 호출 스레드에서 처리한다.
+- `int LayerOps::refreshVworldApiKeyInLayers(QgsProject* project, const QString& currentKey, QStringList* changed)`: updates WMTS/WMS URLs and cadastral GDAL XML files and reloads providers. Declared in `LayerOps.h`, implemented in `BasemapOps.cpp`.
+- `LayerOps::ensureDomainLayer` is the only path that adds domain layers to the project/legend.
 
 ## Code Layout
-- `src/core/ExportService.h / .cpp`: Export submission package, shapefile reprojection, SHA256 manifest.
-- `src/core/LayoutService.h / .cpp`: Layout templates, studio sheet composition validation, PDF export.
-- `src/core/ChecklistEngine.h / .cpp`: Rule evaluation against project state.
-- `src/core/ProjectStateBuilder.h / .cpp`: Gathers project state for checklist evaluation.
-- `src/core/LayerOps.h / .cpp`, `BasemapOps.cpp`: 레이어 키, 배경지도, VWorld 키 갱신. 기하 자동수리(`sanitizeAndRepairGeometry`)는 계획했으나 하지 않음.
-- `src/app/controllers/`: 계획했으나 하지 않음. 디렉터리가 없다.
-- `src/app/MainWindow.h`와 `MainWindow.cpp`, 그리고 같은 클래스의 구현 파일: `MainWindowRibbon.cpp`, `MainWindowOffline.cpp`, `MainWindowAlign.cpp`, `MainWindowOverlay.cpp`, `MainWindowFiles.cpp`, `MainWindowCadastral.cpp`, `MainWindowDownloads.cpp`, `MainWindowEditing.cpp`, `MainWindowExport.cpp`, `MainWindowSession.cpp`, `MainWindowTopographic.cpp`, `MainWindowUndo.cpp`, `MainWindowContextMenus.cpp`.
-- `src/app/KaCaptureMapTool.h / .cpp`: Map digitizing tool.
-- `tests/test_checklist.cpp`, `tests/test_workflow.cpp`: Test cases for validation, lifecycle, and export.
+- `src/core/ExportService.*`: submission package, shapefile reprojection, SHA-256 manifest.
+- `src/core/LayoutService.*`: layout templates, studio sheet validation, PDF export.
+- `src/core/ChecklistEngine.*`, `ChecklistState*.cpp`, `ProjectStateBuilder.*`: rule evaluation against project state.
+- `src/core/SurveyProjectFactory.*`, `SurveyStorage.*`, `SurveyBundle.*`: survey creation, embedded workspace save/open, moving surveys between PCs.
+- `src/core/LayerOps.*`, `BasemapOps.cpp`: layer keys, legend groups, basemaps, VWorld keys.
+- `src/app/MainWindow.h` and `MainWindow*.cpp` (Ribbon, Session, Editing, Export, Cadastral, Downloads, Topographic, Undo, ContextMenus, …): one `MainWindow` class.
+- `src/app/KaCaptureMapTool.*`: drawing new shapes; saved shapes are edited with `KaFeatureSelectTool`.
+- `tests/`: QtTest suites registered with `ka_add_qtest` in `CMakeLists.txt` (see `TEST_INFRA.md`).

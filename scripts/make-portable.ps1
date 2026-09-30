@@ -1,12 +1,112 @@
 # Build a self-contained Windows folder: USB copy, no OSGeo4W install on the target PC.
+# Runs only when the user asks for portable output (AGENTS.md). It never blocks on
+# verify-release; it records in PORTABLE-MANIFEST.json whether this exact EXE passed it.
+#   -RefreshManifestOnly  rewrite PORTABLE-MANIFEST.json of an existing folder (publish-desktop.ps1)
 param(
   [string]$OutDir = "",
-  [switch]$IncludeLocalCredentials
+  [switch]$IncludeLocalCredentials,
+  [switch]$RefreshManifestOnly
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $out = if ($OutDir) { $OutDir } else { Join-Path $root "dist\ka-hgis-portable" }
 $out = [System.IO.Path]::GetFullPath($out)
+
+function Get-GitText([string[]]$gitArgs) {
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $text = & git -C $root @gitArgs 2>$null
+    if ($LASTEXITCODE -ne 0) { return '' }
+    return (($text | Out-String).Trim())
+  } catch {
+    return ''
+  } finally {
+    $ErrorActionPreference = $old
+  }
+}
+
+# F178: what was delivered, so the receiving PC can compare it. Verified means the EXE in
+# the folder is byte-identical to the one scripts/verify-release.ps1 built, tested and
+# smoke-started, and the sources have not changed since. It never blocks the package.
+function Write-PortableManifest([string]$portableRoot) {
+  $exePath = Join-Path $portableRoot 'ka-hgis.exe'
+  $exeHash = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash
+  $receiptPath = Join-Path $root 'build\release-verified.json'
+  $verified = $false
+  $reason = 'no verify-release receipt: scripts/verify-release.ps1 was not run for this build'
+  $receiptUtc = $null
+  if (Test-Path -LiteralPath $receiptPath) {
+    try {
+      $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+      $receiptUtc = $receipt.verifiedUtc
+      if ($receipt.executableSha256 -ne $exeHash) {
+        $reason = 'the verify-release receipt is for a different EXE'
+      } else {
+        try {
+          & (Join-Path $PSScriptRoot 'verify-release.ps1') -CheckOnly | Out-Null
+          $verified = $true
+          $reason = 'verify-release passed for this EXE and the current sources'
+        } catch {
+          $reason = 'same EXE, but sources or tests changed since verify-release: ' + $_.Exception.Message
+        }
+      }
+    } catch {
+      $reason = 'unreadable verify-release receipt: ' + $_.Exception.Message
+    }
+  }
+  # F180: qgis-dev is rebuilt daily, so record whether the bundled OSGeo4W packages still
+  # match dev-env.lock.json (scripts/dev-env-lock.ps1: 0 same, 1 drifted, 2 no lock).
+  $sdkLock = 'not checked'
+  $lockScript = Join-Path $PSScriptRoot 'dev-env-lock.ps1'
+  if (Test-Path -LiteralPath $lockScript) {
+    $oldPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+      & $lockScript -OsgeoOnly *> $null
+      $lockCode = $LASTEXITCODE
+    } catch {
+      $lockCode = -1
+    } finally {
+      $ErrorActionPreference = $oldPreference
+    }
+    $sdkLock = switch ($lockCode) {
+      0 { 'matches dev-env.lock.json' }
+      1 { 'differs from dev-env.lock.json (OSGeo4W packages drifted)' }
+      2 { 'no dev-env.lock.json' }
+      default { 'lock check failed' }
+    }
+    if ($lockCode -eq 1) { Write-Warning "Bundled OSGeo4W packages differ from dev-env.lock.json." }
+  }
+  $status = if ($verified) { 'verified' } else { 'unverified' }
+  $manifest = [ordered]@{
+    schema            = 1
+    createdUtc        = [DateTime]::UtcNow.ToString('o')
+    executable        = 'ka-hgis.exe'
+    executableSha256  = $exeHash
+    releaseStatus     = $status
+    releaseStatusNote = $reason
+    releaseVerifiedUtc = $receiptUtc
+    version           = ((Get-Content -LiteralPath (Join-Path $root 'VERSION') -TotalCount 1) -as [string]).Trim()
+    gitCommit         = (Get-GitText @('rev-parse', 'HEAD'))
+    gitDescribe       = (Get-GitText @('describe', '--tags', '--always', '--dirty'))
+    qgisPin           = ((Get-Content -LiteralPath (Join-Path $root 'VERSION_QGIS_PIN.txt') -TotalCount 1) -as [string]).Trim()
+    sdkLock           = $sdkLock
+    credentialsIncluded = [bool](Get-ChildItem -Path (Join-Path $portableRoot 'config\*') -File -ErrorAction SilentlyContinue `
+        -Include 'secrets.ini', '*-account.ini', '*-local.ini', 'ka-hgis-vworld.ini')
+  }
+  $json = $manifest | ConvertTo-Json
+  [System.IO.File]::WriteAllText((Join-Path $portableRoot 'PORTABLE-MANIFEST.json'), $json, [System.Text.UTF8Encoding]::new($false))
+  Write-Host ("Portable manifest: {0} (EXE SHA256 {1})" -f $status, $exeHash)
+  if (-not $verified) { Write-Warning "Portable EXE is not release-verified: $reason" }
+}
+
+if ($RefreshManifestOnly) {
+  if (-not (Test-Path -LiteralPath (Join-Path $out 'ka-hgis.exe'))) { throw "No portable EXE in $out" }
+  Write-PortableManifest $out
+  exit 0
+}
+
 # Never erase an existing delivery or a user's data through an arbitrary OutDir.
 if (Test-Path -LiteralPath $out) {
   throw "Output already exists. Choose a new folder with -OutDir: $out"
@@ -14,12 +114,14 @@ if (Test-Path -LiteralPath $out) {
 $exe = Join-Path $root "build\Release\ka-hgis.exe"
 if (-not (Test-Path $exe)) { throw "Build ka-hgis.exe first (Release)." }
 
+# Same search order as scripts/dev-env.ps1 (the one documented order, F180):
+# OSGEO4W_ROOT -> C:\OSGeo4W -> D:\OSGeo4W -> A:\OSGeo4W.
 $OSGEO = $null
 if ($env:OSGEO4W_ROOT -and (Test-Path -LiteralPath $env:OSGEO4W_ROOT)) {
   $OSGEO = $env:OSGEO4W_ROOT
-} elseif (Test-Path "A:\OSGeo4W") { $OSGEO = "A:\OSGeo4W" }
-elseif (Test-Path "C:\OSGeo4W") { $OSGEO = "C:\OSGeo4W" }
+} elseif (Test-Path "C:\OSGeo4W") { $OSGEO = "C:\OSGeo4W" }
 elseif (Test-Path "D:\OSGeo4W") { $OSGEO = "D:\OSGeo4W" }
+elseif (Test-Path "A:\OSGeo4W") { $OSGEO = "A:\OSGeo4W" }
 else { throw "OSGEO4W_ROOT not found on this build PC." }
 
 $qgis = Join-Path $OSGEO "apps\qgis-dev"
@@ -53,7 +155,11 @@ function Copy-Dlls([string]$src, [string]$dst) {
 
 Copy-Item $exe $out -Force
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $out
+# Full GNU GPL v2 text (verbatim from the QGIS SDK) next to the short notice.
+Copy-Item -LiteralPath (Join-Path $root 'COPYING') -Destination $out
 Copy-Item -LiteralPath (Join-Path $root 'THIRD_PARTY_NOTICES.md') -Destination $out
+# The receiving PC checks the folder with this (PORTABLE-MANIFEST.json + required files).
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'verify-portable-pack.ps1') -Destination $out
 $noticeDir = Join-Path $out 'licenses'
 New-Item -ItemType Directory -Force -Path $noticeDir | Out-Null
 foreach ($notice in @('LICENSE', 'AUTHORS', 'CONTRIBUTORS')) {
@@ -142,6 +248,116 @@ foreach ($vc in @(
 
 # qgis-dev\bin 사본은 두지 않는다 — 루트 한 벌로 충분하다(위 주석 참고).
 
+# F138: every shipped DLL with the OSGeo4W package and version it came from, so GPL/LGPL
+# recipients can find the matching upstream source (OSGeo4W etc/setup: installed.db, *.lst.gz).
+function Write-BundledComponentList([string]$portableRoot, [string]$osgeoRoot) {
+  $setup = Join-Path $osgeoRoot 'etc\setup'
+  $versions = @{}
+  $db = Join-Path $setup 'installed.db'
+  if (Test-Path -LiteralPath $db) {
+    foreach ($line in (Get-Content -LiteralPath $db | Select-Object -Skip 1)) {
+      $parts = $line -split '\s+'
+      if ($parts.Count -ge 2) { $versions[$parts[0]] = ($parts[1] -replace '\.tar\.bz2$', '') }
+    }
+  }
+  $owner = @{}
+  foreach ($list in (Get-ChildItem -LiteralPath $setup -Filter '*.lst.gz' -ErrorAction SilentlyContinue)) {
+    $package = $list.Name -replace '\.lst\.gz$', ''
+    $stream = [System.IO.File]::OpenRead($list.FullName)
+    try {
+      $gzip = New-Object System.IO.Compression.GZipStream($stream, [System.IO.Compression.CompressionMode]::Decompress)
+      $reader = New-Object System.IO.StreamReader($gzip)
+      while ($null -ne ($entry = $reader.ReadLine())) {
+        if ($entry -match '\.dll$') {
+          $name = [System.IO.Path]::GetFileName($entry).ToLowerInvariant()
+          if (-not $owner.ContainsKey($name)) { $owner[$name] = $package }
+        }
+      }
+      $reader.Dispose()
+    } finally {
+      $stream.Dispose()
+    }
+  }
+  $vcRuntime = @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll',
+                 'concrt140.dll', 'vccorlib140.dll')
+  $rows = New-Object System.Collections.Generic.List[string]
+  $perPackage = @{}
+  foreach ($dll in (Get-ChildItem -LiteralPath $portableRoot -Filter '*.dll' | Sort-Object Name)) {
+    $key = $dll.Name.ToLowerInvariant()
+    $source = if ($owner.ContainsKey($key)) {
+      $pkg = $owner[$key]
+      if ($versions.ContainsKey($pkg)) { $versions[$pkg] } else { $pkg }
+    } elseif ($vcRuntime -contains $key) {
+      'Microsoft Visual C++ runtime (Windows System32, redistributable)'
+    } else {
+      'unknown (not listed by OSGeo4W setup)'
+    }
+    $perPackage[$source] = 1 + [int]$perPackage[$source]
+    $rows.Add(("{0,-48} {1,10:N0}  {2}" -f $dll.Name, $dll.Length, $source))
+  }
+  $header = @(
+    'ka-hgis portable - bundled components',
+    ('Generated: {0:u}  OSGeo4W root: {1}' -f (Get-Date).ToUniversalTime(), $osgeoRoot),
+    ('QGIS pin: {0}' -f ((Get-Content -LiteralPath (Join-Path $root 'VERSION_QGIS_PIN.txt') -TotalCount 1) -as [string])),
+    '',
+    'Licenses: see ../THIRD_PARTY_NOTICES.md, ../COPYING (GNU GPL v2), QGIS-LICENSE in this folder.',
+    'Upstream binaries and their source packages (-src) are published by OSGeo4W:',
+    '  https://download.osgeo.org/osgeo4w/v2/  (find each package by the name-version below)',
+    'ka-hgis source for this build: ../source/ka-hgis-source.zip',
+    '',
+    'Packages (DLL count):'
+  )
+  $summary = $perPackage.Keys | Sort-Object | ForEach-Object { '  {0}  ({1})' -f $_, $perPackage[$_] }
+  $body = @('', 'DLL                                                    bytes  package') + $rows
+  $text = ($header + $summary + $body) -join "`r`n"
+  [System.IO.File]::WriteAllText((Join-Path $portableRoot 'licenses\BUNDLED-COMPONENTS.txt'), $text,
+    [System.Text.UTF8Encoding]::new($false))
+  Write-Host ("Bundled component list: {0} DLLs" -f $rows.Count)
+}
+
+# F138: GPL corresponding source travels with the binaries, whatever the GitHub repository's
+# visibility. Same file set verify-release fingerprints (tracked + untracked, .gitignore respected).
+function Write-SourceArchive([string]$portableRoot) {
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $paths = @(& git -C $root -c core.quotepath=false ls-files --cached --others --exclude-standard -- `
+        src tests data cmake scripts templates launch.ps1 CMakeLists.txt CMakePresets.json VERSION `
+        VERSION_QGIS_PIN.txt dev-env.lock.json LICENSE COPYING README.md THIRD_PARTY_NOTICES.md 2>$null)
+  } finally {
+    $ErrorActionPreference = $old
+  }
+  if ($paths.Count -eq 0) {
+    Write-Warning 'Source archive skipped: git could not list the sources. Ship the source separately.'
+    return
+  }
+  Add-Type -AssemblyName System.IO.Compression
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $sourceDir = Join-Path $portableRoot 'source'
+  New-Item -ItemType Directory -Force -Path $sourceDir | Out-Null
+  $zipPath = Join-Path $sourceDir 'ka-hgis-source.zip'
+  $zip = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.ZipArchiveMode]::Create)
+  try {
+    foreach ($relative in ($paths | Sort-Object -Unique)) {
+      $absolute = Join-Path $root $relative
+      if (-not (Test-Path -LiteralPath $absolute -PathType Leaf)) { continue }
+      [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $absolute, ($relative -replace '\\', '/'))
+    }
+  } finally {
+    $zip.Dispose()
+  }
+  $readme = @(
+    'ka-hgis source (GNU GPL v2 or later) for the ka-hgis.exe in this folder.',
+    ('Revision: {0}' -f (Get-GitText @('describe', '--tags', '--always', '--dirty'))),
+    'Build: see README.md in the archive (Windows, OSGeo4W qgis-dev, Visual Studio 2022, CMake).'
+  ) -join "`r`n"
+  [System.IO.File]::WriteAllText((Join-Path $sourceDir 'README.txt'), $readme, [System.Text.UTF8Encoding]::new($false))
+  Write-Host ("Source archive: {0:N1} MB" -f ((Get-Item -LiteralPath $zipPath).Length / 1MB))
+}
+
+Write-BundledComponentList $out $OSGEO
+Write-SourceArchive $out
+
 $runPs1 = @'
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -207,13 +423,18 @@ Visual Studio 설치도 필요 없습니다. Windows 화면 배율과 현재 모
 주의:
   - apps, bin, share 폴더를 지우면 실행되지 않습니다.
   - 폴더 이름에 한글이 있어도 되지만, 경로가 너무 길면 start.bat 을 쓰세요.
-  - VWorld 지도·주소 검색은 더보기 → VWorld API 키에서 유효한 키를 입력하세요.
+  - VWorld 지도·주소 검색은 더보기 → API 키 입력에서 유효한 키를 입력하세요.
   - 주변유적·수치지형도 다운로드 계정도 더보기 메뉴에서 입력하세요. 인터넷이 필요합니다.
   - 설정은 포터블 config 폴더에 저장됩니다. 계정을 입력한 폴더를 공유할 때 주의하세요.
   - GNU GPL v2 이상 (QGIS 라이브러리 링크). 자세한 공지는 앱 정보 창과 THIRD_PARTY_NOTICES.md.
+    GPL 전문은 COPYING, 함께 넣은 DLL 과 그 출처 패키지는 licenses\BUNDLED-COMPONENTS.txt 에 있습니다.
+
+이 판 확인:
+  PORTABLE-MANIFEST.json 에 ka-hgis.exe 의 SHA256 과 검증 여부(verified/unverified)가 있습니다.
+  다른 PC 에서 폴더를 받았으면 PowerShell 에서 이 폴더의 verify-portable-pack.ps1 을 실행해 대조하세요.
 
 제작: 동국문화재연구원  ·  만든이: youngin kwon
-소스: https://github.com/kwonyoungin11/hgis
+소스: 이 폴더의 source\ka-hgis-source.zip (이 EXE 를 만든 소스). 저장소: https://github.com/kwonyoungin11/hgis
 "@
 Set-Content -LiteralPath (Join-Path $out "README.txt") -Value $readmeKo -Encoding UTF8
 $guideName = (-join ([char]0xC0AC, [char]0xC6A9, [char]0xBC95)) + '.txt'
@@ -251,7 +472,7 @@ function Copy-VworldKeyToPortable([string]$portableRoot) {
   }
   if (-not $key -and $env:VWORLD_API_KEY) { $key = $env:VWORLD_API_KEY.Trim() }
   if (-not $key) {
-    Write-Host "VWorld key: not found on this PC (other PC will need 도움말 → API 키)"
+    Write-Host "VWorld key: not found on this PC (other PC will need 더보기 → API 키 입력)"
     return
   }
   $ini = "[VWorld]`r`nApiKey=$key`r`n"
@@ -261,7 +482,8 @@ function Copy-VworldKeyToPortable([string]$portableRoot) {
 
 if ($IncludeLocalCredentials) { Copy-VworldKeyToPortable $out }
 
-# DPAPI 암호문은 이 Windows 사용자만 푼다. 포터블에는 평문 password= 로 풀어 실어
+# DPAPI 암호문은 이 Windows 사용자만 푼다. 포터블에는 password_portable(앱과 같은 가림 형식,
+# 암호화는 아님)로 바꿔 실어
 # 다른 PC에서도 같은 폴더가 로그인된다. 값은 화면에 찍지 않는다.
 function Convert-KaAccountIniToPortable([string]$path) {
   if (-not (Test-Path -LiteralPath $path)) { return $false }
@@ -276,9 +498,13 @@ function Convert-KaAccountIniToPortable([string]$path) {
       try {
         $blob = [Convert]::FromBase64String($b64)
         $plain = [System.Security.Cryptography.ProtectedData]::Unprotect($blob, $entropy, 'CurrentUser')
-        $text = [System.Text.Encoding]::UTF8.GetString($plain)
+        # Same travelling form as KaSecretStore::writePortable (UTF-8 XOR 'ka-hgis-account-v1',
+        # base64). No plain password= is ever written into the portable folder.
+        $wrapped = New-Object byte[] $plain.Length
+        for ($i = 0; $i -lt $plain.Length; $i++) { $wrapped[$i] = $plain[$i] -bxor $entropy[$i % $entropy.Length] }
+        [Array]::Clear($plain, 0, $plain.Length)
         $changed = $true
-        'password=' + $text
+        'password_portable="' + [Convert]::ToBase64String($wrapped) + '"'
       } catch {
         $failed = $true
         $line
@@ -314,6 +540,13 @@ function Copy-AccountIniToPortable([string]$portableRoot, [string]$destName, [st
 }
 
 if ($IncludeLocalCredentials) {
+  # F179: personal-portable exception (docs/portable-desktop.md). The user asked for accounts to
+  # travel so another PC needs no login; this is opt-in and never the default. Say plainly
+  # what the folder now holds.
+  Write-Warning ("-IncludeLocalCredentials: this folder's config\ will hold the VWorld key and account " +
+    "passwords unencrypted (key in plain text, passwords only obfuscated as password_portable). " +
+    "Keep it on your own USB/PC; do not share, upload or hand it over. " +
+    "Build without the switch for anyone else.")
   $accountRoots = @(
     (Join-Path (Join-Path $env:LOCALAPPDATA "ka-hgis") "ka-hgis"),
     (Join-Path $env:APPDATA "ka-hgis"),
@@ -330,11 +563,12 @@ if ($IncludeLocalCredentials) {
   Copy-AccountIniToPortable $out "vworld-account.ini" @(
       $accountRoots | ForEach-Object { Join-Path $_ "vworld-account.ini" }
     ) "VWorld cadastral account"
-  Add-Content -LiteralPath (Join-Path $out 'README.txt') -Encoding UTF8 -Value "`r`n개인용 패키지: 이 PC에 저장된 API 키와 계정 파일을 포함했습니다. 다른 PC에서도 같은 폴더로 로그인됩니다."
+  Add-Content -LiteralPath (Join-Path $out 'README.txt') -Encoding UTF8 -Value "`r`n개인용 패키지: 이 PC에 저장된 API 키와 계정 파일을 포함했습니다. 다른 PC에서도 같은 폴더로 로그인됩니다.`r`n주의: config 폴더에 키와 계정 비밀번호가 그대로(암호화 없이) 들어 있습니다. 본인 USB·PC 에만 두고 다른 사람에게 주거나 올리지 마세요."
   $guideName = (-join ([char]0xC0AC, [char]0xC6A9, [char]0xBC95)) + '.txt'
   Add-Content -LiteralPath (Join-Path $out $guideName) -Encoding UTF8 -Value "`r`n개인용 패키지: 계정은 이 폴더 config 에 있습니다. 다른 컴퓨터로 폴더를 통째로 복사하세요."
 }
 
+Write-PortableManifest $out
 Write-Host "Portable folder ready: $out"
 Get-ChildItem $out | Select-Object Name, Mode, @{n='MB';e={ if ($_.PSIsContainer) { '' } else { [math]::Round($_.Length/1MB,1) } }}
 $qgisOut = Join-Path $out "apps\qgis-dev\plugins"

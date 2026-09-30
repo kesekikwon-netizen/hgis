@@ -34,7 +34,7 @@ KaLayerOpacityRail::KaLayerOpacityRail(QWidget* host) : QFrame(host), m_host(hos
   m_slider->setEnabled(false);
   m_slider->setInvertedAppearance(false);
   m_slider->setTickPosition(QSlider::NoTicks);
-  m_slider->setToolTip(QStringLiteral("선택한 배경지도의 투명도. 오른쪽으로 밀면 진해집니다."));
+  m_slider->setToolTip(QStringLiteral("선택한 레이어의 투명도. 오른쪽으로 밀면 진해집니다. 지도에서만 흐려지고 자료는 그대로입니다."));
   m_slider->setFocusPolicy(Qt::ClickFocus);
 
   m_value = new QLabel(QStringLiteral("-"), this);
@@ -97,7 +97,7 @@ void KaLayerOpacityRail::setTarget(const QString& layerName, bool adjustable) {
   if (m_target) {
     const QString text = adjustable && !layerName.isEmpty()
                              ? layerName
-                             : QStringLiteral("투명도·밝기: 배경지도를 고르세요");
+                             : QStringLiteral("투명도·밝기: 조절할 레이어를 고르세요");
     m_target->setText(fontMetrics().elidedText(text, Qt::ElideMiddle, 236));
     m_target->setToolTip(adjustable ? layerName : QString());
     m_target->setProperty("idle", !adjustable);
@@ -169,10 +169,18 @@ void KaLayerOpacityRail::showEvent(QShowEvent* event) {
   reposition();
 }
 
+void KaLayerOpacityRail::setTopInset(int px) {
+  const int inset = qMax(0, px);
+  if (inset == m_topInset)
+    return;
+  m_topInset = inset;
+  reposition();
+}
+
 void KaLayerOpacityRail::reposition() {
   if (!m_host)
     return;
-  move(10, 10);
+  move(10, 10 + m_topInset);
   if (auto* lay = layout())
     lay->activate();
   resize(260, m_adjustable ? qMax(88, sizeHint().height()) : qMax(34, sizeHint().height()));

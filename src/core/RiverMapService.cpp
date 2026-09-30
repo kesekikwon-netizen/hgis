@@ -1,5 +1,7 @@
 #include "RiverMapService.h"
 #include "LayerOps.h"
+#include "ReferenceKind.h"
+#include "ReferenceTiledFetch.h"
 
 #include <QDir>
 #include <QFile>
@@ -83,12 +85,16 @@ QString vworldExceptionText(const QByteArray& body) {
   return m.hasMatch() ? m.captured(1).trimmed() : QString();
 }
 
-// 현재 화면 bbox(위경도)의 하천망 GeoJSON을 임시 파일로 받아 경로를 돌려준다.
+// bbox(위경도) 한 조각의 하천망 GeoJSON을 받는다.
 // VWorld WFS는 인증키와 DOMAIN 파라미터가 필요하고(배경지도와 같은 키),
 // MAXFEATURES 상한이 1000이라 STARTINDEX로 나눠 받는다.
-QString fetchRiverGeojson(const QgsRectangle& extent4326, const QString& apiKey,
-                          QString* errorOut, const QString& path, QgsFeedback* feedback,
-                          const ReferenceDownload& download) {
+ReferenceTiledFetch::Piece fetchRiverPiece(const QgsRectangle& extent4326, const QString& apiKey,
+                                           QgsFeedback* feedback, const ReferenceDownload& download) {
+  using ReferenceTiledFetch::Outcome;
+  ReferenceTiledFetch::Piece piece;
+  QString* errorOut = &piece.error;
+  // Every non-transport failure below is a server/content problem.
+  piece.outcome = Outcome::Fatal;
   constexpr int kPageSize = 1000;
   constexpr int kMaxPages = 10;
   QJsonObject rootDoc;
@@ -117,7 +123,13 @@ QString fetchRiverGeojson(const QgsRectangle& extent4326, const QString& apiKey,
                      QStringLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ka-hgis/0.3"));
     netReq.setRawHeader("Referer", "https://localhost");
     QByteArray body;
-    if (!ReferenceMapPreparation::download(netReq, &body, errorOut, feedback, download)) return {};
+    ReferenceTransferFailure failure = ReferenceTransferFailure::None;
+    if (!ReferenceMapPreparation::download(netReq, &body, errorOut, feedback, download,
+                                           ReferenceMapPreparation::kLargeTransfer, &failure)) {
+      piece.outcome = failure == ReferenceTransferFailure::Cancelled ? Outcome::Cancelled
+          : failure == ReferenceTransferFailure::Timeout ? Outcome::Slow : Outcome::Transient;
+      return piece;
+    }
 
     if (body.isEmpty() || !body.trimmed().startsWith('{')) {
       const QString reason = vworldExceptionText(body);
@@ -128,13 +140,13 @@ QString fetchRiverGeojson(const QgsRectangle& extent4326, const QString& apiKey,
                         : (reason.contains(QLatin1String("KEY"), Qt::CaseInsensitive)
                                ? QStringLiteral("VWorld 인증키가 거부되었습니다. 배경지도 설정에서 키를 확인한 뒤 다시 내려받으세요.")
                                : QStringLiteral("VWorld가 하천 지도를 보내지 못했습니다. 인터넷 연결을 확인한 뒤 잠시 후 다시 내려받으세요."));
-      return {};
+      return piece;
     }
-    if (!ReferenceMapPreparation::validateFeatureCollection(body, errorOut)) return {};
+    if (!ReferenceMapPreparation::validateFeatureCollection(body, errorOut)) return piece;
     const QJsonDocument doc = QJsonDocument::fromJson(body);
     if (!doc.isObject()) {
       if (errorOut) *errorOut = QStringLiteral("VWorld 응답(JSON)을 해석하지 못했습니다.");
-      return {};
+      return piece;
     }
     const QJsonObject obj = doc.object();
     const QJsonArray feats = obj.value(QStringLiteral("features")).toArray();
@@ -143,14 +155,35 @@ QString fetchRiverGeojson(const QgsRectangle& extent4326, const QString& apiKey,
     if (feats.size() < kPageSize) break;  // 마지막 페이지
     if (page + 1 == kMaxPages) {
       if (errorOut) *errorOut = QStringLiteral("하천 데이터가 한 번에 받을 수 있는 양을 넘었습니다. 범위를 좁혀 다시 내려받으세요. 기존 지도는 유지됩니다.");
-      return {};
+      piece.outcome = Outcome::TooLarge;  // A smaller bbox needs fewer pages.
+      return piece;
     }
   }
 
   rootDoc.insert(QStringLiteral("features"), allFeatures);
-  const QByteArray combined = QJsonDocument(rootDoc).toJson(QJsonDocument::Compact);
-  if (!ReferenceMapPreparation::validateCompleteFeatureCollection(combined, errorOut) ||
-      !ReferenceMapPreparation::writeResponse(path, combined, errorOut)) return {};
+  piece.body = QJsonDocument(rootDoc).toJson(QJsonDocument::Compact);
+  if (!ReferenceMapPreparation::validateCompleteFeatureCollection(piece.body, errorOut)) {
+    piece.body.clear();
+    piece.outcome = Outcome::TooLarge;
+    return piece;
+  }
+  piece.outcome = Outcome::Complete;
+  return piece;
+}
+
+// 현재 화면 bbox(위경도)의 하천망 GeoJSON을 임시 파일로 받아 경로를 돌려준다.
+// 쪽수 상한을 넘거나 느린 범위는 네 조각으로 나눠 받고, 끊긴 조각은 한 번 더 받는다.
+QString fetchRiverGeojson(const QgsRectangle& extent4326, const QString& apiKey,
+                          QString* errorOut, const QString& path, QgsFeedback* feedback,
+                          const ReferenceDownload& download) {
+  const auto fetched = ReferenceTiledFetch::fetch(extent4326, [&](const QgsRectangle& piece) {
+    return fetchRiverPiece(piece, apiKey, feedback, download);
+  }, feedback);
+  if (!fetched.ok) {
+    if (errorOut) *errorOut = fetched.error;
+    return {};
+  }
+  if (!ReferenceMapPreparation::writeResponse(path, fetched.body, errorOut)) return {};
   return path;
 }
 
@@ -252,7 +285,7 @@ PreparedReferenceMap RiverMapService::prepare(const QgsRectangle& extent5186,
   if (fetch5186.isEmpty() || !fetch5186.isFinite() || fetch5186.width() > maxSpanMeters() ||
       fetch5186.height() > maxSpanMeters()) {
     result.error = QStringLiteral(
-          "범위가 너무 넓습니다. 지도를 조사지역(한 변 %1km 이하)으로 확대한 뒤 다시 "
+          "범위가 너무 넓습니다. 지도를 조사구역(한 변 %1km 이하)으로 확대한 뒤 다시 "
           "내려받으세요.")
           .arg(maxSpanMeters() / 1000.0, 0, 'f', 0);
     return result;
@@ -353,8 +386,12 @@ QgsVectorLayer* RiverMapService::addPrepared(QgsProject* project, QgsMapCanvas* 
   }
   QStringList removeIds;
   for (QgsMapLayer* old : project->mapLayers()) {
+    // By title, or (renamed) by identity: tagged river and read from our GPKG table.
+    const bool renamedOurs = ReferenceKind::of(old) == QLatin1String(ReferenceKind::kRiver) &&
+                             old->source().contains(QLatin1String("layername=river_map"));
     if (old && (old->name() == QString::fromUtf8(kLayerTitle) ||
-        old->name().startsWith(QString::fromUtf8(kLayerTitle) + QStringLiteral(" ["))))
+        old->name().startsWith(QString::fromUtf8(kLayerTitle) + QStringLiteral(" [")) ||
+        renamedOurs))
       removeIds.append(old->id());
   }
   auto* layer = new QgsVectorLayer(prepared.gpkgPath + QStringLiteral("|layername=river_map"),
@@ -370,6 +407,8 @@ QgsVectorLayer* RiverMapService::addPrepared(QgsProject* project, QgsMapCanvas* 
     return nullptr;
   }
   LayerOps::markReferenceLayer(layer);
+  // Toggles find the layer by kind, so renaming it in the legend keeps the button working.
+  ReferenceKind::tag(layer, QString::fromLatin1(ReferenceKind::kRiver));
   LayerOps::applyLegendCrsLabel(layer);
   if (!project->addMapLayer(layer, true)) {
     delete layer;

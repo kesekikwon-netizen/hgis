@@ -6,6 +6,7 @@
 #include <limits>
 #include <unordered_set>
 
+#include <QFileInfo>
 #include <QScopeGuard>
 
 #include <gdal.h>
@@ -125,6 +126,19 @@ OGRGeometry* geomFromWkb(const QByteArray& wkb) {
   return g;
 }
 
+// Why an area cannot hold trenches; empty when it can.
+QString areaProblemOf(const OGRGeometry* area) {
+  if (!area || area->IsEmpty())
+    return QStringLiteral("조사구역 면을 읽지 못했습니다. 조사구역을 다시 그리거나 선택하세요.");
+  const OGRwkbGeometryType gt = wkbFlatten(area->getGeometryType());
+  if (gt != wkbPolygon && gt != wkbMultiPolygon)
+    return QStringLiteral("조사구역이 면(폴리곤)이 아니어서 시굴격자를 놓을 수 없습니다.");
+  if (!area->IsValid())
+    return QStringLiteral("조사구역 경계가 스스로 겹치거나 꼬여 있어(유효하지 않은 도형) 시굴격자를 놓을 수 "
+                          "없습니다. 꼭짓점을 고쳐 경계를 바로잡은 뒤 다시 적용하세요.");
+  return {};
+}
+
 QByteArray wkbFromGeom(OGRGeometry* g) {
   QByteArray out;
   if (!g)
@@ -213,20 +227,23 @@ PickedArea pickAutoFillArea(const std::vector<SurveyPoly>& features,
   return out;
 }
 
-std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb) {
+std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb, QString* reasonOut) {
   std::vector<Cell> out;
-  if (areaWkb.isEmpty() || !validSpec(spec))
-    return out;
+  if (reasonOut) reasonOut->clear();
+  const auto fail = [reasonOut](const QString& why) {
+    if (reasonOut) *reasonOut = why;
+    return std::vector<Cell>{};
+  };
+  if (areaWkb.isEmpty())
+    return fail(QStringLiteral("조사구역이 없습니다. 조사구역을 먼저 그리거나 선택하세요."));
+  if (!validSpec(spec))
+    return fail(QStringLiteral("트렌치 규격이 맞지 않습니다. 폭은 2 m 이하, 길이는 20 m 이하, 둑은 0 m 이상이어야 합니다."));
   const double w = spec.trenchWidth;
   const double len = spec.trenchLength;
   const double balk = spec.balkWidth;
   Geometry area(geomFromWkb(areaWkb));
-  if (!area || area->IsEmpty())
-    return out;
-  const OGRwkbGeometryType gt = wkbFlatten(area->getGeometryType());
-  if ((gt != wkbPolygon && gt != wkbMultiPolygon) || !area->IsValid()) {
-    return out;
-  }
+  if (const QString problem = areaProblemOf(area.get()); !problem.isEmpty())
+    return fail(problem);
 
   OGREnvelope env;
   area->getEnvelope(&env);
@@ -270,14 +287,14 @@ std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb) {
   const double stepV = len + balk;
   const double countU = (uMax - uMin) / stepU;
   const double countV = (vMax - vMin) / stepV;
+  const QString tooMany = QStringLiteral("구역에 비해 트렌치 간격이 좁아 칸 수가 한도를 넘습니다. 둑(간격)을 키우세요.");
   if (!std::isfinite(countU) || !std::isfinite(countV) || countU < 0.0 || countV < 0.0 ||
       countU > double(kMaxCells) - 2.0 || countV > double(kMaxCells) - 2.0)
-    return out;
+    return fail(tooMany);
   const long long nu = static_cast<long long>(countU) + 2;
   const long long nv = static_cast<long long>(countV) + 2;
-  if (nu * nv > static_cast<long long>(kMaxCells)) {
-    return out;
-  }
+  if (nu * nv > static_cast<long long>(kMaxCells))
+    return fail(tooMany);
 
   auto collect = [&]() {
     int n = 1;
@@ -369,6 +386,9 @@ std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb) {
   };
 
   out = collect();
+  if (out.empty())
+    return fail(QStringLiteral("현재 규격과 방향으로는 구역 안에 들어가는 트렌치가 없습니다. 구역이 좁거나 "
+                               "짧으면 회전이나 규격을 바꿔 보세요."));
   return out;
 }
 
@@ -433,10 +453,8 @@ RatioFill buildForTargetRatio(const QByteArray& areaWkb, double targetPct, doubl
   }
 
   Geometry area(geomFromWkb(areaWkb));
-  if (!area || area->IsEmpty() ||
-      (wkbFlatten(area->getGeometryType()) != wkbPolygon &&
-       wkbFlatten(area->getGeometryType()) != wkbMultiPolygon) || !area->IsValid()) {
-    best.error = QStringLiteral("유효한 조사구역 면을 찾지 못했습니다.");
+  if (const QString problem = areaProblemOf(area.get()); !problem.isEmpty()) {
+    best.error = problem;
     return best;
   }
   const double areaM2 = OGR_G_Area(OGRGeometry::ToHandle(area.get()));
@@ -510,6 +528,20 @@ double totalArea(const std::vector<Cell>& cells) {
   return sum;
 }
 
+bool cellsValid(const std::vector<Cell>& cells, QString* errorOut) {
+  if (errorOut) errorOut->clear();
+  const auto fail = [errorOut](const QString& message) {
+    if (errorOut) *errorOut = message;
+    return false;
+  };
+  if (cells.empty() || cells.size() > kMaxCells)
+    return fail(QStringLiteral("기록할 시굴격자가 없거나 개수가 너무 많습니다."));
+  for (const Cell& cell : cells)
+    if (!validCell(cell))
+      return fail(QStringLiteral("시굴격자 규격과 도형이 일치하지 않습니다. 폭은 최대 2 m, 길이는 최대 20 m입니다."));
+  return true;
+}
+
 bool writeGpkg(const QString& gpkgPath, const QString& layerName, const std::vector<Cell>& cells,
                const QString& authid, QString* errorOut) {
   if (errorOut) errorOut->clear();
@@ -520,11 +552,8 @@ bool writeGpkg(const QString& gpkgPath, const QString& layerName, const std::vec
   // Validate everything before opening a write connection or deleting anything.
   if (gpkgPath.isEmpty() || layerName.isEmpty())
     return fail(QStringLiteral("GPKG 경로와 레이어 이름이 필요합니다."));
-  if (cells.empty() || cells.size() > kMaxCells)
-    return fail(QStringLiteral("기록할 시굴격자가 없거나 개수가 너무 많습니다."));
-  for (const Cell& cell : cells)
-    if (!validCell(cell))
-      return fail(QStringLiteral("시굴격자 규격과 도형이 일치하지 않습니다. 폭은 최대 2 m, 길이는 최대 20 m입니다."));
+  if (!cellsValid(cells, errorOut))
+    return false;
   OGRSpatialReference srs;
   if (srs.SetFromUserInput(authid.toUtf8().constData()) != OGRERR_NONE)
     return fail(QStringLiteral("시굴격자 작업 좌표계를 읽지 못했습니다."));
@@ -615,13 +644,18 @@ bool writeGpkg(const QString& gpkgPath, const QString& layerName, const std::vec
 }
 
 bool clearLayer(const QString& gpkgPath, const QString& layerName, QString* errorOut) {
+  if (errorOut) errorOut->clear();
+  if (gpkgPath.isEmpty() || layerName.isEmpty() || !QFileInfo::exists(gpkgPath))
+    return true;  // no file yet -> nothing to clear
   GDALAllRegister();
-  if (gpkgPath.isEmpty() || layerName.isEmpty())
-    return true;
   GDALDataset* ds = static_cast<GDALDataset*>(GDALOpenEx(
       gpkgPath.toUtf8().constData(), GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr));
-  if (!ds)
-    return true;  // no file yet -> nothing to clear
+  if (!ds) {
+    // The file is there but cannot be written: nothing was cleared.
+    if (errorOut)
+      *errorOut = QStringLiteral("조사 파일을 열 수 없어 기존 시굴격자를 지우지 못했습니다.");
+    return false;
+  }
   OGRLayer* lyr = ds->GetLayerByName(layerName.toUtf8().constData());
   bool ok = true;
   if (lyr) {
@@ -639,7 +673,11 @@ bool clearLayer(const QString& gpkgPath, const QString& layerName, QString* erro
         break;
       }
     }
-    lyr->SyncToDisk();
+    if (lyr->SyncToDisk() != OGRERR_NONE && ok) {
+      ok = false;
+      if (errorOut)
+        *errorOut = QStringLiteral("기존 시굴격자 지우기를 파일에 기록하지 못했습니다.");
+    }
   }
   GDALClose(ds);
   return ok;

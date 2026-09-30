@@ -151,13 +151,7 @@ KaFileBrowserPanel::KaFileBrowserPanel(QWidget* parent) : QFrame(parent) {
 
   m_btnUp = makeBtn(QStringLiteral("상위"), QStringLiteral("btnBrowseUp"),
                     QStringLiteral("상위 폴더로 한 단계 이동합니다"));
-  m_btnUp->setStyleSheet(
-      QStringLiteral("QToolButton#btnBrowseUp { "
-                     "background-color: #E0F2FE; color: #0284C7; "
-                     "border: 1px solid #BAE6FD; border-radius: 6px; "
-                     "padding: 2px 6px; font-weight: 600; } "
-                     "QToolButton#btnBrowseUp:hover { "
-                     "background-color: #BAE6FD; border-color: #7DD3FC; color: #0369A1; }"));
+  // Its accent-tinted face lives in ka-hgis.qss (QFrame#filesCard QToolButton#btnBrowseUp).
   connect(m_btnUp, &QToolButton::clicked, this, &KaFileBrowserPanel::goUp);
 
   m_pathBar1 = new QHBoxLayout();
@@ -231,18 +225,8 @@ void KaFileBrowserPanel::fitShortcutFonts(int width) {
       b->setFont(f);
       b->setMinimumWidth(0);
       b->setMaximumWidth(each);
-      if (b->objectName() == QLatin1String("btnBrowseUp")) {
-        b->setStyleSheet(
-            QStringLiteral("QToolButton#btnBrowseUp { "
-                           "background-color: #E0F2FE; color: #0284C7; "
-                           "border: 1px solid #BAE6FD; border-radius: 6px; "
-                           "padding: 2px 6px; font-weight: 600; font-size: %1px; } "
-                           "QToolButton#btnBrowseUp:hover { "
-                           "background-color: #BAE6FD; border-color: #7DD3FC; color: #0369A1; }")
-                .arg(px));
-      } else {
-        b->setStyleSheet(QStringLiteral("font-size: %1px;").arg(px));
-      }
+      // Only the fitted size is local; colours come from the application sheet.
+      b->setStyleSheet(QStringLiteral("font-size: %1px;").arg(px));
     }
   };
   const int inner = qMax(40, width - 16);

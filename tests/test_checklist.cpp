@@ -1,5 +1,8 @@
 #include <QtTest>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -79,8 +82,19 @@ void TestKaHgis::cleanupTestCase() {}
 void TestKaHgis::loadRules() {
   ChecklistEngine e;
   QVERIFY2(e.loadRules(rulesFile()), qPrintable(rulesFile()));
-  QCOMPARE(e.ruleCount(), 21);
+  // The count follows the JSON file; adding a rule must not break unrelated tests.
+  QFile json(rulesFile());
+  QVERIFY(json.open(QIODevice::ReadOnly));
+  const QJsonArray rules = QJsonDocument::fromJson(json.readAll()).object().value(QStringLiteral("rules")).toArray();
+  QCOMPARE(e.ruleCount(), int(rules.size()));
+  QVERIFY2(e.unsupportedRuleIds().isEmpty(), qPrintable(e.unsupportedRuleIds().join(QLatin1Char(','))));
   const auto results = e.evaluate(ProjectStateBuilder::empty());
+  QSet<QString> ids;
+  for (const auto& x : results) {
+    QVERIFY2(!ids.contains(x.id), qPrintable(x.id));
+    ids.insert(x.id);
+    QVERIFY2(!x.fixKo.isEmpty() && !x.basisKo.isEmpty(), qPrintable(x.id));
+  }
   bool sawCrs = false;
   for (const auto& x : results) {
     if (x.id != QLatin1String("CRS_PROJECT_SET")) continue;
@@ -280,7 +294,19 @@ void TestKaHgis::fromProject_composedUserSheet_layoutExistsTrue() {
   QVERIFY(st.value(QStringLiteral("layout_exists:feature_plan")).toBool());
   QVERIFY(st.value(QStringLiteral("layout_exists:survey_area_map")).toBool());
   QVERIFY(!st.value(QStringLiteral("layout_exists:section")).toBool());
-  QVERIFY(st.value(QStringLiteral("layout_exists:feature_detail")).toBool());
+  // A 1:2000-ish site sheet is not an individual feature drawing.
+  QVERIFY(!st.value(QStringLiteral("layout_exists:feature_detail")).toBool());
+  QVERIFY(st.value(QStringLiteral("sheet_covers_targets")).toBool());
+
+  // 6. Zoom the same sheet to one feature at 1:100: the detail drawing passes, but the
+  //    sheet no longer holds the whole survey area (warn only; the errors still pass).
+  map->zoomToExtent(QgsRectangle(200050.0, 450050.0, 200080.0, 450080.0));
+  map->setScale(100.0);
+  const QJsonObject detail = ProjectStateBuilder::fromProject(&proj);
+  QVERIFY(detail.value(QStringLiteral("layout_exists:feature_detail")).toBool());
+  QVERIFY(detail.value(QStringLiteral("layout_exists:site_location")).toBool());
+  QVERIFY(detail.value(QStringLiteral("layout_exists:feature_plan")).toBool());
+  QVERIFY(!detail.value(QStringLiteral("sheet_covers_targets")).toBool());
 }
 
 void TestKaHgis::test_uncomposed_user_sheet_rejected() {
@@ -597,6 +623,27 @@ void TestKaHgis::challenge3_isComposed_zeroAreaPolygon() {
 
   const bool composed3C = LayoutService::isComposedStudioSheet(&proj);
   qDebug() << "[CHALLENGE 3C] isComposedStudioSheet with NULL geometry feature:" << composed3C;
+
+  // Whatever the sheet check says, the checklist must block degenerate survey data.
+  const QJsonObject degenerate = ProjectStateBuilder::fromProject(&proj);
+  QVERIFY2(!degenerate.value(QStringLiteral("geometries_valid")).toBool(true) ||
+               !degenerate.value(QStringLiteral("geometries_nonzero_area")).toBool(true) ||
+               !degenerate.value(QStringLiteral("geometries_nonempty")).toBool(true),
+           "a point-collapsed feature_poly must fail a geometry rule");
+  for (QgsVectorLayer* layer : {emptyGeomLayer, nullGeomLayer})
+    layer->setCustomProperty(QStringLiteral("ka_hgis/layer_key"), QStringLiteral("feature_poly"));
+  const QJsonObject emptyShapes = ProjectStateBuilder::fromProject(&proj);
+  QVERIFY(!emptyShapes.value(QStringLiteral("geometries_nonempty")).toBool(true));
+  ChecklistEngine engine;
+  QVERIFY(engine.loadRules(rulesFile()));
+  bool blocked = false;
+  for (const auto& r : engine.evaluate(emptyShapes)) {
+    if (r.id == QLatin1String("GEOMETRY_NOT_EMPTY")) {
+      blocked = !r.passed && r.severity == QLatin1String("error");
+      QCOMPARE(r.targets.size(), 2);
+    }
+  }
+  QVERIFY2(blocked, "empty and NULL geometries must block submission");
 }
 
 void TestKaHgis::challenge4_isComposed_nanInfExtentsNegativeScales() {
@@ -723,7 +770,8 @@ void TestKaHgis::challenge5_isComposed_customNamedLayoutsAndMultipleMaps() {
 
   // Second map item: main survey map without "ka_map" ID, with real survey data
   auto* mapMain = new QgsLayoutItemMap(lyDual);
-  mapMain->setId(QStringLiteral("main_survey_map"));
+  // The studio names its main frame ka_map; an empty overview placed first must not hide it.
+  mapMain->setId(QStringLiteral("ka_map"));
   mapMain->attemptSetSceneRect(QRectF(55.0, 10.0, 150.0, 100.0));
   mapMain->setLayers(QList<QgsMapLayer*>{sa});
   mapMain->zoomToExtent(QgsRectangle(200000.0, 450000.0, 200100.0, 450100.0));
@@ -732,6 +780,7 @@ void TestKaHgis::challenge5_isComposed_customNamedLayoutsAndMultipleMaps() {
 
   const bool composedDual = LayoutService::isComposedStudioSheet(&proj, QStringLiteral("dual_map_sheet"));
   qDebug() << "[CHALLENGE 5B] Dual-map layout (empty overview first, composed main second) -> isComposed:" << composedDual;
+  QVERIFY2(composedDual, "the ka_map frame decides, not the empty overview inset");
 }
 
 void TestKaHgis::challenge6_projectState_featurePlanWithoutActualFeatures() {
@@ -790,6 +839,9 @@ void TestKaHgis::challenge6_projectState_featurePlanWithoutActualFeatures() {
   const bool fpPassedWithNullGeom = st6B.value(QStringLiteral("layout_exists:feature_plan")).toBool();
   qDebug() << "[CHALLENGE 6B] NULL geometry in feature_poly -> fpCount:" << st6B.value(QStringLiteral("feature_poly_count")).toInt()
            << "layout_exists:feature_plan:" << fpPassedWithNullGeom;
+  // A feature without a shape cannot be shown on the sheet, and it is itself an error.
+  QVERIFY2(!fpPassedWithNullGeom, "a NULL-geometry feature must not satisfy feature_plan");
+  QVERIFY(!st6B.value(QStringLiteral("geometries_nonempty")).toBool(true));
 }
 
 void TestKaHgis::challenge7_projectState_siteLocationWithoutSurveyArea() {
@@ -845,6 +897,16 @@ void TestKaHgis::challenge7_projectState_siteLocationWithoutSurveyArea() {
   const int saCount7B = st7B.value(QStringLiteral("survey_area_count")).toInt();
   const bool siteLoc7B = st7B.value(QStringLiteral("layout_exists:site_location")).toBool();
   qDebug() << "[CHALLENGE 7B] Point feature in '조사구역' -> saCount:" << saCount7B << "layout_exists:site_location:" << siteLoc7B;
+  // Identity is ka_hgis/layer_key; a Korean title alone is not a survey area.
+  QCOMPARE(saCount7B, 0);
+  QVERIFY(!siteLoc7B);
+
+  // Keyed as survey_area, the point is a symbol: both survey-shape rules fail.
+  ptSa->setCustomProperty(QStringLiteral("ka_hgis/layer_key"), QStringLiteral("survey_area"));
+  const QJsonObject keyed = ProjectStateBuilder::fromProject(&proj);
+  QCOMPARE(keyed.value(QStringLiteral("survey_area_count")).toInt(), 1);
+  QVERIFY(!keyed.value(QStringLiteral("survey_is_polygon")).toBool());
+  QVERIFY(keyed.value(QStringLiteral("has_abstract_marker")).toBool());
 }
 
 void TestKaHgis::challenge8_isComposed_autoGeneratedTemplateBypass() {
@@ -889,6 +951,11 @@ void TestKaHgis::challenge8_isComposed_autoGeneratedTemplateBypass() {
            << st.value(QStringLiteral("layout_exists:survey_area_map")).toBool();
   qDebug() << "[CHALLENGE 8] ProjectStateBuilder st.layout_exists:site_location:"
            << st.value(QStringLiteral("layout_exists:site_location")).toBool();
+  // Auto templates the user never composed pass nothing.
+  QVERIFY(!isComposedSaMap);
+  QVERIFY(!isComposedSiteLoc);
+  QVERIFY(!st.value(QStringLiteral("layout_exists:survey_area_map")).toBool());
+  QVERIFY(!st.value(QStringLiteral("layout_exists:site_location")).toBool());
 }
 
 #include "test_checklist.moc"

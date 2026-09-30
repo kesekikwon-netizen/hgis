@@ -1,0 +1,169 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Strata theme tokens and ribbon fold",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "app",
+      "label": "KaApplication"
+    },
+    {
+      "id": "theme",
+      "label": "KaTheme"
+    },
+    {
+      "id": "sheet",
+      "label": "KaThemeSheet"
+    },
+    {
+      "id": "ribbon",
+      "label": "KaBeginnerRibbon"
+    }
+  ],
+  "phases": [
+    {
+      "id": "boot",
+      "label": "Boot",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "qss",
+      "label": "Tokens to QSS",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "fold",
+      "label": "One-row fold",
+      "fromCol": 4,
+      "toCol": 5
+    }
+  ],
+  "mainPath": [
+    "boot",
+    "apply",
+    "tokens",
+    "sheet",
+    "overflow",
+    "plan"
+  ],
+  "nodes": [
+    {
+      "id": "boot",
+      "lane": "app",
+      "col": 0,
+      "type": "external",
+      "label": "app boot",
+      "sublabel": "KaApplication.cpp:742-743",
+      "width": 120
+    },
+    {
+      "id": "apply",
+      "lane": "theme",
+      "col": 1,
+      "type": "frontend",
+      "label": "KaTheme::apply",
+      "sublabel": "KaTheme.cpp:207-223",
+      "width": 140
+    },
+    {
+      "id": "tokens",
+      "lane": "theme",
+      "col": 2,
+      "type": "frontend",
+      "label": "tokensFor / DisplayOptions",
+      "sublabel": "KaTheme.cpp:131-135 · Fonts.cpp:37-42",
+      "width": 210
+    },
+    {
+      "id": "sheet",
+      "lane": "sheet",
+      "col": 3,
+      "type": "backend",
+      "label": "completeStyleSheet @name@",
+      "sublabel": "KaThemeSheet.cpp:61-87, 133-141",
+      "width": 190
+    },
+    {
+      "id": "overflow",
+      "lane": "ribbon",
+      "col": 4,
+      "type": "frontend",
+      "label": "chips + updateOverflow",
+      "sublabel": "KaBeginnerRibbon.cpp:148-183, 313-393",
+      "width": 200
+    },
+    {
+      "id": "plan",
+      "lane": "ribbon",
+      "col": 5,
+      "type": "backend",
+      "label": "planGroups (static)",
+      "sublabel": "KaBeginnerRibbon.cpp:263-311",
+      "width": 160
+    }
+  ],
+  "edges": [
+    {
+      "from": "boot",
+      "to": "apply",
+      "label": "apply(&app)"
+    },
+    {
+      "from": "apply",
+      "to": "tokens",
+      "label": "tokens()"
+    },
+    {
+      "from": "tokens",
+      "to": "sheet",
+      "label": "applicationStyleSheet()",
+      "variant": "emphasis"
+    },
+    {
+      "from": "sheet",
+      "to": "overflow",
+      "label": "setStyleSheet; resize / show"
+    },
+    {
+      "from": "overflow",
+      "to": "plan",
+      "label": "priority, pinned, widths"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Was",
+      "items": [
+        "sky0..sky6 + gloss gradient tokens only",
+        "Chip label shrank to 9 px per chip",
+        "Fold loop inline in updateOverflow"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Now",
+      "items": [
+        "Semantic tokens; legacy names alias them",
+        "One floor ribbonMinFontSize; tooltip keeps full label",
+        "planGroups is static, testable; overflow button keeps room",
+        "Fonts: Malgun Gothic default; bundled Plex opt-in (KA_HGIS_BUNDLED_FONTS=1)"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Keep",
+      "items": [
+        "Unknown @token@ falls back to embedded sheet",
+        "DisplayOptions opt-in; default stays stock Strata",
+        "Secondary text 12 px, chips 12 px bold (2026-09-30 legibility)"
+      ]
+    }
+  ]
+}

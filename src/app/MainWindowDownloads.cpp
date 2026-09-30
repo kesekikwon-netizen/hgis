@@ -1,8 +1,11 @@
 #include "KaCrashGuard.h"
+#include "core/KaLogExcept.h"
 #include "MainWindow.h"
 #include "KaReferenceDownloadJob.h"
+#include "core/BasemapDsm.h"
 #include "core/DemDownloadService.h"
 #include "core/LayerOps.h"
+#include "core/ReferenceStorage.h"
 #include <QDir>
 #include <QFileInfo>
 #include <QProgressDialog>
@@ -60,10 +63,18 @@ void MainWindow::startFileDownload(const QString& title,
     // fails after a layer has started using the file.
     result.retainFiles();
     try {
+      const auto before = ReferenceStorage::referencedFolderNames(QgsProject::instance());
       apply(result);
+      // Remember which earlier download folder this registration replaced; it is
+      // removed only at the next save point (see pruneRetiredReferenceFolders).
+      auto& ledger = ReferenceStorage::sessionLedger();
+      const auto after = ReferenceStorage::referencedFolderNames(QgsProject::instance());
+      if (window && result.storage && after.contains(QFileInfo(result.storage->path()).fileName()))
+        ledger.adopt(result.storage->path(), window->m_surveyPath);
+      ledger.supersede(before, after);
       if (window) window->syncThematicButtons();
     } catch (...) {
-      KaCrashGuard::logLine(QStringLiteral("[except] app/MainWindowDownloads.cpp:64"));
+      KA_LOG_EXCEPT();
       if (window) window->notify(Notice::Warning, title + QStringLiteral(" 표시 실패"),
           QStringLiteral("자료를 받았지만 지도에 표시하지 못했습니다. 현재 작업을 저장한 뒤 파일함에서 다시 열어 주세요.\n%1").arg(result.rasterUri));
     }
@@ -79,8 +90,35 @@ void MainWindow::startFileDownload(const QString& title,
   QgsApplication::taskManager()->addTask(job);
 }
 
+QString MainWindow::referenceDownloadFolder(const QString& title) {
+  const QString folder = ReferenceStorage::surveyFolder(m_surveyPath);
+  if (folder.isEmpty()) {
+    // Without a survey the files would land in a temporary folder that the saved
+    // survey never carries along. Ask for the survey first instead of guessing.
+    notify(Notice::Info, title,
+           QStringLiteral("먼저 「새 조사」를 만들거나 조사를 여세요. 받은 자료는 조사 폴더에 저장해 "
+                          "다음에도 인터넷 없이 열 수 있게 합니다."));
+  }
+  return folder;
+}
+
+void MainWindow::pruneRetiredReferenceFolders() {
+  // Called when the saved survey equals the current project: a folder replaced
+  // by a newer download in this session is no longer used by the saved survey.
+  auto& ledger = ReferenceStorage::sessionLedger();
+  const auto referenced = ReferenceStorage::referencedFolderNames(QgsProject::instance());
+  for (const QString& folder : ledger.removable(referenced, m_surveyPath)) {
+    if (ReferenceStorage::removeGeneratedFolder(folder)) {
+      ledger.forget(folder);
+      KaCrashGuard::logLine(QStringLiteral("[reference] 바뀐 다운로드 폴더 정리 — %1").arg(folder));
+    }
+  }
+}
+
 void MainWindow::startDemDownload() {
   if (!m_canvas) return;
+  const QString dir = referenceDownloadFolder(QStringLiteral("DEM"));
+  if (dir.isEmpty()) return;
   QgsRectangle extent = m_canvas->extent();
   const QgsCoordinateReferenceSystem wgs(QStringLiteral("EPSG:4326"));
   try {
@@ -90,7 +128,6 @@ void MainWindow::startDemDownload() {
     notify(Notice::Warning, QStringLiteral("DEM"), QStringLiteral("화면의 좌표 범위를 계산하지 못했습니다. 조사 좌표계를 확인하고 다시 실행하세요."));
     return;
   }
-  const QString dir = m_surveyPath.isEmpty() ? QDir::tempPath() : QFileInfo(m_surveyPath).absolutePath();
   const QString target = QDir(dir).filePath(QStringLiteral("DEM.tif"));
   const QPointer<MainWindow> window(this);
   startFileDownload(QStringLiteral("DEM"), [extent, target](QgsFeedback* feedback, const std::function<bool()>& cancelled) {
@@ -104,7 +141,10 @@ void MainWindow::startDemDownload() {
     }
     result.retainFiles();
     for (QgsMapLayer* layer : QgsProject::instance()->mapLayers()) {
-      if (layer->name() != QLatin1String("DEM") || layer->source() != result.rasterUri) continue;
+      // By identity (ka_hgis/reference_kind = dem), not by the title "DEM".
+      if (!BasemapDsm::isDemLayer(layer) || layer->source() != result.rasterUri) continue;
+      // This button downloads Copernicus GLO-30, a surface model: the legend says so (F062).
+      BasemapDsm::labelCopernicus(layer);
       const QgsRectangle coverage = layer->extent(); // downloaded raster stays in WGS84
       layer->setCustomProperty(QStringLiteral("ka_hgis/dem_cover_wgs84"), QStringLiteral("%1,%2,%3,%4")
           .arg(coverage.xMinimum(), 0, 'f', 9).arg(coverage.yMinimum(), 0, 'f', 9)

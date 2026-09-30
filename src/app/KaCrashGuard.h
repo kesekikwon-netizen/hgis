@@ -20,4 +20,19 @@ public:
 
   // session.log·crash-*.log·crash-*.dmp 위치를 한 줄로 안내한다.
   static QString dumpHint();
+
+  // Crash files are kept, but not forever: install() keeps only the newest dumps and logs.
+  // A dump can hold memory contents, so the cap also limits what a shared laptop carries.
+  static constexpr int kKeepCrashDumps = 5;
+  static constexpr int kKeepCrashLogs = 20;
+
+  // Removes the oldest crash-*.dmp / crash-*.log in dir beyond the given counts.
+  // File names carry the timestamp (crash-YYYYMMDD-HHMMSS), so name order is age order.
+  // Returns how many files were removed. Other files in the folder are never touched.
+  static int pruneCrashFiles(const QString& dir, int keepDumps = kKeepCrashDumps,
+                             int keepLogs = kKeepCrashLogs);
+
+  // MINIDUMP_TYPE flags used for crash dumps (0 off Windows). Thread info and stacks only:
+  // no indirectly referenced heap, which could carry keys or account values.
+  static unsigned long miniDumpTypeFlags();
 };

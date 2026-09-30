@@ -1,5 +1,7 @@
 #include "app/KaStatusBar.h"
 
+#include "app/KaChip.h"
+
 #include <QComboBox>
 #include <QFrame>
 #include <QLabel>
@@ -29,6 +31,18 @@ QString shortCrs(const QString& authId) {
 KaStatusBar::KaStatusBar(QWidget* parent) : QStatusBar(parent) {
   setObjectName(QStringLiteral("kaStatusBar"));
   setSizeGripEnabled(false);
+
+  // Strata chrome: snap state and unsaved count as chips, left of the readout. The tool
+  // chip the window inserts at index 0 lands before them.
+  m_snapChip = new KaChip(QStringLiteral("자석 끔"), KaChip::Tone::Neutral, this);
+  m_snapChip->setObjectName(QStringLiteral("snapChip"));
+  m_snapChip->setGlyph(QStringLiteral("snap"));
+  m_snapChip->setToolTip(QStringLiteral("그리기 도구 줄의 자석 설정에서 바꿉니다."));
+  addPermanentWidget(m_snapChip);
+  m_unsavedChip = new KaChip(QString(), KaChip::Tone::Warn, this);
+  m_unsavedChip->setObjectName(QStringLiteral("unsavedChip"));
+  m_unsavedChip->setToolTip(QStringLiteral("아직 파일에 쓰지 않은 편집입니다. 「저장」(Ctrl+S)으로 씁니다."));
+  addPermanentWidget(m_unsavedChip);
 
   m_xy = new QLabel(this);
   m_xy->setObjectName(QStringLiteral("xyReadout"));
@@ -110,6 +124,30 @@ KaStatusBar::KaStatusBar(QWidget* parent) : QStatusBar(parent) {
 
   setWorkCrs(QStringLiteral("EPSG:5186"));
   setUploadCrs(QStringLiteral("EPSG:5179"));
+  syncChipVisibility();
+}
+
+void KaStatusBar::setSnapState(bool on) {
+  m_snapKnown = true;
+  m_snapOn = on;
+  m_snapChip->setText(on ? QStringLiteral("자석 켬") : QStringLiteral("자석 끔"));
+  m_snapChip->setTone(on ? KaChip::Tone::Accent : KaChip::Tone::Neutral);
+  syncChipVisibility();
+}
+
+void KaStatusBar::setUnsavedCount(int features, bool projectDirty) {
+  m_unsavedWanted = features > 0 || projectDirty;
+  if (features > 0)
+    m_unsavedChip->setText(QStringLiteral("저장 안 됨 %1건").arg(features));
+  else if (projectDirty)
+    m_unsavedChip->setText(QStringLiteral("저장 안 됨"));
+  m_unsavedChip->setTone(KaChip::Tone::Warn);
+  syncChipVisibility();
+}
+
+void KaStatusBar::syncChipVisibility() {
+  if (m_snapChip) m_snapChip->setVisible(m_mapReadoutVisible && m_snapKnown);
+  if (m_unsavedChip) m_unsavedChip->setVisible(m_surveyChipsVisible && m_unsavedWanted);
 }
 
 void KaStatusBar::setCoordinate(double x, double y) {
@@ -158,13 +196,17 @@ void KaStatusBar::setMapInstrumentsVisible(bool visible) {
 }
 
 void KaStatusBar::setInstrumentsVisible(bool mapReadout, bool scale) {
+  m_mapReadoutVisible = mapReadout;
   for (QWidget* widget : std::as_const(m_mapOnly))
     widget->setVisible(mapReadout);
   for (QWidget* widget : std::as_const(m_scaleOnly))
     widget->setVisible(scale);
+  syncChipVisibility();
 }
 
 void KaStatusBar::setCrsChipsVisible(bool visible) {
+  m_surveyChipsVisible = visible;
   for (QWidget* widget : std::as_const(m_surveyOnly))
     widget->setVisible(visible);
+  syncChipVisibility();
 }

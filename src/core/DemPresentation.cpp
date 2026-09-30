@@ -1,4 +1,5 @@
 #include "DemPresentation.h"
+#include "DemAnalyzer.h"
 #include "DemColorRampLegend.h"
 
 #include <QCryptographicHash>
@@ -135,6 +136,26 @@ void DemPresentation::followCanvas(QgsRasterLayer* layer, QgsMapCanvas* canvas) 
       emit guardedCanvas->messageEmitted(QStringLiteral("DEM"), QStringLiteral("화면 좌표를 변환하지 못해 이전 색띠를 유지합니다."), Qgis::MessageLevel::Warning);
     }
   });
+}
+
+bool DemPresentation::sampleRange(QgsRasterLayer* layer, const QgsRectangle& extent, double* minimum,
+                                  double* maximum) {
+  if (!layer || !layer->isValid() || layer->providerType() != QLatin1String("gdal") || !minimum || !maximum ||
+      extent.isEmpty() || !extent.isFinite())
+    return false;
+  std::vector<float> z;
+  DemAnalyzer::RasterInfo info;
+  if (!DemAnalyzer::readFloatWindow(layer->source(), extent.xMinimum(), extent.yMinimum(), extent.xMaximum(),
+                                    extent.yMaximum(), 128, &z, &info, nullptr))
+    return false;
+  bool found = false;
+  for (const float value : z) {
+    if (!std::isfinite(value) || (info.hasNoData && value == info.noData)) continue;
+    *minimum = found ? std::min(*minimum, double(value)) : double(value);
+    *maximum = found ? std::max(*maximum, double(value)) : double(value);
+    found = true;
+  }
+  return found;
 }
 
 QString DemPresentation::reliefSource(QgsRasterLayer* layer,
