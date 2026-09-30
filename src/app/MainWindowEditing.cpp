@@ -1451,8 +1451,22 @@ void MainWindow::clearDrawnFeaturesOfCurrentLayer() {
           QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
     return;
 
-  vl->selectAll();
-  deleteSelectedFeatures();
+  // 확인 창에 적은 이 레이어만 비운다. deleteSelectedFeatures()는 모든 레이어의 선택을 지워서,
+  // 다른 레이어에 남아 있던 선택까지 말없이 함께 지운다.
+  const QgsFeatureIds ids = vl->allFeatureIds();
+  QString error;
+  if (!LayerOps::runEditCommand(vl, QStringLiteral("도형 모두 지우기"), [&]() {
+        return vl->deleteFeatures(ids);
+      }, &error)) {
+    notify(Notice::Warning, QStringLiteral("도형 삭제 확인"), vl->name() + QStringLiteral(": ") + error);
+    return;
+  }
+  QgsProject::instance()->setDirty(true);
+  if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
+  if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
+  refreshWorkPanel();
+  statusBar()->showMessage(
+      QStringLiteral("도형 %1개를 지웠습니다. Ctrl+Z로 복원할 수 있습니다.").arg(ids.size()), 6000);
 #endif
 }
 

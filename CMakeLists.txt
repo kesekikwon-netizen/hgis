@@ -856,6 +856,7 @@ if(KA_HGIS_BUILD_TESTS)
     referenceGroupMenuRemovesEveryRowAndCtrlZRestores
     emptyGroupDeleteKeyRemovesRowAndCtrlZRestores
     ctrlZRestoresVertexEditsAndGroupedFeatureDeletion
+    clearDrawnFeaturesLeavesOtherLayersSelectionAlone
     layerContextMenu_usesClickedRowAndLeavesSourceIntact
     layerContextMenu_moveToBottomPreservesRegisteredLayer
     mapContextMenu_onlyOffersRecordEditingForSurveyFeatures)

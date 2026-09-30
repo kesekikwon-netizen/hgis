@@ -2796,6 +2796,65 @@ private slots:
     QVERIFY(previousFound);
   }
 
+  // 「그린 도형 모두 지우기…」는 확인 창에 적은 레이어만 비운다. 선택 도구를 내려놓아도
+  // 선택은 남으므로, 다른 레이어에서 골라 둔 도형이 함께 지워지면 안 된다.
+  void clearDrawnFeaturesLeavesOtherLayersSelectionAlone() {
+    const QString path = makeSurvey(QStringLiteral("clear_drawn_scope"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* project = QgsProject::instance();
+    auto* area = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
+    QString error;
+    auto* poly = LayerOps::ensureDomainLayer(project, path, QStringLiteral("feature_poly"),
+                                             QStringLiteral("유구 면"), &error);
+    QVERIFY2(area && poly && area != poly, qPrintable(error));
+    QVERIFY(poly->startEditing());
+    QgsFeature drawn(poly->fields());
+    drawn.setGeometry(QgsGeometry::fromRect(QgsRectangle(190020, 560020, 190040, 560040)));
+    QVERIFY(poly->addFeature(drawn));
+    QVERIFY(poly->commitChanges());
+    QCOMPARE(area->featureCount(), 1);
+    QCOMPARE(poly->featureCount(), 1);
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    QVERIFY(tree && canvas);
+    window.show();
+    QApplication::setActiveWindow(&window);
+    poly->selectAll();
+    const QgsFeatureIds polySelection = poly->selectedFeatureIds();
+    QCOMPARE(polySelection.size(), 1);
+    tree->setCurrentLayer(area);
+    QApplication::processEvents();
+    QCOMPARE(tree->currentLayer(), area);
+    QCOMPARE(poly->selectedFeatureIds(), polySelection);
+
+    QString asked;
+    QTimer answer;
+    connect(&answer, &QTimer::timeout, [&] {
+      if (auto* question = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+        asked = question->text();
+        question->button(QMessageBox::Yes)->click();
+      }
+    });
+    answer.start(20);
+    QVERIFY(QMetaObject::invokeMethod(&window, "clearDrawnFeaturesOfCurrentLayer", Qt::DirectConnection));
+    answer.stop();
+    QVERIFY2(asked.contains(area->name()) && asked.contains(QStringLiteral("도형 1개")), qPrintable(asked));
+    QCOMPARE(area->featureCount(), 0);
+    QVERIFY2(poly->featureCount() == 1, "확인 창에 적지 않은 다른 레이어의 도형까지 지워졌습니다.");
+    QCOMPARE(poly->selectedFeatureIds(), polySelection);
+
+    QApplication::setActiveWindow(&window);
+    canvas->setFocus();
+    QApplication::processEvents();
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY2(area->featureCount() == 1, "Ctrl+Z 한 번으로 비운 레이어가 돌아오지 않았습니다.");
+    QCOMPARE(poly->featureCount(), 1);
+  }
+
   void layerContextMenu_usesClickedRowAndLeavesSourceIntact() {
     const QString path = makeSurvey(QStringLiteral("menu_target"));
     QVERIFY(!path.isEmpty());
