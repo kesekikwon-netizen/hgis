@@ -1,67 +1,83 @@
-# ka-hgis — Claude Code 작업 지침
+# Strata (ka-hgis) 작업 지침
 
-이 파일은 Claude Code가 세션마다 읽는 프로젝트 규칙이다. 제품 규칙의 정본은 `AGENTS.md`이고, 아래에서 그대로 가져온다. 이 파일은 Claude Code에서 그 규칙을 **어떻게 실행하는지**만 덧붙인다.
+사용자는 개발자가 아닌 고고학 현장 전문가다. 요청은 짧은 한국어 문장, 증상("안 돼요"), 스크린샷으로 온다. 전역 `~/.claude/CLAUDE.md` 다섯 줄(결론과 다음 할 일을 첫 줄에 쉬운 한국어로, 증상은 수정 요청, 빌드·테스트 결과와 함께 보고, 요청한 것만, 화면에서 확인할 것 한 가지)을 그대로 따른다.
 
-@AGENTS.md
+## superpowers 사용 방식 (스킬 지침보다 우선한다)
 
-<harness_override>
-2026-09-29 사용자 결정: 이 저장소는 Claude Code로 개발한다. 위 AGENTS.md의 Cursor 전용 문장은 Claude Code 세션에서 다음처럼 바꿔 읽는다. 제품 불변식·GIS 규칙·검증 기준·Git 규칙은 그대로다.
+1. 요청마다 알맞은 superpowers 스킬을 스스로 불러 쓴다. 새 기능이나 동작 변경은 superpowers:brainstorming, 증상·버그 신고와 스크린샷은 superpowers:systematic-debugging, 코드를 고칠 때는 superpowers:test-driven-development, 끝났다고 말하기 전에는 superpowers:verification-before-completion을 쓴다. 글자·라벨·색 하나 바꾸기 같은 한두 줄 수정은 스킬 없이 바로 고치고 빌드로 확인한다.
+2. 사용자는 개발자가 아니다. "해줘/고쳐줘"라는 요청 자체가 진행 승인이다. 설계 승인, 접근법 고르기, 스펙·계획 검토, 실행 방식 선택, 브랜치 마무리 선택 같은 기술 결정은 묻지 말고 가장 안전한 쪽을 스스로 골라 끝까지 진행하고, 고른 것을 보고에 한 줄로 적는다. 멈추고 묻는 것은 앱이 현장에서 어떻게 보이고 동작해야 하는지(제품 질문)가 정말 불분명할 때만, 쉬운 한국어로 한 번에 묶어 묻는다.
+3. docs/superpowers 스펙·계획 문서는 여러 단계짜리 큰 기능에서만 쓰고 한국어로 쓴다. 테스트를 붙일 수 없는 UI 코드는 지우지 말고 빌드와 가장 가까운 기존 테스트로 확인한다. ctest 기준선 실패 4개(workflow_engine, cadastral, storage_safety, save_open_portable)는 원래 실패하므로 묻지 말고 진행한다. 끝나면 현재 브랜치에 커밋까지만 하고 push·merge·PR은 사용자가 요청할 때만 한다.
+4. 새 기능에서 현장 쓰임새가 두 갈래 이상으로 갈리면(예: 번호 매기는 규칙, 화면에 보이는 위치·모양, 지우거나 고칠 때 처리) 코드를 쓰기 전에 한 번만 묻는다. 한 번에 4개 이하, 질문마다 추천 답을 붙인다. 코드가 지금 어떻게 동작하는지, 파일 위치, 좌표계 같은 사실은 직접 찾아보고 묻지 않는다. 사용자가 "추천대로"라고 하면 남은 질문도 추천 답으로 정하고 바로 만든다. 버그 수정과 작은 변경은 묻지 않는다.
+5. 진행 중 안내와 마지막 보고는 모두 한국어로 쓴다.
 
-- "Cursor Agent", "Cursor Runtime" → Claude Code. "Task subagents" → `.claude/agents/`의 서브에이전트.
-- "Grok 4.7 고정 모델" → 모델은 사용자가 `/model`로 고른다. 모델을 임의로 바꾸라고 권하지 않는다.
-- `.cursor/hooks.json` stop 훅 → `.claude/settings.json`의 Stop 훅(`.claude/hooks/dev-loop.mjs`). 같은 네 도구 기록을 확인한다.
-- "second harness 금지" 항목은 Claude Code를 막지 않는다. OpenCode·Sisyphus·숨은 자동 push는 여전히 금지다.
-- USER-level `%USERPROFILE%\.cursor\mcp.json`의 `hgis_graft` → 프로젝트 `.mcp.json`의 `hgis_graft`. 도구 이름은 `mcp__hgis_graft__graft_find_code` 등이다.
-- `.agents/skills/*` 스킬 → `.claude/skills/`의 같은 이름 스킬이 원본 SKILL.md를 읽게 연결한다. 원본은 `.agents/skills/`에만 고친다.
-</harness_override>
+How the superpowers skills fit this repo:
+- Worktrees: the desktop app already runs each session in `A:\qgis\.claude\worktrees\<name>` on a `claude/<name>` branch. Never create another worktree. In `A:\qgis` itself, work in place without asking.
+- Baseline: do not run the whole suite as a baseline. Build, then run only the ctest groups for the area you will touch.
+- brainstorming: do not offer the visual companion; describe screens in words.
+- finishing-a-development-branch: no option menu. Commit on the session branch (rule 3); merging into main and pushing follow the Git section.
+- Code review: after a multi-file change, run superpowers:requesting-code-review (or the built-in /code-review) before committing; fix real findings inside the requested change and mention the rest in one line.
+- TDD: put tests into the existing QtTest files and targets (see Tests). Do not add a new test framework.
+- Files in docs/superpowers dated 2026-09-13 or earlier are history, not current requirements.
 
-## 세션 시작
+## security-guidance 결과 처리
 
-비자명한 제품·GIS 작업 전에 다음을 읽는다. 최근 결정이 과거 문서를 이기기 때문이다.
+- 턴이 끝날 때나 커밋할 때 보안 검토 결과가 돌아오면, 이 앱(Windows 데스크톱, 서버·웹 화면 없음)에 실제로 해당하는 것만 이번 변경 안에서 고치고, 해당 없는 것은 고치지 말고 보고에 한 줄로 적는다. 보안 판단을 사용자에게 묻지 않는다.
+- The project review context is `.claude/claude-security-guidance.md`. Run `git commit` in the Bash tool: the commit review only watches Bash, and the PowerShell tool turns git's CRLF warnings into errors.
 
-1. `.codex/NOW.md` 맨 위 몇 항목 (현재 상태, 최근 현장 제약)
-2. `docs/HANDOFF.md` (제품 정본)
-3. 작업에 해당하는 스킬: GIS 동작은 `ka-hgis-gis`, 조판·정합 회귀는 `ka-hgis-sheet`, 인트라넷 받기는 `heritage-intranet`, 화면 확인은 `ka-hgis-verify`
+## Product rules (do not break)
 
-설명·조사·리뷰 요청은 읽기만 하고 보고한다. 적용·구현·수정·fix 같은 동사가 있을 때만 코드를 바꾼다.
+- Standalone C++20/Qt 6 Widgets app linking OSGeo4W qgis-dev (`qgis_core`, `qgis_gui`). Never fork QGIS or reimplement PROJ, GDAL, rendering or CRS transforms. Keep the GPLv2+ About notices (docs/adr/0001-standalone-cpp-qgis-libs.md).
+- Domain layers: keys `survey_area`, `feature_poly`, `feature_line`, `section_line`, `control_points`, `artifact_point`. Identity is the `ka_hgis/layer_key` property; Korean titles are labels only. `LayerOps::ensureDomainLayer` is the only path that adds a domain layer. Never auto-add empty domain layers or add a layer just because a GPKG table exists. `loadSurveyLayers` must never call `removeAllMapLayers()`.
+- Legend groups 조사 데이터 / 참조 지도. Basemaps, WMS/XYZ, soil, geology and aligned rasters are reference maps, never survey data. Cadastral layers (downloaded 5 km layer and the VWorld picture) stay at the tree root, outside 참조 지도. VWorld cadastral is a picture and cannot be snapped to.
+- CRS: work CRS is EPSG:5187 (default) or 5186; never assume 5179. Submission = EPSG:5179 SHP + PDF + MANIFEST.sha256 through `ExportService`, written to files only, not added to the map. Checklist errors block submission. DXF is not a submit path.
+- Keys: never hardcode a VWorld or personal key. `loadApiKey` order: `%LOCALAPPDATA%\ka-hgis\ka-hgis-vworld.ini` → `HKCU\Software\ka-hgis` → env `VWORLD_API_KEY` → gitignored `config/secrets.ini`. Satellite: keyed api.vworld.kr WMTS first, xdworld only without a key. Cadastral WMS: `crs=EPSG:3857` + KEY, never send DOMAIN, CRS candidates 4326→3857→900913 only. An expired key returns HTTP 200 with an XML error: blank tiles, nothing logged.
+- Crash rules (each caused 0xc0000005): keep `qgis/parallel_rendering=false` (KaApplication.cpp). Never stopRendering/clearCache or re-refresh while WMS/XYZ tiles load (skip when `isDrawing()`). No blocking GetMap or `canvas->refresh()` during a draw; use `LayerOps::refreshCanvasIfIdle`. Layout: no QGIS rubber band, no `setLayers({})`, no `refresh()`; call `m_toolSelect->setLayout`.
+- Field behavior the user already decided: startup shows the home screen only (no auto-restore of survey, basemap or workspace); no autosave (save only on 저장/Ctrl+S or the close prompt, unsaved shows " *"); New/Save-As dialogs start in `preferredSurveyDir()`, never the Desktop; never modify the user's original survey data. Name Strata, one-row ribbon, Malgun Gothic UI font: do not reopen.
+- Regressions: for a familiar-sounding symptom read docs/ERROR_REGRESSION.md first; after fixing a new bug add a row there plus a regression test. For map, CRS, layer-order or layout bugs collect project/layer CRS, canvas layer order, scale and provider URI before editing.
+- QGIS edit buffer: unsaved features have negative ids; a multipolygon in a single-POLYGON GPKG table silently becomes an invalid zero-area ring (store pieces as separate features); undo stacks are per layer.
 
-## 셸과 명령 (Windows)
+## Code map
 
-Claude Code의 Bash 도구는 Windows에서 Git Bash로 돈다. 저장소 스크립트는 PowerShell이므로 다음 형태로 부른다. `dev-env.ps1`은 같은 PowerShell 세션 안에서 dot-source해야 SDK 경로가 살아 있다.
+- `src/app` (UI): MainWindow is split over 16 files (`MainWindow.cpp` + `MainWindow{Align,Cadastral,ContextMenus,Downloads,Editing,Erase,Export,Files,Offline,Overlay,Ribbon,Session,SurveyContour,Topographic,Undo}.cpp`), `KaApplication` (startup, `--smoke-quit`, rendering settings), Ka* widgets and map tools, `KaDrawingStudio` (도면), `KaSectionDrawingStudio` (단면도).
+- `src/core` (static lib `ka_core`): LayerOps, BasemapOps, SurveyStorage/SurveySession/SurveyProjectFactory, ExportService, LayoutService, SectionLayoutService, ChecklistEngine (+ data/rules/drawing_checklist.v1.json), ProjectStateBuilder, Heritage*, Topographic*, Cadastral*, PolygonErase, FeaturePick.
+- Hotspots, keep edits narrow: KaDrawingStudio.cpp, MainWindow.cpp, LayerOps.cpp, BasemapOps.cpp.
+- CMake source lists are explicit (no GLOB): add new files to `add_library(ka_core …)` or `add_executable(ka-hgis …)`. data/ files are copied next to the exe at build time, so a data/ edit needs a ka-hgis rebuild.
 
-```bash
-# 빌드 (configure + Release build)
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-now.ps1
-# 특정 테스트
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ". .\scripts\dev-env.ps1; ctest --test-dir build -C Release -R '^survey_contour$' --output-on-failure"
-# 전체 테스트
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ". .\scripts\dev-env.ps1; ctest --test-dir build -C Release --output-on-failure"
-# 시작·UI·지도 변경 뒤 스모크
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-ka-hgis.ps1 --smoke-quit
-# clangd 선언/정의 (저장소 상대 파일, 1부터 줄, 1부터 UTF-16 열)
-python scripts/clangd-definition.py src/core/ExportService.cpp 149 46
-# Archify
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/archify.ps1 validate <diagram.json>
-# CMake/SDK가 바뀐 뒤 컴파일 DB 재생성
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/gen-compile-commands.ps1
-# 바뀐 줄만 clang-tidy
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/clang-tidy-changed.ps1
-```
+## Build, test, run (Bash tool, from the worktree root)
 
-MSVC 빌드는 수 분 걸린다. 빌드·전체 ctest처럼 출력이 긴 일은 `build-verifier` 서브에이전트에 맡기거나 백그라운드로 돌리고, 끝난 결과만 읽는다. ctest는 기본 16개 병렬이라 부하로만 실패하는 시험이 있다. 실패는 `-j1`로 다시 돌려 확인한다.
+- First build in a fresh worktree (no build/CMakeCache.txt yet; configures and builds everything, about 8 min): `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-now.ps1`
+- Later builds, only the targets you need:
+  `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '. ./scripts/dev-env.ps1; $ErrorActionPreference="Continue"; cmake --build build --config Release --parallel --target ka-hgis <test-target>; exit $LASTEXITCODE'`
+  On out-of-memory errors (C1060, MSB4018, MSB4166, 0x800705AF) rerun it with `-- /m:1 /p:CL_MPCount=2` after the targets.
+- Tests: `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '. ./scripts/dev-env.ps1; $ErrorActionPreference="Continue"; ctest --test-dir build -C Release -j4 --output-on-failure -R "^(name1|name2)$"; exit $LASTEXITCODE'`
+  Run the groups for the area you changed (docs/testing-map.md); results are in build/test-logs/<name>.txt. Full suite (same command without -R) only when asked or before a release. Never plain `ctest`: dev-env sets 16-way parallelism, and perf_engine, heritage_download_retry, topographic_browser, survey_contour and startup_splash then flake; rerun a failure alone before calling it a regression.
+- Baseline at a6eb712 is 67/71. Known failures: workflow_engine `shapeEditing_livesInsideSelectTool`, cadastral `referenceLayerHasOutlineAndOptionalJibunLabels`, storage_safety `persistWorkspace_writeExceptionKeepsPreviousGeneration`, save_open_portable `oldVersionSurveysStillOpen` (its sample gpkg is missing).
+- New tests: register with `ka_add_qtest(<name> <target>)`. A new function in tests/test_save_open.cpp runs only if its name is added to a `ka_add_qtest_filter(save_open_* …)` list in CMakeLists.txt. Tests write only to QTemporaryDir, use QStandardPaths test mode, and never use the app's org/app name.
+- Smoke (app starts and quits, expect exit 0):
+  `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '. ./scripts/dev-env.ps1; $p = Start-Process build/Release/ka-hgis.exe -ArgumentList "--smoke-quit" -WorkingDirectory build/Release -Wait -PassThru; exit $p.ExitCode'`
+  Do not rely on `scripts/run-ka-hgis.ps1 --smoke-quit`: ka-hgis.exe is a GUI exe, PowerShell does not wait for it, and the script returns 0 even if the app never ran.
+- Never start build/Release/ka-hgis.exe raw: the OSGeo DLLs are not on PATH and the agent job object kills it.
 
-## 규칙이 있는 곳
+## After every successful app build (standing request)
 
-- C++ 변경의 완료 조건(Graft·clangd·Archify·CTest)과 코드 스타일은 `.claude/rules/cpp-done.md`에 있다. `src/`·`tests/`의 C++를 읽을 때 올라온다.
-- 반드시 지킬 금지 규칙은 `.claude/hooks/guard.mjs`가 도구 실행 전에 막는다. 막는 것: 강제 push, 숨은 자동 push, 저장소에 키 모양 GUID 쓰기, `src/`의 `removeAllMapLayers()`, 사용자 계정·앱 데이터 수정·삭제. 확인을 받는 것: 포터블·배포·서명, 실행 중인 앱 종료, PowerShell의 커밋·되돌리기 계열 git.
-- 절차는 스킬에 있다: 빌드·시험 `/hgis-build`, 워크트리 작업을 바탕화면 아이콘에 연결 `/desktop-connect`.
+Run the smoke, then repoint `C:\Users\kwonyoungin1\Desktop\Strata (개발).lnk` with WScript.Shell: TargetPath `<worktree>\scripts\start-ka-hgis.vbs`, WorkingDirectory `<worktree>`, IconLocation `<worktree>\build\Release\ka-hgis.exe,0`, Description `Strata 개발 빌드 (워크트리 <name>)`. Then call `SHChangeNotify(0x08000000)` so the icon refreshes, and tell the user which worktree it now opens. 「고고학 전용 HGIS.lnk」 runs `A:\qgis\build`: touch it only when asked. If the app is open, rename the running exe before rebuilding; close it only if its title has no " *".
 
-## 응답
+## Git (single branch: main = GitHub kwonyoungin11/hgis)
 
-- 한국어로 답한다. 코드·경로·식별자는 영어 그대로 둔다.
-- 결론을 먼저 쓰고, 근거(파일:줄, 명령과 결과)를 붙인다. 확인하지 못한 것은 확인하지 못했다고 구분한다.
-- 커밋·푸시·포터블 생성(`publish-desktop.ps1`, `make-portable.ps1`)은 사용자가 요청할 때만 한다.
+- Commit message: `type(scope): 한국어 요약`, a Korean body with one line of test results, and the Co-Authored-By trailer.
+- Work that exists only in a worktree is unsaved: deleting a desktop session wipes it. Commit verified work on the session branch (rule 3) and say it is saved there.
+- "커밋" from the user: commit, then fast-forward A:\qgis main to it (`git -C A:/qgis merge --ff-only <sha>`); if main has moved, rebase the session branch onto main and rerun the tests first. "푸시" or "커밋 푸시": also `git push origin main`.
+- Never force-push. Never run scripts/auto-git-push.ps1 or scripts/commit.ps1. Never commit secrets, *.gpkg/*.qgz field data or a portable's config folder. docs/COMMIT_STATUS.md is stale; leave it.
+- After a lost-work report, check `git -C A:/qgis for-each-ref refs/snapshots` first (a global hook snapshots uncommitted worktree state).
 
-## 개인 설정
+## Portable (only when asked)
 
-이 PC에만 해당하는 메모는 `CLAUDE.local.md`(git 제외)에 둔다.
+「포터블」 or 「키 전부 포함 포터블」: reconfigure first (`cmake -S . -B build`) so the app shows the current commit, build, then run `scripts/make-portable.ps1 -OutDir "C:\Users\kwonyoungin1\Desktop\Strata-포터블-개인용-<YYYY-MM-DD>" -IncludeLocalCredentials` from a temporary UTF-8-BOM copy placed in scripts/ (the file has Korean text and no BOM), passing the Korean path from Bash. OutDir must not exist yet. Check with `scripts/verify-portable-pack.ps1 -OutDir <out>` and `<out>\ka-hgis.exe --smoke-quit` with OSGeo4W removed from PATH. A portable is about 1.1 GB and C: is nearly full: say so first. Tell the user the config folder holds passwords in plain text.
+
+## Windows pitfalls
+
+- PowerShell tool: native stderr (git CRLF warnings, qWarning) becomes a terminating error. Run repo scripts as `powershell.exe -NoProfile -ExecutionPolicy Bypass …` from the Bash tool, and set `$ErrorActionPreference="Continue"` after dot-sourcing dev-env.ps1 (it sets Stop).
+- A .ps1 that contains Korean needs a UTF-8 BOM; PowerShell 5.1 reads BOM-less files as cp949.
+- moc cannot parse `R"(...)"` raw strings in Q_OBJECT sources or headers they include (silent AutoMoc or link failures); use concatenated "..." literals.
+- In Git Bash `>nul` creates a stray file named nul; use /dev/null.
+- Stale docs: docs/HANDOFF.md, docs/README.md and TEST_INFRA.md still mention D:\hgis, D:\OSGeo4W, C:\CMake, AGENTS.md, .codex/NOW.md, publish-desktop after every build and a Codex section. Real paths: repo A:\qgis, OSGeo4W A:\OSGeo4W (QGIS 4.3 master, Qt 6.11), CMake C:\Program Files\CMake\bin, VS 2022 BuildTools. This file wins over those docs.
