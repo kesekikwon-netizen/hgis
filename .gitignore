@@ -42,7 +42,18 @@ Desktop.ini
 !.agents/skills/heritage-intranet/
 !.agents/skills/ka-hgis-sheet/
 !.agents/skills/ka-hgis-verify/
-.claude/
+# Claude Code: share project config, keep per-PC state local
+.claude/*
+!.claude/settings.json
+!.claude/claude-security-guidance.md
+!.claude/rules/
+!.claude/skills/
+!.claude/agents/
+!.claude/hooks/
+.claude/hooks/state/
+.claude/settings.local.json
+.claude/worktrees/
+CLAUDE.local.md
 .repowise/
 .mcp.json
 # Per-checkout Graft paths. scripts/setup-dev-paths.ps1 writes this file.
