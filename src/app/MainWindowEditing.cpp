@@ -188,7 +188,8 @@ void MainWindow::startSelectTool() {
             [this](int count) {
               if (count == 2) {
                 notify(Notice::Info, QStringLiteral("도형 2개 선택됨"),
-                       QStringLiteral("상단의 [폴리곤 나누기]를 누르면 겹치는 구간을 자동으로 분할합니다."));
+                       QStringLiteral("[겹친 곳 지우기]는 큰 도형에서 작은 도형 자리를 지우고, "
+                                      "[폴리곤 나누기]는 겹친 자리를 새 도형으로 나눕니다."));
               }
             });
     connect(m_featureSelectTool, &KaFeatureSelectTool::requestMapContextMenu, this, &MainWindow::onMapContextMenu);
@@ -826,9 +827,18 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
     // Read before the form: a modal dialog can let another capture overwrite it.
     const QString repairNotice = m_captureTool ? m_captureTool->lastRepairNotice() : QString();
 
+    // 같은 레이어의 도형 위에 겹쳐 그렸으면 그 자리에서 「겹친 곳 지우기」를 고를 수 있다.
+    // 지웠으면 그린 도형은 없어졌으므로 이름·번호를 묻지 않는다.
+    bool erased = false;
+    if (layer->geometryType() == Qgis::GeometryType::Polygon) {
+      m_lastDrawnLayer = layer;
+      m_lastDrawnFid = feat.id();
+      erased = offerEraseWithDrawnShape(layer, feat.id());
+    }
+
     // The name/number form comes only after the shape is in (never while drawing).
     // 연속 그리기 skips it; the record can be entered later from the shape's 속성.
-    const bool offerForm = KaFeatureFormDialog::canOffer(layer);
+    const bool offerForm = !erased && KaFeatureFormDialog::canOffer(layer);
     if (offerForm && !m_continuousDraw) {
       statusBar()->showMessage(
           QStringLiteral("도형은 넣었습니다. 이름·번호를 적거나 Esc로 건너뛰세요."), 0);
@@ -878,17 +888,19 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
       m_canvas->setFocus(Qt::OtherFocusReason);
     }
 
-    const long long n = static_cast<long long>(layer->featureCount());
-    statusBar()->showMessage(
-        QStringLiteral("도형을 넣었습니다 (%1, %2개). Ctrl+Z로 되돌리기 · 「저장」(Ctrl+S)으로 파일에 씁니다%3")
-            .arg(layer->name())
-            .arg(n)
-            .arg(offerForm && m_continuousDraw ? QStringLiteral(" · 이름·번호는 나중에 속성에서")
-                                               : QString())
-            // [pkg A] F080: missing kind/period is counted here, after the shape (no popup while drawing).
-            + (LayerOps::layerKeyOf(layer) == QLatin1String("feature_poly") ? missingAttributeCounterText()
-                                                                              : QString()),
-        8000);
+    if (!erased) {
+      const long long n = static_cast<long long>(layer->featureCount());
+      statusBar()->showMessage(
+          QStringLiteral("도형을 넣었습니다 (%1, %2개). Ctrl+Z로 되돌리기 · 「저장」(Ctrl+S)으로 파일에 씁니다%3")
+              .arg(layer->name())
+              .arg(n)
+              .arg(offerForm && m_continuousDraw ? QStringLiteral(" · 이름·번호는 나중에 속성에서")
+                                                 : QString())
+              // [pkg A] F080: missing kind/period is counted here, after the shape (no popup while drawing).
+              + (LayerOps::layerKeyOf(layer) == QLatin1String("feature_poly") ? missingAttributeCounterText()
+                                                                                : QString()),
+          8000);
+    }
     // Told after the shape is finished, never while drawing.
     if (!repairNotice.isEmpty())
       notify(Notice::Warning, QStringLiteral("면을 고쳐 넣었습니다"), repairNotice);
@@ -1485,8 +1497,21 @@ void MainWindow::clearDrawnFeaturesOfCurrentLayer() {
           QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
     return;
 
-  vl->selectAll();
-  deleteSelectedFeatures();
+  // 확인 창에 적은 이 레이어만 비운다. deleteSelectedFeatures()는 모든 레이어의 선택을 지워서,
+  // 다른 레이어에 남아 있던 선택까지 말없이 함께 지운다.
+  const QgsFeatureIds ids = vl->allFeatureIds();
+  QString error;
+  if (!LayerOps::runEditCommand(vl, QStringLiteral("도형 모두 지우기"), [&]() {
+        return vl->deleteFeatures(ids);
+      }, &error)) {
+    notify(Notice::Warning, QStringLiteral("도형 삭제 확인"), vl->name() + QStringLiteral(": ") + error);
+    return;
+  }
+  QgsProject::instance()->setDirty(true);
+  if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
+  if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
+  statusBar()->showMessage(
+      QStringLiteral("도형 %1개를 지웠습니다. Ctrl+Z로 복원할 수 있습니다.").arg(ids.size()), 6000);
 #endif
 }
 

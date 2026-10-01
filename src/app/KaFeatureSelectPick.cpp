@@ -7,6 +7,7 @@
 #include "KaEditTolerance.h"
 #include "KaPickLayers.h"
 #include "KaVertexEditTool.h"
+#include "core/FeaturePick.h"
 #include "core/KaLogExcept.h"
 
 #include <qgscoordinatetransform.h>
@@ -87,15 +88,19 @@ bool KaFeatureSelectTool::deleteActivePick() { return deleteActiveVertex() || re
 
 bool KaFeatureSelectTool::cutOutActivePiece() { return !m_activePiece.isHole() && removeActivePiece(true); }
 
-void KaFeatureSelectTool::installKeyShortcut(QWidget* window, QAction* selectAction) {
+void KaFeatureSelectTool::installKeyShortcut(QWidget* window, QAction* selectAction,
+                                             std::function<bool()> keyOwnedElsewhere) {
   if (!window || !selectAction) return;
+  // One key, one action: a second QAction or QShortcut on A in this window would make Qt report
+  // an ambiguous shortcut, and then neither fires.
+  if (window->findChild<QAction*>(QStringLiteral("actSelectShapeKey"))) return;
   selectAction->setToolTip(
       QStringLiteral("그린 도형을 선택합니다 (A 또는 Ctrl+1). 단추를 다시 누르면 이동으로 돌아갑니다"));
   auto* key = new QAction(QStringLiteral("도형선택"), window);
   key->setObjectName(QStringLiteral("actSelectShapeKey"));
   key->setShortcut(QKeySequence(Qt::Key_A));
   key->setShortcutContext(Qt::WindowShortcut);
-  QObject::connect(key, &QAction::triggered, window, [window, selectAction]() {
+  QObject::connect(key, &QAction::triggered, window, [window, selectAction, keyOwnedElsewhere]() {
     auto* canvas = window->findChild<QgsMapCanvas*>(QStringLiteral("mapCanvas"));
     if (!canvas || !canvas->isVisibleTo(window) || !selectAction->isEnabled()) return;
     // A letter typed into a field is text, never a tool change.
@@ -107,11 +112,14 @@ void KaFeatureSelectTool::installKeyShortcut(QWidget* window, QAction* selectAct
       return;
     QgsMapTool* tool = canvas->mapTool();
     if (qobject_cast<KaFeatureSelectTool*>(tool)) return;  // already on: A never turns it off
-    if (tool && tool->inherits("KaMeasureMapTool")) {       // the tape keeps its own A (면적)
+    // Tools that read keys themselves get the key: the tape keeps its own A (면적), and
+    // 맞추기 (image alignment) is never left by a stray letter.
+    if (tool && (tool->inherits("KaMeasureMapTool") || tool->inherits("KaAlignMapTool"))) {
       QKeyEvent press(QEvent::KeyPress, Qt::Key_A, Qt::NoModifier);
       tool->keyPressEvent(&press);
       return;
     }
+    if (keyOwnedElsewhere && keyOwnedElsewhere()) return;
     // A half-drawn shape is never dropped by a stray key.
     if (const auto* capture = qobject_cast<KaCaptureMapTool*>(tool); capture && capture->hasSketch()) return;
     selectAction->trigger();
@@ -134,74 +142,16 @@ void KaFeatureSelectTool::selectAtPoint(const QgsPointXY& mapPt, bool addToSelec
     }
   }
 
-  // Every survey shape under the cursor, not just the first one of the top layer:
-  // lines and points by distance, then polygons by area so a pit inside a house wins.
-  // An inner piece of a polygon (a hole, or a part inside another part) is a hit of its own.
-  struct Hit {
-    QgsVectorLayer* layer = nullptr;
-    QgsFeatureId fid = FID_NULL;
-    int tier = 0;
-    double key = 0.0;
-    PolygonPieces::Piece piece;
-  };
-  QVector<Hit> hits;
-  const double mapTol = mCanvas->mapUnitsPerPixel() * KaEditTolerance::kFeaturePickPx;
-
-  for (QgsMapLayer* ml : kaPickLayers(mCanvas)) {
-    auto* vl = qobject_cast<QgsVectorLayer*>(ml);
-    if (!isPickableLayer(vl)) continue;
-
-    QgsCoordinateTransform xf;
-    const bool needXf = (mCanvas->mapSettings().destinationCrs() != vl->crs());
-    if (needXf) {
-      xf = QgsCoordinateTransform(mCanvas->mapSettings().destinationCrs(), vl->crs(),
-                                  QgsProject::instance()->transformContext());
-      xf.setBallparkTransformsAreAppropriate(true);
-    }
-
-    QgsPointXY layerPt = mapPt;
-    if (needXf) {
-      try {
-        layerPt = xf.transform(mapPt);
-      } catch (...) {
-        KA_LOG_EXCEPT();
-        continue;
-      }
-    }
-
-    const double layerTol = needXf ? (mapTol * (vl->crs().mapUnits() == Qgis::DistanceUnit::Degrees ? 0.00001 : 1.0)) : mapTol;
-    const QgsRectangle searchBox(layerPt.x() - layerTol, layerPt.y() - layerTol,
-                                 layerPt.x() + layerTol, layerPt.y() + layerTol);
-
-    QgsFeatureRequest req;
-    req.setFilterRect(searchBox);
-    QgsFeatureIterator it = vl->getFeatures(req);
-    QgsFeature f;
-    const QgsGeometry layerProbe = QgsGeometry::fromPointXY(layerPt);
-    const bool polygonLayer = vl->geometryType() == Qgis::GeometryType::Polygon;
-
-    while (it.nextFeature(f)) {
-      if (!f.hasGeometry() || f.geometry().isEmpty()) continue;
-      const QgsGeometry g = f.geometry();
-      if (polygonLayer) {
-        // Inside a hole nothing of the shape is under the cursor, yet the hole must be pickable.
-        if (const auto piece = PolygonPieces::innerPieceAt(g, layerPt, layerTol))
-          hits.append({vl, f.id(), 1, std::abs(PolygonPieces::outline(g, *piece).area()), *piece});
-        if (!g.contains(layerProbe) && g.distance(layerProbe) > layerTol) continue;
-        hits.append({vl, f.id(), 1, std::abs(g.area()), {}});
-      } else {
-        const double d = g.distance(layerProbe);
-        if (d > layerTol) continue;
-        hits.append({vl, f.id(), 0, d, {}});
-      }
-    }
-  }
-  std::stable_sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) {
-    return a.tier != b.tier ? a.tier < b.tier : a.key < b.key;
-  });
+  // Every shape under the cursor in pick order (core/FeaturePick): survey shapes before
+  // reference and cadastral ones, nearby lines and points, then the smallest polygon or inner
+  // piece (a hole, or a part inside another part) holding the click, then nearby outlines.
+  // Unsaved shapes (negative edit-buffer ids) and above-labels overlay layers are included.
+  const QList<FeaturePick::Hit> hits = FeaturePick::candidates(
+      kaPickLayers(mCanvas), mapPt, mCanvas->mapUnitsPerPixel() * KaEditTolerance::kFeaturePickPx,
+      mCanvas->mapSettings().destinationCrs(), QgsProject::instance()->transformContext());
 
   QList<Pick> candidates;
-  for (const Hit& hit : hits) candidates.append({hit.layer->id(), hit.fid, hit.piece});
+  for (const FeaturePick::Hit& hit : hits) candidates.append({hit.layer->id(), hit.fid, hit.piece});
   int pick = 0;
   const bool samePlace = allowCycle && !addToSelection && !candidates.isEmpty() &&
                          m_lastPickIndex >= 0 && candidates == m_lastPickCandidates &&
@@ -247,7 +197,9 @@ void KaFeatureSelectTool::selectAtPoint(const QgsPointXY& mapPt, bool addToSelec
   } else if (all.size() == 1) {
     emit statusMessage(QStringLiteral("수정점이 나왔습니다. 점을 끌어 옮기세요(Ctrl=자석). 점 우클릭은 삭제, 선 우클릭은 추가입니다."));
   } else if (all.size() == 2) {
-    emit statusMessage(QStringLiteral("도형 2개 선택됨 (%1, %2) — [폴리곤 나누기] 클릭 시 겹치는 구간이 자동 분할됩니다!").arg(all[0].layer->name(), all[1].layer->name()));
+    emit statusMessage(QStringLiteral("도형 2개 선택됨 (%1, %2) — [겹친 곳 지우기]는 큰 도형에서 작은 도형 자리를 지우고, "
+                                      "[폴리곤 나누기]는 겹친 자리를 새 도형으로 나눕니다.")
+                           .arg(all[0].layer->name(), all[1].layer->name()));
   } else {
     emit statusMessage(QStringLiteral("도형 %1개 선택됨").arg(all.size()));
   }

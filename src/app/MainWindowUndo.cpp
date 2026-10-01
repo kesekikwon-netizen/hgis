@@ -338,7 +338,8 @@ void MainWindow::undoMapAction() {
     fallbackTime = std::max(entry.seq, editHistory()->lastRecent(entry.commandId));
   }
   if (stackLayer && (fallback < 0 || stackTime >= fallbackTime)) {
-    if (LayerOps::undoLayerEdits(stackLayer)) {
+    // An edit that changed several layers at once (겹친 곳 지우기) goes back as one step.
+    if (undoLinkedEdit(stackLayer) || LayerOps::undoLayerEdits(stackLayer)) {
       project->setDirty(true);
       if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
       if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
@@ -459,7 +460,7 @@ void MainWindow::redoMapAction() {
   if (editingText() || m_isOpeningSurvey || m_closingWindow) return;
   auto* project = QgsProject::instance();
   if (auto* layer = newestRedoLayer()) {
-    if (LayerOps::redoLayerEdits(layer)) {
+    if (redoLinkedEdit(layer) || LayerOps::redoLayerEdits(layer)) {
       project->setDirty(true);
       if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
       if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);

@@ -45,6 +45,7 @@ Desktop.ini
 # Claude Code: share project config, keep per-PC state local
 .claude/*
 !.claude/settings.json
+!.claude/claude-security-guidance.md
 !.claude/rules/
 !.claude/skills/
 !.claude/agents/

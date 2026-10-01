@@ -8,6 +8,7 @@
 
 #include <QPointer>
 #include <QList>
+#include <functional>
 #include <optional>
 
 #include "core/PolygonPieces.h"
@@ -56,10 +57,14 @@ public:
   // Turns the picked inner part into a hole of the shape around it. False for a hole.
   bool cutOutActivePiece();
   bool hasActivePiece() const;
-  // A = 도형선택 from anywhere on the map. It never toggles the tool off, leaves the tape's
-  // own A alone and does not drop a half-drawn shape.
-  static void installKeyShortcut(QWidget* window, QAction* selectAction);
-  // Only survey data can be picked: reference maps and cadastral layers are read-only.
+  // A = 도형선택 from anywhere on the map: the one implementation of the key (MainWindow sends
+  // the physical A key here too when an input method hides Qt::Key_A). It never toggles the
+  // tool off, leaves the tape's own A alone, does nothing while 맞추기 (align) owns the keys or
+  // keyOwnedElsewhere() says so, and does not drop a half-drawn shape.
+  static void installKeyShortcut(QWidget* window, QAction* selectAction,
+                                 std::function<bool()> keyOwnedElsewhere = {});
+  // Survey data, which gets handles and inner pieces. Reference maps and cadastral layers are
+  // read-only: a click picks them only where no survey shape lies (core/FeaturePick).
   static bool isPickableLayer(const QgsVectorLayer* layer);
 
 signals:

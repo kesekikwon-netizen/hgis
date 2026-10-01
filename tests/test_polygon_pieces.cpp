@@ -4,10 +4,18 @@
 #include <QtTest>
 #include <QFile>
 
+#include "core/FeaturePick.h"
+#include "core/LayerOps.h"
 #include "core/PolygonPieces.h"
 
+#include <algorithm>
+
 #include <qgsapplication.h>
+#include <qgscoordinatereferencesystem.h>
 #include <qgsgeometry.h>
+#include <qgsproject.h>
+#include <qgsvectordataprovider.h>
+#include <qgsvectorlayer.h>
 
 namespace {
 using PolygonPieces::Piece;
@@ -105,6 +113,60 @@ private slots:
     const QgsGeometry noIsland = PolygonPieces::withoutPiece(g, Piece{1, 0});
     QCOMPARE(ringCount(noIsland), 2);
     QVERIFY(qFuzzyCompare(noIsland.area(), 2700.0));
+  }
+
+  void pickListKeepsSurveyShapesAndFindsHolesCutBeforeSaving() {
+    // The list 도형선택 cycles through (core/FeaturePick): survey shapes only where any lies
+    // under the click, and the hole of a shape changed in the edit buffer (not saved yet) is a
+    // pick of its own. A filter-rect request alone skips that shape when the click is in its hole.
+    QgsProject project;
+    auto* reference = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("참고 면"),
+                                         QStringLiteral("memory"));
+    LayerOps::markReferenceLayer(reference);
+    QgsFeature cover(reference->fields());
+    cover.setGeometry(QgsGeometry::fromPolygonXY({ring(199950, 449950, 200)}));
+    reference->dataProvider()->addFeature(cover);
+    project.addMapLayer(reference);
+    auto* layer = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("조사구역"),
+                                     QStringLiteral("memory"));
+    LayerOps::markSurveyLayer(layer, QStringLiteral("survey_area"));
+    QgsFeature area(layer->fields());
+    area.setGeometry(QgsGeometry::fromPolygonXY({ring(200010, 450010, 60)}));
+    layer->dataProvider()->addFeature(area);
+    project.addMapLayer(layer);
+    const QgsFeatureId outer = *layer->allFeatureIds().constBegin();
+    const QList<QgsMapLayer*> layers{reference, layer};
+    const auto list = [&](double x, double y) {
+      return FeaturePick::candidates(layers, QgsPointXY(x, y), 0.5,
+                                     QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")),
+                                     project.transformContext());
+    };
+    const auto hasReference = [&](const QList<FeaturePick::Hit>& hits) {
+      return std::any_of(hits.cbegin(), hits.cend(), [&](const FeaturePick::Hit& hit) { return hit.layer == reference; });
+    };
+
+    QList<FeaturePick::Hit> hits = list(200015, 450015);
+    QCOMPARE(hits.size(), 1);
+    QVERIFY(hits.first().layer == layer && hits.first().fid == outer && !hits.first().piece.isValid());
+    QVERIFY(list(200500, 450500).isEmpty());
+    hits = list(200120, 450120);  // nothing of the survey there: the reference shape may be picked
+    QCOMPARE(hits.size(), 1);
+    QVERIFY(hits.first().layer == reference);
+    QVERIFY(!FeaturePick::isSurveyLayer(reference));
+    QVERIFY(FeaturePick::isSurveyLayer(layer));
+
+    QVERIFY(layer->startEditing());
+    QgsGeometry cut = holed();
+    QVERIFY(layer->changeGeometry(outer, cut));
+    hits = list(200035, 450035);
+    QVERIFY2(!hits.isEmpty(), "the hole cut before saving was not found");
+    QVERIFY(hits.first().layer == layer && hits.first().fid == outer);
+    QCOMPARE(hits.first().piece, (Piece{0, 1}));
+    QVERIFY2(!hasReference(hits), "a survey shape lies under the click; the reference shape stays out of the list");
+    QVERIFY(FeaturePick::at(layers, QgsPointXY(200035, 450035), 0.5,
+                            QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")), project.transformContext())
+                .piece.isHole());
+    QVERIFY(layer->rollBack());
   }
 };
 

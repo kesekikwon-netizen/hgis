@@ -459,6 +459,9 @@ public:
   // topological writes QgsProject::setTopologicalEditing and ka_hgis/topological.
   static void applySnapSettings(QgsProject* project, const SnapSettings& settings);
   static SnapSettings readSnapSettings(const QgsProject* project);
+  // 면의 고리는 첫 점과 닫는 점이 같은 자리다. vertex 가 그 둘 중 하나면 짝의 번호를, 아니면 -1 을 준다.
+  // 구멍이 있는 면은 고리마다 따로 닫히므로 면 전체의 첫 점·끝 점으로 짝지으면 구멍이 깨진다.
+  static int ringClosingVertex(const QgsGeometry& geometry, int vertex);
   // Moves one vertex. If topological, also moves other features' vertices at the
   // same place (1 mm). Does not commit. Layer must already be editable.
   static bool applyVertexMove(QgsVectorLayer* layer, qint64 featureId, int vertex,

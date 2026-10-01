@@ -5,6 +5,7 @@
 #include "KaEditTolerance.h"
 #include "KaPickLayers.h"
 #include "KaVertexEditTool.h"
+#include "core/FeaturePick.h"
 #include "core/LayerOps.h"
 
 #include <qgsmapcanvas.h>
@@ -56,9 +57,7 @@ void KaFeatureSelectTool::refreshSelectedGeometry() {
 }
 
 bool KaFeatureSelectTool::isPickableLayer(const QgsVectorLayer* layer) {
-  if (!layer || !layer->isValid()) return false;
-  return !LayerOps::isReferenceOrBasemapLayer(layer) && !LayerOps::isCadastralLayer(layer) &&
-         !LayerOps::isReferenceLayer(layer);
+  return FeaturePick::isSurveyLayer(layer);
 }
 
 bool KaFeatureSelectTool::deleteActiveVertex() {

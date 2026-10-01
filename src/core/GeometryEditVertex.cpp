@@ -13,6 +13,7 @@
 #include <qgsproject.h>
 #include <qgsrectangle.h>
 #include <qgsvectorlayer.h>
+#include <qgsvertexid.h>
 
 namespace {
 // Shared vertices within this distance (map units, 1 mm in the metric work CRS) move together.
@@ -59,6 +60,17 @@ bool LayerOps::moveFeatureVertex(QgsVectorLayer* layer, qint64 featureId, int ve
     return false;
   }
   return true;
+}
+
+int LayerOps::ringClosingVertex(const QgsGeometry& geometry, int vertex) {
+  if (geometry.type() != Qgis::GeometryType::Polygon || !geometry.constGet()) return -1;
+  QgsVertexId id;
+  if (!geometry.vertexIdFromVertexNr(vertex, id)) return -1;
+  const int count = geometry.constGet()->vertexCount(id.part, id.ring);
+  if (count < 2) return -1;
+  if (id.vertex == 0) return vertex + count - 1;
+  if (id.vertex == count - 1) return vertex - (count - 1);
+  return -1;
 }
 
 bool LayerOps::applyVertexMove(QgsVectorLayer* layer, qint64 featureId, int vertex,
@@ -120,12 +132,8 @@ bool LayerOps::applyVertexMove(QgsVectorLayer* layer, qint64 featureId, int vert
     }
   } else {
     addHit(existing, vertex);
-    const QgsGeometry geom = existing.geometry();
-    const int count = geom.constGet() ? static_cast<int>(geom.constGet()->nCoordinates()) : 0;
-    if (geom.type() == Qgis::GeometryType::Polygon && count > 1) {
-      if (vertex == 0) addHit(existing, count - 1);
-      if (vertex == count - 1) addHit(existing, 0);
-    }
+    const int partner = ringClosingVertex(existing.geometry(), vertex);
+    if (partner >= 0) addHit(existing, partner);
   }
   if (!hits.contains(fid)) addHit(existing, vertex);
 

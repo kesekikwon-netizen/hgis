@@ -139,6 +139,8 @@ add_library(ka_core STATIC
   src/core/SubmitReadme.cpp
   src/core/LayoutService.cpp
   src/core/LayerOps.cpp
+  src/core/FeaturePick.cpp
+  src/core/PolygonErase.cpp
   src/core/BasemapOps.cpp
   src/core/LabelOps.cpp
   src/core/LayerTreeLabelStack.cpp
@@ -240,6 +242,8 @@ add_library(ka_core STATIC
   src/core/LayerTreeRecovery.h
   src/core/LayerTreePolicy.h
   src/core/GeometryEditOps.h
+  src/core/FeaturePick.h
+  src/core/PolygonErase.h
   src/core/KaPortableRuntime.h
   src/core/KaSessionLog.h
   src/core/LocationSearch.h
@@ -363,6 +367,7 @@ add_executable(ka-hgis
     src/app/MainWindowDownloads.cpp
     src/app/MainWindowExport.cpp
     src/app/MainWindowEditing.cpp
+    src/app/MainWindowErase.cpp
     src/app/MainWindowSession.cpp
     src/app/MainWindowTopographic.cpp
     src/app/MainWindowCadastral.cpp
@@ -1029,6 +1034,11 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_survey_scope_clip_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_survey_scope_clip_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(survey_scope_clip ka_survey_scope_clip_tests)
+  add_executable(ka_polygon_erase_tests tests/test_polygon_erase.cpp)
+  target_link_libraries(ka_polygon_erase_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_polygon_erase_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(polygon_erase ka_polygon_erase_tests)
+  set_tests_properties(polygon_erase PROPERTIES TIMEOUT 60)
   add_executable(ka_heritage_download_retry_tests tests/test_heritage_download_retry.cpp
     src/app/KaHeritageBrowser.cpp src/app/KaHeritageBrowser.h)
   target_link_libraries(ka_heritage_download_retry_tests PRIVATE ka_core Qt6::Test Qt6::WebEngineWidgets)
@@ -1368,9 +1378,17 @@ if(KA_HGIS_BUILD_TESTS)
     referenceGroupMenuRemovesEveryRowAndCtrlZRestores
     emptyGroupDeleteKeyRemovesRowAndCtrlZRestores
     ctrlZRestoresVertexEditsAndGroupedFeatureDeletion
+    clearDrawnFeaturesLeavesOtherLayersSelectionAlone
     layerContextMenu_usesClickedRowAndLeavesSourceIntact
     layerContextMenu_moveToBottomPreservesRegisteredLayer
     mapContextMenu_onlyOffersRecordEditingForSurveyFeatures)
+  ka_add_qtest_filter(save_open_erase ka_save_open_tests
+    eraseOverlap_cutsTheShapeUnderTheSelectedOneAndCtrlZRestores
+    eraseOverlap_acrossLayersUndoesAndRedoesTogether
+    eraseOverlap_severalShapesAskBeforeRemovingThem
+    eraseOverlap_secondPressUsesTheShapeJustDrawn
+    drawnShapeOnTopOffersEraseWhenFinished
+    selectTool_picksTheShapeDrawnOnTopAndKeyAStartsIt)
   ka_add_qtest_filter(save_open_roundtrip ka_save_open_tests
     saveAndReopen_keepsTreeGeometryAttributesAndStyle
     saveReopenSubmit_preservesWorkAndPackage
@@ -1408,7 +1426,7 @@ if(KA_HGIS_BUILD_TESTS)
     samplesOpenAsSurveys)
   set(KA_SAVE_OPEN_TESTS
     save_open_window save_open_topo save_open_drawing
-    save_open_edit save_open_roundtrip save_open_open
+    save_open_edit save_open_erase save_open_roundtrip save_open_open
     save_open_open_invalid save_open_commit save_open_saveas save_open_portable)
   set_tests_properties(${KA_SAVE_OPEN_TESTS} PROPERTIES TIMEOUT 180 RESOURCE_LOCK ka_save_open)
 

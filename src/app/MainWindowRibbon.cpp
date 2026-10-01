@@ -308,7 +308,9 @@ void MainWindow::buildMenus() {
   Q_UNUSED(btnSelect);
   m_actSelect->setCheckable(true);
   m_actSelect->setShortcut(QKeySequence(QStringLiteral("Ctrl+1")));
-  KaFeatureSelectTool::installKeyShortcut(this, m_actSelect);  // A = 도형선택, and the tooltip naming both keys
+  // A = 도형선택, and the tooltip naming both keys. 맞추기 keeps the keyboard while it is open.
+  KaFeatureSelectTool::installKeyShortcut(this, m_actSelect,
+                                          [this]() { return m_subToolsMode == QLatin1String("align"); });
   auto* actUndo = new QAction(KaIcons::icon(QStringLiteral("undo")), QStringLiteral("되돌리기"), this);
   actUndo->setToolTip(QStringLiteral("마지막 그리기·정점·삭제를 되돌립니다 (Ctrl+Z)"));
   actUndo->setShortcut(QKeySequence::Undo);
@@ -912,7 +914,7 @@ void MainWindow::showSubToolsDraw() {
   // 폴리곤 묶기·나누기는 「그리는 도구」가 아니라 「이미 그린 면을 고치는 도구」다.
   // 예전에는 늘어나는 빈칸으로 오른쪽 끝까지 밀어 두었는데, 넓은 화면에서는 그리기
   // 버튼과 너무 멀어져 한눈에 들어오지 않았다. 빈칸을 빼고 구분선만 두어
-  // 그리기 버튼 바로 옆(가운데 쪽)에 묶기·나누기·구간 분리·닫기를 같이 보이게 한다.
+  // 그리기 버튼 바로 옆(가운데 쪽)에 묶기·나누기·구간 분리·겹친 곳 지우기·닫기를 같이 보이게 한다.
   m_subToolbar->addSeparator();
   auto* mergeAct = m_subToolbar->addAction(QStringLiteral("폴리곤 묶기"),
                                            this, &MainWindow::mergeFeaturePolygons);
@@ -930,6 +932,14 @@ void MainWindow::showSubToolsDraw() {
                                           this, &MainWindow::clipOverlappingLayers);
   clipAct->setToolTip(QStringLiteral(
       "겹쳐 있는 두 레이어에서 겹치는 구간만 새 레이어로 떼어 냅니다. 원본은 그대로 남습니다."));
+  auto* eraseAct = m_subToolbar->addAction(QStringLiteral("겹친 곳 지우기"),
+                                           this, &MainWindow::eraseOverlapWithShape);
+  eraseAct->setObjectName(QStringLiteral("actEraseOverlap"));
+  eraseAct->setToolTip(QStringLiteral(
+      "위에 그린 도형 모양대로 아래 도형에서 그 자리만 지웁니다(클립).\n"
+      "쓰는 법: 같은 레이어의 도형 위에 겹쳐 그리고 우클릭으로 마치면 선택창에서 고를 수 있습니다.\n"
+      "이미 그린 도형은 [도형선택](A)으로 고른 뒤 이 단추를 누릅니다.\n"
+      "아래 도형에 구멍이 나고 위에 그린 도형은 없어집니다. Ctrl+Z로 되돌립니다."));
   auto* closeAct = m_subToolbar->addAction(QStringLiteral("닫기"));
   closeAct->setToolTip(QStringLiteral("그리기 도구 모음을 닫고 지도 이동으로 돌아갑니다"));
   connect(closeAct, &QAction::triggered, this, &MainWindow::hideSubTools);

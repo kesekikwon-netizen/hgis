@@ -444,6 +444,12 @@ private:
     QString name;
     QList<MenuActionState> actions;
   };
+  // 도형을 다 그린 뒤 무엇이 떴는지(선택창·이름번호 창).
+  struct DrawAnswer {
+    bool menuSeen = false;
+    bool formSeen = false;
+    QStringList menuItems;
+  };
   static LayerMenuState inspectLayerMenu(MainWindow& window, QgsLayerTreeView* tree,
                                          const QPoint& viewportPosition,
                                          const QString& triggerId = {}) {
@@ -2820,6 +2826,424 @@ private slots:
     QVERIFY(previousFound);
   }
 
+  // 「그린 도형 모두 지우기…」는 확인 창에 적은 레이어만 비운다. 선택 도구를 내려놓아도
+  // 선택은 남으므로, 다른 레이어에서 골라 둔 도형이 함께 지워지면 안 된다.
+  void clearDrawnFeaturesLeavesOtherLayersSelectionAlone() {
+    const QString path = makeSurvey(QStringLiteral("clear_drawn_scope"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* project = QgsProject::instance();
+    auto* area = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
+    QString error;
+    auto* poly = LayerOps::ensureDomainLayer(project, path, QStringLiteral("feature_poly"),
+                                             QStringLiteral("유구 면"), &error);
+    QVERIFY2(area && poly && area != poly, qPrintable(error));
+    QVERIFY(poly->startEditing());
+    QgsFeature drawn(poly->fields());
+    drawn.setGeometry(QgsGeometry::fromRect(QgsRectangle(190020, 560020, 190040, 560040)));
+    QVERIFY(poly->addFeature(drawn));
+    QVERIFY(poly->commitChanges());
+    QCOMPARE(area->featureCount(), 1);
+    QCOMPARE(poly->featureCount(), 1);
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    QVERIFY(tree && canvas);
+    window.show();
+    QApplication::setActiveWindow(&window);
+    poly->selectAll();
+    const QgsFeatureIds polySelection = poly->selectedFeatureIds();
+    QCOMPARE(polySelection.size(), 1);
+    tree->setCurrentLayer(area);
+    QApplication::processEvents();
+    QCOMPARE(tree->currentLayer(), area);
+    QCOMPARE(poly->selectedFeatureIds(), polySelection);
+
+    QString asked;
+    QTimer answer;
+    connect(&answer, &QTimer::timeout, [&] {
+      if (auto* question = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+        asked = question->text();
+        question->button(QMessageBox::Yes)->click();
+      }
+    });
+    answer.start(20);
+    QVERIFY(QMetaObject::invokeMethod(&window, "clearDrawnFeaturesOfCurrentLayer", Qt::DirectConnection));
+    answer.stop();
+    QVERIFY2(asked.contains(area->name()) && asked.contains(QStringLiteral("도형 1개")), qPrintable(asked));
+    QCOMPARE(area->featureCount(), 0);
+    QVERIFY2(poly->featureCount() == 1, "확인 창에 적지 않은 다른 레이어의 도형까지 지워졌습니다.");
+    QCOMPARE(poly->selectedFeatureIds(), polySelection);
+
+    QApplication::setActiveWindow(&window);
+    canvas->setFocus();
+    QApplication::processEvents();
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY2(area->featureCount() == 1, "Ctrl+Z 한 번으로 비운 레이어가 돌아오지 않았습니다.");
+    QCOMPARE(poly->featureCount(), 1);
+  }
+
+  // 「겹친 곳 지우기」: 위에 그린 도형을 고르고 누르면 아래 도형에서 그 자리만 지워지고 위 도형은
+  // 없어진다. 그려 놓고 저장하지 않은 도형으로도 되어야 하고, Ctrl+Z 한 번에 둘 다 돌아와야 한다.
+  void eraseOverlap_cutsTheShapeUnderTheSelectedOneAndCtrlZRestores() {
+    const QString path = makeSurvey(QStringLiteral("erase_same_layer"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* area = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"));
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    QVERIFY(area && canvas);
+    const QgsFeatureId outer = *area->allFeatureIds().constBegin();
+    QVERIFY(area->isEditable() || area->startEditing());
+    QgsFeature inner(area->fields());
+    inner.setGeometry(QgsGeometry::fromRect(QgsRectangle(190040, 560040, 190060, 560060)));
+    QVERIFY(area->addFeature(inner));
+    QVERIFY2(inner.id() < 0, "저장하지 않은 도형은 음수 번호를 가진다.");
+    window.resize(1920, 1040);
+    window.show();
+    QApplication::setActiveWindow(&window);
+    canvas->setFocus();
+    QApplication::processEvents();
+
+    // 그리기 도구 줄에 단추가 있고, 1920 폭에서 접혀 사라지지 않는다.
+    auto* draw = window.findChild<QToolButton*>(QStringLiteral("btnDraw"));
+    auto* sub = window.findChild<QToolBar*>(QStringLiteral("subToolbar"));
+    QVERIFY(draw && sub);
+    QTRY_VERIFY(draw->isEnabled());
+    draw->click();
+    QTRY_VERIFY(sub->isVisible());
+    QAction* erase = nullptr;
+    QAction* close = nullptr;
+    for (QAction* action : sub->actions()) {
+      if (action->objectName() == QLatin1String("actEraseOverlap")) erase = action;
+      if (action->text() == QStringLiteral("닫기")) close = action;
+    }
+    QVERIFY2(erase, "그리기 도구 줄에 「겹친 곳 지우기」가 없습니다.");
+    QCOMPARE(erase->text(), QStringLiteral("겹친 곳 지우기"));
+    QVERIFY(close);
+    QApplication::processEvents();
+    QVERIFY2(sub->widgetForAction(erase) && sub->widgetForAction(erase)->isVisible() &&
+                 sub->widgetForAction(close) && sub->widgetForAction(close)->isVisible(),
+             qPrintable(QStringLiteral("1920 폭에서 그리기 도구 줄의 단추가 접혔습니다 (줄 %1, 필요 %2)")
+                            .arg(sub->width())
+                            .arg(sub->sizeHint().width())));
+
+    // KA_HGIS_QA_OUTPUT_DIR 을 주면 지우기 전후 화면을 그림으로 남긴다(눈으로 확인할 때 쓴다).
+    const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    const auto shot = [&](const QString& name) {
+      if (output.isEmpty()) return true;
+      if (!QDir().mkpath(output)) return false;
+      canvas->setExtent(QgsRectangle(189940, 559940, 190160, 560160));
+      // 다시 그리기는 타이머로 시작한다. 시작하기도 전에 찍으면 앞 장면이 찍히므로,
+      // 그리기가 끝났다는 신호를 기다린 뒤 더 그릴 것이 없을 때까지 본다.
+      QSignalSpy refreshed(canvas, &QgsMapCanvas::mapCanvasRefreshed);
+      canvas->setRenderFlag(true);
+      canvas->refresh();
+      if (refreshed.isEmpty() && !refreshed.wait(20000)) return false;
+      QElapsedTimer quiet;
+      quiet.start();
+      while (quiet.elapsed() < 500) {
+        QTest::qWait(50);
+        if (canvas->isDrawing()) quiet.restart();
+      }
+      const bool saved = window.grab().save(QDir(output).filePath(name));
+      canvas->setRenderFlag(false);
+      return saved;
+    };
+
+    const auto areaOf = [&](QgsFeatureId fid) { return area->getFeature(fid).geometry().area(); };
+    area->selectByIds({inner.id()});
+    QVERIFY(shot(QStringLiteral("erase-overlap-1-before.png")));
+    erase->trigger();
+    QVERIFY2(qAbs(areaOf(outer) - 9600.0) < 1e-3, "아래 도형에서 겹친 자리가 지워지지 않았습니다.");
+    QVERIFY2(!area->getFeature(inner.id()).isValid(), "위에 그린 도형이 남아 있습니다.");
+    QCOMPARE(area->featureCount(), 1);
+    QVERIFY(shot(QStringLiteral("erase-overlap-2-after.png")));
+
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY2(qAbs(areaOf(outer) - 10000.0) < 1e-3 && area->featureCount() == 2,
+             "Ctrl+Z 한 번에 구멍이 메워지고 위 도형이 돌아오지 않았습니다.");
+    QTest::keyClick(canvas, Qt::Key_Y, Qt::ControlModifier);
+    QVERIFY(qAbs(areaOf(outer) - 9600.0) < 1e-3);
+    QCOMPARE(area->featureCount(), 1);
+
+    // 저장한 파일에도 구멍 난 도형 하나만 남는다.
+    QVERIFY(saveNow(window));
+    QgsVectorLayer saved(QStringLiteral("%1|layername=survey_area").arg(path), QStringLiteral("확인"),
+                         QStringLiteral("ogr"));
+    QVERIFY(saved.isValid());
+    QCOMPARE(saved.featureCount(), 1);
+    QgsFeature kept;
+    QVERIFY(saved.getFeatures().nextFeature(kept));
+    QVERIFY(kept.geometry().isGeosValid());
+    QVERIFY2(qAbs(kept.geometry().area() - 9600.0) < 1e-3, "저장한 도형의 넓이가 다릅니다.");
+  }
+
+  // 다른 레이어에 그린 도형으로도 지운다. 레이어마다 되돌리기 기록이 따로라서, 묶지 않으면
+  // Ctrl+Z 한 번에 반만 돌아온다(구멍은 메워졌는데 위 도형은 없는 식).
+  void eraseOverlap_acrossLayersUndoesAndRedoesTogether() {
+    const QString path = makeSurvey(QStringLiteral("erase_two_layers"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* project = QgsProject::instance();
+    auto* area = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
+    QString error;
+    auto* poly = LayerOps::ensureDomainLayer(project, path, QStringLiteral("feature_poly"),
+                                             QStringLiteral("유구 면"), &error);
+    QVERIFY2(area && poly && area != poly, qPrintable(error));
+    const QgsFeatureId outer = *area->allFeatureIds().constBegin();
+    QVERIFY(poly->startEditing());
+    QgsFeature cutter(poly->fields());
+    cutter.setGeometry(QgsGeometry::fromRect(QgsRectangle(190040, 560040, 190060, 560060)));
+    QVERIFY(poly->addFeature(cutter));
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    QVERIFY(tree && canvas);
+    window.show();
+    QApplication::setActiveWindow(&window);
+    canvas->setFocus();
+    tree->setCurrentLayer(poly);
+    QApplication::processEvents();
+    const auto cut = [&] { return qAbs(area->getFeature(outer).geometry().area() - 9600.0) < 1e-3; };
+    const auto whole = [&] { return qAbs(area->getFeature(outer).geometry().area() - 10000.0) < 1e-3; };
+
+    // 위 도형 하나만 골라도, 아래에 겹친 도형이 하나뿐이면 그 도형에서 지운다.
+    poly->selectByIds({cutter.id()});
+    QVERIFY(QMetaObject::invokeMethod(&window, "eraseOverlapWithShape", Qt::DirectConnection));
+    QVERIFY2(cut(), "다른 레이어의 아래 도형에서 겹친 자리가 지워지지 않았습니다.");
+    QCOMPARE(poly->featureCount(), 0);
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY2(whole() && poly->featureCount() == 1, "Ctrl+Z 한 번에 두 레이어가 함께 돌아오지 않았습니다.");
+    QTest::keyClick(canvas, Qt::Key_Y, Qt::ControlModifier);
+    QVERIFY2(cut() && poly->featureCount() == 0, "다시 실행이 두 레이어에 함께 적용되지 않았습니다.");
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(whole());
+    QCOMPARE(poly->featureCount(), 1);
+
+    // 둘을 함께 고르면 큰 도형에서 작은 도형 자리를 지운다.
+    area->selectByIds({outer});
+    poly->selectByIds({cutter.id()});
+    QVERIFY(QMetaObject::invokeMethod(&window, "eraseOverlapWithShape", Qt::DirectConnection));
+    QVERIFY(cut());
+    QCOMPARE(poly->featureCount(), 0);
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(whole());
+    QCOMPARE(poly->featureCount(), 1);
+  }
+
+  // 도형 하나로 지우는 것은 바로 하지만, 여러 도형을 한꺼번에 없애는 것은 먼저 묻는다.
+  // 끌어서 고르다 딸려 온 도형까지 사라질 수 있기 때문이다.
+  void eraseOverlap_severalShapesAskBeforeRemovingThem() {
+    const QString path = makeSurvey(QStringLiteral("erase_several"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* area = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"));
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    QVERIFY(area && canvas);
+    const QgsFeatureId outer = *area->allFeatureIds().constBegin();
+    QVERIFY(area->isEditable() || area->startEditing());
+    QgsFeature first(area->fields());
+    first.setGeometry(QgsGeometry::fromRect(QgsRectangle(190010, 560010, 190030, 560030)));
+    QgsFeature second(area->fields());
+    second.setGeometry(QgsGeometry::fromRect(QgsRectangle(190060, 560060, 190080, 560080)));
+    QVERIFY(area->addFeature(first) && area->addFeature(second));
+    window.show();
+    QApplication::setActiveWindow(&window);
+    canvas->setFocus();
+    QApplication::processEvents();
+    const auto outerArea = [&] { return area->getFeature(outer).geometry().area(); };
+
+    QString asked;
+    bool agree = false;
+    QTimer answer;
+    connect(&answer, &QTimer::timeout, [&] {
+      if (auto* question = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+        asked = question->text();
+        question->button(agree ? QMessageBox::Yes : QMessageBox::No)->click();
+      }
+    });
+    answer.start(20);
+    area->selectByIds({outer, first.id(), second.id()});
+    QVERIFY(QMetaObject::invokeMethod(&window, "eraseOverlapWithShape", Qt::DirectConnection));
+    QVERIFY2(asked.contains(QStringLiteral("2개")), qPrintable(asked));
+    QVERIFY2(area->featureCount() == 3 && qAbs(outerArea() - 10000.0) < 1e-3,
+             "「아니요」를 눌렀는데 도형이 바뀌었습니다.");
+
+    agree = true;
+    asked.clear();
+    QVERIFY(QMetaObject::invokeMethod(&window, "eraseOverlapWithShape", Qt::DirectConnection));
+    answer.stop();
+    QVERIFY(!asked.isEmpty());
+    QCOMPARE(area->featureCount(), 1);
+    QVERIFY(qAbs(outerArea() - 9200.0) < 1e-3);
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(area->featureCount(), 3);
+    QVERIFY(qAbs(outerArea() - 10000.0) < 1e-3);
+  }
+
+  // 그린 직후에는 고르지 않고 눌러도 된다. 첫 번째 누름은 방금 그린 도형을 골라 보여 주기만 하고,
+  // 두 번째 누름에 지운다.
+  void eraseOverlap_secondPressUsesTheShapeJustDrawn() {
+    const QString path = makeSurvey(QStringLiteral("erase_just_drawn"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* project = QgsProject::instance();
+    auto* area = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
+    QVERIFY(area);
+    // 아무것도 그리지도 고르지도 않았으면 알려 주기만 한다.
+    QVERIFY(QMetaObject::invokeMethod(&window, "eraseOverlapWithShape", Qt::DirectConnection));
+    QCOMPARE(area->featureCount(), 1);
+
+    QVERIFY(QMetaObject::invokeMethod(&window, "startEditFeaturePoly", Qt::DirectConnection));
+    auto* poly = LayerOps::findByLayerKey(project, QStringLiteral("feature_poly"));
+    auto* capture = window.findChild<KaCaptureMapTool*>();
+    QVERIFY(poly && capture);
+    captureAndDismissForm(capture, QgsGeometry::fromRect(QgsRectangle(190000, 560000, 190100, 560100)));
+    // 겹쳐 그리면 선택창이 뜬다. 여기서는 「그대로 두기」를 고르고 단추로 지우는 길을 본다.
+    const DrawAnswer kept = captureAnswering(capture, QgsGeometry::fromRect(QgsRectangle(190040, 560040, 190060, 560060)),
+                                             QStringLiteral("actKeepDrawnShape"));
+    QVERIFY(kept.menuSeen);
+    QCOMPARE(poly->featureCount(), 2);
+    QVERIFY(poly->selectedFeatureIds().isEmpty());
+
+    QVERIFY(QMetaObject::invokeMethod(&window, "eraseOverlapWithShape", Qt::DirectConnection));
+    QCOMPARE(poly->selectedFeatureIds().size(), 1);
+    QVERIFY2(poly->featureCount() == 2, "첫 번째 누름에서 바로 지웠습니다. 고른 도형을 보여 주기만 해야 합니다.");
+    const QgsFeatureId small = *poly->selectedFeatureIds().constBegin();
+    QVERIFY(qAbs(poly->getFeature(small).geometry().area() - 400.0) < 1e-3);
+
+    QVERIFY(QMetaObject::invokeMethod(&window, "eraseOverlapWithShape", Qt::DirectConnection));
+    QCOMPARE(poly->featureCount(), 1);
+    QgsFeature left;
+    QVERIFY(poly->getFeatures().nextFeature(left));
+    QVERIFY2(qAbs(left.geometry().area() - 9600.0) < 1e-3, "방금 그린 도형 모양대로 지워지지 않았습니다.");
+    // 같은 레이어에 겹친 도형이 있으면 다른 레이어(조사구역)는 건드리지 않는다.
+    QgsFeature untouched;
+    QVERIFY(area->getFeatures().nextFeature(untouched));
+    QVERIFY(qAbs(untouched.geometry().area() - 10000.0) < 1e-3);
+  }
+
+  // 같은 레이어의 도형 위에 겹쳐 그리고 우클릭으로 마치면 그 자리에 선택창이 떠서 「겹친 곳 지우기」를
+  // 고를 수 있다. 조사구역 안에 유구를 그리는 것처럼 다른 레이어의 도형 위는 늘 하는 그리기라 묻지 않는다.
+  void drawnShapeOnTopOffersEraseWhenFinished() {
+    const QString path = makeSurvey(QStringLiteral("erase_on_finish"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* project = QgsProject::instance();
+    auto* area = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
+    QVERIFY(area);
+    const QgsFeatureId surveyShape = *area->allFeatureIds().constBegin();
+    QVERIFY(QMetaObject::invokeMethod(&window, "startEditFeaturePoly", Qt::DirectConnection));
+    auto* poly = LayerOps::findByLayerKey(project, QStringLiteral("feature_poly"));
+    auto* capture = window.findChild<KaCaptureMapTool*>();
+    QVERIFY(poly && capture);
+    const auto rect = [](double x1, double y1, double x2, double y2) {
+      return QgsGeometry::fromRect(QgsRectangle(x1, y1, x2, y2));
+    };
+
+    // 조사구역(다른 레이어) 안에 유구를 그리면 묻지 않고 늘 하던 대로 이름·번호 창이 뜬다.
+    const DrawAnswer pit = captureAnswering(capture, rect(190010, 560010, 190040, 560040),
+                                            QStringLiteral("actEraseDrawnOverlap"));
+    QVERIFY2(!pit.menuSeen, "다른 레이어의 도형 위에 그렸는데 선택창이 떴습니다.");
+    QVERIFY(pit.formSeen);
+    QCOMPARE(poly->featureCount(), 1);
+    QVERIFY(qAbs(area->getFeature(surveyShape).geometry().area() - 10000.0) < 1e-3);
+
+    // 같은 레이어의 도형 위에 겹쳐 그리면 선택창이 뜬다. 「그대로 두기」면 둘 다 남는다.
+    const DrawAnswer kept = captureAnswering(capture, rect(190020, 560020, 190030, 560030),
+                                             QStringLiteral("actKeepDrawnShape"));
+    QVERIFY2(kept.menuSeen, "같은 레이어의 도형 위에 겹쳐 그렸는데 선택창이 뜨지 않았습니다.");
+    QCOMPARE(kept.menuItems, QStringList({QStringLiteral("겹친 곳 지우기"), QStringLiteral("그대로 두기")}));
+    QVERIFY(kept.formSeen);
+    QCOMPARE(poly->featureCount(), 2);
+
+    // 「겹친 곳 지우기」를 고르면 그린 도형 자리만큼 아래 유구가 지워지고, 그린 도형은 남지 않는다.
+    QgsFeatureId big = FID_NULL;
+    for (const QgsFeatureId fid : poly->allFeatureIds()) {
+      if (qAbs(poly->getFeature(fid).geometry().area() - 900.0) < 1e-3) big = fid;
+    }
+    QVERIFY(!FID_IS_NULL(big));
+    const DrawAnswer erased = captureAnswering(capture, rect(190032, 560032, 190038, 560038),
+                                               QStringLiteral("actEraseDrawnOverlap"));
+    QVERIFY(erased.menuSeen);
+    QVERIFY2(!erased.formSeen, "지운 뒤에 없어진 도형의 이름·번호 창이 떴습니다.");
+    QCOMPARE(poly->featureCount(), 2);
+    QVERIFY2(qAbs(poly->getFeature(big).geometry().area() - 864.0) < 1e-3,
+             "그린 도형 자리만큼 아래 유구가 지워지지 않았습니다.");
+    QVERIFY(qAbs(area->getFeature(surveyShape).geometry().area() - 10000.0) < 1e-3);
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    QVERIFY(canvas);
+    window.show();
+    QApplication::setActiveWindow(&window);
+    canvas->setFocus();
+    QApplication::processEvents();
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(poly->featureCount(), 3);
+    QVERIFY(qAbs(poly->getFeature(big).geometry().area() - 900.0) < 1e-3);
+  }
+
+  // 큰 도형 위에 그린 작은 도형은 찍으면 작은 도형이 잡혀야 한다. 저장하지 않은 도형도 마찬가지고,
+  // 고르면 수정점이 나와야 한다. A 키는 도형선택을 켠다.
+  void selectTool_picksTheShapeDrawnOnTopAndKeyAStartsIt() {
+    const QString path = makeSurvey(QStringLiteral("select_top_shape"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* area = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"));
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    QVERIFY(area && canvas);
+    const QgsFeatureId outer = *area->allFeatureIds().constBegin();
+    QVERIFY(area->isEditable() || area->startEditing());
+    QgsFeature inner(area->fields());
+    inner.setGeometry(QgsGeometry::fromRect(QgsRectangle(190040, 560040, 190060, 560060)));
+    QVERIFY(area->addFeature(inner));
+    window.resize(1280, 900);
+    window.show();
+    QApplication::setActiveWindow(&window);
+    canvas->setFocus();
+    canvas->setExtent(QgsRectangle(189950, 559950, 190150, 560150));
+    QApplication::processEvents();
+    const auto clickAt = [&](double x, double y) {
+      const QgsPointXY pixel = canvas->getCoordinateTransform()->transform(QgsPointXY(x, y));
+      QTest::mouseClick(canvas->viewport(), Qt::LeftButton, Qt::NoModifier,
+                        QPoint(qRound(pixel.x()), qRound(pixel.y())));
+      QApplication::processEvents();
+    };
+
+    QTest::keyClick(canvas, Qt::Key_A);
+    auto* select = window.findChild<KaFeatureSelectTool*>();
+    QVERIFY2(select && canvas->mapTool() == select, "A 키로 도형선택이 켜지지 않았습니다.");
+    QTest::keyClick(canvas, Qt::Key_A);
+    QVERIFY2(canvas->mapTool() == select, "A 키를 다시 눌렀더니 도형선택이 꺼졌습니다.");
+
+    clickAt(190050, 560050);
+    QVERIFY2(area->selectedFeatureIds() == QgsFeatureIds{inner.id()},
+             "큰 도형 위에 그린 작은 도형(저장 전)을 찍었는데 그 도형이 잡히지 않았습니다.");
+    auto* vertex = select->findChild<KaVertexEditTool*>();
+    QVERIFY2(vertex && vertex->hasTarget(), "저장하지 않은 도형을 골랐는데 수정점이 나오지 않았습니다.");
+    clickAt(190010, 560010);
+    QVERIFY2(area->selectedFeatureIds() == QgsFeatureIds{outer},
+             "작은 도형 바깥을 찍었는데 큰 도형이 잡히지 않았습니다.");
+  }
+
   void layerContextMenu_usesClickedRowAndLeavesSourceIntact() {
     const QString path = makeSurvey(QStringLiteral("menu_target"));
     QVERIFY(!path.isEmpty());
@@ -3060,6 +3484,35 @@ private slots:
     });
     dismiss.start(20);
     capture->geometryCaptured(geometry);
+  }
+  // 도형을 다 그린 뒤 뜨는 선택창에 choice(동작 이름)로 답하고, 이름·번호 창은 닫는다.
+  static DrawAnswer captureAnswering(KaCaptureMapTool* capture, const QgsGeometry& geometry, const QString& choice) {
+    DrawAnswer seen;
+    QTimer answer;
+    QObject::connect(&answer, &QTimer::timeout, [&seen, choice] {
+      if (auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget())) {
+        seen.menuSeen = true;
+        seen.menuItems.clear();
+        QAction* picked = nullptr;
+        for (QAction* action : menu->actions()) {
+          seen.menuItems << action->text();
+          if (action->objectName() == choice) picked = action;
+        }
+        const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+        if (!output.isEmpty() && QDir().mkpath(output))
+          menu->grab().save(QDir(output).filePath(QStringLiteral("draw-choice-menu.png")));
+        if (picked) picked->trigger();
+        menu->close();
+        return;
+      }
+      if (auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget())) {
+        seen.formSeen = true;
+        dialog->reject();
+      }
+    });
+    answer.start(20);
+    capture->geometryCaptured(geometry);
+    return seen;
   }
   void newSurvey_selectedCrsSurvivesSaveAndOpen() {
     QFETCH(QString, authId);

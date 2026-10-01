@@ -2283,6 +2283,16 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
       redoLastAction();
       return true;
     }
+    // A = 도형선택 has one implementation, the window action of KaFeatureSelectTool::installKeyShortcut.
+    // With the Korean input method on, the A key can arrive without Qt::Key_A and the shortcut does
+    // not match; the physical key (VK_A) is handed to that same action.
+    if (ke && ke->modifiers() == Qt::NoModifier && !ke->isAutoRepeat() && ke->key() != Qt::Key_A &&
+        ke->nativeVirtualKey() == 0x41) {
+      if (auto* key = findChild<QAction*>(QStringLiteral("actSelectShapeKey"))) {
+        key->trigger();
+        return true;
+      }
+    }
   }
   if (onCanvas && event->type() == QEvent::MouseButtonDblClick) {
     const bool capturing = m_captureTool && m_canvas->mapTool() == m_captureTool;

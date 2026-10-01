@@ -1,4 +1,0 @@
-interface:
-  display_name: "문화재인트라넷"
-  short_description: "주변유적 다운로드 성공 기준과 범례·장애 복구 절차를 보존합니다"
-  default_prompt: "$heritage-intranet을 사용해 성공한 다운로드 경로를 보존하면서 요청한 수정이나 장애 복구를 진행해줘."

@@ -21,6 +21,7 @@
 #include <qgsrubberband.h>
 #include <qgssnappingutils.h>
 #include <qgsvectorlayer.h>
+#include <qgsvertexid.h>
 #include <qgsvertexmarker.h>
 #include <qgswkbtypes.h>
 
@@ -75,13 +76,10 @@ void KaVertexEditTool::previewVertexMove(int index, const QgsPointXY& toLayerPt)
   if (index < 0) return;
   QgsGeometry geom = selectedGeometry();
   if (geom.isNull()) return;
-  const int count = geom.constGet() ? static_cast<int>(geom.constGet()->nCoordinates()) : 0;
+  // 면의 첫 점과 닫는 점은 같은 자리여야 한다. 하나를 옮기면 같은 고리의 짝도 옮긴다.
+  const int partner = LayerOps::ringClosingVertex(geom, index);
   geom.moveVertex(toLayerPt.x(), toLayerPt.y(), index);
-  // 면의 첫 점과 닫는 점은 같은 자리여야 한다. 하나를 옮기면 짝도 옮긴다.
-  if (geom.type() == Qgis::GeometryType::Polygon && count > 1) {
-    if (index == 0) geom.moveVertex(toLayerPt.x(), toLayerPt.y(), count - 1);
-    if (index == count - 1) geom.moveVertex(toLayerPt.x(), toLayerPt.y(), 0);
-  }
+  if (partner >= 0) geom.moveVertex(toLayerPt.x(), toLayerPt.y(), partner);
   refreshRubber(geom);
   if (index < m_marks.size() && m_marks[index])
     m_marks[index]->setCenter(toMap(toLayerPt));
@@ -149,6 +147,8 @@ void KaVertexEditTool::clearSelection() {
     delete m_outline;
     m_outline = nullptr;
   }
+  // 없음은 FID_NULL 로 적는다. 그려 놓고 아직 저장하지 않은 도형은 번호가 음수라서,
+  // 음수를 「없음」으로 읽으면 그런 도형은 수정점이 나오지 않는다.
   m_fid = FID_NULL;
   m_dragIndex = -1;
   m_activeIndex = -1;
@@ -295,7 +295,7 @@ void KaVertexEditTool::selectAt(const QgsPointXY& mapPt_) {
     return;
   }
   QgsVectorLayer* hitLayer = nullptr;
-  QgsFeatureId hit = -1;
+  QgsFeatureId hit = FID_NULL;
   double bestD = std::numeric_limits<double>::max();
   for (QgsVectorLayer* layer : layers) {
     m_layer = layer;
@@ -317,7 +317,7 @@ void KaVertexEditTool::selectAt(const QgsPointXY& mapPt_) {
       }
     }
   }
-  if (hit < 0 || !hitLayer) {
+  if (FID_IS_NULL(hit) || !hitLayer) {
     if (layers.size() == 1) m_layer = layers.first();
     clearSelection();
     emit statusMessage(QStringLiteral("도형을 찾지 못했습니다. 선이나 면 위를 클릭하세요."));
@@ -359,7 +359,11 @@ bool KaVertexEditTool::deleteVertexAt(int index) {
   if (!m_layer || FID_IS_NULL(m_fid) || index < 0) return false;
   QgsGeometry geom = selectedGeometry();
   if (geom.isNull() || !geom.constGet()) return false;
-  const int count = static_cast<int>(geom.constGet()->nCoordinates());
+  // 구멍이 있는 면은 점이 든 고리 하나만 센다. 전체로 세면 세모난 바깥 고리에서도 점이 지워진다.
+  QgsVertexId ring;
+  const int count = geom.vertexIdFromVertexNr(index, ring)
+                        ? geom.constGet()->vertexCount(ring.part, ring.ring)
+                        : static_cast<int>(geom.constGet()->nCoordinates());
   // 면은 닫는 점을 빼고 3점, 선은 2점이 최소다. 그 아래로는 도형이 깨진다.
   const int minCount = geom.type() == Qgis::GeometryType::Polygon ? 5 : 3;
   if (count < minCount) {
