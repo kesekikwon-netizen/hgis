@@ -20,7 +20,8 @@ foreach ($n in @("ka-hgis.exe", "start.bat", "run.ps1", "README.txt", "LICENSE",
     "apps/Qt6/resources/qtwebengine_resources_100p.pak", "apps/Qt6/resources/qtwebengine_resources_200p.pak",
     "apps/Qt6/resources/v8_context_snapshot.bin", "apps/Qt6/translations/qtwebengine_locales/ko.pak",
     "apps/Qt6/translations/qtwebengine_locales/en-US.pak", "apps/Qt6/translations/qtbase_ko.qm",
-    "apps/qgis-dev/plugins/provider_wms.dll")) {
+    "apps/qgis-dev/plugins/provider_wms.dll",
+    "tools/libredwg/dwg2dxf.exe", "tools/libredwg/libredwg-0.dll", "tools/libredwg/COPYING")) {
   $p = Join-Path $out $n
   if (-not (Test-Path -LiteralPath $p)) { throw "portable missing $n" }
 }

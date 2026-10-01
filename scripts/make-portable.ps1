@@ -176,6 +176,8 @@ if (Test-Path $pdb) { Copy-Item $pdb $out -Force }
 if (Test-Path (Join-Path $root "data")) {
   Copy-Item (Join-Path $root "data") $out -Recurse -Force
 }
+# DWG converter (LibreDWG, a separate program). The ka-hgis build puts it in build\Release\tools\libredwg.
+Invoke-Robo (Join-Path $root "build\Release\tools\libredwg") (Join-Path $out "tools\libredwg")
 $docsUser = Join-Path $out "docs\user"
 New-Item -ItemType Directory -Force -Path $docsUser | Out-Null
 if (Test-Path (Join-Path $root "docs\user")) {

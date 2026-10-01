@@ -221,6 +221,7 @@ add_library(ka_core STATIC
   src/core/StandardScales.cpp
   src/core/LayoutBadgePlacer.cpp
   src/core/SectionSheetDecor.cpp
+  src/core/CadDwgConverter.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
   src/core/SurveyStorage.h
@@ -295,6 +296,7 @@ add_library(ka_core STATIC
   src/core/Terrain3dService.h
   src/core/Terrain3dLayoutService.h
   src/core/TilePrint.h
+  src/core/CadDwgConverter.h
 )
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
@@ -581,6 +583,15 @@ add_custom_command(TARGET ka-hgis POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/ka-hgis-실행.bat"
     "$<TARGET_FILE_DIR:ka-hgis>/ka-hgis-실행.bat"
+  # DWG 변환기 LibreDWG(별도 프로그램): CadDwgConverter::bundledTool() 이 앱 폴더의 tools/libredwg 에서 찾는다.
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ka-hgis>/tools/libredwg"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/third_party/libredwg/0.14/dwg2dxf.exe"
+    "${CMAKE_SOURCE_DIR}/third_party/libredwg/0.14/libredwg-0.dll"
+    "${CMAKE_SOURCE_DIR}/third_party/libredwg/0.14/libiconv-2.dll"
+    "${CMAKE_SOURCE_DIR}/third_party/libredwg/0.14/COPYING"
+    "${CMAKE_SOURCE_DIR}/third_party/libredwg/0.14/SOURCE.txt"
+    "$<TARGET_FILE_DIR:ka-hgis>/tools/libredwg"
 )
 
 if(KA_HGIS_BUILD_TESTS)
@@ -662,6 +673,17 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_directories(ka_georef_tests PRIVATE ${KA_LIBDIRS})
   target_compile_definitions(ka_georef_tests PRIVATE ${KA_TEST_DEFS})
   ka_add_qtest(georef_engine ka_georef_tests)
+
+  # DWG를 DXF로 바꾸는 CadDwgConverter. 앱 폴더 대신 third_party 의 LibreDWG dwg2dxf 를 바로 돌린다.
+  add_executable(ka_cad_dwg_tests tests/test_cad_dwg.cpp)
+  target_link_libraries(ka_cad_dwg_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_cad_dwg_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_cad_dwg_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_cad_dwg_tests PRIVATE ${KA_TEST_DEFS}
+    "KA_TEST_LIBREDWG=\"${CMAKE_SOURCE_DIR}/third_party/libredwg/0.14/dwg2dxf.exe\""
+    "KA_TEST_CAD_DATA=\"${CMAKE_SOURCE_DIR}/tests/data/cad\"")
+  set_target_properties(ka_cad_dwg_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(cad_dwg ka_cad_dwg_tests)
 
   add_executable(ka_preset_tests tests/test_presets.cpp)
   target_link_libraries(ka_preset_tests PRIVATE ${KA_TEST_LIBS})
@@ -1496,6 +1518,8 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(layer_roles layer_styles layer_edits layer_panel layer_tree_undo PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(georef_quality georef_backup align_tool align_image_view PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
+    set_tests_properties(cad_dwg PROPERTIES
+      ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     set_tests_properties(dem_legend PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(topographic_catalog PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(topographic_archive PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)

@@ -7,6 +7,9 @@
 *.pdf binary
 *.gpkg binary
 *.zip binary
+*.dwg binary
+*.dll binary
+*.exe binary
 
 # Cloud agent scripts run on Ubuntu and must stay LF.
 .cursor/Dockerfile text eol=lf

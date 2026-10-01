@@ -1,0 +1,12 @@
+LibreDWG 0.14 (GNU LibreDWG)
+
+이 폴더의 dwg2dxf.exe · libredwg-0.dll · libiconv-2.dll 은 LibreDWG 0.14 공식 Windows 배포판 그대로입니다.
+- 받은 주소: https://github.com/LibreDWG/libredwg/releases/download/0.14/libredwg-0.14-win64.zip
+- 그 파일의 sha256: 1ad7e15344d20b3426c3435b078d82fb84b35062815946b2cca9c5fc9810fea8
+
+소스 코드
+- 주소: https://github.com/LibreDWG/libredwg/releases/download/0.14/libredwg-0.14.tar.xz
+- sha256: 62ebb73b984f865960f20ed26619ea5f8789d5e3fd088fa40a2598384da81275
+
+GPLv3 이상. Strata는 링크하지 않고 별도 프로그램으로 실행한다.
+라이선스 전문은 이 폴더의 COPYING 입니다.

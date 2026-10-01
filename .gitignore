@@ -86,6 +86,8 @@ symbology-style.db
 *.idb
 *.ipdb
 *.iobj
+# DWG 변환기 LibreDWG(GPLv3 이상)는 링크하지 않고 별도 프로그램으로 앱과 함께 둔다. 받은 그대로 저장소에 넣는다(third_party/libredwg/0.14/SOURCE.txt).
+!third_party/libredwg/**
 
 # Generated portable output stays local; maintain sources in scripts/data/docs.
 /dist/

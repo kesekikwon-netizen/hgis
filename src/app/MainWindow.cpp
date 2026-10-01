@@ -3070,6 +3070,7 @@ void MainWindow::showAbout() {
                      "저작권·라이선스\n") + KaStartupSplash::attributionText() +
       QStringLiteral("\n선택한 지도에 따라 OpenStreetMap·CARTO·OpenTopoMap·NASA GIBS·"
                      "Copernicus DEM·Google 자료를 사용합니다. 각 제공처의 표시·이용조건을 따릅니다.\n\n"
+                     "DWG 변환: GNU LibreDWG 0.14 (GPLv3 이상, 별도 프로그램 tools/libredwg)\n"
                      "본 소프트웨어는 GNU GPL v2 이상으로 배포됩니다.\n"
                      "자세한 의존 고지는 앱 폴더의 THIRD_PARTY_NOTICES.md를 봅니다.\n\n") +
       KaCrashGuard::dumpHint());

@@ -22,6 +22,12 @@
 Qt 제3자 구성 목록: https://doc.qt.io/QT-6/licenses-used-in-qt.html  
 OSGeo4W에서 복사한 QGIS `LICENSE`/`AUTHORS`는 포터블 `licenses/QGIS-*`.
 
+## 함께 두는 별도 프로그램
+
+| 구성 | 라이선스 | 소스 주소·sha256 |
+| --- | --- | --- |
+| LibreDWG 0.14 (`tools/libredwg/dwg2dxf.exe`) | GPLv3 이상, 별도 프로세스(링크하지 않는다). 전문은 `tools/libredwg/COPYING` | https://github.com/LibreDWG/libredwg/releases/download/0.14/libredwg-0.14.tar.xz · sha256 `62ebb73b984f865960f20ed26619ea5f8789d5e3fd088fa40a2598384da81275`. 받은 곳은 `tools/libredwg/SOURCE.txt` |
+
 ## 글꼴
 
 맑은 고딕(Malgun Gothic)은 **Windows에 설치된 글꼴을 이름만 지정**한다. 기본 화면 글꼴이다(아래 IBM Plex 는 선택 사항). 재배포 조건은 Microsoft 글꼴 라이선스를 따른다.
