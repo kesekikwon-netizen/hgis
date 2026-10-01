@@ -48,7 +48,7 @@
 ## Review Focus
 
 1. 고해상도 화면(배율 125%·150%)에서 타일과 글리프가 흐려지거나 어긋나는 경우. 기대: devicePixelRatio에 맞춰 선명하게 그린다 → Task 1 `mockupIconIsCrispAtDpr150`.
-2. 1920 창, 그리고 그보다 좁은 1280·1024 창에서 리본이 접히는 경우. 기대: 1920에서는 접히지 않고, 좁은 창은 지금 규칙대로 접힌다 → Task 2 `mockupRibbonFitsAt1920`.
+2. 1920 창, 그리고 그보다 좁은 1366·1093·1024 창의 리본. 기대: 어느 너비에서도 묶음을 접지 않는다. 1904는 글자+아이콘, 좁으면 아이콘만, 더 좁으면 작은 아이콘(사용자 결정 2026-10-01 19:40) → Task 2 `density_*`.
 3. 「큰 글씨」 옵션(본문 15px)을 켠 경우. 기대: 레이어 줄과 표가 글자에 맞게 커지고 잘리지 않는다 → Task 6 `largeTextRowsDoNotClip`.
 4. 조사를 열지 않은 홈에서 상태줄을 보는 경우. 기대: 「작업 —」처럼 빈 값으로 보이고 누를 수 없다(목업 6쪽) → Task 4 `homeShowsEmptyCrsChips`.
 5. 예전 아이콘 모양이 필요한 경우(`KA_HGIS_ICON_STYLE=outline` 또는 `tile`). 기대: 옛 모양이 그대로 나온다 → Task 1 `environmentSelectsLegacyStyles`.
@@ -187,7 +187,8 @@
     - 아이콘 On 상태의 테두리 화소와 Off 상태 화소의 대비가 ≥ 4.5여야 한다.
   - `ribbon_overflow`:
     - 「제출 변환」 기대를 「검수·제출」로 바꾼다.
-    - 새 시험 `mockupRibbonFitsAt1920`: 창 1904px에서 접히는 묶음 0개. 1280·1093 규칙은 그대로.
+    - 새 시험 `mockupRibbonFitsAt1920`: 창 1904px에서 접히는 묶음 0개.
+    - 아래 「접지 않고 줄이기」 시험들. 묶음을 접던 `plan_*` 시험은 지운다.
 - [ ] **Step 2: 실패 확인**(`theme_qss|ribbon_overflow|theme_render`)
 - [ ] **Step 3: 구현.** 위 크기값과 QSS를 고친다. `MainWindowChrome.cpp:122-136`의 저장 안 됨 아이콘은 `KaIcons::strongIcon("save_unsaved")`를 그대로 쓴다(Task 1이 Mockup에서 strong을 처리).
 - [ ] **Step 4: 통과 확인** + `--smoke-quit` 0
