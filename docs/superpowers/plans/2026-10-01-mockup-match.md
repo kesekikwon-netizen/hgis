@@ -470,6 +470,11 @@ spec 「리본 크기 단계 (2026-10-01 19:40 결정, 22:10 넓은 창 키움 �
   - `src/app/KaTheme.cpp:207-223` — 본문 13 → 14px(큰 글씨 16).
   - QSS — 카드·패널 안쪽 여백을 4px 격자(12/16/20)로 한다. 단추 높이 32/36.
 - Test: `tests/test_theme_options.cpp`(`theme_options`) — 13→15 기대를 14→16으로.
+- 더함 (2026-10-02 Task 11 검토 판정):
+  - 그리기 보조 줄의 글자만 있는 도구 여섯 개(폴리곤 묶기·폴리곤 나누기·구간 분리·겹친 곳 지우기·닫기·연속 그리기)에 목업 문법 아이콘을 단다.
+  - 자석 설정(436px)을 좁은 꼴로 줄인다.
+  - 목표: 1904에서 첫 점을 찍은 뒤에도 글자가 보이고, 1024에서도 » 가 나오지 않는다. `subToolbarFitsAt1904WhileSketching`의 아이콘만 기대를 글자 보임으로 바꾼다.
+  - 제품 확인 거리: 1280 창은 타일 24에 오른쪽 빈자리 202px다. 글자 숨김 28 단계를 더할지 사용자에게 물을 거리로 남긴다.
 
 - [ ] **Step 1–4.** 위 시험과 전체 화면 시험(`theme_qss|theme_options|theme_render|chip_theme|shell_chrome|shell_widgets|shell_focus|home_start|home_cards|layer_list_chrome|layer_panel|inspector_panel|feature_card|layer_styles|editing_tools|icon_outline|ribbon_overflow|startup_splash`)을 통과시킨다.
 - [ ] **Step 5: 커밋.** `style(theme): 본문 글자와 여백을 목업 밀도로 맞춘다`
