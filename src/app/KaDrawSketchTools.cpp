@@ -78,7 +78,10 @@ void MainWindow::syncDrawSketchButtons() {
       action->setChecked(m_continuousDraw);
       continue;
     }
+    // 완료·되돌리기·취소 show only while a shape is being drawn. Kept on the row as disabled
+    // buttons they took 270 px, and at 1920 px the row folded 「겹친 곳 지우기」 and 「닫기」 away.
     action->setEnabled(sketching);
+    action->setVisible(sketching);
   }
 #endif
 }
