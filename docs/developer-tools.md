@@ -82,3 +82,13 @@ Grok이 여섯 도구를 빠뜨리던 이유는 지시가 `AGENTS.md` 안에만 
 Windows CI는 비공개 저장소의 self-hosted runner다. 러너가 꺼져 있거나 `vars.ENABLE_SELF_HOSTED_BUILD` 가 없으면 `Windows build gate` 잡이 "Windows build not run" 경고를 남긴다(`vars.REQUIRE_WINDOWS_BUILD=true` 면 실패). Linux `Sanity checks (no build)` 초록은 빌드 통과가 아니다. 저장소가 비공개여도 GPL 대응 소스는 포터블의 `source/ka-hgis-source.zip` 으로 함께 간다. https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners 이 문서 수정은 제품 C++를 바꾸지 않는다.
 
 과거 Codex 설정 근거(호환): [프로젝트 MCP 설정](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), [프로젝트 스킬](https://learn.chatgpt.com/docs/build-skills). Cursor는 USER MCP와 위 Cursor 설정을 우선한다. 실제 이 PC의 유효 설정과 실행 결과를 우선한다.
+
+## 슈퍼파워 알림 장치
+
+사용자 메시지마다 superpowers 스킬 표(CLAUDE.md 「superpowers 사용 방식」과 같은 내용)를 붙이는 UserPromptSubmit 훅이다. 긴 대화에서 스킬 사용이 빠지지 않게 한다. Strata 저장소(작업 폴더 포함) 안에서만 붙는다. 설치는 사용자가 직접 한다(대화 세션은 `~/.claude`를 고칠 수 없다). 설치 전 설정을 `~/.claude/_reset_backup/`에 백업하고, 다른 훅은 건드리지 않는다.
+
+```powershell
+node --test scripts/claude-hooks/superpowers-reminder.test.mjs
+node scripts/claude-hooks/install-superpowers-reminder.mjs           # 설치
+node scripts/claude-hooks/install-superpowers-reminder.mjs --remove  # 제거
+```
