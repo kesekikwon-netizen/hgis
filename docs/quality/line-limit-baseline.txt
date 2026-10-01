@@ -21,10 +21,10 @@
 632 src/app/KaTopographicScopePanel.cpp
 524 src/app/KaVertexEditTool.cpp
 3258 src/app/MainWindow.cpp
-651 src/app/MainWindow.h
+652 src/app/MainWindow.h
 881 src/app/MainWindowAlign.cpp
 478 src/app/MainWindowContextMenus.cpp
-1520 src/app/MainWindowEditing.cpp
+1540 src/app/MainWindowEditing.cpp
 551 src/app/MainWindowExport.cpp
 501 src/app/MainWindowOffline.cpp
 696 src/app/MainWindowOverlay.cpp
@@ -80,7 +80,7 @@
 564 tests/test_perf.cpp
 400 tests/test_polygon_erase.cpp
 802 tests/test_reference_download.cpp
-5642 tests/test_save_open.cpp
+5706 tests/test_save_open.cpp
 1314 tests/test_section_layout.cpp
 411 tests/test_section_studio.cpp
 1099 tests/test_storage_safety.cpp

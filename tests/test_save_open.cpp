@@ -3313,6 +3313,70 @@ private slots:
     QVERIFY(qAbs(area->getFeature(outer).geometry().area() - 9600.0) < 1e-3);
   }
 
+  // 참고 자료(유적 경계 같은 참조 지도, 지적)의 도형은 도형선택으로 골라 볼 수는 있어도 고칠 수 없다.
+  // 「폴리곤 나누기」·「폴리곤 묶기」가 그 파일에 바로 쓰면 Ctrl+Z로도 되돌릴 수 없었다.
+  void polygonCommands_leaveReferenceAndCadastralShapesAlone() {
+    const QString path = makeSurvey(QStringLiteral("reference_read_only"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* project = QgsProject::instance();
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
+    QVERIFY(tree);
+    const auto memoryLayer = [project](const QString& name, const QStringList& shapes) {
+      auto* layer = new QgsVectorLayer(QStringLiteral("MultiPolygon?crs=EPSG:5187"), name, QStringLiteral("memory"));
+      layer->startEditing();
+      for (const QString& wkt : shapes) {
+        QgsFeature feature(layer->fields());
+        feature.setGeometry(QgsGeometry::fromWkt(wkt));
+        layer->addFeature(feature);
+      }
+      layer->commitChanges();
+      project->addMapLayer(layer);
+      return layer;
+    };
+    auto* heritage = memoryLayer(QStringLiteral("유적 경계"),
+        {QStringLiteral("MultiPolygon(((190050 560050,190200 560050,190200 560200,190050 560200,190050 560050)))"),
+         QStringLiteral("MultiPolygon(((190150 560150,190300 560150,190300 560300,190150 560300,190150 560150)))")});
+    auto* parcels = memoryLayer(QStringLiteral("지적"),
+        {QStringLiteral("MultiPolygon(((190000 559800,190050 559800,190050 559850,190000 559850,190000 559800)),"
+                        "((190100 559800,190150 559800,190150 559850,190100 559850,190100 559800)))")});
+    LayerOps::markReferenceLayer(heritage);
+    LayerOps::markCadastralLayer(parcels);
+    QVERIFY(heritage->featureCount() == 2 && parcels->featureCount() == 1);
+    int refusals = 0;
+    QTimer dismiss;
+    connect(&dismiss, &QTimer::timeout, [&refusals] {
+      for (auto* widget : QApplication::topLevelWidgets())
+        if (auto* message = qobject_cast<QMessageBox*>(widget); message && message->isVisible()) {
+          ++refusals;
+          message->accept();
+        }
+    });
+    dismiss.start(20);
+
+    heritage->selectByIds(heritage->allFeatureIds());
+    QVERIFY(QMetaObject::invokeMethod(&window, "startSplitPolygonTool", Qt::DirectConnection));
+    QVERIFY2(!heritage->isEditable() && heritage->featureCount() == 2,
+             "참조 지도 도형 두 개를 고르고 「폴리곤 나누기」를 눌렀더니 참조 파일에 겹친 조각이 써졌습니다.");
+    QVERIFY(QMetaObject::invokeMethod(&window, "mergeFeaturePolygons", Qt::DirectConnection));
+    QVERIFY2(!heritage->isEditable() && heritage->featureCount() == 2,
+             "참조 지도 도형을 「폴리곤 묶기」로 하나로 합쳤습니다(Ctrl+Z로 되돌릴 수 없음).");
+    heritage->removeSelection();
+    parcels->selectByIds(parcels->allFeatureIds());
+    QVERIFY(QMetaObject::invokeMethod(&window, "startSplitPolygonTool", Qt::DirectConnection));
+    QVERIFY2(!parcels->isEditable() && parcels->featureCount() == 1,
+             "여러 조각인 지적 도형을 「폴리곤 나누기」가 지적 레이어 안에서 조각냈습니다.");
+    parcels->removeSelection();
+    tree->setCurrentLayer(heritage);
+    QVERIFY(QMetaObject::invokeMethod(&window, "startSplitPolygonTool", Qt::DirectConnection));
+    QVERIFY2(!heritage->isEditable(), "좌측 목록에서 참조 지도를 고르고 「폴리곤 나누기」를 누르면 편집이 열립니다.");
+    dismiss.stop();
+    QVERIFY2(refusals == 4, qPrintable(QStringLiteral("고칠 수 없다는 안내가 %1번 나왔습니다(4번이어야 함).").arg(refusals)));
+  }
+
   void layerContextMenu_usesClickedRowAndLeavesSourceIntact() {
     const QString path = makeSurvey(QStringLiteral("menu_target"));
     QVERIFY(!path.isEmpty());

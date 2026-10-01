@@ -519,7 +519,7 @@ void MainWindow::mergeFeaturePolygons() {
   if (!targetLayer || targetLayer->geometryType() != Qgis::GeometryType::Polygon) {
     targetLayer = ensureDomainLayerForEdit(QStringLiteral("feature_poly"), QStringLiteral("유구면"));
   }
-  if (!targetLayer) return;
+  if (!targetLayer || refuseReadOnlyLayer(QStringLiteral("폴리곤 묶기"), targetLayer)) return;
 
   // [pkg E1] F083: say which records differ before the merge keeps the first-drawn one.
   const auto conflicts = GeometryEditOps::mergeConflicts(targetLayer, selectedIds);

@@ -1164,9 +1164,28 @@ void MainWindow::startEditArtifact() {
 #endif
 }
 
+// Reference maps and cadastral layers are read-only. 도형선택 may pick their shapes to look at,
+// but 나누기·묶기 must not write into their files: Ctrl+Z never reaches those layers.
+bool MainWindow::refuseReadOnlyLayer(const QString& title, const QgsVectorLayer* layer) {
+#if KA_HGIS_HAS_QGIS
+  if (!layer || !LayerOps::isReferenceOrBasemapLayer(layer)) return false;
+  QMessageBox::information(this, title,
+                           QStringLiteral("「%1」은(는) 보기만 하는 참고 자료(참조 지도·지적)라 고칠 수 없습니다.\n"
+                                          "조사 도형만 골라 다시 누르세요.")
+                               .arg(layer->name()));
+  return true;
+#else
+  Q_UNUSED(title);
+  Q_UNUSED(layer);
+  return false;
+#endif
+}
+
 void MainWindow::startSplitPolygonTool() {
 #if KA_HGIS_HAS_QGIS
   auto selected = KaFeatureSelectTool::allSelectedFeatures(m_canvas);
+  for (const auto& item : selected)
+    if (refuseReadOnlyLayer(QStringLiteral("폴리곤 나누기"), item.layer.data())) return;
 
   // 1. 도형 2개가 선택된 경우: 겹치는 곳을 잘라서 나누기 (A\B, B\A, A∩B)
   if (selected.size() == 2) {
@@ -1232,6 +1251,7 @@ void MainWindow::startSplitPolygonTool() {
   if (!selected.isEmpty() && selected[0].layer) {
     cur = selected[0].layer.data();
   }
+  if (refuseReadOnlyLayer(QStringLiteral("폴리곤 나누기"), cur)) return;
   if (!cur || !cur->isValid() || cur->geometryType() != Qgis::GeometryType::Polygon) {
     QMessageBox::information(this, QStringLiteral("폴리곤 나누기"),
                              QStringLiteral("도형을 Shift+클릭으로 선택하거나, 나눌 폴리곤 레이어를 좌측 목록에서 선택해 주세요."));

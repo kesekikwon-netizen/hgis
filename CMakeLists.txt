@@ -1390,7 +1390,8 @@ if(KA_HGIS_BUILD_TESTS)
     eraseOverlap_secondPressUsesTheShapeJustDrawn
     drawnShapeOnTopOffersEraseWhenFinished
     selectTool_picksTheShapeDrawnOnTopAndKeyAStartsIt
-    selectTool_rightClickErasesAndKeyAEndsSplitMode)
+    selectTool_rightClickErasesAndKeyAEndsSplitMode
+    polygonCommands_leaveReferenceAndCadastralShapesAlone)
   ka_add_qtest_filter(save_open_roundtrip ka_save_open_tests
     saveAndReopen_keepsTreeGeometryAttributesAndStyle
     saveReopenSubmit_preservesWorkAndPackage

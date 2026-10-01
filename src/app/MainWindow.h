@@ -344,6 +344,7 @@ private:
   void deleteSelectedAlignPoint();
   void applyAlignMove();
   void beginEdit(QgsVectorLayer* layer);
+  bool refuseReadOnlyLayer(const QString& title, const QgsVectorLayer* layer);
   void onGeometryCaptured(const QgsGeometry& geom);
   void stopCaptureTool();
   // [pkg B1] drawing helpers (KaDrawSketchTools.cpp). 완료·되돌리기·취소 and
