@@ -152,17 +152,23 @@ void KaBeginnerRibbon::applyTwoLine(QToolButton* button) {
   button->setText(twoLine(button->text()));
   const auto& metrics = KaTheme::buttonMetrics();
   button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-  button->setAutoRaise(false);
+  // Auto-raise only so Qt asks the icon for its hover look (the tile's hover fill, QIcon::Active);
+  // the style sheet paints no raised face for a chip either way.
+  button->setAutoRaise(true);
   button->setFocusPolicy(Qt::TabFocus);
   button->setIconSize(QSize(metrics.ribbonIconSize, metrics.ribbonIconSize));
+  // Polish first: the sheet's family and weight are what the label is drawn (and measured) in.
+  button->ensurePolished();
   QFont font = button->font();
   font.setPixelSize(metrics.ribbonFontSize);
   const QString text = button->text();
-  // The style sheet gives the label the chip's whole 56 px content box, so every
-  // current label (widest: 「다른 이름」, 「제출 변환」 at 52 px) stays at 12 px.
-  const int textRoom = std::max(8, metrics.ribbonChipWidth - 2);
-  const auto overflows = [&] { return QFontMetrics(font).horizontalAdvance(text) > textRoom; };
-  // One floor for every chip, so a row never mixes 12 px with 9 px labels.
+  // A chip is as wide as its label plus 8 px (the mockup), so every current label (widest:
+  // 「다른 이름」, 「검수·제출」, about 57 px at 13 px) keeps full size. Only a label wider than
+  // kMaxLabelWidth shrinks, to one floor for every chip.
+  constexpr int kLabelPadding = 8;
+  constexpr int kMaxLabelWidth = 64;
+  const auto labelWidth = [&] { return QFontMetrics(font).horizontalAdvance(text); };
+  const auto overflows = [&] { return labelWidth() > kMaxLabelWidth; };
   while (font.pixelSize() > metrics.ribbonMinFontSize && overflows())
     font.setPixelSize(font.pixelSize() - 1);
   button->setFont(font);
@@ -177,9 +183,12 @@ void KaBeginnerRibbon::applyTwoLine(QToolButton* button) {
   if (overflows() && !button->toolTip().contains(text))
     button->setToolTip(button->toolTip().isEmpty() ? text : text + QStringLiteral(" — ") + button->toolTip());
   button->ensurePolished();
-  // One chip size for every ribbon action. Leftover window width is not
-  // given to these buttons. https://doc.qt.io/qt-6.8/qwidget.html#setFixedSize
-  button->setFixedSize(metrics.ribbonChipWidth, metrics.ribbonHeight);
+  // The chip's own size; leftover window width is not given to these buttons. The style
+  // sheet does not pin the width, so a repolish keeps it.
+  // https://doc.qt.io/qt-6.8/qwidget.html#setFixedSize
+  const int chipWidth = std::min(std::max(metrics.ribbonChipWidth, labelWidth() + kLabelPadding),
+                                 kMaxLabelWidth + kLabelPadding);
+  button->setFixedSize(chipWidth, metrics.ribbonHeight);
   button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 }
 

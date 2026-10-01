@@ -88,6 +88,37 @@ bool onRibbon(KaBeginnerRibbon* ribbon, const QString& id) {
   return frame && frame->parentWidget() == ribbon && frame->isVisible();
 }
 
+// The production ribbon (groups, chips, keep order) and the app bar in a main window of the given
+// width, shown and laid out. Returns the ribbon, owned by `window`.
+KaBeginnerRibbon* showProductionRibbon(QMainWindow& window, const RibbonSource& source, int windowWidth) {
+  window.setAttribute(Qt::WA_DontShowOnScreen);
+  auto* toolbar = new QToolBar(&window);
+  toolbar->setObjectName(QStringLiteral("mainToolbar"));
+  toolbar->setIconSize(QSize(20, 20));
+  toolbar->setMovable(false);
+  auto* appBar = new KaAppBar(toolbar);
+  appBar->setRegionWidget(new QWidget);
+  auto* ribbon = new KaBeginnerRibbon(toolbar);
+  for (const QString& id : source.groups) ribbon->addGroup(id, id);
+  ribbon->setKeepPriority(source.priority);
+  ribbon->setPinned(source.pinned);
+  for (const Chip& chip : source.chips) {
+    auto* button = new QToolButton(ribbon);
+    button->setText(chip.text);
+    button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    ribbon->addWidget(chip.group, button);
+  }
+  toolbar->addWidget(ribbon);
+  toolbar->addWidget(appBar);
+  window.addToolBar(toolbar);
+  window.setCentralWidget(new QWidget(&window));
+  window.resize(windowWidth, 768);
+  window.show();
+  QCoreApplication::processEvents();
+  QCoreApplication::processEvents();
+  return ribbon;
+}
+
 }  // namespace
 
 class TestRibbonOverflow : public QObject {
@@ -101,6 +132,7 @@ private slots:
   void labels_shrinkToOneFloorAndKeepWordingInTip();
   void productionRibbon_data();
   void productionRibbon();
+  void mockupRibbonFitsAt1920();
 };
 
 void TestRibbonOverflow::initTestCase() {
@@ -166,8 +198,8 @@ void TestRibbonOverflow::labels_shrinkToOneFloorAndKeepWordingInTip() {
   fits.setText(QStringLiteral("그리기"));
   KaBeginnerRibbon::applyTwoLine(&fits);
   QCOMPARE(fits.font().pixelSize(), metrics.ribbonFontSize);
-  // The widest production labels fit the 56 px content box at full size.
-  for (const QString& label : {QStringLiteral("제출 변환"), QStringLiteral("다른 이름")}) {
+  // The widest production labels keep full size: the chip grows with its label.
+  for (const QString& label : {QStringLiteral("검수·제출"), QStringLiteral("다른 이름")}) {
     QToolButton tight;
     tight.setText(label);
     KaBeginnerRibbon::applyTwoLine(&tight);
@@ -196,31 +228,7 @@ void TestRibbonOverflow::productionRibbon() {
   QVERIFY2(source.groups.size() >= 5, "run from the source tree: MainWindowRibbon.cpp groups");
   QVERIFY2(source.chips.size() >= 20, qPrintable(QStringLiteral("parsed %1 chips").arg(source.chips.size())));
   QMainWindow window;
-  window.setAttribute(Qt::WA_DontShowOnScreen);
-  auto* toolbar = new QToolBar(&window);
-  toolbar->setObjectName(QStringLiteral("mainToolbar"));
-  toolbar->setIconSize(QSize(20, 20));
-  toolbar->setMovable(false);
-  auto* appBar = new KaAppBar(toolbar);
-  appBar->setRegionWidget(new QWidget);
-  auto* ribbon = new KaBeginnerRibbon(toolbar);
-  for (const QString& id : source.groups) ribbon->addGroup(id, id);
-  ribbon->setKeepPriority(source.priority);
-  ribbon->setPinned(source.pinned);
-  for (const Chip& chip : source.chips) {
-    auto* button = new QToolButton(ribbon);
-    button->setText(chip.text);
-    button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-    ribbon->addWidget(chip.group, button);
-  }
-  toolbar->addWidget(ribbon);
-  toolbar->addWidget(appBar);
-  window.addToolBar(toolbar);
-  window.setCentralWidget(new QWidget(&window));
-  window.resize(windowWidth, 768);
-  window.show();
-  QCoreApplication::processEvents();
-  QCoreApplication::processEvents();
+  KaBeginnerRibbon* ribbon = showProductionRibbon(window, source, windowWidth);
 
   auto* overflow = ribbon->findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
   QVERIFY(overflow);
@@ -253,6 +261,29 @@ void TestRibbonOverflow::productionRibbon() {
       if (!onRibbon(ribbon, id))
         QVERIFY2(ribbon->group(id)->sizeHint().width() > room, qPrintable(id + QStringLiteral(" folded with room left: ") + where));
   }
+  qInfo().noquote() << where;
+}
+
+// Mockup chips (tile 32, label 13 px, width = label + 8) at the 1920 x 1080 screen of the field PC:
+// the 1904 px window keeps all seven groups on the ribbon, none folded into 「더 많은 작업」.
+void TestRibbonOverflow::mockupRibbonFitsAt1920() {
+  const RibbonSource source = readProductionRibbon();
+  QVERIFY2(source.groups.size() >= 5, "run from the source tree: MainWindowRibbon.cpp groups");
+  QMainWindow window;
+  KaBeginnerRibbon* ribbon = showProductionRibbon(window, source, 1904);
+  auto* overflow = ribbon->findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
+  QVERIFY(overflow);
+  int folded = 0;
+  QString placed;
+  for (const QString& id : source.groups) {
+    const bool shown = onRibbon(ribbon, id);
+    placed += QStringLiteral("%1:%2 ").arg(id, shown ? QStringLiteral("in") : QStringLiteral("out"));
+    if (!shown) ++folded;
+  }
+  const QString where = QStringLiteral("window 1904, ribbon %1, needs %2: %3")
+                            .arg(ribbon->width()).arg(ribbon->sizeHint().width()).arg(placed);
+  QVERIFY2(folded == 0, qPrintable(where));
+  QVERIFY2(!overflow->isVisible(), qPrintable(where));
   qInfo().noquote() << where;
 }
 

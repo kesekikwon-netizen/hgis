@@ -65,6 +65,14 @@ constexpr Entry kEntries[] = {
     {"chevron_left", "lucide/chevron-left"},
     {"chevron_right", "lucide/chevron-right"},
     {"satellite", "lucide/satellite"},
+    // 그리기 보조 줄 (MainWindowRibbon.cpp showSubToolsDraw, KaDrawSketchTools.cpp)
+    {"check", "lucide/check"},
+    {"stop", "lucide/x"},
+    {"draw_area", "lucide/square-dashed"},
+    {"draw_line", "lucide/pen-line"},
+    {"easy_draw", "lucide/pencil"},
+    {"artifact", "lucide/amphora"},
+    {"transform", "lucide/move"},
 };
 
 }  // namespace

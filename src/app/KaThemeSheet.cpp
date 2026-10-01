@@ -26,6 +26,9 @@ QHash<QString, QString> replacementTable() {
       {"layoutIconSize", m.layoutIconSize}, {"layoutButtonHeight", m.layoutButtonHeight},
       {"panelMargin", m.panelMargin}, {"uiFontSize", uiFontSize()},
       {"chipHeight", m.chipHeight}, {"chipRadius", m.chipRadius},
+      // Ribbon chip box (see QWidget#beginnerRibbon QToolButton): content height and bottom padding.
+      {"ribbonLabelTail", m.ribbonLabelTail}, {"ribbonContentHeight", m.ribbonHeight - m.ribbonLabelTail},
+      {"ribbonBottomPad", m.buttonPadding + m.ribbonLabelTail},
   };
   for (const auto& entry : metrics) values.insert(QString::fromLatin1(entry.name), QString::number(entry.value));
   const Tokens& c = tokens();
@@ -41,7 +44,7 @@ QHash<QString, QString> replacementTable() {
       {"successSurface", c.successSurface}, {"dangerSurface", c.dangerSurface},
       {"warn", c.warn}, {"warnSurface", c.warnSurface}, {"rail", c.rail},
       {"railText", c.railText}, {"railMuted", c.railMuted}, {"progressFill", c.progressFill},
-      {"focusRing", c.focusRing},
+      {"focusRing", c.focusRing}, {"ribbonActiveInk", c.ribbonActiveInk}, {"ribbonGroupInk", c.ribbonGroupInk},
       // Legacy placeholders, kept so older sheets still resolve.
       {"glossMiddle", c.glossMiddle}, {"glossBottom", c.glossBottom}, {"hoverTop", c.hoverTop},
       {"hoverBottom", c.hoverBottom}, {"pressedTop", c.pressedTop}, {"pressedBottom", c.pressedBottom},

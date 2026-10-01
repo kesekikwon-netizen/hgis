@@ -22,6 +22,8 @@ const char* const mappedIds[] = {
     "georef", "pdf", "print", "section", "geotiff", "export_convert", "more", "home", "map", "region", "search",
     "undo", "redo", "zoom_in", "zoom_out", "zoom_fit", "folder", "note", "layer", "warn", "snap", "chevron_left",
     "chevron_right", "satellite", "save_unsaved",
+    // The drawing sub-toolbar (MainWindowRibbon.cpp, KaDrawSketchTools.cpp).
+    "check", "stop", "draw_area", "draw_line", "easy_draw", "artifact", "transform",
 };
 const QColor kTile(0xE4, 0xEA, 0xED);
 const QColor kInk(0x2B, 0x48, 0x58);
@@ -118,7 +120,7 @@ void TestIconsMockup::everyMappedIdHasSvg() {
   }
   QVERIFY(KaIconsMockup::svgPathFor(QStringLiteral("definitely_not_an_icon")).isEmpty());
   QVERIFY(KaIconsMockup::mockupIcon(QStringLiteral("definitely_not_an_icon")).isNull());
-  // Every bundled SVG (37 Lucide + 3 Strata drawings) recolours through currentColor.
+  // Every bundled SVG (44 Lucide + 3 Strata drawings) recolours through currentColor.
   int svgFiles = 0;
   for (QDirIterator it(QStringLiteral(":/ka-hgis/icons"), {QStringLiteral("*.svg")}, QDir::Files,
                        QDirIterator::Subdirectories);
@@ -126,7 +128,7 @@ void TestIconsMockup::everyMappedIdHasSvg() {
     QFile file(it.next());
     QVERIFY2(file.open(QIODevice::ReadOnly) && file.readAll().contains("currentColor"), qPrintable(file.fileName()));
   }
-  QCOMPARE(svgFiles, 40);
+  QCOMPARE(svgFiles, 47);
 }
 
 void TestIconsMockup::normalTileColours() {

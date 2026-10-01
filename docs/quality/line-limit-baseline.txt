@@ -3,7 +3,7 @@
 # or a listed file grows. Shrinking is always fine; rewrite with -WriteBaseline after it.
 583 src/app/KaAlignMapTool.cpp
 967 src/app/KaApplication.cpp
-393 src/app/KaBeginnerRibbon.cpp
+402 src/app/KaBeginnerRibbon.cpp
 464 src/app/KaCaptureMapTool.cpp
 3851 src/app/KaDrawingStudio.cpp
 559 src/app/KaFeatureSelectTool.cpp
@@ -86,7 +86,7 @@
 1099 tests/test_storage_safety.cpp
 338 tests/test_survey_contour.cpp
 607 tests/test_terrain_3d.cpp
-1202 tests/test_theme.cpp
+1384 tests/test_theme.cpp
 415 tests/test_tile_print.cpp
 1442 tests/test_topographic_browser.cpp
 320 tests/test_topographic_catalog.cpp

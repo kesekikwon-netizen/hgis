@@ -30,6 +30,8 @@ struct Tokens {
   // Progress chunk: ink text on it and the chunk on white both stay readable.
   QColor progressFill;
   QColor focusRing;
+  // Ribbon (mockup): the chosen tool's label, and the group names under the chips.
+  QColor ribbonActiveInk, ribbonGroupInk;
 
   // Legacy aliases (same values as above). Do not use in new code.
   QColor sky0, sky1, sky2, sky3, sky4, sky5, sky6;
@@ -69,13 +71,17 @@ struct IconPalette {
 const IconPalette& iconPalette();
 
 struct ButtonMetrics {
-  int ribbonIconSize = 32;
-  int ribbonFontSize = 12;
-  // Ribbon labels shrink one pixel at a time to fit the chip, never below this.
-  int ribbonMinFontSize = 11;
-  int ribbonChipWidth = 56;
-  int ribbonMinWidth = 56;
+  int ribbonIconSize = 32;  // the mockup's 32 px icon tile
+  int ribbonFontSize = 13;
+  // Ribbon labels shrink one pixel at a time when even the widest chip cannot hold them, never below this.
+  int ribbonMinFontSize = 12;
+  // A chip is as wide as its label plus 8 px but never narrower than this.
+  int ribbonChipWidth = 40;
+  int ribbonMinWidth = 40;
   int ribbonHeight = 82;
+  // Chip room under the label. Qt centres a label in the room below its icon; ending the chip's
+  // content box this early lifts the label to hang just under the tile (about 6 px).
+  int ribbonLabelTail = 25;
   int buttonPadding = 1;
   int buttonSpacing = 4;
   int ribbonChipGap = 0;

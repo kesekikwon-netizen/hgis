@@ -95,6 +95,10 @@ void TestThemeOptions::stateWashesStepLightToStrong() {
       QVERIFY(contrast(t.inkMuted, wash) >= 4.5);
     }
     QVERIFY(contrast(t.inkDisabled, t.disabledSurface) >= 4.5);
+    // Ribbon inks: group names on the toolbar, the chosen tool's label on the toolbar and on the hover wash.
+    QVERIFY2(contrast(t.ribbonGroupInk, t.surface) >= 4.5, "ribbon group names");
+    QVERIFY2(contrast(t.ribbonActiveInk, t.surface) >= 4.5, "chosen ribbon label");
+    QVERIFY2(contrast(t.ribbonActiveInk, t.hover) >= 4.5, "chosen ribbon label on hover");
     QVERIFY2(contrast(t.ink, t.progressFill) >= 4.5, "progress text on the chunk");
     QVERIFY2(contrast(t.progressFill, t.surface) >= 3.0, "progress chunk against the groove");
   }
@@ -132,8 +136,8 @@ void TestThemeOptions::largeTextOnlyGrowsBodyText() {
   QCOMPARE(qApp->font().pixelSize(), 15);
   QVERIFY(qApp->styleSheet().contains(QStringLiteral("font-size: 15px")));
   // Chip size, ribbon labels and the 10 px layer list are fixed user decisions.
-  QCOMPARE(KaTheme::buttonMetrics().ribbonFontSize, 12);
-  QCOMPARE(KaTheme::buttonMetrics().ribbonChipWidth, 56);
+  QCOMPARE(KaTheme::buttonMetrics().ribbonFontSize, 13);
+  QCOMPARE(KaTheme::buttonMetrics().ribbonChipWidth, 40);
   QVERIFY(qApp->styleSheet().contains(QStringLiteral("font-size: 10px")));
   KaTheme::setDisplayOptions(qApp, KaTheme::DisplayOptions());
   QCOMPARE(qApp->font().pixelSize(), 13);

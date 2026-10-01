@@ -29,8 +29,10 @@ public:
   void applyTabOrder();
   // 이름은 예전 두 줄 맞춤. 지금은 줄바꿈을 없애 한 줄로 맞춘다.
   static QString twoLine(const QString& text);
-  // One chip: 56 x 82 content box, one-line label shrunk to fit but never below
-  // ButtonMetrics::ribbonMinFontSize; a label that still does not fit keeps its
+  // One chip (mockup): as wide as its 13 px label plus 8 px and never under
+  // ButtonMetrics::ribbonChipWidth; the 32 px icon tile on top and the label under it (the
+  // style sheet's ribbonLabelTail). A label wider than the widest chip shrinks one pixel at a
+  // time, never below ButtonMetrics::ribbonMinFontSize; one that still does not fit keeps its
   // full wording in the tooltip (screen readers already read the full text()).
   static void applyTwoLine(QToolButton* button);
   // Which groups stay on the one-row ribbon, in priority order. survey, out and

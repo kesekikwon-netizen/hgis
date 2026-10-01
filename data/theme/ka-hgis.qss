@@ -257,11 +257,19 @@ QToolBar#subToolbar {
   border-top: 1px solid @border@;
   border-bottom: 1px solid @border@;
 }
+/* Same label size and ink as the ribbon chips. The 13 px labels are wider than the old 12 px ones,
+   so the side padding is 7 px (was 10) to keep the whole drawing row on screen at 1920. */
+QToolBar#subToolbar QToolButton {
+  color: @ink@;
+  font-size: @ribbonFontSize@px;
+  padding: 6px 7px;
+}
 QToolBar#subToolbar QToolButton:enabled:checked {
-  background: @selected@;
-  color: @accentDeep@;
+  background: transparent;
+  color: @ribbonActiveInk@;
+  font-weight: 700;
   border: 2px solid transparent;
-  border-bottom: 2px solid @accent@;
+  border-bottom: 2px solid @ribbonActiveInk@;
 }
 QToolBar#mainToolbar {
   spacing: @buttonSpacing@px;
@@ -307,20 +315,21 @@ QFrame#ribbonGroup {
 }
 QFrame#ribbonGroup[offContext="true"] QLabel#ribbonGroupCaption { color: @borderStrong@; }
 QLabel#ribbonGroupCaption {
-  color: @inkMuted@;
+  color: @ribbonGroupInk@;
   font-size: 11px;
   font-weight: 700;
   min-height: 18px;
   padding: 0 2px;
   background: transparent;
 }
+/* The icon tile sits at the chip's top and the label hangs about 6 px under it: Qt centres the
+   label in the room left under the icon, so the content box ends ribbonLabelTail px early and
+   that room is padding. The outer chip stays ribbonHeight + 4 px high. */
 QWidget#beginnerRibbon QToolButton {
-  min-width: @ribbonChipWidth@px;
-  max-width: @ribbonChipWidth@px;
-  min-height: @ribbonHeight@px;
-  max-height: @ribbonHeight@px;
+  min-height: @ribbonContentHeight@px;
+  max-height: @ribbonContentHeight@px;
   margin: 0;
-  padding: @buttonPadding@px;
+  padding: @buttonPadding@px @buttonPadding@px @ribbonBottomPad@px @buttonPadding@px;
   background: @surface@;
   color: @ink@;
   font-size: @ribbonFontSize@px;
@@ -329,8 +338,8 @@ QWidget#beginnerRibbon QToolButton {
   text-align: center;
 }
 QWidget#beginnerRibbon QToolButton:enabled:hover {
-  background: @hover@;
-  border-color: @border@;
+  background: transparent;
+  border: 1px solid transparent;
 }
 QWidget#beginnerRibbon QToolButton:enabled:pressed {
   background: @pressed@;
@@ -341,11 +350,17 @@ QWidget#beginnerRibbon QToolButton#ribbonOverflow {
   max-width: 220px;
   min-height: 28px;
   max-height: @ribbonHeight@px;
+  padding: @buttonPadding@px;
 }
-QWidget#beginnerRibbon QToolButton:enabled:checked {
-  background: @selected@;
-  color: @accentDeep@;
-  border: 1px solid @accent@;
+/* A chosen chip paints no face and no border of its own: the icon tile (blue border, light
+   blue fill) and a bold label in the active ink are the whole mark. The hover line repeats the
+   rule because QToolBar#mainToolbar QToolButton:checked:hover is just as specific. */
+QWidget#beginnerRibbon QToolButton:enabled:checked,
+QWidget#beginnerRibbon QToolButton:enabled:checked:hover {
+  background: transparent;
+  color: @ribbonActiveInk@;
+  font-weight: 700;
+  border: 1px solid transparent;
   border-radius: 8px;
 }
 QWidget#beginnerRibbon QToolButton::menu-button {
@@ -1200,11 +1215,12 @@ QToolButton#renderToggle:enabled:focus {
 }
 QFrame#studioOutputBar QToolButton#btnPrimary:enabled:focus,
 QFrame#itemInspector QToolButton#btnPrimary:enabled:focus { border-color: @ink@; }
-/* Ribbon chips stay 56 x 82 inside: the 2 px ring takes the 1 px of padding. */
+/* Ribbon chips keep their size when focused: the 2 px ring takes the 1 px of padding. */
 QWidget#beginnerRibbon QToolButton:enabled:focus {
   border: 2px solid @focusRing@;
-  padding: 0px;
+  padding: 0px 0px @ribbonLabelTail@px 0px;
 }
+QWidget#beginnerRibbon QToolButton#ribbonOverflow:enabled:focus { padding: 0px; }
 QTableWidget:focus, QTableView:focus { border-color: @focusRing@; }
 
 /* ---- [P1 design-system] chips: one shape (colour is painted by KaChip::paintChip) ---- */
