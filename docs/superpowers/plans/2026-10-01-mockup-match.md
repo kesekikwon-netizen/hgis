@@ -48,7 +48,7 @@
 ## Review Focus
 
 1. 고해상도 화면(배율 125%·150%)에서 타일과 글리프가 흐려지거나 어긋나는 경우. 기대: devicePixelRatio에 맞춰 선명하게 그린다 → Task 1 `mockupIconIsCrispAtDpr150`.
-2. 1920 창, 그리고 그보다 좁은 1366·1093·1024 창의 리본. 기대: 어느 너비에서도 묶음을 접지 않는다. 1904는 글자+아이콘, 좁으면 아이콘만, 더 좁으면 작은 아이콘(사용자 결정 2026-10-01 19:40) → Task 2 `density_*`.
+2. 1920 창, 그리고 그보다 좁은 1366·1093·1024 창의 리본. 기대: 어느 너비에서도 묶음을 접지 않는다. 1904는 글자+커진 아이콘으로 오른쪽 빈자리가 칸 하나보다 작고, 좁으면 아이콘만, 더 좁으면 작은 아이콘(사용자 결정 2026-10-01 19:40·22:10) → Task 11 `productionRibbon`·`sizeOnlyShrinksAsWindowNarrows`.
 3. 「큰 글씨」 옵션(본문 15px)을 켠 경우. 기대: 레이어 줄과 표가 글자에 맞게 커지고 잘리지 않는다 → Task 6 `largeTextRowsDoNotClip`.
 4. 조사를 열지 않은 홈에서 상태줄을 보는 경우. 기대: 「작업 —」처럼 빈 값으로 보이고 누를 수 없다(목업 6쪽) → Task 4 `homeShowsEmptyCrsChips`.
 5. 예전 아이콘 모양이 필요한 경우(`KA_HGIS_ICON_STYLE=outline` 또는 `tile`). 기대: 옛 모양이 그대로 나온다 → Task 1 `environmentSelectsLegacyStyles`.
@@ -194,17 +194,19 @@
 - [ ] **Step 4: 통과 확인** + `--smoke-quit` 0
 - [ ] **Step 5: 커밋.** `style(ribbon): 리본 칸·라벨·고른 도구 표시를 목업대로 맞춘다`
 
-### Task 11: 리본 크기 단계 — 접지 않고 줄이기 (Task 2 바로 다음에 한다)
+### Task 11: 리본 크기 단계 — 접지 않고, 넓으면 키우고 좁으면 줄이기 (Task 2 바로 다음에 한다)
 
-spec 「리본 크기 단계 (2026-10-01 19:40 결정)」을 그대로 따른다. 「더 많은 작업」과 묶음 접기를 없애고, 창 너비에 맞는 가장 큰 크기 단계를 고른다.
+spec 「리본 크기 단계 (2026-10-01 19:40 결정, 22:10 넓은 창 키움 더함)」을 그대로 따른다. 「더 많은 작업」과 묶음 접기를 없애고, 크기를 큰 것부터 늘어놓은 목록에서 창 너비에 들어가는 첫 크기를 고른다.
 
 **Files:**
 - Modify:
   - `src/app/KaBeginnerRibbon.h/.cpp`
     - 없앤다: `m_overflow`(「더 많은 작업」), `m_overflowMenu`, `m_groupMenus`, `m_groupScrolls`, `planGroups`, `setKeepPriority`, `setPinned`, `updateOverflow`, 「[ribbon] 접힘」 로그.
+    - Task 2가 `applyTwoLine` 안에 둔 `kLabelPadding = 8`, `kMaxLabelWidth = 64`를 `ButtonMetrics`(`KaTheme.h`)로 옮겨 크기 계산과 함께 쓴다.
     - 단추 글자는 숨겨도 `text()`를 지우지 않는다. 툴팁은 늘 전체 이름이다.
-    - `minimumSizeHint().width()`는 3단계(가장 작게) 너비다.
-    - 단계가 바뀔 때만 세션 로그 한 줄: `[ribbon] 크기 단계 N · 창 W · 필요 [w0 w1 w2 w3]`(qWarning, 지금 접힘 로그와 같은 길).
+    - 칸 높이는 타일을 따라간다: 타일 + 6 + 글자 줄 높이 + 아래 여백 6(글자 숨김이면 타일 + 12). 어느 크기에서도 글자·타일이 잘리지 않는다.
+    - `minimumSizeHint().width()`는 가장 작은 크기(타일 20, 글자 숨김) 너비다.
+    - 고른 크기가 바뀔 때만 세션 로그 한 줄: `[ribbon] 크기 타일 T · 글자 보임|숨김 · 창 W · 가용 A`(qWarning, 지금 접힘 로그와 같은 길).
   - `src/app/MainWindowRibbon.cpp` — `setKeepPriority`·`setPinned` 호출 두 문장을 지우고, 그리기 보조 줄을 만든 곳에 `KaToolbarFit::install(m_subToolbar);` 한 줄을 넣는다(파일은 줄어든다).
 - Create: `src/app/KaToolbarFit.h/.cpp` — QToolBar에 붙는 이벤트 필터. 크기가 바뀌거나 액션이 더해지면 다시 계산한다.
   - 다 들어가면: 지금 글자 모양 그대로, 아이콘 20.
@@ -213,38 +215,45 @@ spec 「리본 크기 단계 (2026-10-01 19:40 결정)」을 그대로 따른다
   - 자리가 생기면 위 순서를 거꾸로 되돌린다. 어느 단계에서도 QToolBar 펼침 단추(`qt_toolbar_ext_button`)가 보이지 않는다.
 - CMakeLists.txt: `KaToolbarFit.cpp`를 ka-hgis와 ribbon_overflow 시험 대상에 넣는다.
 - Test:
-  - `tests/test_ribbon_overflow.cpp`(ctest `ribbon_overflow`) — `plan_*` 4개를 지우고 아래 시험으로 바꾼다.
+  - `tests/test_ribbon_overflow.cpp`(ctest `ribbon_overflow`) — `plan_*` 4개를 지우고 아래 시험으로 바꾼다. 파일이 300줄을 넘으면 새 시험 파일과 대상으로 나눈다.
   - `tests/test_theme.cpp`(ctest `theme_qss`) `ribbonOverflow_preservesControlsAndKeyboard`·`ribbonOverflow_keepsAlignAtFieldWidth` — 확인하던 것(좁은 창에서도 모든 단추를 Tab으로 갈 수 있음, 「정합」이 보임)을 새 규칙으로 다시 쓴다. 이름은 `ribbonNarrow_keepsControlsAndKeyboard`·`ribbonNarrow_keepsAlignVisible`.
   - `tests/test_region_locator.cpp:195-215`(ctest `region_locator_popup`) — 접힌 메뉴 대신, 리본을 `minimumSizeHint().width()`로 줄여도 지역 찾기 칩이 리본 위에 보이고 눌린다.
   - `tests/test_save_open.cpp`(ctest `save_open_window`) `narrowWindowKeepsSearchOnTheRibbonRow`·`ribbonButtonsAllHaveDifferentIcons` — 리본은 `ribbonOverflow`의 부모가 아니라 objectName `beginnerRibbon`으로 찾는다. 「더 많은 작업으로 접히지 않았다」 확인은 「모든 칩이 리본 안에 보인다」로 바꾼다.
 
 **Interfaces:**
-- Consumes: Task 1 `KaIcons::icon(id)`(Mockup 타일, 어느 크기에서도 선명), Task 2 `ButtonMetrics`(타일 32, 칸 너비 max(40, 라벨+8)).
+- Consumes: Task 1 `KaIcons::icon(id)`(Mockup 타일, 어느 크기에서도 선명), Task 2 `ButtonMetrics`(타일 32, 칸 너비 max(40, 라벨+8), 라벨 위 6px).
 - Produces:
   ```cpp
   // KaBeginnerRibbon.h
-  enum class Density { Full = 0, IconOnly = 1, Small = 2, Tiny = 3 };
-  struct DensityLook { int tile; int chipWidth; bool labels; };  // chipWidth 0 = max(40, 라벨 너비 + 8)
-  static DensityLook lookFor(Density density);  // Full {32,0,true} · IconOnly {32,40,false} · Small {24,30,false} · Tiny {20,26,false}
-  // widths[i] = 단계 i일 때 리본 전체 너비. 들어가는 가장 큰 단계, 하나도 안 들어가면 Tiny.
-  static Density chooseDensity(const std::array<int, 4>& widths, int available);
-  Density density() const;
+  // 리본 크기 하나(spec 「리본 크기 단계」). chipWidth 0 = max(tile + 8, 라벨 너비 + 8).
+  struct RibbonLook { int tile; int glyph; int chipWidth; bool labels; };
+  // 큰 것부터: 타일 56,54,…,34(글자 보임) → 32(글자 보임) → 32·24·20(글자 숨김, 칸 40·30·26).
+  // glyph = qRound(tile * 18 / 32.0).
+  static QList<RibbonLook> looks();
+  // widths[i] = looks()[i]로 그린 리본 전체 너비. 들어가는 첫 크기, 하나도 안 들어가면 마지막.
+  static int chooseLook(const QList<int>& widths, int available);
+  RibbonLook look() const;
   // KaToolbarFit.h
   namespace KaToolbarFit { void install(QToolBar* bar); }
   ```
 
 - [ ] **Step 1: 실패하는 시험 작성**
   ```cpp
-  void chooseDensity_picksLargestThatFits();
-  // widths {1800,1200,900,780}: 1904→Full, 1366→IconOnly, 1000→Small, 800→Tiny, 500→Tiny
+  void looks_followTheSpecTable();
+  // tile: 56,54,…,34,32,32,24,20 / labels: 32까지 true, 그 뒤 false / chipWidth: 글자 보임 0, 숨김 40·30·26
+  // glyph: 56→32, 48→27, 32→18, 24→14, 20→12 (qRound(tile*18/32.0))
+  void chooseLook_picksFirstThatFits();
+  // widths {1700,1600,1500,1265,1100,900,780}: 1904→0, 1550→2, 1265→3, 1000→5, 500→6(마지막)
   void productionRibbon_data();   // 1904, 1536, 1366, 1280, 1093, 1024
   void productionRibbon();
   // findChild<QToolButton*>("ribbonOverflow") == nullptr
   // 모든 칩: isVisible(), 리본 안(0 ≤ x, 오른쪽 < ribbon->width()), 서로 겹치지 않음, toolTip()에 text()가 있음
-  // 모든 묶음 이름(QLabel#ribbonGroupCaption)이 보인다
-  // 1904: density()==Full, 모든 칩 ToolButtonTextUnderIcon
-  // 1093·1024: density()!=Full, 칩 ToolButtonIconOnly; Small이면 iconSize 24, Tiny면 20
-  void ribbonMinimumWidthIsTinyWidth();  // 0 < minimumSizeHint().width() < 1024, 그 너비에서 density()==Tiny이고 칩이 모두 보임
+  // 모든 묶음 이름(QLabel#ribbonGroupCaption)이 보이고, 글자·타일이 칸 밖으로 잘리지 않는다
+  // 1904: look().labels, look().tile > 32, 리본 오른쪽 남는 자리(리본 너비 - 마지막 묶음 오른쪽 끝) < 64
+  // 1093·1024: !look().labels, 칩 ToolButtonIconOnly, iconSize == look().tile 이고 32·24·20 가운데 하나
+  void sizeOnlyShrinksAsWindowNarrows();
+  // 창 1904에서 1024까지 120씩 줄이며: tile 은 커지지 않고, 한번 글자가 숨으면 다시 나타나지 않는다
+  void ribbonMinimumWidthIsSmallestLook();  // 0 < minimumSizeHint().width() < 1024, 그 너비에서 look().tile == 20 이고 칩이 모두 보임
   void toolbarFit_hidesTextThenShrinksIcons();
   // QToolBar + 글자 있는 액션 14개, install 뒤 넓게 → 글자 보임·아이콘 20; 좁게 → IconOnly·20; 더 좁게 → IconOnly·16;
   // 다시 넓게 → 글자 보임. 모든 경우 qt_toolbar_ext_button 이 보이지 않는다.
@@ -252,9 +261,9 @@ spec 「리본 크기 단계 (2026-10-01 19:40 결정)」을 그대로 따른다
   test_theme·test_region_locator·test_save_open의 위 시험도 새 규칙으로 고친다.
   새 `subToolbarKeepsTextAt1904WhileSketching`(test_save_open, `save_open_window` 목록에 더함): 조사를 열고 1904×1000 창에서 유구면 그리기를 시작하면 `#subToolbar`의 단추가 글자를 보이고(`ToolButtonIconOnly` 아님) `qt_toolbar_ext_button`이 보이지 않는다. 1024 창에서는 IconOnly이고 역시 펼침 단추가 없다.
 - [ ] **Step 2: 실패 확인.** `ribbon_overflow|theme_qss|region_locator_popup|save_open_window`.
-- [ ] **Step 3: 구현.** 단계별 너비는 묶음마다 max(묶음 이름 너비, 칩 너비 합 + 칩 간격) + 묶음 여백을 더해 계산한다. 단계를 바꾼 뒤 칩마다 `setToolButtonStyle`·`setIconSize`·고정 너비를 다시 준다.
+- [ ] **Step 3: 구현.** 크기마다 너비는 묶음마다 max(묶음 이름 너비, 칩 너비 합 + 칩 간격) + 묶음 여백을 더해 계산한다(크기 16개 × 칩 약 30개라 매번 계산해도 가볍다). 크기를 바꾼 뒤 칩마다 `setToolButtonStyle`·`setIconSize`·고정 크기를 다시 준다.
 - [ ] **Step 4: 통과 확인.** 위 네 묶음과 `theme_render`, `--smoke-quit` 0.
-- [ ] **Step 5: 커밋.** `feat(ribbon): 리본을 접지 않고 좁으면 아이콘만·작은 아이콘으로 모두 보인다`
+- [ ] **Step 5: 커밋.** `feat(ribbon): 리본을 접지 않고 넓으면 아이콘을 키우고 좁으면 글자를 숨긴 뒤 작게 줄인다`
 
 ### Task 3: 앱 바·탭 줄·조사 열림 칩·창 제목·로고
 
