@@ -1785,3 +1785,26 @@ if(KA_HGIS_BUILD_TESTS)
   endif()
   target_link_libraries(ka_perf_tests PRIVATE Qt6::Network)
 endif()
+
+# ---- [mockup icons] grey tile + Lucide SVG glyph style (design 2026-10-01-mockup-match) ----
+# Every target that compiles KaIcons.cpp (the app, the icon tests, anything that renders a ribbon or a
+# chip) also gets the Mockup engine, the id -> SVG table, the SVG resources and Qt6::Svg. Placed last so
+# targets added by the earlier blocks (and the source copies made for the save/open and perf tests) are
+# all visible here.
+set(_ka_mockup_sources
+  ${CMAKE_SOURCE_DIR}/src/app/KaIconsMockup.h
+  ${CMAKE_SOURCE_DIR}/src/app/KaIconsMockupEngine.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/KaIconsMockupMap.cpp
+  ${CMAKE_SOURCE_DIR}/data/icons/icons-mockup.qrc)
+get_property(_ka_mockup_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(_ka_mockup_target IN LISTS _ka_mockup_targets)
+  get_target_property(_ka_mockup_type ${_ka_mockup_target} TYPE)
+  if(NOT _ka_mockup_type MATCHES "EXECUTABLE|LIBRARY")
+    continue()
+  endif()
+  get_target_property(_ka_mockup_target_sources ${_ka_mockup_target} SOURCES)
+  if(_ka_mockup_target_sources MATCHES "KaIcons\\.cpp" AND NOT _ka_mockup_target_sources MATCHES "KaIconsMockupEngine")
+    target_sources(${_ka_mockup_target} PRIVATE ${_ka_mockup_sources})
+    target_link_libraries(${_ka_mockup_target} PRIVATE Qt6::Svg)
+  endif()
+endforeach()

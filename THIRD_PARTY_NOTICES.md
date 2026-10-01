@@ -17,6 +17,7 @@
 | PROJ | MIT (X/MIT). 인용: PROJ contributors (2026) | https://proj.org/en/stable/about.html |
 | GEOS | LGPLv2.1 | 스플래시·정보 창 고지. https://libgeos.org/ |
 | SQLite | Public domain | https://www.sqlite.org/copyright.html |
+| Lucide 1.49.0 | ISC. Feather에서 온 일부 아이콘은 MIT. 전문은 `data/icons/lucide/LICENSE-lucide.txt` | https://github.com/lucide-icons/lucide |
 
 Qt 제3자 구성 목록: https://doc.qt.io/QT-6/licenses-used-in-qt.html  
 OSGeo4W에서 복사한 QGIS `LICENSE`/`AUTHORS`는 포터블 `licenses/QGIS-*`.

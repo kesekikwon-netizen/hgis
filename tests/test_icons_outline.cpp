@@ -60,6 +60,8 @@ private slots:
 };
 
 void TestIconsOutline::initTestCase() {
+  // The app default is the Mockup style; this file tests the Outline style behind the switch.
+  KaIcons::setGlyphStyle(KaIcons::GlyphStyle::Outline);
   QCOMPARE(KaIcons::glyphStyle(), KaIcons::GlyphStyle::Outline);
   QCOMPARE(KaIconMetrics::kOutlineInset, 12);
 }
@@ -176,7 +178,7 @@ void TestIconsOutline::envVarSelectsTile() {
   qputenv("KA_HGIS_ICON_STYLE", "outline");
   QCOMPARE(KaIcons::glyphStyleFromEnvironment(), KaIcons::GlyphStyle::Outline);
   qunsetenv("KA_HGIS_ICON_STYLE");
-  QCOMPARE(KaIcons::glyphStyleFromEnvironment(), KaIcons::GlyphStyle::Outline);
+  QCOMPARE(KaIcons::glyphStyleFromEnvironment(), KaIcons::GlyphStyle::Mockup);
   KaIcons::setGlyphStyle(KaIcons::GlyphStyle::Tile);
   const QImage tile = render(QStringLiteral("new"));
   // The tile style borrows an outline-only glyph instead of showing a ? box.

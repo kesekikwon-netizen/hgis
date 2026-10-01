@@ -10,7 +10,7 @@
 381 src/app/KaFileBrowserPanel.cpp
 1532 src/app/KaHeritageBrowser.cpp
 449 src/app/ka-hgis.ico
-1114 src/app/KaIcons.cpp
+1120 src/app/KaIcons.cpp
 504 src/app/KaMeasureMapTool.cpp
 804 src/app/KaPrintDialog.cpp
 1110 src/app/KaSectionDrawingStudio.cpp

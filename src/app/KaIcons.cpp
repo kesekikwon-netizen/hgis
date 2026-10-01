@@ -1,5 +1,6 @@
 #include "KaIcons.h"
 #include "KaIconMetrics.h"
+#include "KaIconsMockup.h"
 #include "KaIconsOutline.h"
 #include "KaTheme.h"
 #include <QDebug>
@@ -21,7 +22,7 @@ thread_local QIcon::State tState = QIcon::Off;
 thread_local bool tGlossyTile = true;
 // 저장·도면·인쇄처럼 자주 누르는 단추만 진한 색 타일. 나머지는 옅은 타일이라 지도가 먼저 보인다.
 thread_local bool tStrongTile = false;
-// Outline by default; KA_HGIS_ICON_STYLE=tile or setGlyphStyle(Tile) keeps the tiles above.
+// Mockup by default; KA_HGIS_ICON_STYLE=outline|tile or setGlyphStyle() keeps the older styles.
 KaIcons::GlyphStyle tStyle = KaIcons::glyphStyleFromEnvironment();
 
 // t 만큼 b 쪽으로 섞는다.
@@ -1021,7 +1022,8 @@ namespace KaIcons {
 bool hasIcon(const QString& id) { return glyphFor(id) != nullptr || KaIconsOutline::hasOutlineGlyph(id); }
 
 GlyphStyle glyphStyleFromEnvironment() {
-  return qgetenv("KA_HGIS_ICON_STYLE").trimmed().toLower() == "tile" ? GlyphStyle::Tile : GlyphStyle::Outline;
+  const QByteArray style = qgetenv("KA_HGIS_ICON_STYLE").trimmed().toLower();
+  return style == "tile" ? GlyphStyle::Tile : style == "outline" ? GlyphStyle::Outline : GlyphStyle::Mockup;
 }
 
 GlyphStyle glyphStyle() { return tStyle; }
@@ -1041,13 +1043,17 @@ QIcon appIcon() {
 
 QIcon icon(const QString& id) {
   static QHash<QString, QIcon> cache;
-  // In the outline style strong and plain are one icon; save_unsaved is told apart by its id.
-  const bool outline = tGlossyTile && tStyle == GlyphStyle::Outline;
+  // The mockup style draws mapped ids only; any other id is drawn in the outline style.
+  const bool mockup = tGlossyTile && tStyle == GlyphStyle::Mockup && !KaIconsMockup::svgPathFor(id).isEmpty();
+  // In the outline and mockup styles strong and plain are one icon; save_unsaved is told apart by its id.
+  const bool outline = tGlossyTile && !mockup && tStyle != GlyphStyle::Tile;
   const QString cacheKey = id + (!tGlossyTile ? QStringLiteral("/flat")
+                                 : mockup      ? QStringLiteral("/mockup")
                                  : outline     ? QStringLiteral("/outline")
                                  : tStrongTile ? QStringLiteral("/strong")
                                                : QStringLiteral("/glossy"));
   if (cache.contains(cacheKey)) return cache.value(cacheKey);
+  if (mockup) return *cache.insert(cacheKey, KaIconsMockup::mockupIcon(id, id == QLatin1String("save_unsaved")));
 
   // Solid tiles (저장·도면·인쇄) share the chrome's one blue accent; two dark tile
   // colours in one ribbon row read as two different kinds of button.
@@ -1078,7 +1084,7 @@ QIcon strongIcon(const QString& id) {
 }
 
 QIcon icon(const QString& id, const QColor& ink) {
-  if (ink.isValid() && tStyle == GlyphStyle::Outline)
+  if (ink.isValid() && tStyle != GlyphStyle::Tile)
     if (KaIconsOutline::Glyph outlined = KaIconsOutline::outlineGlyphFor(id))
       return KaIconsOutline::outlineIcon(id, outlined, nullptr, ink);
   // Monochrome utility consumers need the glyph, not a solid tinted tile.
