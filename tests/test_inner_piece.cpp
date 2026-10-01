@@ -3,11 +3,15 @@
 // the inner pieces of one polygon (a hole, a part inside another part). Also key A.
 #include <QtTest>
 #include <QAction>
+#include <QApplication>
 #include <QFile>
 #include <QMainWindow>
+#include <QMenu>
 #include <QSignalSpy>
+#include <QTimer>
 #include <QUndoStack>
 
+#include "app/KaAttributeMapTool.h"
 #include "app/KaCaptureMapTool.h"
 #include "app/KaFeatureSelectTool.h"
 #include "app/KaVertexEditTool.h"
@@ -80,6 +84,20 @@ void click(QgsMapTool& tool, QgsMapCanvas* canvas, const QPoint& at) {
   QgsMapMouseEvent release(canvas, QEvent::MouseButtonRelease, at, Qt::LeftButton, Qt::NoButton);
   tool.canvasReleaseEvent(&release);
 }
+// Right-click and return the enabled entries of the menu that opens (closed unchosen).
+QStringList rightClick(QgsMapTool& tool, QgsMapCanvas* canvas, const QPoint& at) {
+  QStringList seen;  QTimer close;
+  QObject::connect(&close, &QTimer::timeout, [&seen] {
+    if (auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget())) {
+      for (QAction* action : menu->actions()) seen << (action->isEnabled() ? action->text() : QString());
+      menu->close();
+    }
+  });
+  close.start(20);
+  QgsMapMouseEvent release(canvas, QEvent::MouseButtonRelease, at, Qt::RightButton, Qt::NoButton);
+  tool.canvasReleaseEvent(&release);
+  return seen;
+}
 }  // namespace
 
 class TestInnerPiece : public QObject {
@@ -125,6 +143,11 @@ private slots:
              "fixture: the survey area is lifted above the labels");
     Canvas view;
     view.canvas.setLayers({labelled});  // what the app leaves on the canvas
+    // 「이 도형 기록 입력」 and double-click pick with the same rules, the inner part standing for its shape.
+    KaAttributeMapTool record(&view.canvas);
+    QgsVectorLayer* picked = nullptr;  QgsFeature feature;
+    QVERIFY(record.pickAtScreen(view.px(200035, 450035), &picked, &feature));
+    QVERIFY(picked == layer && feature.id() == 1);
     KaFeatureSelectTool tool(&view.canvas);
 
     click(tool, &view.canvas, view.px(200015, 450015));
@@ -193,6 +216,25 @@ private slots:
     QVERIFY(tool.deleteActivePick());
     QVERIFY(qFuzzyCompare(layer->getFeature(1).geometry().area(), 3600.0));
     QCOMPARE(layer->undoStack()->count(), 2);
+  }
+
+  void anySurveyLayerGetsTheMenuAndARightClickStartsNoCycle() {
+    Canvas view;
+    QgsVectorLayer* layer = surveyArea(nested());
+    LayerOps::markSurveyLayer(layer, QStringLiteral("user_poly_1"));  // not one of the domain layers
+    view.canvas.setLayers({layer});
+    KaFeatureSelectTool tool(&view.canvas);
+    const QPoint inner = view.px(200035, 450035);
+    QVERIFY(rightClick(tool, &view.canvas, inner).contains(QStringLiteral("안쪽 도형 지우기")));
+    click(tool, &view.canvas, inner);
+    QVERIFY2(tool.hasActivePiece(), "after a right-click the next click picks the best shape again");
+    QVERIFY(rightClick(tool, &view.canvas, view.px(200010, 450010)).contains(QStringLiteral("점삭제")));
+    // Handles exist only while 도형선택 is the map tool (an undo while drawing must not show them).
+    auto* vertex = tool.findChild<KaVertexEditTool*>();
+    QVERIFY(vertex && vertex->hasTarget());  tool.refreshSelectedGeometry();
+    QVERIFY(!vertex->hasTarget());
+    view.canvas.setMapTool(&tool);
+    QVERIFY(vertex->hasTarget());
   }
 
   void keyASwitchesToSelectWithoutTogglingOrDroppingASketch() {

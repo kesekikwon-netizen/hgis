@@ -7,6 +7,7 @@
 #include "KaVertexEditTool.h"
 #include "core/FeaturePick.h"
 #include "core/LayerOps.h"
+#include "core/PolygonErase.h"
 
 #include <qgsmapcanvas.h>
 #include <qgsvectorlayer.h>
@@ -50,10 +51,17 @@ void KaFeatureSelectTool::setSnapEnabled(bool on) {
 void KaFeatureSelectTool::refreshSelectedGeometry() {
   m_vertexDragging = false;
   m_vertexIndex = -1;
+  m_lastPickIndex = -1;  // the shapes under the last click may have changed
   // After an undo the vertex numbering may have changed under the highlight.
   if (m_vertex) m_vertex->setActiveVertex(-1);
-  syncVertexTarget();
   setActivePiece({});  // rings and parts may be numbered differently after the undo
+  // Handles live only while 도형선택 is the map tool; activate() brings them back for the
+  // selection then. Otherwise they would stay on the map while the user keeps drawing.
+  if (!isActive()) {
+    if (m_vertex) m_vertex->clearTarget();
+    return;
+  }
+  syncVertexTarget();
 }
 
 bool KaFeatureSelectTool::isPickableLayer(const QgsVectorLayer* layer) {
@@ -139,6 +147,7 @@ void KaFeatureSelectTool::deactivate() {
   m_dragging = false;
   m_vertexDragging = false;
   m_vertexIndex = -1;
+  m_lastPickIndex = -1;
   delete m_snapMark;
   m_snapMark = nullptr;
   setActivePiece({});
@@ -155,6 +164,7 @@ void KaFeatureSelectTool::keyPressEvent(QKeyEvent* e) {
   if (e->key() == Qt::Key_Escape && m_vertex && (m_vertex->activeVertex() >= 0 || m_activePiece.isValid())) {
     m_vertex->setActiveVertex(-1);
     setActivePiece({});
+    m_lastPickIndex = -1;
     e->accept();
     return;
   }
@@ -277,13 +287,8 @@ void KaFeatureSelectTool::handleContextMenu(QgsMapMouseEvent* e) {
     return;
   }
 
-  const auto isSurveyLayer = [](const QgsVectorLayer* layer) {
-    const QString key = LayerOps::layerKeyOf(layer);
-    return key == QLatin1String("survey_area") || key == QLatin1String("feature_poly") ||
-           key == QLatin1String("feature_line") || key == QLatin1String("section_line") ||
-           key == QLatin1String("control_points") || key == QLatin1String("artifact_point") ||
-           key == QLatin1String("trial_trench");
-  };
+  // Same rule as the handles and Delete (isPickableLayer): every survey layer, including
+  // user_poly_*, paleo_landform and imported survey layers, gets the vertex and piece actions.
   bool hasEditableShapeType = false;
   const QPointer<QgsVectorLayer> firstLayer = all.first().layer;
   bool sameLayer = true;
@@ -292,7 +297,7 @@ void KaFeatureSelectTool::handleContextMenu(QgsMapMouseEvent* e) {
     if (item.layer != firstLayer) sameLayer = false;
     if (!item.layer || !item.layer->isValid()) continue;
     const auto type = item.layer->geometryType();
-    if (isSurveyLayer(item.layer))
+    if (isPickableLayer(item.layer))
       hasEditableShapeType |= type == Qgis::GeometryType::Line || type == Qgis::GeometryType::Polygon;
   }
 
@@ -308,10 +313,10 @@ void KaFeatureSelectTool::handleContextMenu(QgsMapMouseEvent* e) {
       segAfter = m_vertex->segmentNear(mapPt, &onLine);
   }
 
-  const auto editReason = [&firstLayer, sameLayer, &isSurveyLayer](Qgis::VectorProviderCapabilities required) {
+  const auto editReason = [&firstLayer, sameLayer](Qgis::VectorProviderCapabilities required) {
     if (!sameLayer) return QStringLiteral("같은 레이어의 도형만 선택해 주세요.");
     if (!firstLayer || !firstLayer->isValid()) return QStringLiteral("도형이 있는 레이어를 다시 열어 주세요.");
-    if (!isSurveyLayer(firstLayer)) return QStringLiteral("조사 데이터의 도형을 선택해 주세요.");
+    if (!isPickableLayer(firstLayer)) return QStringLiteral("조사 데이터의 도형을 선택해 주세요.");
     if (firstLayer->readOnly()) return QStringLiteral("읽기 전용 레이어는 수정할 수 없습니다.");
     const auto* provider = firstLayer->dataProvider();
     if (!provider || (provider->capabilities() & required) != required)
@@ -365,11 +370,36 @@ void KaFeatureSelectTool::handleContextMenu(QgsMapMouseEvent* e) {
       if (!vertexReason.isEmpty()) act->setToolTip(vertexReason);
     }
   }
+  // 「겹친 곳 지우기」 lives on the draw row, which 도형선택 (A, ribbon) does not open; offer it
+  // here too when no point or piece action is under the cursor.
+  QAction* eraseAct = nullptr;
+  bool eraseChosen = false;
+  if (!vertexAct && !piece) {
+    QList<PolygonErase::Shape> shapes;
+    bool anyPolygon = false;
+    for (const auto& item : all) {
+      shapes.append({item.layer, item.fid});
+      anyPolygon |= item.layer && item.layer->geometryType() == Qgis::GeometryType::Polygon;
+    }
+    const PolygonErase::Plan plan = anyPolygon ? PolygonErase::plan(shapes, QgsProject::instance())
+                                               : PolygonErase::Plan();
+    if (anyPolygon && (plan.ready() || all.size() >= 2)) {
+      eraseAct = menu.addAction(QStringLiteral("겹친 곳 지우기"));
+      eraseAct->setObjectName(QStringLiteral("actSelectEraseOverlap"));
+      eraseAct->setEnabled(plan.ready());
+      if (!plan.ready()) eraseAct->setToolTip(plan.hint);
+      connect(eraseAct, &QAction::triggered, &menu, [&eraseChosen] { eraseChosen = true; });
+    }
+  }
   if (menu.isEmpty()) {
     emit statusMessage(QStringLiteral("점 위에서 우클릭하면 점삭제, 선 위에서 우클릭하면 점추가입니다."));
     return;
   }
   const QAction* chosen = menu.exec(mCanvas->mapToGlobal(e->pos()));
+  if (eraseAct && (eraseChosen || chosen == eraseAct)) {
+    emit requestEraseOverlap();
+    return;
+  }
   if (!chosen || !m_vertex) return;
   if (chosen == removeAct || chosen == cutAct) {
     setActivePiece(*piece);
@@ -398,10 +428,16 @@ void KaFeatureSelectTool::selectInRect(const QgsRectangle& mapRect, bool addToSe
     }
   }
 
+  m_lastPickIndex = -1;  // a box selection is never the start of a click cycle
+
+  // Same tiers as a click (core/FeaturePick): survey shapes first; reference and cadastral
+  // shapes only when the box holds no survey shape. They are read-only and get no handles.
   const QgsGeometry mapGeom = QgsGeometry::fromRect(mapRect);
+  QList<QPair<QgsVectorLayer*, QgsFeatureIds>> survey;
+  QList<QPair<QgsVectorLayer*, QgsFeatureIds>> reference;
   for (QgsMapLayer* ml : kaPickLayers(mCanvas)) {
     auto* vl = qobject_cast<QgsVectorLayer*>(ml);
-    if (!isPickableLayer(vl)) continue;
+    if (!vl || !vl->isValid()) continue;
 
     QgsCoordinateTransform xf;
     const bool needXf = (mCanvas->mapSettings().destinationCrs() != vl->crs());
@@ -432,10 +468,11 @@ void KaFeatureSelectTool::selectInRect(const QgsRectangle& mapRect, bool addToSe
         toSelect.insert(f.id());
       }
     }
-    if (!toSelect.isEmpty()) {
-      vl->selectByIds(toSelect, Qgis::SelectBehavior::AddToSelection);
-      vl->triggerRepaint();
-    }
+    if (!toSelect.isEmpty()) (isPickableLayer(vl) ? survey : reference).append({vl, toSelect});
+  }
+  for (const auto& [vl, toSelect] : survey.isEmpty() ? reference : survey) {
+    vl->selectByIds(toSelect, Qgis::SelectBehavior::AddToSelection);
+    vl->triggerRepaint();
   }
 
   mCanvas->refresh();

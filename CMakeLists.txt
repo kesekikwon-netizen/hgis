@@ -638,6 +638,7 @@ if(KA_HGIS_BUILD_TESTS)
     src/app/KaCaptureMapTool.cpp src/app/KaCaptureMapTool.h
     src/app/KaFeatureSelectTool.cpp src/app/KaFeatureSelectPick.cpp src/app/KaFeatureSelectTool.h
     src/app/KaVertexEditTool.cpp src/app/KaVertexEditTool.h
+    src/app/KaAttributeMapTool.cpp src/app/KaAttributeMapTool.h
     src/app/KaEditTolerance.h src/app/KaPickLayers.h
     src/app/KaCrashGuard.cpp src/app/KaCrashGuard.h)
   target_link_libraries(ka_inner_piece_tests PRIVATE ${KA_TEST_LIBS})
@@ -1388,7 +1389,8 @@ if(KA_HGIS_BUILD_TESTS)
     eraseOverlap_severalShapesAskBeforeRemovingThem
     eraseOverlap_secondPressUsesTheShapeJustDrawn
     drawnShapeOnTopOffersEraseWhenFinished
-    selectTool_picksTheShapeDrawnOnTopAndKeyAStartsIt)
+    selectTool_picksTheShapeDrawnOnTopAndKeyAStartsIt
+    selectTool_rightClickErasesAndKeyAEndsSplitMode)
   ka_add_qtest_filter(save_open_roundtrip ka_save_open_tests
     saveAndReopen_keepsTreeGeometryAttributesAndStyle
     saveReopenSubmit_preservesWorkAndPackage

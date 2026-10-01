@@ -3244,6 +3244,75 @@ private slots:
              "작은 도형 바깥을 찍었는데 큰 도형이 잡히지 않았습니다.");
   }
 
+  // 「폴리곤 나누기」에서 A로 도형선택으로 빠져나온 뒤 그린 면은 나누기 선이 아니라 도형으로 들어간다.
+  // 도형선택(A)으로 두 도형을 고르면 그리기 줄을 열지 않아도 우클릭에서 「겹친 곳 지우기」를 고를 수 있고,
+  // 리본 「선택」 단추는 도형선택이 켜져 있는 동안 눌린 모양이다.
+  void selectTool_rightClickErasesAndKeyAEndsSplitMode() {
+    const QString path = makeSurvey(QStringLiteral("select_menu_erase"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* project = QgsProject::instance();
+    auto* area = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
+    QVERIFY(area && canvas && tree);
+    const QgsFeatureId outer = *area->allFeatureIds().constBegin();
+    window.resize(1280, 900);
+    window.show();
+    QApplication::setActiveWindow(&window);
+    canvas->setFocus();
+    canvas->setExtent(QgsRectangle(189950, 559950, 190150, 560150));
+    QApplication::processEvents();
+
+    tree->setCurrentLayer(area);
+    QVERIFY(QMetaObject::invokeMethod(&window, "startSplitPolygonTool", Qt::DirectConnection));
+    auto* capture = window.findChild<KaCaptureMapTool*>();
+    QVERIFY2(capture && canvas->mapTool() == capture, "fixture: 폴리곤 나누기 is drawing its line");
+    QTest::keyClick(canvas, Qt::Key_A);
+    auto* select = window.findChild<KaFeatureSelectTool*>();
+    QVERIFY(select && canvas->mapTool() == select);
+    QAction* selectAct = nullptr;
+    for (QAction* action : window.findChildren<QAction*>())
+      if (action->shortcut() == QKeySequence(QStringLiteral("Ctrl+1"))) selectAct = action;
+    QVERIFY2(selectAct && selectAct->isChecked(), "도형선택이 켜졌는데 「선택」 단추가 눌린 모양이 아닙니다.");
+    QVERIFY(QMetaObject::invokeMethod(&window, "startEditFeaturePoly", Qt::DirectConnection));
+    auto* poly = LayerOps::findByLayerKey(project, QStringLiteral("feature_poly"));
+    QVERIFY(poly);
+    captureAndDismissForm(capture, QgsGeometry::fromRect(QgsRectangle(190070, 560010, 190090, 560030)));
+    QVERIFY2(poly->featureCount() == 1, "나누기에서 빠져나온 뒤 그린 면이 나누기 선으로 버려졌습니다.");
+
+    QVERIFY(area->isEditable() || area->startEditing());
+    QgsFeature inner(area->fields());
+    inner.setGeometry(QgsGeometry::fromRect(QgsRectangle(190040, 560040, 190060, 560060)));
+    QVERIFY(area->addFeature(inner));
+    QVERIFY(QMetaObject::invokeMethod(&window, "startSelectTool", Qt::DirectConnection));
+    QVERIFY(canvas->mapTool() == select);
+    area->selectByIds({outer, inner.id()});
+    bool offered = false;
+    QTimer answer;
+    connect(&answer, &QTimer::timeout, [&offered] {
+      if (auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget())) {
+        for (QAction* action : menu->actions()) {
+          if (action->objectName() != QLatin1String("actSelectEraseOverlap") || !action->isEnabled()) continue;
+          offered = true;
+          action->trigger();
+        }
+        menu->close();
+      }
+    });
+    answer.start(20);
+    const QgsPointXY pixel = canvas->getCoordinateTransform()->transform(QgsPointXY(190020, 560080));
+    QTest::mouseClick(canvas->viewport(), Qt::RightButton, Qt::NoModifier, QPoint(qRound(pixel.x()), qRound(pixel.y())));
+    QApplication::processEvents();
+    answer.stop();
+    QVERIFY2(offered, "두 도형을 고르고 우클릭했는데 「겹친 곳 지우기」가 없습니다.");
+    QCOMPARE(area->featureCount(), 1);
+    QVERIFY(qAbs(area->getFeature(outer).geometry().area() - 9600.0) < 1e-3);
+  }
+
   void layerContextMenu_usesClickedRowAndLeavesSourceIntact() {
     const QString path = makeSurvey(QStringLiteral("menu_target"));
     QVERIFY(!path.isEmpty());

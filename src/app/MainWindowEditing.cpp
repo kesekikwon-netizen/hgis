@@ -188,7 +188,7 @@ void MainWindow::startSelectTool() {
             [this](int count) {
               if (count == 2) {
                 notify(Notice::Info, QStringLiteral("도형 2개 선택됨"),
-                       QStringLiteral("[겹친 곳 지우기]는 큰 도형에서 작은 도형 자리를 지우고, "
+                       QStringLiteral("[겹친 곳 지우기](우클릭)는 큰 도형에서 작은 도형 자리를 지우고, "
                                       "[폴리곤 나누기]는 겹친 자리를 새 도형으로 나눕니다."));
               }
             });
@@ -196,6 +196,7 @@ void MainWindow::startSelectTool() {
     connect(m_featureSelectTool, &KaFeatureSelectTool::requestMerge, this, &MainWindow::mergeFeaturePolygons);
     connect(m_featureSelectTool, &KaFeatureSelectTool::requestSplit, this, &MainWindow::startSplitPolygonTool);
     connect(m_featureSelectTool, &KaFeatureSelectTool::requestClip, this, &MainWindow::clipOverlappingLayers);
+    connect(m_featureSelectTool, &KaFeatureSelectTool::requestEraseOverlap, this, &MainWindow::eraseOverlapWithShape);
     connect(m_featureSelectTool, &KaFeatureSelectTool::featureGeometryEdited, this,
             [this](QgsVectorLayer* layer, const QgsFeature& before) {
       if (!layer || !before.isValid()) return;
@@ -271,6 +272,7 @@ void MainWindow::stopCaptureTool() {
     m_canvas->setMapTool(m_panTool);
   if (m_captureTool)
     m_captureTool->resetSession();
+  m_isSplittingPolygon = false;  // leaving the capture also leaves 폴리곤 나누기
 }
 
 QString MainWindow::attributeFieldLabelKo(const QString& fieldName) {
@@ -917,6 +919,7 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
 }
 
 void MainWindow::beginEdit(QgsVectorLayer* layer) {
+  m_isSplittingPolygon = false;  // a new drawing is never a split line; startSplitPolygonTool sets it after this
   try {
     if (!layer || !layer->isValid()) {
       KaUserError::warn(this, {
@@ -1234,11 +1237,11 @@ void MainWindow::startSplitPolygonTool() {
                              QStringLiteral("도형을 Shift+클릭으로 선택하거나, 나눌 폴리곤 레이어를 좌측 목록에서 선택해 주세요."));
     return;
   }
+  beginEdit(cur);  // clears the split flag, so it is set only once the capture has really started
+  if (!m_canvas || !m_captureTool || m_canvas->mapTool() != m_captureTool || m_editLayer != cur) return;
   m_isSplittingPolygon = true;
-  beginEdit(cur);
-  if (m_captureTool) {
-    m_captureTool->setMode(KaCaptureMapTool::Mode::Line);
-  }
+  m_captureTool->setMode(KaCaptureMapTool::Mode::Line);
+  updateToolChip();
   statusBar()->showMessage(
       QStringLiteral("폴리곤 나누기 모드 — 폴리곤을 가로지르는 선을 클릭하여 그리고 우클릭으로 분할 (또는 Shift로 2개 도형 선택 후 실행)."),
       12000);

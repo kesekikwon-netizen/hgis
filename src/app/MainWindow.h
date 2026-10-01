@@ -85,7 +85,6 @@ class QListWidget;
 class QTimer;
 class QgsVertexMarker;
 class QgsMapToolPan;
-class QgsMapToolSelect;
 class QgsGeometry;
 class QgsFeature;
 class QgsLayerTreeMapCanvasBridge;
@@ -484,7 +483,6 @@ private:
   QPoint m_alignLiveScreen;
   QTimer* m_alignCursorTimer = nullptr;
   QgsMapToolPan* m_panTool = nullptr;
-  QgsMapToolSelect* m_selectTool = nullptr;
   KaFeatureSelectTool* m_featureSelectTool = nullptr;
   QgsVectorLayer* m_editLayer = nullptr;
   bool m_isSplittingPolygon = false;

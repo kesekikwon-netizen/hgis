@@ -74,6 +74,7 @@ signals:
   void requestMerge();
   void requestSplit();
   void requestClip();
+  void requestEraseOverlap();  // right-click 「겹친 곳 지우기」 on the selected shapes
   void requestMapContextMenu(const QPoint& canvasPos);
 
 private:

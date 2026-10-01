@@ -712,7 +712,7 @@ void MainWindow::buildUi() {
   });
   connect(m_canvas, &QgsMapCanvas::mapToolSet, this, [this](QgsMapTool* newTool, QgsMapTool*) {
     if (m_actSelect)
-      m_actSelect->setChecked(newTool && m_selectTool && newTool == m_selectTool);
+      m_actSelect->setChecked(newTool && m_featureSelectTool && newTool == m_featureSelectTool);
     if (m_actMeasure)
       m_actMeasure->setChecked(newTool && m_measureTool && newTool == m_measureTool);
     if (m_btnDraw) {

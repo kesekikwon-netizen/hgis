@@ -157,9 +157,11 @@ void KaFeatureSelectTool::selectAtPoint(const QgsPointXY& mapPt, bool addToSelec
                          m_lastPickIndex >= 0 && candidates == m_lastPickCandidates &&
                          (screenPos - m_lastPickPos).manhattanLength() <= KaEditTolerance::kClickSlopPx;
   if (samePlace) pick = (m_lastPickIndex + 1) % candidates.size();
+  // Only a cycling click starts or continues a cycle: after a right-click pick the next left
+  // click on the same spot must pick the best shape again, not the second one.
   m_lastPickPos = screenPos;
-  m_lastPickCandidates = candidates;
-  m_lastPickIndex = candidates.isEmpty() ? -1 : pick;
+  m_lastPickCandidates = allowCycle ? candidates : QList<Pick>();
+  m_lastPickIndex = (allowCycle && !candidates.isEmpty()) ? pick : -1;
 
   QgsVectorLayer* hitLayer = hits.isEmpty() ? nullptr : hits.at(pick).layer;
   // Any id counts, negative ones too: a shape drawn but not saved yet lives in the edit buffer.
@@ -194,10 +196,12 @@ void KaFeatureSelectTool::selectAtPoint(const QgsPointXY& mapPt, bool addToSelec
     emit statusMessage(QStringLiteral("겹친 도형 %1/%2 — 같은 자리를 다시 누르면 다음 도형을 고릅니다.")
                            .arg(pick + 1)
                            .arg(candidates.size()));
+  } else if (all.size() == 1 && !(m_vertex && m_vertex->hasTarget())) {
+    emit statusMessage(QStringLiteral("참고 자료 도형은 고칠 수 없습니다(보기만)."));
   } else if (all.size() == 1) {
     emit statusMessage(QStringLiteral("수정점이 나왔습니다. 점을 끌어 옮기세요(Ctrl=자석). 점 우클릭은 삭제, 선 우클릭은 추가입니다."));
   } else if (all.size() == 2) {
-    emit statusMessage(QStringLiteral("도형 2개 선택됨 (%1, %2) — [겹친 곳 지우기]는 큰 도형에서 작은 도형 자리를 지우고, "
+    emit statusMessage(QStringLiteral("도형 2개 선택됨 (%1, %2) — [겹친 곳 지우기](우클릭)는 큰 도형에서 작은 도형 자리를 지우고, "
                                       "[폴리곤 나누기]는 겹친 자리를 새 도형으로 나눕니다.")
                            .arg(all[0].layer->name(), all[1].layer->name()));
   } else {

@@ -1,11 +1,14 @@
 #include "KaAttributeMapTool.h"
+#include "KaEditTolerance.h"
 #include "KaPickLayers.h"
+#include "core/FeaturePick.h"
 #include "core/LayerOps.h"
 
 #include <qgsmapcanvas.h>
 #include <qgsmapmouseevent.h>
 #include <qgsvectorlayer.h>
 #include <qgsmaplayer.h>
+#include <qgsproject.h>
 
 #include <QKeyEvent>
 #include <QStatusTipEvent>
@@ -35,18 +38,22 @@ bool KaAttributeMapTool::pickAtScreen(const QPoint& screenPos, QgsVectorLayer** 
   *outLayer = nullptr;
   *outFeat = QgsFeature();
 
-  const QList<IdentifyResult> results = identify(
-      screenPos.x(), screenPos.y(),
-      QgsMapToolIdentify::TopDownStopAtFirst,
-      QgsMapToolIdentify::VectorLayer);
+  // Same picking rules as 도형선택 (core/FeaturePick): survey shapes before reference and
+  // cadastral ones, then the smallest shape under the click. The canvas list leaves out layers
+  // painted above the labels (KaAboveLabelsOverlay), so those are added in front of it.
+  QList<QgsMapLayer*> layers = LayerOps::layersDrawnAboveLabels(QgsProject::instance());
+  for (QgsMapLayer* layer : mCanvas->layers())
+    if (layer && !layers.contains(layer)) layers.append(layer);
+  const FeaturePick::Hit hit = FeaturePick::at(
+      layers, toMapCoordinates(screenPos), mCanvas->mapUnitsPerPixel() * KaEditTolerance::kFeaturePickPx,
+      mCanvas->mapSettings().destinationCrs(), QgsProject::instance()->transformContext());
+  if (!hit.valid()) return false;
+  // An inner piece (a hole, a part inside a part) stands for its whole shape here.
+  const QgsFeature feature = hit.layer->getFeature(hit.fid);
+  if (!feature.isValid()) return false;
 
-  if (results.isEmpty()) return false;
-
-  auto* vl = qobject_cast<QgsVectorLayer*>(results.first().mLayer);
-  if (!vl || !results.first().mFeature.isValid()) return false;
-
-  *outLayer = vl;
-  *outFeat = results.first().mFeature;
+  *outLayer = hit.layer;
+  *outFeat = feature;
   return true;
 }
 
