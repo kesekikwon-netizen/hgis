@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 #include <QtGlobal>
 
 class QFile;
@@ -26,6 +27,16 @@ bool replaceFileDurably(const QString& from, const QString& to, quint32* nativeE
 
 // Win32 오류 번호가 "다른 프로그램이 잠깐 잡고 있다"(접근 거부·공유 위반·잠금 위반)인가.
 bool isTransientLockError(quint32 nativeError);
+
+// 진단 전용(저장이 이미 거부된 뒤에만 부른다). 답은 부른 그 순간 기준이다.
+// path 를 지금 열고 있는 프로그램들: 「실행 파일 이름 «설명» (pid N)」, 이 프로그램이면 「· 이 앱」.
+// Windows Restart Manager 로 묻는다. 묻지 못하면 빈 목록이고 note 에 까닭을 적는다
+// (빈 목록에 note 가 비어 있으면 Restart Manager 가 본 범위에서 아무도 열지 않은 것이다).
+QStringList processesHolding(const QString& path, QString* note = nullptr);
+
+// 원본 교체가 거부됐을 때의 진단 한 줄: 「열고 있는 프로그램: …」·「열고 있는 프로그램 없음(Restart Manager 기준)」·
+// 「열고 있는 프로그램 확인하지 못함(까닭)」 뒤에 「· 읽기 전용」·「· 읽기 전용 아님」·「· 속성 확인 못 함」.
+QString lockDiagnosis(const QString& path);
 
 // source 를 target 으로 1MB 단위로 복사하고 디스크까지 내린다. target 은 새로 만든다.
 // 실패하면 target 을 지운다. 원본·대상 파일 모두 사용자 원본이 아닌 임시 파일에만 쓴다.

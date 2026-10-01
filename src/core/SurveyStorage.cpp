@@ -434,6 +434,7 @@ bool finishStagedSurvey(const QString& staged, const QString& targetPath, QStrin
   // 원본이 잘린 채 남는다). 검증된 새 세대는 옆의 -저장.gpkg 로 둔다.
   KaSessionLog::line(QStringLiteral("[save] 이름 교체 거부 — 원본은 두고 옆 파일에 저장: %1")
                          .arg(replaceError));
+  KaSessionLog::line(QStringLiteral("[save] 원본 교체 거부 진단 — %1").arg(SurveyDurability::lockDiagnosis(targetPath)));
   const QString alt = siblingSurveyPath(QFileInfo(targetPath));
   QString copyError;
   if (SurveyDurability::replaceFileDurably(staged, alt) ||

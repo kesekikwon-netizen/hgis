@@ -28,6 +28,7 @@
 | 검수 문구가 작업 좌표계를 EPSG:5179로 권함 | `CRS_PROJECT_SET`은 좌표계가 있는지만 보는데 문구가 업로드 CRS를 권함. | 문구는 작업 좌표계 EPSG:5186 또는 EPSG:5187. 시험: `TestKaHgis::loadRules` (`checklist_engine`, 2026-09-26 `check_exit=0`, 7.61초). |
 | 조판에서 같은 유적 번호가 두 번 나오고 덧그림 범례가 비음 | 도면 복제본 글자가 켜지고, 번호 지도에 원본 레이어가 같이 올라가며, 범례 필터가 덧그림을 빼먹음. | 복제본 글자는 끄고 번호 지도는 핀만. 덧그림이 있으면 범례 필터에 넣음. 시험: `heritage_style` (2026-09-26 전체 CTest 67/67, `full_ctest_exit=0`, 539.75초). |
 | 참조 지도·지적 도형을 고른 채 「폴리곤 나누기」·「폴리곤 묶기」를 누르면 그 원본 파일이 바뀌고 Ctrl+Z로도 안 돌아옴 | 2026-10-01 합친 판이 참고 자료 도형도 도형선택으로 고를 수 있게 했는데, 나누기(`splitTwoOverlappingFeatures`·`explodeMultipartFeatures`는 바로 커밋)와 묶기가 레이어 역할을 보지 않았다. Ctrl+Z는 참조·지적 레이어를 건너뛴다. | `MainWindow::refuseReadOnlyLayer`(`LayerOps::isReferenceOrBasemapLayer`)로 나누기 세 길과 묶기를 막고 안내한다. 키가 있는 고지형 판독 레이어는 그대로 고칠 수 있다. 시험: `polygonCommands_leaveReferenceAndCadastralShapesAlone` (save_open_erase) |
+| 저장할 때마다 「이름-저장.gpkg」·「-저장-저장」이 하나씩 늘어남(2026-09-30 광령리1, 10-01 「1」) | 원본 교체(MoveFileEx)가 10초 재시도 내내 「액세스 거부」로 막혀 검증된 새 세대를 옆 파일로 둔다. 기록상 「기록 항목 추가」 저장 뒤부터 막혔고 시험 7가지·실제 앱 시연으로는 재현되지 않아 원인 미확정. | 막히면 세션 로그 「[save] 원본 교체 거부 진단 — 」 줄이 원본을 연 프로그램(실행 파일·pid·「이 앱」), 「없음(Restart Manager 기준)」, 「확인하지 못함(까닭)」과 읽기 전용 여부를 남긴다. 그 줄부터 본다. 시험: `survey_durability` |
 
 ## 지적 GetMap (확인된 사실)
 

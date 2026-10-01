@@ -1306,6 +1306,12 @@ if(KA_HGIS_BUILD_TESTS)
   # 120 s left no room for a parallel ctest run.
   set_tests_properties(storage_generation PROPERTIES TIMEOUT 300)
 
+  add_executable(ka_survey_durability_tests tests/test_survey_durability.cpp)
+  target_link_libraries(ka_survey_durability_tests PRIVATE ka_core Qt6::Test)
+  ka_add_qtest(survey_durability ka_survey_durability_tests)
+  # Two survey copies plus the product's 10 s replace retry window: about 40 s alone.
+  set_tests_properties(survey_durability PROPERTIES TIMEOUT 180)
+
   add_executable(ka_storage_hygiene_tests tests/test_storage_hygiene.cpp)
   target_link_libraries(ka_storage_hygiene_tests PRIVATE ka_core Qt6::Test)
   ka_add_qtest(storage_hygiene ka_storage_hygiene_tests)
