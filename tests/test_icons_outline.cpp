@@ -55,6 +55,7 @@ private slots:
   void saveUnsavedHasAccentTileAndWarnDot();
   void envVarSelectsTile();
   void outlineIdsAreDistinct();
+  void pixmapHonoursDevicePixelRatio();
   void glyphPixmapSmallSizes();
   void contactSheet();
 };
@@ -206,6 +207,15 @@ void TestIconsOutline::outlineIdsAreDistinct() {
       for (int j = i + 1; j < group.size(); ++j)
         QVERIFY2(differingShare(render(group[i]), render(group[j])) > 0.05,
                  qPrintable(group[i] + QStringLiteral(" vs ") + group[j]));
+}
+
+// QIcon::pixmap(size, dpr) passes the logical size and the scale: the pixmap has size * dpr pixels.
+void TestIconsOutline::pixmapHonoursDevicePixelRatio() {
+  for (const qreal dpr : {1.0, 1.5, 2.0}) {
+    const QPixmap pm = KaIcons::icon(QStringLiteral("new")).pixmap(QSize(32, 32), dpr, QIcon::Normal, QIcon::Off);
+    QCOMPARE(pm.size(), QSize(qRound(32 * dpr), qRound(32 * dpr)));
+    QCOMPARE(pm.devicePixelRatio(), dpr);
+  }
 }
 
 void TestIconsOutline::glyphPixmapSmallSizes() {

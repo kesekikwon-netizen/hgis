@@ -61,17 +61,16 @@ class OutlineIconEngine : public QIconEngine {
 
   void paint(QPainter* painter, const QRect& rect, QIcon::Mode mode, QIcon::State state) override {
     const qreal dpr = painter->device()->devicePixelRatio();
-    QPixmap pm = scaledPixmap(rect.size() * dpr, mode, state, dpr);
+    QPixmap pm = scaledPixmap(rect.size(), mode, state, dpr);
     pm.setDevicePixelRatio(dpr);
     painter->drawPixmap(rect, pm);
   }
   QPixmap pixmap(const QSize& size, QIcon::Mode mode, QIcon::State state) override {
     return scaledPixmap(size, mode, state, 1.0);
   }
-  // size is in device pixels (QIcon::pixmap passes size * dpr); the result has that many pixels.
+  // size is logical (QIcon::pixmap passes it with the screen scale); the result has size * scale pixels.
   QPixmap scaledPixmap(const QSize& size, QIcon::Mode mode, QIcon::State state, qreal scale) override {
-    Q_UNUSED(scale);
-    const int px = qMax(1, qMin(size.width(), size.height()));
+    const int px = qMax(1, qRound(qMin(size.width(), size.height()) * scale));
     const QString key = QString::number(px) + QLatin1Char('/') + QString::number(int(mode)) + QLatin1Char('/') +
                         QString::number(int(state));
     const auto found = m_cache.constFind(key);

@@ -59,7 +59,7 @@ constexpr Entry kEntries[] = {
     {"zoom_fit", "lucide/maximize"},
     {"folder", "lucide/folder"},
     {"note", "lucide/clipboard-list"},
-    {"layers", "lucide/layers"},
+    {"layer", "lucide/layers"},
     {"warn", "lucide/triangle-alert"},
     {"snap", "lucide/magnet"},
     {"chevron_left", "lucide/chevron-left"},

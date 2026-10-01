@@ -99,17 +99,16 @@ class MockupIconEngine : public QIconEngine {
     const qreal dpr = painter->device()->devicePixelRatio();
     const int side = qMin(rect.width(), rect.height());
     const QRect target(rect.x() + (rect.width() - side) / 2, rect.y() + (rect.height() - side) / 2, side, side);
-    QPixmap pm = scaledPixmap(QSize(side, side) * dpr, mode, state, dpr);
+    QPixmap pm = scaledPixmap(QSize(side, side), mode, state, dpr);
     pm.setDevicePixelRatio(dpr);
     painter->drawPixmap(target, pm);
   }
   QPixmap pixmap(const QSize& size, QIcon::Mode mode, QIcon::State state) override {
     return scaledPixmap(size, mode, state, 1.0);
   }
-  // size is in device pixels (QIcon::pixmap passes size * dpr); the result has that many pixels.
+  // size is logical (QIcon::pixmap passes it with the screen scale); the result has size * scale pixels.
   QPixmap scaledPixmap(const QSize& size, QIcon::Mode mode, QIcon::State state, qreal scale) override {
-    Q_UNUSED(scale);
-    const int px = qMax(1, qMin(size.width(), size.height()));
+    const int px = qMax(1, qRound(qMin(size.width(), size.height()) * scale));
     const QString key = QString::number(px) + QLatin1Char('/') + QString::number(int(mode)) + QLatin1Char('/') +
                         QString::number(int(state));
     const auto found = m_cache.constFind(key);

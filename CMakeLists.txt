@@ -936,7 +936,14 @@ if(KA_HGIS_BUILD_TESTS)
     src/app/KaThemeSheet.cpp
     src/app/KaThemeStyle.cpp
   )
-  foreach(_ka_theme_target IN ITEMS ka_theme_options_tests ka_theme_render_tests ka_ribbon_overflow_tests ka_icon_glyph_tests)
+  add_executable(ka_icon_mockup_tests
+    tests/test_icons_mockup.cpp
+    src/app/KaIcons.cpp
+    src/app/KaTheme.cpp
+    src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp
+  )
+  foreach(_ka_theme_target IN ITEMS ka_theme_options_tests ka_theme_render_tests ka_ribbon_overflow_tests ka_icon_glyph_tests ka_icon_mockup_tests)
     set_target_properties(${_ka_theme_target} PROPERTIES WIN32_EXECUTABLE FALSE)
     target_link_libraries(${_ka_theme_target} PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
     target_include_directories(${_ka_theme_target} PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
@@ -945,6 +952,7 @@ if(KA_HGIS_BUILD_TESTS)
   ka_add_qtest(theme_render ka_theme_render_tests)
   ka_add_qtest(ribbon_overflow ka_ribbon_overflow_tests)
   ka_add_qtest(icon_glyphs ka_icon_glyph_tests)
+  ka_add_qtest(icon_mockup ka_icon_mockup_tests)
 
   add_executable(ka_user_error_tests
     tests/test_user_error.cpp
