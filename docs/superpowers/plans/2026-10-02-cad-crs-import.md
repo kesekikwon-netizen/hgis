@@ -533,7 +533,7 @@ void choose_usesTheTestChooser();                              // 시험용 함�
   - `src/app/MainWindowCadImport.cpp`: `MainWindow` 멤버 함수.
 - Modify: `src/app/MainWindow.h`.
   - 공개(`addVectorFromPath` 옆): `importCadDrawing`.
-  - 비공개: `openCadDrawingFile`, `showCadDrawingNotice`, `startCadDrawingAlign`, `QStringList m_cadAlignHidden;`.
+  - 비공개: `openCadDrawingFile`, `showCadDrawingNotice`, `startCadDrawingAlign`.
 - Modify: `src/app/MainWindow.cpp`.
   - `addVectorFromPath` 첫 문장에 `if (GeorefService::isCadPath(path)) return importCadDrawing(path);`를 넣는다.
   - `takeLayer` 안의 `isCadPath` 갈래와 `added.isEmpty()`일 때의 dwg/dxf 안내 덩어리는 이제 쓰이지 않으므로 지운다.
@@ -617,7 +617,8 @@ void cadDwgUsesTheBundledConverter();
 // QVERIFY2(<시험 exe 폴더>/tools/libredwg/dwg2dxf.exe 있음, "ka-hgis를 먼저 빌드해 tools/libredwg를 복사하세요");
 // 고정 DWG 를 「[동국] 작은 도면(2010v).dwg」로 복사해 addVectorFromPath → 묶음 "[동국] 작은 도면(2010v) (도면)" 있음
 void cadSameDrawingTwiceKeepsOneGroup();      // 같은 DXF 두 번 → 그 제목 묶음 1개
-void cadNoSurveyOpenWritesIntoAppData();      // 조사 없이 → 「선」 원본 파일이 cad-drawings 아래, SurveyBundle::isAppManagedPath 참
+void cadNoSurveyOpenWritesIntoAppData();
+// 조사 없이(시험용 고르기 함수가 0 을 돌려줌) → 「선」 원본 파일이 cad-drawings 아래, SurveyBundle::isAppManagedPath 참
 ```
 
 - [ ] **Step 2: 실패를 확인한다.** 빌드 대상은 `ka-hgis ka_save_open_tests`이고, 시험 `save_open_cad`는 `-j1`로 돌린다. 시험이 실패해야 한다.
@@ -634,10 +635,11 @@ void cadNoSurveyOpenWritesIntoAppData();      // 조사 없이 → 「선」 원
 
 **Files:**
 - Modify: `src/core/CadDrawingLayers.h/.cpp`: 아래 세 함수를 더한다. 파일이 300줄을 넘으면 `CadDrawingAlign.h/.cpp`로 나눈다.
-- Modify: `src/app/KaAlignMapTool.h/.cpp`.
+- Modify: `src/app/KaAlignMapTool.h/.cpp`. 이 과제에 한해 `KaAlignMapTool.cpp`는 20줄까지 늘 수 있다. 덜어 낼 수 있는 일은 `CadDrawingLayers` 쪽으로 옮긴다.
   - `saveAligned` 벡터 갈래: 숨긴 원본(`m_hiddenSource`)에 `kPropDrawing`이 있으면 `saveAlignment(QgsProject::instance(), id, m_affine, errorOut)`를 부른다.
   - 성공하면 메모리 복제본을 프로젝트에서 빼고 `m_layer`를 원본 「선」 레이어로 바꿔 보이게 한다. `*savedPath`는 그 GPKG 파일이고, `saveVectorCopyGpkg`(원본 옆 `_aligned.gpkg`)는 부르지 않는다.
   - `endSession`: 도면 세션을 저장하지 않고 끝내면 복제본을 빼고 원본을 다시 보인다.
+- Modify: `src/app/MainWindow.h`: 비공개 `QStringList m_cadAlignHidden;`와 `void restoreCadAlignCompanions();`.
 - Modify: `src/app/MainWindowCadImport.cpp`.
   - `startCadDrawingAlign`: `m_cadAlignHidden = hideCompanions(project, id, alignLayer)`를 부른 뒤 `startAlignSession(alignLayer)`.
   - 같은 파일에 `restoreCadAlignCompanions()`(비공개, `showLayers` 후 비움)를 둔다.
