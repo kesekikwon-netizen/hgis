@@ -275,9 +275,9 @@ QToolBar#mainToolbar {
   spacing: @buttonSpacing@px;
   padding: 4px 8px;
 }
+/* No min-width or min-height here: the sheet turns them into the widget's minimum size at every repolish,
+   and that undoes the exact size KaBeginnerRibbon gives each chip in code. */
 QToolBar#mainToolbar QToolButton {
-  min-width: 0;
-  min-height: 0;
   padding: @buttonPadding@px;
   font-size: @ribbonFontSize@px;
   background: @surface@;
@@ -322,14 +322,12 @@ QLabel#ribbonGroupCaption {
   padding: 0 2px;
   background: transparent;
 }
-/* The icon tile sits at the chip's top and the label hangs about 6 px under it: Qt centres the
-   label in the room left under the icon, so the content box ends ribbonLabelTail px early and
-   that room is padding. The outer chip stays ribbonHeight + 4 px high. */
+/* The chip's size is set in code (KaBeginnerRibbon): tile + 12 px, plus the label line while the
+   labels show, so the icon tile sits at the top and the label hangs about 6 px under it. The
+   sheet only draws the face: a 1 px edge and 1 px padding keep Qt's own icon box inside the chip. */
 QWidget#beginnerRibbon QToolButton {
-  min-height: @ribbonContentHeight@px;
-  max-height: @ribbonContentHeight@px;
   margin: 0;
-  padding: @buttonPadding@px @buttonPadding@px @ribbonBottomPad@px @buttonPadding@px;
+  padding: @buttonPadding@px;
   background: @surface@;
   color: @ribbonLabelInk@;
   font-size: @ribbonFontSize@px;
@@ -344,13 +342,6 @@ QWidget#beginnerRibbon QToolButton:enabled:hover {
 QWidget#beginnerRibbon QToolButton:enabled:pressed {
   background: @pressed@;
   border-color: @border@;
-}
-QWidget#beginnerRibbon QToolButton#ribbonOverflow {
-  min-width: 72px;
-  max-width: 220px;
-  min-height: 28px;
-  max-height: @ribbonHeight@px;
-  padding: @buttonPadding@px;
 }
 /* A chosen chip paints no face and no border of its own: the icon tile (blue border, light
    blue fill) and a bold label in the active ink are the whole mark. The hover line repeats the
@@ -1223,9 +1214,8 @@ QFrame#itemInspector QToolButton#btnPrimary:enabled:focus { border-color: @ink@;
 /* Ribbon chips keep their size when focused: the 2 px ring takes the 1 px of padding. */
 QWidget#beginnerRibbon QToolButton:enabled:focus {
   border: 2px solid @focusRing@;
-  padding: 0px 0px @ribbonLabelTail@px 0px;
+  padding: 0px;
 }
-QWidget#beginnerRibbon QToolButton#ribbonOverflow:enabled:focus { padding: 0px; }
 QTableWidget:focus, QTableView:focus { border-color: @focusRing@; }
 
 /* ---- [P1 design-system] chips: one shape (colour is painted by KaChip::paintChip) ---- */

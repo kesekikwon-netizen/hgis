@@ -189,7 +189,9 @@ private slots:
     QVERIFY(!(*it)->isChecked());
   }
 
-  void overflowFindMenuKeepsRegionPopupOnScreen() {
+  // The ribbon no longer folds a group into a menu: at its narrowest the region chips stay on the ribbon
+  // and a press still opens the address popup, inside the screen.
+  void regionChipStaysOnTheRibbonAtItsMinimumWidth() {
     KaBeginnerRibbon ribbon;
     ribbon.addGroup(QStringLiteral("survey"), QStringLiteral("조사파일"));
     ribbon.addGroup(QStringLiteral("find"), QStringLiteral("찾기"));
@@ -197,44 +199,32 @@ private slots:
     ribbon.addWidget(QStringLiteral("find"), locator);
     auto* extra = new QToolButton(&ribbon);
     extra->setText(QStringLiteral("웹자료"));
+    extra->setIcon(QIcon(QPixmap(32, 32)));
     ribbon.addWidget(QStringLiteral("find"), extra);
-    ribbon.resize(120, ribbon.sizeHint().height());
+    ribbon.resize(ribbon.minimumSizeHint().width(), ribbon.sizeHint().height());
     ribbon.show();
     QCoreApplication::processEvents();
-    auto* overflow = ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
-    auto* menu = ribbon.findChild<QMenu*>(QStringLiteral("ribbonOverflowMenu"));
-    auto* find = ribbon.findChild<QMenu*>(QStringLiteral("ribbonOverflowGroup_find"));
-    QVERIFY(overflow && overflow->isVisible());
-    QVERIFY(menu && find && find->menuAction()->isVisible());
-    menu->popup(overflow->mapToGlobal(QPoint(0, overflow->height())));
-    menu->setActiveAction(find->menuAction());
-    QTest::keyClick(menu, Qt::Key_Right);
-    QTRY_VERIFY(find->isVisible());
-    QTRY_VERIFY(locator->isVisible());
+    QVERIFY(!ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow")));
+    QVERIFY(!ribbon.findChild<QMenu*>(QStringLiteral("ribbonOverflowMenu")));
+    QVERIFY(locator->isVisible());
     const auto chips = locator->findChildren<QToolButton*>();
     auto it = std::find_if(chips.begin(), chips.end(), [](QToolButton* button) {
       return button->text() == QStringLiteral("부산");
     });
     QVERIFY(it != chips.end());
+    const QRect chipBox((*it)->mapTo(&ribbon, QPoint()), (*it)->size());
+    QVERIFY2((*it)->isVisible() && ribbon.rect().contains(chipBox),
+             qPrintable(QStringLiteral("chip %1,%2 %3x%4 outside the ribbon %5x%6")
+                            .arg(chipBox.x()).arg(chipBox.y()).arg(chipBox.width()).arg(chipBox.height())
+                            .arg(ribbon.width()).arg(ribbon.height())));
     QVERIFY2((*it)->height() <= 28 && (*it)->width() <= 48,
-             qPrintable(QStringLiteral("chip %1x%2 menu %3x%4 locator %5x%6")
+             qPrintable(QStringLiteral("chip %1x%2 locator %3x%4")
                             .arg((*it)->width()).arg((*it)->height())
-                            .arg(find->width()).arg(find->height())
                             .arg(locator->width()).arg(locator->height())));
-    const QPoint chipBottom = (*it)->mapTo(find, (*it)->rect().bottomRight());
-    QVERIFY2(find->rect().contains(chipBottom),
-             qPrintable(QStringLiteral("chip clipped at %1,%2 menu %3x%4")
-                            .arg(chipBottom.x()).arg(chipBottom.y())
-                            .arg(find->width()).arg(find->height())));
     (*it)->click();
     QCoreApplication::processEvents();
     QVERIFY(locator->m_popup);
-    QVERIFY2(locator->m_popup->isVisible(), "address popup closed as soon as the overflow menu opened it");
-    QVERIFY2(!qobject_cast<QMenu*>(locator->m_popup->parentWidget()),
-             qPrintable(QStringLiteral("popup parent=%1")
-                            .arg(locator->m_popup->parentWidget()
-                                     ? locator->m_popup->parentWidget()->metaObject()->className()
-                                     : "null")));
+    QVERIFY2(locator->m_popup->isVisible(), "the address popup did not open from the chip on the ribbon");
     const QRect available = QGuiApplication::primaryScreen()->availableGeometry();
     QVERIFY2(available.contains(locator->m_popup->frameGeometry()),
              qPrintable(QStringLiteral("popup=%1,%2 %3x%4")

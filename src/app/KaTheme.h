@@ -75,13 +75,12 @@ struct ButtonMetrics {
   int ribbonFontSize = 13;
   // Ribbon labels shrink one pixel at a time when even the widest chip cannot hold them, never below this.
   int ribbonMinFontSize = 12;
-  // A chip is as wide as its label plus 8 px but never narrower than this.
+  // A chip is as wide as its label plus ribbonLabelPadding (mockup: 8 px) but never narrower than ribbonChipWidth;
+  // a label wider than ribbonMaxLabelWidth is cut there and its full wording stays in the tooltip.
   int ribbonChipWidth = 40;
   int ribbonMinWidth = 40;
-  int ribbonHeight = 82;
-  // Chip room under the label. Qt centres a label in the room below its icon; ending the chip's
-  // content box this early lifts the label to hang just under the tile (about 6 px).
-  int ribbonLabelTail = 25;
+  int ribbonLabelPadding = 8;
+  int ribbonMaxLabelWidth = 64;
   int buttonPadding = 1;
   int buttonSpacing = 4;
   int ribbonChipGap = 0;

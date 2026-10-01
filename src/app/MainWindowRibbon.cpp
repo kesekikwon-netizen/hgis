@@ -30,6 +30,7 @@
 #include "KaShellUi.h"
 #include "KaStatusBar.h"
 #include "KaBeginnerRibbon.h"
+#include "KaToolbarFit.h"
 #include "KaSnapSettingsWidget.h"
 #include "KaFeatureFormDialog.h"
 #include "KaFileBrowserPanel.h"
@@ -250,11 +251,6 @@ void MainWindow::buildMenus() {
   ribbon->addGroup(QStringLiteral("align"), QStringLiteral("정합"));
   ribbon->addGroup(QStringLiteral("out"), QStringLiteral("내보내기"));
   ribbon->addGroup(QStringLiteral("more"), QStringLiteral("기타"));
-  // 배경 지도는 접히면 무슨 단추인지 알 수 없다. 좁은 창에서도 리본에 남긴다.
-  ribbon->setKeepPriority({QStringLiteral("survey"), QStringLiteral("out"), QStringLiteral("record"),
-                           QStringLiteral("basemap"), QStringLiteral("align"), QStringLiteral("fetch"),
-                           QStringLiteral("more")});
-  ribbon->setPinned({QStringLiteral("basemap"), QStringLiteral("fetch")});
 
   auto addIcon = [this, ribbon](const QString& group, const QString& iconId, const QString& text,
                                 const QString& tip, auto slot) -> QPair<QAction*, QToolButton*> {
@@ -727,6 +723,7 @@ void MainWindow::buildMenus() {
   m_subToolbar->setVisible(false);
   // Flat chrome: the QSS draws a 1px top/bottom rule for this row instead of a drop shadow.
   insertToolBarBreak(m_subToolbar);
+  KaToolbarFit::install(m_subToolbar);  // no » fold: labels hide first, then the icons shrink
 }
 
 void MainWindow::clearSubToolbar() {

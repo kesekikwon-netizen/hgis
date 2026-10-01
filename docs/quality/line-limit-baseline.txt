@@ -3,7 +3,7 @@
 # or a listed file grows. Shrinking is always fine; rewrite with -WriteBaseline after it.
 583 src/app/KaAlignMapTool.cpp
 967 src/app/KaApplication.cpp
-402 src/app/KaBeginnerRibbon.cpp
+343 src/app/KaBeginnerRibbon.cpp
 464 src/app/KaCaptureMapTool.cpp
 3851 src/app/KaDrawingStudio.cpp
 559 src/app/KaFeatureSelectTool.cpp
@@ -28,7 +28,7 @@
 551 src/app/MainWindowExport.cpp
 501 src/app/MainWindowOffline.cpp
 696 src/app/MainWindowOverlay.cpp
-961 src/app/MainWindowRibbon.cpp
+958 src/app/MainWindowRibbon.cpp
 1865 src/app/MainWindowSession.cpp
 565 src/app/MainWindowUndo.cpp
 2544 src/core/BasemapOps.cpp
@@ -80,13 +80,13 @@
 564 tests/test_perf.cpp
 400 tests/test_polygon_erase.cpp
 802 tests/test_reference_download.cpp
-5743 tests/test_save_open.cpp
+5839 tests/test_save_open.cpp
 1314 tests/test_section_layout.cpp
 411 tests/test_section_studio.cpp
 1099 tests/test_storage_safety.cpp
 338 tests/test_survey_contour.cpp
 607 tests/test_terrain_3d.cpp
-1437 tests/test_theme.cpp
+1426 tests/test_theme.cpp
 415 tests/test_tile_print.cpp
 1442 tests/test_topographic_browser.cpp
 320 tests/test_topographic_catalog.cpp

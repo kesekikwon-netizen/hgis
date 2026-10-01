@@ -391,6 +391,7 @@ add_executable(ka-hgis
   src/app/KaTopographicImportDialog.cpp
   src/app/KaTopographicImportDialog.h
   src/app/KaBeginnerRibbon.cpp
+  src/app/KaToolbarFit.cpp
   src/app/KaApplication.cpp
   src/app/KaStartupSplash.cpp
   src/app/KaStartupSplash.h
@@ -484,6 +485,7 @@ add_executable(ka-hgis
   src/app/KaFileBrowserPanel.h
   src/app/KaLayerOpacityRail.h
   src/app/KaBeginnerRibbon.h
+  src/app/KaToolbarFit.h
   src/app/KaApplication.h
   src/app/KaTheme.h
   src/app/KaUserError.h
@@ -929,6 +931,21 @@ if(KA_HGIS_BUILD_TESTS)
     src/app/KaBeginnerRibbon.cpp
     src/app/KaAppBar.cpp
   )
+  add_executable(ka_ribbon_pixels_tests
+    tests/test_ribbon_pixels.cpp
+    src/app/KaIcons.cpp
+    src/app/KaTheme.cpp
+    src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp
+    src/app/KaBeginnerRibbon.cpp
+  )
+  add_executable(ka_toolbar_fit_tests
+    tests/test_toolbar_fit.cpp
+    src/app/KaToolbarFit.cpp
+    src/app/KaTheme.cpp
+    src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp
+  )
   add_executable(ka_icon_glyph_tests
     tests/test_icons.cpp
     src/app/KaIcons.cpp
@@ -943,7 +960,7 @@ if(KA_HGIS_BUILD_TESTS)
     src/app/KaThemeSheet.cpp
     src/app/KaThemeStyle.cpp
   )
-  foreach(_ka_theme_target IN ITEMS ka_theme_options_tests ka_theme_render_tests ka_ribbon_overflow_tests ka_icon_glyph_tests ka_icon_mockup_tests)
+  foreach(_ka_theme_target IN ITEMS ka_theme_options_tests ka_theme_render_tests ka_ribbon_overflow_tests ka_ribbon_pixels_tests ka_toolbar_fit_tests ka_icon_glyph_tests ka_icon_mockup_tests)
     set_target_properties(${_ka_theme_target} PROPERTIES WIN32_EXECUTABLE FALSE)
     target_link_libraries(${_ka_theme_target} PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
     target_include_directories(${_ka_theme_target} PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
@@ -951,6 +968,8 @@ if(KA_HGIS_BUILD_TESTS)
   ka_add_qtest(theme_options ka_theme_options_tests)
   ka_add_qtest(theme_render ka_theme_render_tests)
   ka_add_qtest(ribbon_overflow ka_ribbon_overflow_tests)
+  ka_add_qtest(ribbon_pixels ka_ribbon_pixels_tests)
+  ka_add_qtest(toolbar_fit ka_toolbar_fit_tests)
   ka_add_qtest(icon_glyphs ka_icon_glyph_tests)
   ka_add_qtest(icon_mockup ka_icon_mockup_tests)
 
@@ -1363,6 +1382,7 @@ if(KA_HGIS_BUILD_TESTS)
     ribbonButtonsAllHaveDifferentIcons
     ribbonGroupsMatchTheirPurpose
     narrowWindowKeepsDrawingAndPrintVisible
+    subToolbarKeepsTextAt1904WhileSketching
     unsavedSaveChipLabelTurnsBoldAndBack
     recordToolsWaitForASurvey
     provinceChipMovesMapWithoutLoadingLayers)
@@ -1489,7 +1509,7 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(trench_plan trench_edit PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(heritage_style PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
     set_tests_properties(heritage_form PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
-    set_tests_properties(theme_options theme_render ribbon_overflow icon_glyphs icon_mockup PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+    set_tests_properties(theme_options theme_render ribbon_overflow ribbon_pixels toolbar_fit icon_glyphs icon_mockup PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(heritage_download_retry PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 90)
     set_tests_properties(gdal_error_log PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(catch_log PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)

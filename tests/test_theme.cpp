@@ -42,9 +42,8 @@ class TestTheme : public QObject {
 private slots:
   void initTestCase();
   void ribbonButtons_renderAtIntendedSize();
-  void ribbonOverflow_preservesControlsAndKeyboard();
-  void ribbonOverflow_keepsAlignAtFieldWidth();
-  void ribbonKeepPriorityKeepsExportAndOriginalOrder();
+  void ribbonNarrow_keepsControlsAndKeyboard();
+  void ribbonNarrow_keepsAlignVisible();
   void ribbon_tabEnterNewSurveyToSave();
   void domainIcons_useDistinctColors();
   void iconStates_preserveMeaningAndDisableColor();
@@ -222,7 +221,7 @@ void TestTheme::ribbon_tabEnterNewSurveyToSave() {
   QTRY_COMPARE(saveSpy.count(), 1);
 }
 
-void TestTheme::ribbonOverflow_preservesControlsAndKeyboard() {
+void TestTheme::ribbonNarrow_keepsControlsAndKeyboard() {
   KaBeginnerRibbon ribbon;
   ribbon.addGroup(QStringLiteral("survey"), QStringLiteral("조사파일"));
   ribbon.addGroup(QStringLiteral("record"), QStringLiteral("기록"));
@@ -232,43 +231,37 @@ void TestTheme::ribbonOverflow_preservesControlsAndKeyboard() {
   draw->setText(QStringLiteral("그리기"));
   draw->setCheckable(true);
   ribbon.addWidget(QStringLiteral("record"), draw);
+  ribbon.applyTabOrder();
   QPointer<QToolButton> retainedDraw(draw);
   QSignalSpy activated(draw, &QToolButton::clicked);
   ribbon.resize(700, ribbon.sizeHint().height());
   ribbon.show();
-  QCoreApplication::processEvents();
-  auto* overflow = ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
-  QVERIFY(overflow);
-  QVERIFY(!overflow->isVisible());
-  ribbon.resize(80, ribbon.height());
-  QTRY_VERIFY(overflow->isVisible());
-  QVERIFY(overflow->width() >= overflow->fontMetrics().horizontalAdvance(overflow->text()));
-  auto* menu = ribbon.findChild<QMenu*>(QStringLiteral("ribbonOverflowMenu"));
-  auto* record = ribbon.findChild<QMenu*>(QStringLiteral("ribbonOverflowGroup_record"));
-  QVERIFY(menu && record && record->menuAction()->isVisible());
-  menu->popup(overflow->mapToGlobal(QPoint(0, overflow->height())));
-  menu->setActiveAction(record->menuAction());
-  QTest::keyClick(menu, Qt::Key_Right);
-  QTRY_VERIFY(record->isVisible());
-  QTRY_VERIFY(draw->isVisible());
-  draw->setFocus();
-  QTest::keyClick(draw, Qt::Key_Space);
-  QCOMPARE(activated.count(), 1);
-  QVERIFY(draw->isChecked());
-  menu->close();
+  QVERIFY(QTest::qWaitForWindowExposed(&ribbon));
+  QVERIFY(!ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow")));
   for (int i = 0; i < 3; ++i) {
-    ribbon.resize(700, ribbon.height());
-    QTRY_VERIFY(!overflow->isVisible());
+    // As narrow as the ribbon gets: the labels hide and the icons shrink, but every button stays on it.
+    ribbon.resize(ribbon.minimumSizeHint().width(), ribbon.height());
+    QTRY_VERIFY(!ribbon.look().labels);
+    QVERIFY(ribbon.look().tile <= 24);  // two small groups: their names are as wide as the 24 px and 20 px chips
+    QVERIFY(open->isVisible() && draw->isVisible());
     QVERIFY(retainedDraw && retainedDraw == draw);
     QCOMPARE(open->defaultAction(), survey);
-    QVERIFY(draw->isVisible());
+    // Keyboard: Tab goes from one button to the next, Space presses the checkable one.
+    open->setFocus(Qt::TabFocusReason);
+    QCOMPARE(QApplication::focusWidget(), static_cast<QWidget*>(open));
+    QTest::keyClick(open, Qt::Key_Tab);
+    QCOMPARE(QApplication::focusWidget(), static_cast<QWidget*>(draw));
+    const bool checked = draw->isChecked();
+    QTest::keyClick(draw, Qt::Key_Space);
+    QCOMPARE(activated.count(), i + 1);
+    QCOMPARE(draw->isChecked(), !checked);
+    ribbon.resize(700, ribbon.height());
+    QTRY_VERIFY(ribbon.look().labels);
     QCOMPARE(draw->font().pixelSize(), 13);
-    ribbon.resize(80, ribbon.height());
-    QTRY_VERIFY(overflow->isVisible());
   }
 }
 
-void TestTheme::ribbonOverflow_keepsAlignAtFieldWidth() {
+void TestTheme::ribbonNarrow_keepsAlignVisible() {
   KaBeginnerRibbon ribbon;
   ribbon.setAttribute(Qt::WA_DontShowOnScreen);
   ribbon.addGroup(QStringLiteral("survey"), QStringLiteral("조사"));
@@ -278,9 +271,6 @@ void TestTheme::ribbonOverflow_keepsAlignAtFieldWidth() {
   ribbon.addGroup(QStringLiteral("align"), QStringLiteral("정합"));
   ribbon.addGroup(QStringLiteral("out"), QStringLiteral("내보내기"));
   ribbon.addGroup(QStringLiteral("more"), QStringLiteral("기타"));
-  ribbon.setKeepPriority({QStringLiteral("survey"), QStringLiteral("out"), QStringLiteral("record"),
-                          QStringLiteral("align"), QStringLiteral("fetch"), QStringLiteral("basemap"),
-                          QStringLiteral("more")});
   const struct { const char* group; const char* text; } chips[] = {
       {"survey", "신규"}, {"survey", "열기"}, {"survey", "저장"}, {"survey", "다른이름"},
       {"record", "선택"}, {"record", "측거"}, {"record", "그리기"}, {"record", "시굴격자"},
@@ -291,65 +281,53 @@ void TestTheme::ribbonOverflow_keepsAlignAtFieldWidth() {
       {"out", "도면"}, {"out", "인쇄"}, {"out", "단면"}, {"out", "GeoTIFF"}, {"out", "5179"},
       {"fetch", "웹"}, {"more", "더보기"},
   };
+  QPixmap picture(32, 32);
+  picture.fill(Qt::darkGray);
   for (const auto& chip : chips) {
     auto* button = new QToolButton(&ribbon);
     button->setText(QString::fromUtf8(chip.text));
-    if (QString::fromLatin1(chip.group) == QLatin1String("out") &&
-        QString::fromUtf8(chip.text) == QStringLiteral("도면"))
-      button->setObjectName(QStringLiteral("fieldOut_도면"));
+    button->setIcon(QIcon(picture));
+    button->setObjectName(QStringLiteral("field_") + QString::fromUtf8(chip.text));
     ribbon.addWidget(QString::fromLatin1(chip.group), button);
   }
   ribbon.resize(1280, ribbon.sizeHint().height());
   ribbon.show();
   QCoreApplication::processEvents();
-  auto* overflow = ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
-  QVERIFY(overflow);
-  auto* out = ribbon.group(QStringLiteral("out"));
-  QVERIFY(out);
-  QVERIFY2(out->parentWidget() == &ribbon,
-           "내보내기 must stay on the ribbon at 1280, not inside 더 많은 작업");
-  auto* drawing = ribbon.findChild<QToolButton*>(QStringLiteral("fieldOut_도면"));
-  QVERIFY(drawing);
-  QVERIFY(drawing->isVisible());
+  QVERIFY(!ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow")));
+  auto* align = ribbon.findChild<QToolButton*>(QStringLiteral("field_정합"));
+  auto* drawing = ribbon.findChild<QToolButton*>(QStringLiteral("field_도면"));
+  QVERIFY(align && drawing);
   QCOMPARE(KaTheme::buttonMetrics().ribbonChipGap, 0);
   QCOMPARE(KaTheme::buttonMetrics().ribbonChipWidth, 40);
   QCOMPARE(KaTheme::buttonMetrics().ribbonMinWidth, 40);
   QCOMPARE(KaTheme::buttonMetrics().ribbonFontSize, 13);
-  QVERIFY(drawing->width() >= KaTheme::buttonMetrics().ribbonChipWidth);
-  QVERIFY(drawing->height() >= KaTheme::buttonMetrics().ribbonHeight);
+  // At the 1280 field width and at the narrowest the ribbon gets: every group and 「정합」 stay on it.
+  for (const int width : {1280, ribbon.minimumSizeHint().width()}) {
+    ribbon.resize(width, ribbon.height());
+    QCoreApplication::processEvents();
+    int lastX = -1;  // the groups keep the order they were added in, left to right
+    for (const QString& id : {QStringLiteral("survey"), QStringLiteral("record"), QStringLiteral("fetch"),
+                              QStringLiteral("basemap"), QStringLiteral("align"), QStringLiteral("out"),
+                              QStringLiteral("more")}) {
+      QFrame* group = ribbon.group(id);
+      QVERIFY2(group && group->parentWidget() == &ribbon && group->isVisible() && group->geometry().right() < ribbon.width() &&
+                   group->x() > lastX,
+               qPrintable(QStringLiteral("%1 at %2 px").arg(id).arg(width)));
+      lastX = group->x();
+    }
+    const QRect box(align->mapTo(&ribbon, QPoint()), align->size());
+    QVERIFY2(align->isVisible() && ribbon.rect().contains(box), qPrintable(QStringLiteral("정합 at %1 px").arg(width)));
+    QVERIFY(drawing->isVisible());
+    QVERIFY(drawing->width() >= drawing->iconSize().width() + 2);
+    QVERIFY(drawing->height() >= drawing->iconSize().height() + 12);
+  }
   ribbon.resize(2200, ribbon.height());
-  QTRY_VERIFY(ribbon.group(QStringLiteral("more"))->parentWidget() == &ribbon);
+  QCoreApplication::processEvents();
   QVERIFY(drawing->width() >= KaTheme::buttonMetrics().ribbonChipWidth);
   auto* more = ribbon.group(QStringLiteral("more"));
-  QVERIFY(more);
   const int packedRight = more->mapTo(&ribbon, QPoint(more->width(), 0)).x();
   QVERIFY2(ribbon.width() - packedRight >= 80,
            "leftover window width must stay empty on the right, not on chips");
-}
-
-void TestTheme::ribbonKeepPriorityKeepsExportAndOriginalOrder() {
-  KaBeginnerRibbon ribbon;
-  ribbon.setAttribute(Qt::WA_DontShowOnScreen);
-  for (const auto& id : {QStringLiteral("survey"), QStringLiteral("record"), QStringLiteral("basemap"),
-                         QStringLiteral("out")}) {
-    ribbon.addGroup(id, id);
-    for (int i = 0; i < 4; ++i) {
-      auto* button = new QToolButton(&ribbon);
-      button->setText(id);
-      ribbon.addWidget(id, button);
-    }
-  }
-  ribbon.setKeepPriority({QStringLiteral("survey"), QStringLiteral("out"), QStringLiteral("record"),
-                          QStringLiteral("basemap")});
-  ribbon.resize(640, ribbon.sizeHint().height());
-  ribbon.show();
-  QCoreApplication::processEvents();
-  QVERIFY(ribbon.group(QStringLiteral("survey"))->parentWidget() == &ribbon);
-  QVERIFY(ribbon.group(QStringLiteral("out"))->parentWidget() == &ribbon);
-  QVERIFY(ribbon.group(QStringLiteral("basemap"))->parentWidget() != &ribbon);
-  const int surveyX = ribbon.group(QStringLiteral("survey"))->x();
-  const int outX = ribbon.group(QStringLiteral("out"))->x();
-  QVERIFY2(surveyX < outX, "화면 순서는 우선순위가 아니라 원래 왼쪽에서 오른쪽이다");
 }
 
 void TestTheme::ribbonButtons_renderAtIntendedSize() {
@@ -405,9 +383,19 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
     buttons.append(button);
   }
   toolbar.addWidget(ribbon);
-  toolbar.resize(qMax(1800, toolbar.sizeHint().width()), toolbar.sizeHint().height());
   toolbar.show();
   QCoreApplication::processEvents();
+  // The mockup's normal size (tile 32, labels shown): the ribbon takes the biggest size that fits,
+  // so give it exactly the width of that one.
+  int normal = -1;
+  const QList<RibbonLook> looks = KaBeginnerRibbon::looks();
+  for (int i = 0; i < looks.size(); ++i)
+    if (looks.at(i).tile == 32 && looks.at(i).labels) normal = i;
+  ribbon->setFixedWidth(ribbon->lookWidths().at(normal));
+  toolbar.resize(ribbon->width() + 40, toolbar.sizeHint().height());
+  QCoreApplication::processEvents();
+  QCOMPARE(ribbon->look().tile, 32);
+  QVERIFY(ribbon->look().labels);
 
   // Group names: 11 px in the quiet group ink.
   const auto captions = ribbon->findChildren<QLabel*>(QStringLiteral("ribbonGroupCaption"));
@@ -418,7 +406,8 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
   }
 
   const int commonHeight = buttons.front()->height();
-  QVERIFY(commonHeight >= KaTheme::buttonMetrics().ribbonHeight);
+  // The chip follows its tile: tile + 6 px + the label line + 6 px.
+  QCOMPARE(commonHeight, 32 + 12 + QFontMetrics(buttons.front()->font()).height());
   // Mockup chip: as wide as its label plus 8 px and never under 40 px, one height for all.
   // Equal label widths give equal chip widths.
   QHash<int, int> widthByLabel;
@@ -1046,7 +1035,7 @@ void TestTheme::toolbarCheckedHasDistinctTreatment() {
   // The label (everything below the 32 px tile) turns bold and blue on the chosen chip only.
   const auto labelArea = [](QToolButton* chip) {
     const QImage image = chip->grab().toImage();
-    const int top = qRound(40 * image.devicePixelRatio());
+    const int top = qRound((chip->iconSize().height() + 8) * image.devicePixelRatio());
     return image.copy(0, top, image.width(), image.height() - top);
   };
   const QImage checkedLabel = labelArea(checked);

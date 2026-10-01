@@ -19,16 +19,13 @@ QHash<QString, QString> replacementTable() {
   const struct { const char* name; int value; } metrics[] = {
       {"ribbonIconSize", m.ribbonIconSize}, {"ribbonFontSize", m.ribbonFontSize},
       {"ribbonChipWidth", m.ribbonChipWidth}, {"ribbonMinWidth", m.ribbonMinWidth},
-      {"ribbonHeight", m.ribbonHeight}, {"buttonPadding", m.buttonPadding},
+      {"buttonPadding", m.buttonPadding},
       {"buttonSpacing", m.buttonSpacing}, {"ribbonChipGap", m.ribbonChipGap},
       {"ribbonGroupPad", m.ribbonGroupPad}, {"scaleButtonHeight", m.scaleButtonHeight},
       {"scaleButtonMinWidth", m.scaleButtonMinWidth}, {"scaleFontSize", m.scaleFontSize},
       {"layoutIconSize", m.layoutIconSize}, {"layoutButtonHeight", m.layoutButtonHeight},
       {"panelMargin", m.panelMargin}, {"uiFontSize", uiFontSize()},
       {"chipHeight", m.chipHeight}, {"chipRadius", m.chipRadius},
-      // Ribbon chip box (see QWidget#beginnerRibbon QToolButton): content height and bottom padding.
-      {"ribbonLabelTail", m.ribbonLabelTail}, {"ribbonContentHeight", m.ribbonHeight - m.ribbonLabelTail},
-      {"ribbonBottomPad", m.buttonPadding + m.ribbonLabelTail},
   };
   for (const auto& entry : metrics) values.insert(QString::fromLatin1(entry.name), QString::number(entry.value));
   const Tokens& c = tokens();

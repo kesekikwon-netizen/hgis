@@ -932,7 +932,7 @@ private slots:
     QVERIFY2(!sub->isVisible(), "복원한 창 배치가 빈 그리기 도구 줄을 다시 띄웠습니다.");
   }
   void narrowWindowKeepsSearchOnTheRibbonRow() {
-    for (const QSize size : {QSize(1024, 768), QSize(1280, 720)}) {
+    for (const QSize size : {QSize(1024, 768), QSize(1280, 720), QSize(1904, 1000)}) {
       MainWindow window;
       disableRendering(window);
       window.resize(size);
@@ -940,10 +940,14 @@ private slots:
       QCoreApplication::processEvents();
       auto* mainTb = window.findChild<QToolBar*>(QStringLiteral("mainToolbar"));
       auto* appBar = window.findChild<QWidget*>(QStringLiteral("appBar"));
-      auto* overflow = window.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
-      QVERIFY(mainTb && appBar && overflow);
-      auto* ribbon = overflow->parentWidget();
-      QVERIFY(ribbon && ribbon->parentWidget() == mainTb);
+      auto* ribbon = window.findChild<KaBeginnerRibbon*>(QStringLiteral("beginnerRibbon"));
+      QVERIFY(mainTb && appBar && ribbon);
+      // The toolbar grows and shrinks with the ribbon's size, so no chip is cut off at the bottom.
+      QTRY_VERIFY2(ribbon->height() >= ribbon->sizeHint().height() && mainTb->height() >= ribbon->height(),
+                   qPrintable(QStringLiteral("%1 폭: 리본 높이 %2 필요 %3 줄 높이 %4")
+                                  .arg(size.width()).arg(ribbon->height()).arg(ribbon->sizeHint().height()).arg(mainTb->height())));
+      QVERIFY2(!window.findChild<QToolButton*>(QStringLiteral("ribbonOverflow")), "더 많은 작업 단추는 없다");
+      QVERIFY(ribbon->parentWidget() == mainTb);
       QCOMPARE(appBar->parentWidget(), mainTb);
       const QRect ribbonBox = ribbon->geometry();
       const QRect searchBox = appBar->geometry();
@@ -954,9 +958,13 @@ private slots:
                               .arg(ribbonBox.width())
                               .arg(appBar->isVisible())));
       QVERIFY(qAbs(ribbonBox.center().y() - searchBox.center().y()) < ribbonBox.height());
-      if (ribbon->sizeHint().width() > ribbon->width())
-        QVERIFY2(overflow->isVisible(),
-                 qPrintable(QStringLiteral("%1 폭에서 더 많은 작업으로 접히지 않았다").arg(size.width())));
+      // 접지 않는다: 어느 폭에서도 모든 칩이 리본 안에 보인다.
+      for (QToolButton* chip : ribbon->tabButtons()) {
+        const QRect box(chip->mapTo(ribbon, QPoint()), chip->size());
+        QVERIFY2(chip->isVisible() && ribbon->rect().contains(box),
+                 qPrintable(QStringLiteral("%1 폭(리본 %2)에서 「%3」가 리본에 다 보이지 않는다")
+                                .arg(size.width()).arg(ribbon->width()).arg(chip->text())));
+      }
       QgsProject::instance()->setDirty(false);
     }
   }
@@ -1046,18 +1054,107 @@ private slots:
       MainWindow maximized;
       disableRendering(maximized);
       maximized.showMaximized();
-      QCoreApplication::processEvents();
+      QTest::qWait(150);  // the ribbon picks its size and the toolbar its height over a few layout rounds
       QVERIFY(QDir().mkpath(output));
       QVERIFY(maximized.grab().save(QDir(output).filePath(QStringLiteral("ribbon-maximized.png"))));
       QgsProject::instance()->setDirty(false);
     }
+  }
+  // 그리기 보조 줄(#subToolbar)도 리본처럼 접지 않는다: » 펼침 단추가 나오지 않는다. 1904 창에서 그리기를 시작하면
+  // 단추 글자가 보이고, 줄이 모자라면 글자를 숨긴 뒤 아이콘을 20에서 16으로 줄인다. 한 점을 찍으면 완료·되돌리기·취소가
+  // 줄에 더해져 길어지므로(1904 창에서는 글자가 안 들어간다) 줄은 그에 맞춰 아이콘만 남긴다.
+  void subToolbarKeepsTextAt1904WhileSketching() {
+    const QString path = makeSurvey(QStringLiteral("그리기줄글자"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    auto* sub = window.findChild<QToolBar*>(QStringLiteral("subToolbar"));
+    auto* draw = window.findChild<QToolButton*>(QStringLiteral("btnDraw"));
+    QVERIFY(canvas && sub && draw);
+    window.resize(1904, 1000);
+    window.show();
+    QApplication::setActiveWindow(&window);
+    QTRY_VERIFY(draw->isEnabled());
+    draw->click();
+    QTRY_VERIFY(sub->isVisible());
+    QVERIFY(QMetaObject::invokeMethod(&window, "startEditFeaturePoly", Qt::DirectConnection));
+
+    const auto extShown = [&] {
+      auto* ext = sub->findChild<QToolButton*>(QStringLiteral("qt_toolbar_ext_button"));
+      return ext && ext->isVisible();
+    };
+    QStringList hidden;
+    const auto allShown = [&] {  // every action that is on the row has a visible button
+      hidden.clear();
+      for (QAction* action : sub->actions()) {
+        QWidget* button = sub->widgetForAction(action);
+        if (action->isVisible() && !action->isSeparator() && (!button || !button->isVisible())) hidden << action->text();
+      }
+      return hidden.isEmpty();
+    };
+    const auto where = [&] {
+      return QStringLiteral("창 %1 · 줄 %2 · 필요 %3 · 글자 %4 · 아이콘 %5 · 펼침 %6 · 안 보임 [%7]")
+          .arg(window.width()).arg(sub->width()).arg(sub->sizeHint().width())
+          .arg(sub->toolButtonStyle()).arg(sub->iconSize().width()).arg(extShown())
+          .arg(hidden.join(QLatin1Char(' ')));
+    };
+    // The tools are on the row, nothing is being drawn yet: labels beside the 20 px icons, nothing folded.
+    QTRY_VERIFY2(allShown() && !extShown(), qPrintable(where()));
+    QVERIFY2(sub->toolButtonStyle() != Qt::ToolButtonIconOnly && sub->iconSize() == QSize(20, 20), qPrintable(where()));
+    qInfo().noquote() << "sub toolbar at 1904, nothing drawn yet:" << where();
+
+    // One vertex placed: 완료·되돌리기·취소 join the row.
+    canvas->setExtent(QgsRectangle(189950, 559950, 190150, 560150));
+    QApplication::processEvents();
+    const QgsPointXY pixel = canvas->getCoordinateTransform()->transform(QgsPointXY(190050, 560050));
+    QTest::mouseClick(canvas->viewport(), Qt::LeftButton, Qt::NoModifier, QPoint(qRound(pixel.x()), qRound(pixel.y())));
+    auto* capture = window.findChild<KaCaptureMapTool*>();
+    QVERIFY(capture);
+    QTRY_VERIFY2(capture->hasSketch(), "fixture: the click placed a vertex");
+    QAction* finish = nullptr;
+    for (QAction* action : sub->actions())
+      if (action->property("kaSketch").toString() == QLatin1String("finish")) finish = action;
+    QVERIFY2(finish && finish->isVisible(), "fixture: 완료 shows while a shape is being drawn");
+    QTRY_VERIFY2(allShown() && !extShown(), qPrintable(where()));
+    qInfo().noquote() << "sub toolbar at 1904, one vertex placed:" << where();
+
+    // What each stage needs on this row (the bar's own sizes, measured by trying them; the fit follows).
+    const auto need = [&](Qt::ToolButtonStyle style, int icon) {
+      sub->setToolButtonStyle(style);
+      sub->setIconSize(QSize(icon, icon));
+      sub->layout()->invalidate();
+      return sub->sizeHint().width();
+    };
+    const int needIcons = need(Qt::ToolButtonIconOnly, 20);
+    const int needSmall = need(Qt::ToolButtonIconOnly, 16);
+    const int needText = need(Qt::ToolButtonTextBesideIcon, 20);
+    QVERIFY2(needText > needIcons + 100 && needIcons > needSmall + 10, qPrintable(QStringLiteral("%1 %2 %3").arg(needText).arg(needIcons).arg(needSmall)));
+    window.resize(needIcons + 25, 1000);  // too narrow for the labels, room for 20 px icons
+    QTRY_VERIFY2(allShown() && !extShown(), qPrintable(where()));
+    QVERIFY2(sub->toolButtonStyle() == Qt::ToolButtonIconOnly && sub->iconSize() == QSize(20, 20), qPrintable(where()));
+    window.resize(needSmall + 5, 1000);  // not even room for those: the icons shrink
+    QTRY_VERIFY2(allShown() && !extShown(), qPrintable(where()));
+    QVERIFY2(sub->toolButtonStyle() == Qt::ToolButtonIconOnly && sub->iconSize() == QSize(16, 16), qPrintable(where()));
+    qInfo().noquote() << "sub toolbar at the smallest stage:" << where();
+    window.resize(1904, 1000);  // room again: back to what 1904 showed
+    QTRY_VERIFY2(allShown() && !extShown() && sub->iconSize() == QSize(20, 20), qPrintable(where()));
+
+    // 1024 (the window itself stops at about 1082): the row has text-only tools and the snap settings, about
+    // 1360 px even as bare icons, so the smallest stage is as far as it can go there and the » may show.
+    window.resize(1024, 768);
+    QTRY_VERIFY2(sub->toolButtonStyle() == Qt::ToolButtonIconOnly && sub->iconSize() == QSize(16, 16), qPrintable(where()));
+    qInfo().noquote() << "sub toolbar at 1024:" << where();
+    QgsProject::instance()->setDirty(false);
   }
   // 저장 안 됨(스펙 「아이콘 체계」 표): 「저장」 칩은 파란 타일·주황 점에 더해 라벨이 굵어지고,
   // 저장하면 보통 굵기로 돌아온다. 굵기는 창이 칩에 붙이는 `unsaved` 속성을 QSS 가 읽어 정한다.
   void unsavedSaveChipLabelTurnsBoldAndBack() {
     MainWindow window;
     disableRendering(window);
-    window.resize(1400, 800);
+    window.resize(1904, 1000);  // the labels show from about 1500 px up; narrower windows keep only the icons
     window.show();
     const QString path = makeSurvey(QStringLiteral("굵은저장"));
     QVERIFY(!path.isEmpty());
@@ -1078,7 +1175,7 @@ private slots:
             << "in a" << save->width() << "px chip";
     QVERIFY2(bold.pixels > plain.pixels * 1.15,
              qPrintable(QStringLiteral("unsaved label ink %1 vs saved %2").arg(bold.pixels).arg(plain.pixels)));
-    // The 40 px chip must not clip the bold label: ink stays inside its 2 px of border and padding.
+    // The chip must not clip the bold label: ink stays inside its 2 px of border and padding.
     QVERIFY2(bold.left >= 2 && bold.right <= save->width() - 3,
              qPrintable(QStringLiteral("bold label spans %1..%2 in a %3 px chip").arg(bold.left).arg(bold.right).arg(save->width())));
 
@@ -1119,14 +1216,13 @@ private slots:
   void ribbonButtonsAllHaveDifferentIcons() {
     MainWindow window;
     disableRendering(window);
-    auto* overflow = window.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
-    QVERIFY(overflow && overflow->parentWidget());
+    auto* ribbon = window.findChild<KaBeginnerRibbon*>(QStringLiteral("beginnerRibbon"));
+    QVERIFY(ribbon);
     QHash<QByteArray, QString> seen;
     int compared = 0;
-    const auto buttons = overflow->parentWidget()->findChildren<QToolButton*>();
+    const auto buttons = ribbon->findChildren<QToolButton*>();
     for (QToolButton* button : buttons) {
-      if (button == overflow || button->toolButtonStyle() != Qt::ToolButtonTextUnderIcon || button->icon().isNull())
-        continue;
+      if (button->icon().isNull()) continue;  // chips keep their icon whether the labels show or not
       const QImage image =
           button->icon().pixmap(QSize(64, 64), 1.0).toImage().convertToFormat(QImage::Format_ARGB32);
       const QByteArray key = QCryptographicHash::hash(
