@@ -47,7 +47,7 @@
   "mainPath": [
     "key",
     "select",
-    "layers",
+    "candidates",
     "piece",
     "delete",
     "replace"
@@ -59,7 +59,7 @@
       "col": 0,
       "type": "external",
       "label": "A / 선택 / click",
-      "sublabel": "KaFeatureSelectPick.cpp:90-120",
+      "sublabel": "KaFeatureSelectPick.cpp:91-128",
       "width": 200
     },
     {
@@ -68,17 +68,26 @@
       "col": 1,
       "type": "frontend",
       "label": "selectAtPoint",
-      "sublabel": "KaFeatureSelectPick.cpp:122-254",
+      "sublabel": "KaFeatureSelectPick.cpp:130-206",
       "width": 200
     },
     {
       "id": "layers",
+      "lane": "tool",
+      "col": 2,
+      "type": "frontend",
+      "label": "kaPickLayers (lifted + legend + canvas)",
+      "sublabel": "KaPickLayers.h:15-25",
+      "width": 230
+    },
+    {
+      "id": "candidates",
       "lane": "core",
       "col": 2,
       "type": "backend",
-      "label": "kaPickLayers (+ lifted)",
-      "sublabel": "KaPickLayers.h:14-21",
-      "width": 180
+      "label": "FeaturePick::candidates",
+      "sublabel": "FeaturePick.cpp:64-151",
+      "width": 210
     },
     {
       "id": "piece",
@@ -95,7 +104,7 @@
       "col": 4,
       "type": "frontend",
       "label": "deleteActivePick",
-      "sublabel": "KaFeatureSelectPick.cpp:62-86",
+      "sublabel": "KaFeatureSelectPick.cpp:63-87",
       "width": 210
     },
     {
@@ -104,7 +113,7 @@
       "col": 5,
       "type": "backend",
       "label": "replaceGeometry",
-      "sublabel": "KaVertexEditTool.cpp:388-412",
+      "sublabel": "KaVertexEditTool.cpp:392-416",
       "width": 200
     }
   ],
@@ -117,12 +126,18 @@
     {
       "from": "select",
       "to": "layers",
-      "label": "canvas + overlay layers"
+      "label": "which layers a click reaches"
     },
     {
-      "from": "layers",
+      "from": "select",
+      "to": "candidates",
+      "label": "ranked hits; same spot again = next",
+      "variant": "emphasis"
+    },
+    {
+      "from": "candidates",
       "to": "piece",
-      "label": "polygon under cursor",
+      "label": "polygon or hole under cursor (also edit-buffer shapes)",
       "variant": "emphasis"
     },
     {
@@ -143,14 +158,16 @@
       "items": [
         "Only QgsMapCanvas::layers(): lifted layers unpickable",
         "fid >= 0 checks dropped unsaved shapes",
-        "A hole or inner part could not be picked"
+        "A hole or inner part could not be picked",
+        "Edited shapes were skipped when the click fell in their hole"
       ]
     },
     {
       "dot": "emerald",
       "title": "Now",
       "items": [
-        "Pick list adds layersDrawnAboveLabels",
+        "Pick order lives in core/FeaturePick (one path)",
+        "Edit-buffer shapes are fetched by bounding box too",
         "FID_NULL is the only 'none' id",
         "Inner piece is a hit of its own; Delete takes it out",
         "Key A turns 도형선택 on, never off"
@@ -161,7 +178,7 @@
       "title": "Keep",
       "items": [
         "One undo step through runEditCommand",
-        "Reference and cadastral layers stay unpickable",
+        "Reference/cadastral: picked only where no survey shape lies, no handles",
         "Nothing is written before 저장"
       ]
     }
