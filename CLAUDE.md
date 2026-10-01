@@ -19,6 +19,15 @@ How the superpowers skills fit this repo:
 - TDD: put tests into the existing QtTest files and targets (see Tests). Do not add a new test framework.
 - Files in docs/superpowers dated 2026-09-13 or earlier are history, not current requirements.
 
+## 코드 고치는 방식
+
+2026-10-01 사용자가 붙여 준 일반 작업 규칙 가운데 지금 규칙과 겹치지 않는 것만 옮겼다(「모르면 멈추고 묻기」는 규칙 2와 부딪혀 넣지 않았다).
+
+- 주변 코드의 이름·주석·모양에 맞춘다. 요청과 상관없는 옆 코드·주석·줄 맞춤은 고치지 않는다.
+- 요청과 상관없는 죽은 코드를 보면 지우지 말고 보고에 한 줄로 알린다. 내 변경 때문에 안 쓰이게 된 것(가져오기·변수·함수)만 지운다.
+- 요청하지 않은 설정 항목·확장성·추상화는 넣지 않고, 일어날 수 없는 경우를 위한 처리는 쓰지 않는다. 더 짧게 쓸 수 있으면 다시 쓴다.
+- 바뀐 줄은 모두 요청에서 바로 이어져야 한다.
+
 ## security-guidance 결과 처리
 
 - 턴이 끝날 때나 커밋할 때 보안 검토 결과가 돌아오면, 이 앱(Windows 데스크톱, 서버·웹 화면 없음)에 실제로 해당하는 것만 이번 변경 안에서 고치고, 해당 없는 것은 고치지 말고 보고에 한 줄로 적는다. 보안 판단을 사용자에게 묻지 않는다.
