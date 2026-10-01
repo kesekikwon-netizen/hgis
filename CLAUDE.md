@@ -4,7 +4,7 @@
 
 ## superpowers 사용 방식 (스킬 지침보다 우선한다)
 
-1. 요청마다 알맞은 superpowers 스킬을 스스로 불러 쓴다. 새 기능이나 동작 변경은 superpowers:brainstorming, 증상·버그 신고와 스크린샷은 superpowers:systematic-debugging, 코드를 고칠 때는 superpowers:test-driven-development, 끝났다고 말하기 전에는 superpowers:verification-before-completion을 쓴다. 글자·라벨·색 하나 바꾸기 같은 한두 줄 수정은 스킬 없이 바로 고치고 빌드로 확인한다.
+1. 요청마다 알맞은 superpowers 스킬을 스스로 불러 쓴다. 새 기능이나 동작 변경은 superpowers:brainstorming, 증상·버그 신고와 스크린샷은 superpowers:systematic-debugging, 코드를 고칠 때는 superpowers:test-driven-development, 끝났다고 말하기 전에는 superpowers:verification-before-completion을 쓴다. 한두 줄 수정, 설정·문서 변경, 조사·질문 답변까지 예외 없이 모든 작업을 superpowers 단계로 진행한다(작업에 맞는 스킬을 먼저 부르고 그 절차를 따른다).
 2. 사용자는 개발자가 아니다. "해줘/고쳐줘"라는 요청 자체가 진행 승인이다. 설계 승인, 접근법 고르기, 스펙·계획 검토, 실행 방식 선택, 브랜치 마무리 선택 같은 기술 결정은 묻지 말고 가장 안전한 쪽을 스스로 골라 끝까지 진행하고, 고른 것을 보고에 한 줄로 적는다. 멈추고 묻는 것은 앱이 현장에서 어떻게 보이고 동작해야 하는지(제품 질문)가 정말 불분명할 때만, 쉬운 한국어로 한 번에 묶어 묻는다.
 3. docs/superpowers 스펙·계획 문서는 여러 단계짜리 큰 기능에서만 쓰고 한국어로 쓴다. 테스트를 붙일 수 없는 UI 코드는 지우지 말고 빌드와 가장 가까운 기존 테스트로 확인한다. ctest 기준선 실패 4개(workflow_engine, cadastral, storage_safety, save_open_portable)는 원래 실패하므로 묻지 말고 진행한다. 끝나면 현재 브랜치에 커밋까지만 하고 push·merge·PR은 사용자가 요청할 때만 한다.
 4. 새 기능에서 현장 쓰임새가 두 갈래 이상으로 갈리면(예: 번호 매기는 규칙, 화면에 보이는 위치·모양, 지우거나 고칠 때 처리) 코드를 쓰기 전에 한 번만 묻는다. 한 번에 4개 이하, 질문마다 추천 답을 붙인다. 코드가 지금 어떻게 동작하는지, 파일 위치, 좌표계 같은 사실은 직접 찾아보고 묻지 않는다. 사용자가 "추천대로"라고 하면 남은 질문도 추천 답으로 정하고 바로 만든다. 버그 수정과 작은 변경은 묻지 않는다.
