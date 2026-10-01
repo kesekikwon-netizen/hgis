@@ -3,6 +3,7 @@
 #include "KaFeatureSelectTool.h"
 
 #include "KaEditTolerance.h"
+#include "KaPickLayers.h"
 #include "KaVertexEditTool.h"
 #include "core/LayerOps.h"
 
@@ -51,6 +52,7 @@ void KaFeatureSelectTool::refreshSelectedGeometry() {
   // After an undo the vertex numbering may have changed under the highlight.
   if (m_vertex) m_vertex->setActiveVertex(-1);
   syncVertexTarget();
+  setActivePiece({});  // rings and parts may be numbered differently after the undo
 }
 
 bool KaFeatureSelectTool::isPickableLayer(const QgsVectorLayer* layer) {
@@ -115,6 +117,7 @@ KaFeatureSelectTool::~KaFeatureSelectTool() {
     m_rubberBand = nullptr;
   }
   delete m_snapMark;
+  delete m_pieceBand;
 }
 
 void KaFeatureSelectTool::activate() {
@@ -139,18 +142,20 @@ void KaFeatureSelectTool::deactivate() {
   m_vertexIndex = -1;
   delete m_snapMark;
   m_snapMark = nullptr;
+  setActivePiece({});
   if (m_vertex) m_vertex->clearTarget();
   QgsMapTool::deactivate();
 }
 
 void KaFeatureSelectTool::keyPressEvent(QKeyEvent* e) {
   if (!e) return;
-  if ((e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace) && deleteActiveVertex()) {
+  if ((e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace) && deleteActivePick()) {
     e->accept();
     return;
   }
-  if (e->key() == Qt::Key_Escape && m_vertex && m_vertex->activeVertex() >= 0) {
+  if (e->key() == Qt::Key_Escape && m_vertex && (m_vertex->activeVertex() >= 0 || m_activePiece.isValid())) {
     m_vertex->setActiveVertex(-1);
+    setActivePiece({});
     e->accept();
     return;
   }
@@ -168,6 +173,7 @@ void KaFeatureSelectTool::canvasPressEvent(QgsMapMouseEvent* e) {
       m_vertexIndex = idx;
       m_vertexPressPos = e->pos();
       m_vertex->setActiveVertex(idx);
+      setActivePiece({});  // one picked thing at a time: the vertex replaces the inner piece
       return;
     }
   }
@@ -336,149 +342,46 @@ void KaFeatureSelectTool::handleContextMenu(QgsMapMouseEvent* e) {
     }
   }
 
+  // An inner piece under the cursor (a hole, or a part inside another part) can be taken out whole.
+  std::optional<PolygonPieces::Piece> piece;
+  if (hasEditableShapeType && all.size() == 1 && m_vertex && m_vertex->hasTarget()) piece = pieceUnder(e->mapPoint());
+
   QMenu menu(mCanvas);
-  if (vtxIdx >= 0) {
-    auto* act = menu.addAction(QStringLiteral("점삭제"));
-    act->setEnabled(deleteReason.isEmpty());
-    if (!deleteReason.isEmpty()) act->setToolTip(deleteReason);
-    if (menu.exec(mCanvas->mapToGlobal(e->pos())) == act && m_vertex && m_vertex->deleteVertexAt(vtxIdx)) {
-      m_vertex->showVertexMarkers();
-      if (mCanvas) mCanvas->refresh();
-      emit statusMessage(QStringLiteral("점을 지웠습니다."));
+  QAction* vertexAct = nullptr;
+  if (vtxIdx >= 0 || segAfter >= 0) {
+    const QString& reason = vtxIdx >= 0 ? deleteReason : addReason;
+    vertexAct = menu.addAction(vtxIdx >= 0 ? QStringLiteral("점삭제") : QStringLiteral("점추가"));
+    vertexAct->setEnabled(reason.isEmpty());
+    if (!reason.isEmpty()) vertexAct->setToolTip(reason);
+  }
+  QAction* removeAct = nullptr;
+  QAction* cutAct = nullptr;
+  if (piece) {
+    if (vertexAct) menu.addSeparator();
+    removeAct = menu.addAction(QStringLiteral("안쪽 도형 지우기"));
+    if (!piece->isHole()) cutAct = menu.addAction(QStringLiteral("안쪽 도형만큼 구멍 내기"));
+    for (QAction* act : {removeAct, cutAct}) {
+      if (!act) continue;
+      act->setEnabled(vertexReason.isEmpty());
+      if (!vertexReason.isEmpty()) act->setToolTip(vertexReason);
     }
+  }
+  if (menu.isEmpty()) {
+    emit statusMessage(QStringLiteral("점 위에서 우클릭하면 점삭제, 선 위에서 우클릭하면 점추가입니다."));
     return;
   }
-  if (segAfter >= 0) {
-    auto* act = menu.addAction(QStringLiteral("점추가"));
-    act->setEnabled(addReason.isEmpty());
-    if (!addReason.isEmpty()) act->setToolTip(addReason);
-    if (menu.exec(mCanvas->mapToGlobal(e->pos())) == act && m_vertex &&
-        m_vertex->insertVertexAt(segAfter, onLine)) {
-      m_vertex->showVertexMarkers();
-      if (mCanvas) mCanvas->refresh();
-      emit statusMessage(QStringLiteral("점을 넣었습니다."));
-    }
+  const QAction* chosen = menu.exec(mCanvas->mapToGlobal(e->pos()));
+  if (!chosen || !m_vertex) return;
+  if (chosen == removeAct || chosen == cutAct) {
+    setActivePiece(*piece);
+    removeActivePiece(chosen == cutAct);
     return;
   }
-  emit statusMessage(QStringLiteral("점 위에서 우클릭하면 점삭제, 선 위에서 우클릭하면 점추가입니다."));
-}
-
-void KaFeatureSelectTool::selectAtPoint(const QgsPointXY& mapPt, bool addToSelection,
-                                        const QPoint& screenPos, bool allowCycle) {
-  if (!mCanvas || !QgsProject::instance()) return;
-
-  if (!addToSelection) {
-    for (QgsMapLayer* l : QgsProject::instance()->mapLayers()) {
-      if (auto* vl = qobject_cast<QgsVectorLayer*>(l)) {
-        if (!vl->selectedFeatureIds().isEmpty()) {
-          vl->removeSelection();
-          vl->triggerRepaint();
-        }
-      }
-    }
-  }
-
-  // Every survey shape under the cursor, not just the first one of the top layer:
-  // lines and points by distance, then polygons by area so a pit inside a house wins.
-  struct Hit {
-    QgsVectorLayer* layer = nullptr;
-    QgsFeatureId fid = -1;
-    int tier = 0;
-    double key = 0.0;
-  };
-  QVector<Hit> hits;
-  const double mapTol = mCanvas->mapUnitsPerPixel() * KaEditTolerance::kFeaturePickPx;
-
-  for (QgsMapLayer* ml : mCanvas->layers()) {
-    auto* vl = qobject_cast<QgsVectorLayer*>(ml);
-    if (!isPickableLayer(vl)) continue;
-
-    QgsCoordinateTransform xf;
-    const bool needXf = (mCanvas->mapSettings().destinationCrs() != vl->crs());
-    if (needXf) {
-      xf = QgsCoordinateTransform(mCanvas->mapSettings().destinationCrs(), vl->crs(),
-                                  QgsProject::instance()->transformContext());
-      xf.setBallparkTransformsAreAppropriate(true);
-    }
-
-    QgsPointXY layerPt = mapPt;
-    if (needXf) {
-      try {
-        layerPt = xf.transform(mapPt);
-      } catch (...) {
-        KA_LOG_EXCEPT();
-        continue;
-      }
-    }
-
-    const double layerTol = needXf ? (mapTol * (vl->crs().mapUnits() == Qgis::DistanceUnit::Degrees ? 0.00001 : 1.0)) : mapTol;
-    const QgsRectangle searchBox(layerPt.x() - layerTol, layerPt.y() - layerTol,
-                                 layerPt.x() + layerTol, layerPt.y() + layerTol);
-
-    QgsFeatureRequest req;
-    req.setFilterRect(searchBox);
-    QgsFeatureIterator it = vl->getFeatures(req);
-    QgsFeature f;
-    const QgsGeometry layerProbe = QgsGeometry::fromPointXY(layerPt);
-    const bool polygonLayer = vl->geometryType() == Qgis::GeometryType::Polygon;
-
-    while (it.nextFeature(f)) {
-      if (!f.hasGeometry() || f.geometry().isEmpty()) continue;
-      const QgsGeometry g = f.geometry();
-      if (polygonLayer) {
-        if (!g.contains(layerProbe) && g.distance(layerProbe) > layerTol) continue;
-        hits.append({vl, f.id(), 1, std::abs(g.area())});
-      } else {
-        const double d = g.distance(layerProbe);
-        if (d > layerTol) continue;
-        hits.append({vl, f.id(), 0, d});
-      }
-    }
-  }
-  std::stable_sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) {
-    return a.tier != b.tier ? a.tier < b.tier : a.key < b.key;
-  });
-
-  QList<QPair<QString, QgsFeatureId>> candidates;
-  for (const Hit& hit : hits) candidates.append({hit.layer->id(), hit.fid});
-  int pick = 0;
-  const bool samePlace = allowCycle && !addToSelection && !candidates.isEmpty() &&
-                         m_lastPickIndex >= 0 && candidates == m_lastPickCandidates &&
-                         (screenPos - m_lastPickPos).manhattanLength() <= KaEditTolerance::kClickSlopPx;
-  if (samePlace) pick = (m_lastPickIndex + 1) % candidates.size();
-  m_lastPickPos = screenPos;
-  m_lastPickCandidates = candidates;
-  m_lastPickIndex = candidates.isEmpty() ? -1 : pick;
-
-  QgsVectorLayer* hitLayer = hits.isEmpty() ? nullptr : hits.at(pick).layer;
-  const QgsFeatureId hitFid = hits.isEmpty() ? -1 : hits.at(pick).fid;
-  if (hitLayer && hitFid >= 0) {
-    if (addToSelection && hitLayer->selectedFeatureIds().contains(hitFid)) {
-      hitLayer->deselect(hitFid);
-    } else {
-      hitLayer->select(hitFid);
-    }
-    hitLayer->triggerRepaint();
-  }
-
-  mCanvas->refresh();
-
-  auto all = allSelectedFeatures(mCanvas);
-  syncVertexTarget();
-  emit selectionChanged(all.size());
-
-  if (all.isEmpty()) {
-    emit statusMessage(QStringLiteral("선택된 도형 없음"));
-  } else if (all.size() == 1 && candidates.size() > 1 && !addToSelection) {
-    emit statusMessage(QStringLiteral("겹친 도형 %1/%2 — 같은 자리를 다시 누르면 다음 도형을 고릅니다.")
-                           .arg(pick + 1)
-                           .arg(candidates.size()));
-  } else if (all.size() == 1) {
-    emit statusMessage(QStringLiteral("수정점이 나왔습니다. 점을 끌어 옮기세요(Ctrl=자석). 점 우클릭은 삭제, 선 우클릭은 추가입니다."));
-  } else if (all.size() == 2) {
-    emit statusMessage(QStringLiteral("도형 2개 선택됨 (%1, %2) — [폴리곤 나누기] 클릭 시 겹치는 구간이 자동 분할됩니다!").arg(all[0].layer->name(), all[1].layer->name()));
-  } else {
-    emit statusMessage(QStringLiteral("도형 %1개 선택됨").arg(all.size()));
+  const bool deleting = vtxIdx >= 0;
+  if (deleting ? m_vertex->deleteVertexAt(vtxIdx) : m_vertex->insertVertexAt(segAfter, onLine)) {
+    m_vertex->showVertexMarkers();
+    if (mCanvas) mCanvas->refresh();
+    emit statusMessage(deleting ? QStringLiteral("점을 지웠습니다.") : QStringLiteral("점을 넣었습니다."));
   }
 }
 
@@ -497,7 +400,7 @@ void KaFeatureSelectTool::selectInRect(const QgsRectangle& mapRect, bool addToSe
   }
 
   const QgsGeometry mapGeom = QgsGeometry::fromRect(mapRect);
-  for (QgsMapLayer* ml : mCanvas->layers()) {
+  for (QgsMapLayer* ml : kaPickLayers(mCanvas)) {
     auto* vl = qobject_cast<QgsVectorLayer*>(ml);
     if (!isPickableLayer(vl)) continue;
 
@@ -539,6 +442,7 @@ void KaFeatureSelectTool::selectInRect(const QgsRectangle& mapRect, bool addToSe
   mCanvas->refresh();
   auto all = allSelectedFeatures(mCanvas);
   syncVertexTarget();
+  setActivePiece({});
   emit selectionChanged(all.size());
   emit statusMessage(QStringLiteral("도형 %1개 선택됨").arg(all.size()));
 }

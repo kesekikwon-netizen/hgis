@@ -1,4 +1,5 @@
 #include "KaAttributeMapTool.h"
+#include "KaPickLayers.h"
 #include "core/LayerOps.h"
 
 #include <qgsmapcanvas.h>
@@ -62,7 +63,7 @@ bool KaAttributeMapTool::pickEditableAtScreen(const QPoint& screenPos, QgsVector
   *outLayer = nullptr;
   *outFeat = QgsFeature();
   QList<QgsMapLayer*> candidates;
-  for (QgsMapLayer* layer : mCanvas->layers()) {
+  for (QgsMapLayer* layer : kaPickLayers(mCanvas)) {
     if (isEditableLayer(layer)) candidates.append(layer);
   }
   if (candidates.isEmpty()) return false;

@@ -482,9 +482,9 @@ void MainWindow::deleteFeaturesOrSelectedReferenceLayers() {
       statusBar()->showMessage(QStringLiteral("꼭짓점 하나를 되돌렸습니다."), 4000);
     return;
   }
-  // A picked vertex (clicked in 도형선택) is what Delete removes, not the whole shape.
+  // A picked vertex or inner piece (clicked in 도형선택) is what Delete removes, not the whole shape.
   if (m_featureSelectTool && m_canvas && m_canvas->mapTool() == m_featureSelectTool &&
-      m_featureSelectTool->deleteActiveVertex())
+      m_featureSelectTool->deleteActivePick())
     return;
   // [pkg B2] F003: in the trench tool, Delete removes the picked trench (one Ctrl+Z step).
   if (m_trenchMoveTool && m_canvas && m_canvas->mapTool() == m_trenchMoveTool &&

@@ -1,0 +1,169 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Shape select: what a click can pick",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "win",
+      "label": "MainWindow"
+    },
+    {
+      "id": "tool",
+      "label": "KaFeatureSelectTool"
+    },
+    {
+      "id": "core",
+      "label": "core"
+    },
+    {
+      "id": "edit",
+      "label": "KaVertexEditTool"
+    }
+  ],
+  "phases": [
+    {
+      "id": "on",
+      "label": "Tool on",
+      "fromCol": 0,
+      "toCol": 0
+    },
+    {
+      "id": "pick",
+      "label": "Pick",
+      "fromCol": 1,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "take",
+      "label": "Take out",
+      "fromCol": 4,
+      "toCol": 5
+    }
+  ],
+  "mainPath": [
+    "key",
+    "select",
+    "layers",
+    "piece",
+    "delete",
+    "replace"
+  ],
+  "nodes": [
+    {
+      "id": "key",
+      "lane": "win",
+      "col": 0,
+      "type": "external",
+      "label": "A / 선택 / click",
+      "sublabel": "KaFeatureSelectPick.cpp:90-120",
+      "width": 200
+    },
+    {
+      "id": "select",
+      "lane": "tool",
+      "col": 1,
+      "type": "frontend",
+      "label": "selectAtPoint",
+      "sublabel": "KaFeatureSelectPick.cpp:122-254",
+      "width": 200
+    },
+    {
+      "id": "layers",
+      "lane": "core",
+      "col": 2,
+      "type": "backend",
+      "label": "kaPickLayers (+ lifted)",
+      "sublabel": "KaPickLayers.h:14-21",
+      "width": 180
+    },
+    {
+      "id": "piece",
+      "lane": "core",
+      "col": 3,
+      "type": "backend",
+      "label": "innerPieceAt",
+      "sublabel": "PolygonPieces.cpp:47-69",
+      "width": 170
+    },
+    {
+      "id": "delete",
+      "lane": "tool",
+      "col": 4,
+      "type": "frontend",
+      "label": "deleteActivePick",
+      "sublabel": "KaFeatureSelectPick.cpp:62-86",
+      "width": 210
+    },
+    {
+      "id": "replace",
+      "lane": "edit",
+      "col": 5,
+      "type": "backend",
+      "label": "replaceGeometry",
+      "sublabel": "KaVertexEditTool.cpp:388-412",
+      "width": 200
+    }
+  ],
+  "edges": [
+    {
+      "from": "key",
+      "to": "select",
+      "label": "startSelectTool; release"
+    },
+    {
+      "from": "select",
+      "to": "layers",
+      "label": "canvas + overlay layers"
+    },
+    {
+      "from": "layers",
+      "to": "piece",
+      "label": "polygon under cursor",
+      "variant": "emphasis"
+    },
+    {
+      "from": "piece",
+      "to": "delete",
+      "label": "setActivePiece; Delete"
+    },
+    {
+      "from": "delete",
+      "to": "replace",
+      "label": "withoutPiece / withPieceCutOut"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Was",
+      "items": [
+        "Only QgsMapCanvas::layers(): lifted layers unpickable",
+        "fid >= 0 checks dropped unsaved shapes",
+        "A hole or inner part could not be picked"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Now",
+      "items": [
+        "Pick list adds layersDrawnAboveLabels",
+        "FID_NULL is the only 'none' id",
+        "Inner piece is a hit of its own; Delete takes it out",
+        "Key A turns 도형선택 on, never off"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Keep",
+      "items": [
+        "One undo step through runEditCommand",
+        "Reference and cadastral layers stay unpickable",
+        "Nothing is written before 저장"
+      ]
+    }
+  ]
+}

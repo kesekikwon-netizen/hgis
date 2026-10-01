@@ -149,6 +149,7 @@ add_library(ka_core STATIC
   src/core/LayerTreeRecovery.cpp
   src/core/LayerTreePolicy.cpp
   src/core/GeometryEditMerge.cpp
+  src/core/PolygonPieces.cpp
   src/core/GeometryEditVertex.cpp
   src/core/ControlPointCsv.cpp
   src/core/SurveyPointSchema.cpp
@@ -447,6 +448,7 @@ add_executable(ka-hgis
   src/app/KaTrenchMoveTool.cpp
   src/app/KaVertexEditTool.cpp
   src/app/KaFeatureSelectTool.cpp
+  src/app/KaFeatureSelectPick.cpp
   src/app/KaTrenchDialog.cpp
   src/app/KaTrenchDialogPlan.cpp
   src/app/KaDemClassDialog.cpp
@@ -615,7 +617,7 @@ if(KA_HGIS_BUILD_TESTS)
 
   add_executable(ka_editing_tools_tests tests/test_editing_tools.cpp
     src/app/KaCaptureMapTool.cpp src/app/KaCaptureMapTool.h
-    src/app/KaFeatureSelectTool.cpp src/app/KaFeatureSelectTool.h
+    src/app/KaFeatureSelectTool.cpp src/app/KaFeatureSelectPick.cpp src/app/KaFeatureSelectTool.h
     src/app/KaVertexEditTool.cpp src/app/KaVertexEditTool.h
     src/app/KaAttributeMapTool.cpp src/app/KaAttributeMapTool.h
     src/app/KaEditTolerance.h
@@ -625,6 +627,26 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_directories(ka_editing_tools_tests PRIVATE ${KA_LIBDIRS})
   target_compile_definitions(ka_editing_tools_tests PRIVATE ${KA_TEST_DEFS})
   ka_add_qtest(editing_tools ka_editing_tools_tests)
+
+  # 도형선택 cases that used to pick nothing (unsaved shape, lifted layer, inner piece) and key A.
+  add_executable(ka_inner_piece_tests tests/test_inner_piece.cpp
+    src/app/KaCaptureMapTool.cpp src/app/KaCaptureMapTool.h
+    src/app/KaFeatureSelectTool.cpp src/app/KaFeatureSelectPick.cpp src/app/KaFeatureSelectTool.h
+    src/app/KaVertexEditTool.cpp src/app/KaVertexEditTool.h
+    src/app/KaEditTolerance.h src/app/KaPickLayers.h
+    src/app/KaCrashGuard.cpp src/app/KaCrashGuard.h)
+  target_link_libraries(ka_inner_piece_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_inner_piece_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_inner_piece_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_inner_piece_tests PRIVATE ${KA_TEST_DEFS})
+  ka_add_qtest(inner_piece ka_inner_piece_tests)
+
+  add_executable(ka_polygon_pieces_tests tests/test_polygon_pieces.cpp)
+  target_link_libraries(ka_polygon_pieces_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_polygon_pieces_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_polygon_pieces_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_polygon_pieces_tests PRIVATE ${KA_TEST_DEFS})
+  ka_add_qtest(polygon_pieces ka_polygon_pieces_tests)
 
   add_executable(ka_georef_tests tests/test_georef.cpp)
   target_link_libraries(ka_georef_tests PRIVATE ${KA_TEST_LIBS})

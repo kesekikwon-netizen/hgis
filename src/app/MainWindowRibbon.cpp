@@ -308,7 +308,7 @@ void MainWindow::buildMenus() {
   Q_UNUSED(btnSelect);
   m_actSelect->setCheckable(true);
   m_actSelect->setShortcut(QKeySequence(QStringLiteral("Ctrl+1")));
-  m_actSelect->setToolTip(QStringLiteral("그린 도형을 선택합니다. 다시 누르면 이동으로 돌아갑니다 (Ctrl+1)"));
+  KaFeatureSelectTool::installKeyShortcut(this, m_actSelect);  // A = 도형선택, and the tooltip naming both keys
   auto* actUndo = new QAction(KaIcons::icon(QStringLiteral("undo")), QStringLiteral("되돌리기"), this);
   actUndo->setToolTip(QStringLiteral("마지막 그리기·정점·삭제를 되돌립니다 (Ctrl+Z)"));
   actUndo->setShortcut(QKeySequence::Undo);
@@ -861,7 +861,7 @@ void MainWindow::showSubToolsDraw() {
       "점을 끌면 그 점만 옮겨집니다.\n"
       "점 위에서 우클릭하면 그 점을 지우고, 선 위에서 우클릭하면 점을 넣습니다.\n"
       "Ctrl을 누른 채 끌면 다른 도형의 점·선에 붙습니다. 점을 클릭해 고른 뒤 Delete로 지웁니다.\n"
-      "겹친 도형은 같은 자리를 다시 누르면 다음 도형이 골라집니다."));
+      "겹친 도형은 같은 자리를 다시 누르면 다음 도형이 골라집니다. 단축키 A. 면 안쪽 도형은 클릭 후 Delete."));
   auto* snap = new KaSnapSettingsWidget(m_subToolbar);
   snap->syncFromProject();
   connect(snap, &KaSnapSettingsWidget::settingsChanged, this, [this, snap]() {

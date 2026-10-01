@@ -53,7 +53,8 @@ public:
   // 요구에 맞춰, 선택 도구가 이 기능들을 그대로 불러 쓴다.
   void setTarget(QgsVectorLayer* layer, QgsFeatureId fid);
   void clearTarget();
-  bool hasTarget() const { return !m_layer.isNull() && m_fid >= 0; }
+  // "None" is FID_NULL, never -1: a shape drawn but not saved yet has a negative id.
+  bool hasTarget() const { return !m_layer.isNull() && !FID_IS_NULL(m_fid); }
   void showVertexMarkers();
   // 끄는 동안 화면만 미리 보여 준다. 저장은 놓을 때 moveVertexTo 에서 한 번.
   void previewVertexMove(int index, const QgsPointXY& toLayerPt);
@@ -63,6 +64,12 @@ public:
   bool moveVertexTo(int index, const QgsPointXY& to);
   bool deleteVertexAt(int index);
   bool insertVertexAt(int index, const QgsPointXY& at);
+  // A whole-geometry edit of the target (taking out an inner ring or part): one undo step,
+  // reported through featureGeometryEdited like a vertex edit.
+  bool replaceGeometry(const QgsGeometry& geometry, const QString& commandText) {
+    m_lastEditError.clear();
+    return applyGeometryChange(geometry, commandText);
+  }
   QString lastEditError() const { return m_lastEditError; }
   QgsGeometry selectedGeometry() const;
   // 도형은 레이어 CRS, 마우스는 지도 CRS. 섞으면 도형이 안 잡힌다.
@@ -93,7 +100,7 @@ private:
   bool applyGeometryChange(QgsGeometry geom, const QString& commandText);
 
   QPointer<QgsVectorLayer> m_layer;
-  QgsFeatureId m_fid = -1;
+  QgsFeatureId m_fid = FID_NULL;
   QgsRubberBand* m_outline = nullptr;
   QVector<QgsVertexMarker*> m_marks;
   int m_dragIndex = -1;

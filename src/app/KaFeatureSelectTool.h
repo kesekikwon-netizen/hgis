@@ -8,12 +8,15 @@
 
 #include <QPointer>
 #include <QList>
-#include <QPair>
+#include <optional>
+
+#include "core/PolygonPieces.h"
 
 class QgsMapCanvas;
 class QgsVectorLayer;
 class QgsRubberBand;
 class QgsVertexMarker;
+class QAction;
 class QKeyEvent;
 class KaVertexEditTool;
 
@@ -22,7 +25,7 @@ class KaFeatureSelectTool : public QgsMapTool {
 public:
   struct SelectedItem {
     QPointer<QgsVectorLayer> layer;
-    QgsFeatureId fid = -1;
+    QgsFeatureId fid = FID_NULL;
   };
 
   explicit KaFeatureSelectTool(QgsMapCanvas* canvas);
@@ -46,6 +49,16 @@ public:
   // Delete while a vertex is picked (clicked) removes that vertex instead of the shape.
   // True when a picked vertex took the key, even if the vertex could not be removed.
   bool deleteActiveVertex();
+  // An inner piece of a polygon (a hole, or a part lying inside another part) is picked by
+  // clicking it. Delete takes the picked vertex first, then the picked piece; the rest of
+  // the shape stays. True when either took the key, so the whole shape is not deleted.
+  bool deleteActivePick();
+  // Turns the picked inner part into a hole of the shape around it. False for a hole.
+  bool cutOutActivePiece();
+  bool hasActivePiece() const;
+  // A = 도형선택 from anywhere on the map. It never toggles the tool off, leaves the tape's
+  // own A alone and does not drop a half-drawn shape.
+  static void installKeyShortcut(QWidget* window, QAction* selectAction);
   // Only survey data can be picked: reference maps and cadastral layers are read-only.
   static bool isPickableLayer(const QgsVectorLayer* layer);
 
@@ -59,7 +72,17 @@ signals:
   void requestMapContextMenu(const QPoint& canvasPos);
 
 private:
+  struct Pick {
+    QString layerId;
+    QgsFeatureId fid = FID_NULL;
+    PolygonPieces::Piece piece;
+    friend bool operator==(const Pick&, const Pick&) = default;
+  };
   void handleContextMenu(QgsMapMouseEvent* e);
+  // An invalid piece clears the pick and its red highlight.
+  void setActivePiece(const PolygonPieces::Piece& piece);
+  std::optional<PolygonPieces::Piece> pieceUnder(const QgsPointXY& mapPt) const;
+  bool removeActivePiece(bool cutOut);
   // Nearest line/point first, then the smallest polygon under the cursor. Clicking the same
   // spot again moves to the next overlapping shape.
   void selectAtPoint(const QgsPointXY& mapPt, bool addToSelection, const QPoint& screenPos,
@@ -81,7 +104,9 @@ private:
   QgsVertexMarker* m_snapMark = nullptr;
 
   QPoint m_lastPickPos;
-  QList<QPair<QString, QgsFeatureId>> m_lastPickCandidates;
+  QList<Pick> m_lastPickCandidates;
+  PolygonPieces::Piece m_activePiece;
+  QgsRubberBand* m_pieceBand = nullptr;
   int m_lastPickIndex = -1;
 
   bool m_dragging = false;
