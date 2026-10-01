@@ -12,7 +12,7 @@ class QToolButton;
 // One ribbon size (spec 「리본 크기 단계」). chipWidth 0 = max(tile + 8, label width + 8).
 struct RibbonLook {
   int tile;       // icon tile edge in px
-  int glyph;      // glyph edge inside the tile; the icon engine draws it as tile * 18 / 32
+  int glyph;      // spec table's rounded glyph edge, documentation only: KaIconsMockupEngine draws tile * 18 / 32
   int chipWidth;  // fixed chip width in px; 0 = follow the label
   bool labels;    // button labels shown under the tile
 };

@@ -8,6 +8,7 @@
 #include <QFontDatabase>
 #include <QLabel>
 #include <QLayout>
+#include <QMainWindow>
 #include <QPixmap>
 #include <QToolBar>
 #include <QToolButton>
@@ -15,6 +16,18 @@
 #include "app/KaToolbarFit.h"
 
 namespace {
+
+// The bar sits in the top area of a window like #subToolbar in the main window: the window's width is the
+// bar's width, and dragging the window's edge is what resizes it.
+struct Host {
+  QMainWindow window;
+  QToolBar* bar = new QToolBar(&window);
+  Host() {
+    window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.addToolBar(Qt::TopToolBarArea, bar);
+    window.setCentralWidget(new QWidget);
+  }
+};
 
 // A bar like #subToolbar (MainWindowRibbon.cpp): 20 px icons, the label beside the icon.
 void configureBar(QToolBar& bar) {
@@ -24,12 +37,13 @@ void configureBar(QToolBar& bar) {
   bar.setMovable(false);
 }
 
-// A caption label, tools with a picture and a Korean name, then two tools without a picture.
+// A caption label, checkable tools with a picture and a Korean name, then two tools without a picture.
 void addTools(QToolBar& bar, int tools) {
   QPixmap picture(32, 32);
   picture.fill(Qt::darkGray);
   bar.addWidget(new QLabel(QStringLiteral("  그리기 › ")));
-  for (int i = 0; i < tools; ++i) bar.addAction(QIcon(picture), QStringLiteral("도구 이름 %1번").arg(i + 1));
+  for (int i = 0; i < tools; ++i)
+    bar.addAction(QIcon(picture), QStringLiteral("도구 이름 %1번").arg(i + 1))->setCheckable(true);
   bar.addSeparator();
   bar.addAction(QStringLiteral("폴리곤 묶기"));
   bar.addAction(QStringLiteral("닫기"));
@@ -53,12 +67,21 @@ int needed(QToolBar& bar, Qt::ToolButtonStyle style, int icon) {
   return bar.sizeHint().width();
 }
 
-void expectStage(QToolBar& bar, int width, Qt::ToolButtonStyle style, int icon) {
-  bar.resize(width, bar.sizeHint().height());
+// A window resize reaches the offscreen platform window a little after the call, and the bar re-lays out
+// in a posted event.
+void settle() {
+  QTest::qWait(20);
   QCoreApplication::processEvents();
-  const QString where = QStringLiteral("width %1: style %2 icon %3 needs %4, extension %5")
-                            .arg(width).arg(bar.toolButtonStyle()).arg(bar.iconSize().width())
+}
+
+void expectStage(Host& host, int width, Qt::ToolButtonStyle style, int icon) {
+  QToolBar& bar = *host.bar;
+  host.window.resize(width, 200);
+  settle();
+  const QString where = QStringLiteral("window %1, bar %2: style %3 icon %4 needs %5, extension %6")
+                            .arg(width).arg(bar.width()).arg(bar.toolButtonStyle()).arg(bar.iconSize().width())
                             .arg(bar.sizeHint().width()).arg(extShown(bar));
+  QVERIFY2(bar.width() == width, qPrintable(where));  // the window gives the bar all of its width
   QVERIFY2(bar.toolButtonStyle() == style && bar.iconSize() == QSize(icon, icon), qPrintable(where));
   QVERIFY2(!extShown(bar), qPrintable(where));
   for (QAction* action : bar.actions()) {
@@ -76,6 +99,8 @@ private slots:
   void toolbarFit_hidesTextThenShrinksIcons();
   void toolbarFit_neverShowsTheExtensionButtonWhileResizing();
   void toolbarFit_followsActionsAddedAndShownLater();
+  void toolbarFit_checkedToolKeepsTheStage();
+  void toolbarFit_longerTextRefits();
   void toolbarFit_installTwiceFitsOnce();
 };
 
@@ -89,9 +114,9 @@ void TestToolbarFit::initTestCase() {
 }
 
 void TestToolbarFit::toolbarFit_hidesTextThenShrinksIcons() {
-  QToolBar bar;
+  Host host;
+  QToolBar& bar = *host.bar;
   fillBar(bar, 14);
-  bar.setAttribute(Qt::WA_DontShowOnScreen);
   const int withText = needed(bar, Qt::ToolButtonTextBesideIcon, 20);
   const int iconsOnly = needed(bar, Qt::ToolButtonIconOnly, 20);
   const int small = needed(bar, Qt::ToolButtonIconOnly, 16);
@@ -99,49 +124,49 @@ void TestToolbarFit::toolbarFit_hidesTextThenShrinksIcons() {
   bar.setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   bar.setIconSize(QSize(20, 20));
   KaToolbarFit::install(&bar);
-  bar.show();
+  host.window.show();
 
-  expectStage(bar, withText + 30, Qt::ToolButtonTextBesideIcon, 20);  // room: the labels show, icon 20
+  expectStage(host, withText + 30, Qt::ToolButtonTextBesideIcon, 20);  // room: the labels show, icon 20
   if (QTest::currentTestFailed()) return;
-  expectStage(bar, withText - 1, Qt::ToolButtonIconOnly, 20);  // short by a pixel: labels hide first
+  expectStage(host, withText - 1, Qt::ToolButtonIconOnly, 20);  // short by a pixel: labels hide first
   if (QTest::currentTestFailed()) return;
-  expectStage(bar, iconsOnly, Qt::ToolButtonIconOnly, 20);
+  expectStage(host, iconsOnly, Qt::ToolButtonIconOnly, 20);
   if (QTest::currentTestFailed()) return;
-  expectStage(bar, iconsOnly - 1, Qt::ToolButtonIconOnly, 16);  // still short: icons shrink
+  expectStage(host, iconsOnly - 1, Qt::ToolButtonIconOnly, 16);  // still short: icons shrink
   if (QTest::currentTestFailed()) return;
-  expectStage(bar, small, Qt::ToolButtonIconOnly, 16);
+  expectStage(host, small, Qt::ToolButtonIconOnly, 16);
   if (QTest::currentTestFailed()) return;
-  expectStage(bar, iconsOnly, Qt::ToolButtonIconOnly, 20);  // room again: back in the reverse order
+  expectStage(host, iconsOnly, Qt::ToolButtonIconOnly, 20);  // room again: back in the reverse order
   if (QTest::currentTestFailed()) return;
-  expectStage(bar, withText + 30, Qt::ToolButtonTextBesideIcon, 20);
+  expectStage(host, withText + 30, Qt::ToolButtonTextBesideIcon, 20);
 }
 
-// Dragging a window edge resizes the bar a pixel at a time: at no width above the last stage's need may
-// the » button show, and the stage only moves one way as the bar narrows (and back as it widens).
+// Dragging a window edge resizes the bar a few pixels at a time: at no width above the last stage's need
+// may the » button show, and the stage only moves one way as the bar narrows (and back as it widens).
 void TestToolbarFit::toolbarFit_neverShowsTheExtensionButtonWhileResizing() {
-  QToolBar bar;
+  Host host;
+  QToolBar& bar = *host.bar;
   fillBar(bar, 14);
-  bar.setAttribute(Qt::WA_DontShowOnScreen);
   const int small = needed(bar, Qt::ToolButtonIconOnly, 16);
   const int withText = needed(bar, Qt::ToolButtonTextBesideIcon, 20);
   bar.setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   bar.setIconSize(QSize(20, 20));
   KaToolbarFit::install(&bar);
-  bar.show();
+  host.window.show();
   int stage = 0;  // 0 labels, 1 icons only, 2 small icons
-  for (int width = withText + 60; width >= small; width -= 7) {
-    bar.resize(width, bar.sizeHint().height());
-    QCoreApplication::processEvents();
+  for (int width = withText + 60; width >= small; width -= 13) {
+    host.window.resize(width, 200);
+    settle();
     const int now = bar.toolButtonStyle() != Qt::ToolButtonIconOnly ? 0 : bar.iconSize().width() == 20 ? 1 : 2;
-    QVERIFY2(now >= stage && !extShown(bar), qPrintable(QStringLiteral("width %1 stage %2 after %3, extension %4").arg(width).arg(now).arg(stage).arg(extShown(bar))));
+    QVERIFY2(bar.width() == width && now >= stage && !extShown(bar), qPrintable(QStringLiteral("width %1 (bar %2) stage %3 after %4, extension %5").arg(width).arg(bar.width()).arg(now).arg(stage).arg(extShown(bar))));
     stage = now;
   }
   QCOMPARE(stage, 2);
-  for (int width = small; width <= withText + 60; width += 7) {
-    bar.resize(width, bar.sizeHint().height());
-    QCoreApplication::processEvents();
+  for (int width = small; width <= withText + 60; width += 13) {
+    host.window.resize(width, 200);
+    settle();
     const int now = bar.toolButtonStyle() != Qt::ToolButtonIconOnly ? 0 : bar.iconSize().width() == 20 ? 1 : 2;
-    QVERIFY2(now <= stage && !extShown(bar), qPrintable(QStringLiteral("width %1 stage %2 after %3, extension %4").arg(width).arg(now).arg(stage).arg(extShown(bar))));
+    QVERIFY2(bar.width() == width && now <= stage && !extShown(bar), qPrintable(QStringLiteral("width %1 (bar %2) stage %3 after %4, extension %5").arg(width).arg(bar.width()).arg(now).arg(stage).arg(extShown(bar))));
     stage = now;
   }
   QCOMPARE(stage, 0);
@@ -152,39 +177,103 @@ void TestToolbarFit::toolbarFit_followsActionsAddedAndShownLater() {
   int small = 0;
   int withText = 0;
   {
-    QToolBar probe;
-    fillBar(probe, 14);
-    small = needed(probe, Qt::ToolButtonIconOnly, 16);
-    withText = needed(probe, Qt::ToolButtonTextBesideIcon, 20);
+    Host probe;
+    fillBar(*probe.bar, 14);
+    small = needed(*probe.bar, Qt::ToolButtonIconOnly, 16);
+    withText = needed(*probe.bar, Qt::ToolButtonTextBesideIcon, 20);
   }
-  QToolBar bar;
-  bar.setAttribute(Qt::WA_DontShowOnScreen);
+  Host host;
+  QToolBar& bar = *host.bar;
   configureBar(bar);
   KaToolbarFit::install(&bar);
-  bar.resize(small + 10, 60);
-  bar.show();
-  QCoreApplication::processEvents();
+  host.window.resize(small + 10, 200);
+  host.window.show();
+  settle();
   addTools(bar, 14);  // filled after install, while the bar is already narrow
-  QCoreApplication::processEvents();
+  settle();
   QVERIFY2(bar.toolButtonStyle() == Qt::ToolButtonIconOnly && bar.iconSize() == QSize(16, 16) && !extShown(bar),
            qPrintable(QStringLiteral("needs %1 of %2").arg(bar.sizeHint().width()).arg(bar.width())));
   bar.clear();
   bar.hide();
   addTools(bar, 14);
-  bar.resize(withText + 20, 60);
+  host.window.resize(withText + 20, 200);
   bar.show();
-  QCoreApplication::processEvents();
+  settle();
   QVERIFY2(bar.toolButtonStyle() == Qt::ToolButtonTextBesideIcon && bar.iconSize() == QSize(20, 20) && !extShown(bar),
            qPrintable(QStringLiteral("needs %1 of %2").arg(bar.sizeHint().width()).arg(bar.width())));
 }
 
+// Checking a tool changes no button width, so the bar keeps its stage. Fitting again would try the bigger
+// stages first, and every try sets the style and the icon size of the bar and re-lays out all its buttons.
+void TestToolbarFit::toolbarFit_checkedToolKeepsTheStage() {
+  Host host;
+  QToolBar& bar = *host.bar;
+  fillBar(bar, 14);
+  const int iconsOnly = needed(bar, Qt::ToolButtonIconOnly, 20);
+  bar.setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+  bar.setIconSize(QSize(20, 20));
+  KaToolbarFit::install(&bar);
+  host.window.show();
+  expectStage(host, iconsOnly + 5, Qt::ToolButtonIconOnly, 20);  // just short of the labels
+  if (QTest::currentTestFailed()) return;
+
+  QSignalSpy styleChanges(&bar, &QToolBar::toolButtonStyleChanged);
+  QSignalSpy iconChanges(&bar, &QToolBar::iconSizeChanged);
+  int checkable = 0;
+  for (QAction* action : bar.actions()) {
+    if (!action->isCheckable()) continue;
+    action->setChecked(true);
+    ++checkable;
+  }
+  QCOMPARE(checkable, 14);
+  settle();
+  for (QAction* action : bar.actions())
+    if (action->isCheckable()) action->setChecked(false);
+  settle();
+  QVERIFY2(styleChanges.isEmpty() && iconChanges.isEmpty(),
+           qPrintable(QStringLiteral("%1 style and %2 icon size changes while 14 tools were checked and unchecked")
+                          .arg(styleChanges.size()).arg(iconChanges.size())));
+  expectStage(host, iconsOnly + 5, Qt::ToolButtonIconOnly, 20);
+}
+
+// A change that does move a button width (a longer name on a tool without a picture, whose text shows at
+// every stage) still fits again.
+void TestToolbarFit::toolbarFit_longerTextRefits() {
+  const QString longer = QStringLiteral("닫고 나가기");
+  int iconsOnly = 0;
+  {
+    Host probe;
+    fillBar(*probe.bar, 14);
+    iconsOnly = needed(*probe.bar, Qt::ToolButtonIconOnly, 20);
+    const int small = needed(*probe.bar, Qt::ToolButtonIconOnly, 16);
+    probe.bar->actions().last()->setText(longer);
+    const int longerIconsOnly = needed(*probe.bar, Qt::ToolButtonIconOnly, 20);
+    const int longerSmall = needed(*probe.bar, Qt::ToolButtonIconOnly, 16);
+    QVERIFY2(iconsOnly > small && longerIconsOnly > iconsOnly + 5 && longerSmall <= iconsOnly + 5,
+             qPrintable(QStringLiteral("fixture: the longer name needs %1 at icon 20 and %2 at icon 16, the old one %3 and %4")
+                            .arg(longerIconsOnly).arg(longerSmall).arg(iconsOnly).arg(small)));
+  }
+  Host host;
+  QToolBar& bar = *host.bar;
+  fillBar(bar, 14);
+  bar.setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+  bar.setIconSize(QSize(20, 20));
+  KaToolbarFit::install(&bar);
+  host.window.show();
+  expectStage(host, iconsOnly + 5, Qt::ToolButtonIconOnly, 20);
+  if (QTest::currentTestFailed()) return;
+  bar.actions().last()->setText(longer);  // the last tool is 「닫기」
+  settle();
+  expectStage(host, iconsOnly + 5, Qt::ToolButtonIconOnly, 16);
+}
+
 void TestToolbarFit::toolbarFit_installTwiceFitsOnce() {
-  QToolBar bar;
-  fillBar(bar, 3);
-  KaToolbarFit::install(&bar);
-  KaToolbarFit::install(&bar);
+  Host host;
+  fillBar(*host.bar, 3);
+  KaToolbarFit::install(host.bar);
+  KaToolbarFit::install(host.bar);
   KaToolbarFit::install(nullptr);
-  QCOMPARE(bar.findChildren<QObject*>(QStringLiteral("kaToolbarFit"), Qt::FindDirectChildrenOnly).size(), 1);
+  QCOMPARE(host.bar->findChildren<QObject*>(QStringLiteral("kaToolbarFit"), Qt::FindDirectChildrenOnly).size(), 1);
 }
 
 QTEST_MAIN(TestToolbarFit)

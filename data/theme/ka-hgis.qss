@@ -100,8 +100,8 @@ QTableWidget#recentSurveyList::item:selected { background: @selected@; color: @i
 QLabel#startRecoveryNote { color: @ink@; font-size: 12px; }
 /* ---- Place search: 「지역」 and the address field at the right end of the ribbon row ---- */
 QWidget#appBar { background: transparent; }
-/* min-width keeps 「지역」 readable: the toolbar rule's min-width 0 let a crowded
-   ribbon squeeze this button down to its 30 px of padding and border. */
+/* min-width and min-height are 「지역」's own floor, just above its 30 px of padding and border;
+   the general toolbar button rule sets no minimum. */
 QToolBar#mainToolbar QToolButton#appBarRegion {
   color: @ink@;
   background: @surface@;

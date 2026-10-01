@@ -17,24 +17,6 @@
 
 namespace fx = RibbonFixture;
 
-namespace {
-QStringList g_ribbonLog;
-QtMessageHandler g_previousHandler = nullptr;
-void collectRibbonLog(QtMsgType type, const QMessageLogContext& context, const QString& message) {
-  if (message.startsWith(QLatin1String("[ribbon]"))) g_ribbonLog << message;
-  else if (g_previousHandler) g_previousHandler(type, context, message);
-}
-
-// Collects the ribbon's session-log lines while it lives and puts the previous message handler back.
-struct LogCapture {
-  LogCapture() {
-    g_ribbonLog.clear();
-    g_previousHandler = qInstallMessageHandler(collectRibbonLog);
-  }
-  ~LogCapture() { qInstallMessageHandler(g_previousHandler); }
-};
-}  // namespace
-
 class TestRibbonOverflow : public QObject {
   Q_OBJECT
 private slots:
@@ -49,6 +31,7 @@ private slots:
   void ribbonMinimumWidthIsSmallestLook();
   void lookWidths_matchTheLayoutAtEverySize();
   void sizeChangeIsLoggedOnce();
+  void firstVisibleSizeIsLoggedAtTheDefault();
 };
 
 void TestRibbonOverflow::initTestCase() {
@@ -170,27 +153,41 @@ void TestRibbonOverflow::productionRibbon() {
 
 void TestRibbonOverflow::sizeOnlyShrinksAsWindowNarrows() {
   const fx::RibbonSource source = fx::readProductionRibbon();
+  QVERIFY2(source.groups.size() >= 5, "run from the source tree: MainWindowRibbon.cpp groups");
+  QVERIFY2(source.chips.size() >= 20, qPrintable(QStringLiteral("parsed %1 chips").arg(source.chips.size())));
+  const fx::LogCapture capture;  // the walk crosses about 30 sizes; their log lines are not what it checks
   QMainWindow window;
   KaBeginnerRibbon* ribbon = fx::showProductionRibbon(window, source, 1904);
   int tile = INT_MAX;
   bool hidden = false;
-  for (int width = 1904; width >= 1024; width -= 120) {
+  QList<int> narrowing;  // the size at each width, as its place in looks()
+  QList<int> widening;
+  for (int width = 1904; width >= 1024; width -= 30) {
     window.resize(width, 768);
     fx::settle();
     const RibbonLook look = ribbon->look();
     QVERIFY2(look.tile <= tile && !(hidden && look.labels), qPrintable(fx::describe(ribbon, source)));
+    narrowing << fx::lookIndex(look);
     tile = look.tile;
     hidden = hidden || !look.labels;
     fx::verifyWhole(ribbon, source);
     if (QTest::currentTestFailed()) return;
   }
-  // And back: widening never makes the icons smaller.
-  for (int width = 1024; width <= 1904; width += 120) {
+  // And back: widening never moves to a smaller size in looks(). The tile alone does not say it: tile 32
+  // is one size with the labels and another without.
+  int index = INT_MAX;  // the first width, already narrower than the last one above, sets the start
+  for (int width = 1024; width <= 1904; width += 30) {
     window.resize(width, 768);
     fx::settle();
-    QVERIFY2(ribbon->look().tile >= tile, qPrintable(fx::describe(ribbon, source)));
-    tile = ribbon->look().tile;
+    const int now = fx::lookIndex(ribbon->look());
+    QVERIFY2(now <= index, qPrintable(fx::describe(ribbon, source)));
+    widening << now;
+    index = now;
   }
+  qInfo() << "sizes visited (place in looks()), narrowing:" << narrowing << "widening:" << widening;
+  // Each size is about 50 px wide in window width, so a 30 px step lands in every one of them. Tile 32 with
+  // labels (12) is the one the tile alone cannot tell from its neighbour.
+  QVERIFY2(narrowing.contains(12) && widening.contains(12), "fixture: the walk crosses tile 32 with labels both ways");
   QVERIFY(ribbon->look().labels);
 }
 
@@ -214,6 +211,8 @@ void TestRibbonOverflow::ribbonMinimumWidthIsSmallestLook() {
 // ends exactly at lookWidths()[i], and a ribbon that wide chooses that size (or an equal bigger one).
 void TestRibbonOverflow::lookWidths_matchTheLayoutAtEverySize() {
   const fx::RibbonSource source = fx::readProductionRibbon();
+  QVERIFY2(source.groups.size() >= 5, "run from the source tree: MainWindowRibbon.cpp groups");
+  QVERIFY2(source.chips.size() >= 20, qPrintable(QStringLiteral("parsed %1 chips").arg(source.chips.size())));
   const QList<RibbonLook> looks = KaBeginnerRibbon::looks();
   KaBeginnerRibbon probe;
   fx::fillRibbon(&probe, source);
@@ -244,23 +243,23 @@ void TestRibbonOverflow::sizeChangeIsLoggedOnce() {
   const fx::RibbonSource source = fx::readProductionRibbon();
   QMainWindow window;
   KaBeginnerRibbon* ribbon = fx::showProductionRibbon(window, source, 1904);
-  const LogCapture capture;
+  const fx::LogCapture capture;
   static const QRegularExpression format(
       QStringLiteral("^\\[ribbon\\] 크기 타일 (\\d+) · 글자 (보임|숨김) · 창 \\d+ · 가용 \\d+$"));
   RibbonLook before = ribbon->look();
   int stepsThatChanged = 0;
   for (int width : {1904, 1900, 1700, 1696, 1300, 1100, 1024, 1100, 1904}) {
-    const qsizetype logged = g_ribbonLog.size();
+    const qsizetype logged = fx::g_ribbonLog.size();
     window.resize(width, 768);
     fx::settle();
     const RibbonLook look = ribbon->look();
     const bool changed = look.tile != before.tile || look.labels != before.labels;
     stepsThatChanged += changed;
     const QString step = QStringLiteral("window %1: tile %2 labels %3, log: %4")
-                             .arg(width).arg(look.tile).arg(look.labels).arg(g_ribbonLog.join(QLatin1String(" | ")));
-    QVERIFY2(changed == (g_ribbonLog.size() > logged), qPrintable(step));
+                             .arg(width).arg(look.tile).arg(look.labels).arg(fx::g_ribbonLog.join(QLatin1String(" | ")));
+    QVERIFY2(changed == (fx::g_ribbonLog.size() > logged), qPrintable(step));
     if (changed) {
-      const QRegularExpressionMatch last = format.match(g_ribbonLog.last());
+      const QRegularExpressionMatch last = format.match(fx::g_ribbonLog.last());
       QVERIFY2(last.hasMatch() && last.captured(1).toInt() == look.tile &&
                    (last.captured(2) == QStringLiteral("보임")) == look.labels,
                qPrintable(step));
@@ -268,10 +267,30 @@ void TestRibbonOverflow::sizeChangeIsLoggedOnce() {
     before = look;
   }
   QVERIFY2(stepsThatChanged >= 5, "fixture: the widths cross several sizes");
-  for (int i = 0; i < g_ribbonLog.size(); ++i) {
-    QVERIFY2(format.match(g_ribbonLog.at(i)).hasMatch(), qPrintable(g_ribbonLog.at(i)));
-    if (i > 0) QVERIFY2(g_ribbonLog.at(i) != g_ribbonLog.at(i - 1), "a size is logged once, not repeated");
+  for (int i = 0; i < fx::g_ribbonLog.size(); ++i) {
+    QVERIFY2(format.match(fx::g_ribbonLog.at(i)).hasMatch(), qPrintable(fx::g_ribbonLog.at(i)));
+    if (i > 0) QVERIFY2(fx::g_ribbonLog.at(i) != fx::g_ribbonLog.at(i - 1), "a size is logged once, not repeated");
   }
+}
+
+// The first size the ribbon draws on screen is logged even when it is the size the ribbon starts at (tile 32
+// with labels, looks()[12]); without that line a field report of a ribbon that never changed size has no size.
+void TestRibbonOverflow::firstVisibleSizeIsLoggedAtTheDefault() {
+  const fx::RibbonSource source = fx::readProductionRibbon();
+  QVERIFY2(source.groups.size() >= 5, "run from the source tree: MainWindowRibbon.cpp groups");
+  QVERIFY2(source.chips.size() >= 20, qPrintable(QStringLiteral("parsed %1 chips").arg(source.chips.size())));
+  const fx::LogCapture capture;
+  KaBeginnerRibbon ribbon;
+  ribbon.setAttribute(Qt::WA_DontShowOnScreen);
+  fx::fillRibbon(&ribbon, source);
+  const QList<int> widths = ribbon.lookWidths();
+  QVERIFY2(widths.at(11) > widths.at(12), "fixture: tile 32 with labels is the biggest size that fits its own width");
+  ribbon.resize(widths.at(12), ribbon.sizeHint().height());
+  ribbon.show();
+  fx::settle();
+  QVERIFY2(ribbon.look().tile == 32 && ribbon.look().labels, qPrintable(fx::describe(&ribbon, source)));
+  QVERIFY2(fx::g_ribbonLog.size() == 1 && fx::g_ribbonLog.first().startsWith(QStringLiteral("[ribbon] 크기 타일 32 · 글자 보임")),
+           qPrintable(QStringLiteral("%1 log lines: %2").arg(fx::g_ribbonLog.size()).arg(fx::g_ribbonLog.join(QLatin1String(" | ")))));
 }
 
 QTEST_MAIN(TestRibbonOverflow)

@@ -322,15 +322,9 @@ void KaBeginnerRibbon::applyLook(int index, bool force) {
   const int line = lineHeight();
   int labels = 0;
   for (const QToolButton* chip : chips()) labels += labelWidth(chip);
-  if (index == m_lookIndex && line == m_appliedLine && labels == m_appliedLabels && !force) return;
-  m_lookIndex = index;
-  m_appliedLine = line;
-  m_appliedLabels = labels;
   const RibbonLook now = looks().at(index);
-  for (QToolButton* chip : chips()) drawChip(chip, now, line);
-  updateGeometry();
   // One session-log line per change of the chosen size (skip a hidden ribbon and the pre-layout pass, 100 px wide),
-  // so a screen that shows icons too small or labels hidden can be measured instead of guessed.
+  // so a screen with icons too small or labels hidden can be measured. Before the return: the first size counts too.
   if (index != m_loggedLook && isVisible() && width() > 200) {
     m_loggedLook = index;
     qWarning().noquote()  // the app's message handler files it under [qt/warn]; tests just print it
@@ -340,4 +334,10 @@ void KaBeginnerRibbon::applyLook(int index, bool force) {
                .arg(window()->width())
                .arg(width());
   }
+  if (index == m_lookIndex && line == m_appliedLine && labels == m_appliedLabels && !force) return;
+  m_lookIndex = index;
+  m_appliedLine = line;
+  m_appliedLabels = labels;
+  for (QToolButton* chip : chips()) drawChip(chip, now, line);
+  updateGeometry();
 }

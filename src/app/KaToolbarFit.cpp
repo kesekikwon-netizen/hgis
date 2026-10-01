@@ -1,7 +1,6 @@
 #include "KaToolbarFit.h"
 
 #include <QEvent>
-#include <QLayout>
 #include <QObject>
 #include <QResizeEvent>
 #include <QScopedValueRollback>
@@ -29,8 +28,10 @@ public:
     if (watched != m_bar) return false;
     switch (event->type()) {
       case QEvent::Resize: {
-        // Only a new width changes what fits (our own stages change the height). Fitting here, before the
-        // bar's layout handles the resize, means the » button never shows for a frame.
+        // Only a new width changes what fits (our own stages change the height). Qt hands the resize to the
+        // bar's layout before it reaches this filter, so the layout places the old stage once at the new
+        // width; the stage change here then queues another layout pass that runs before the next paint,
+        // so the » button is never painted.
         const int width = static_cast<QResizeEvent*>(event)->size().width();
         if (width != m_width) {
           m_width = width;
@@ -40,9 +41,11 @@ public:
       }
       case QEvent::Show:
       case QEvent::ActionAdded:
-      case QEvent::ActionRemoved:
-      case QEvent::ActionChanged:  // the bar builds its buttons after this filter has run: fit once it has
-        fitLater();
+      case QEvent::ActionRemoved:  // the bar builds its buttons after this filter has run: fit once it has
+        fitLater(true);
+        break;
+      case QEvent::ActionChanged:  // the same, but a tool that is only checked or enabled needs no new fit
+        fitLater(false);
         break;
       default:
         break;
@@ -51,12 +54,18 @@ public:
   }
 
 private:
-  void fitLater() {
+  // Without `always` the fit is skipped when the bar's width and the width its buttons need now are the ones
+  // the last fit ended with. Only the stage on screen is measured: a change that matters to a bigger stage
+  // alone (a longer label while the icons show) waits for the next resize, show or added action.
+  void fitLater(bool always) {
+    m_always = m_always || always;
     if (m_queued) return;
     m_queued = true;
     QTimer::singleShot(0, this, [this] {
       m_queued = false;
-      fit();
+      const bool mustFit = m_always;
+      m_always = false;
+      if (mustFit || m_bar->width() != m_fitWidth || m_bar->sizeHint().width() != m_fitNeed) fit();
     });
   }
 
@@ -73,14 +82,19 @@ private:
     const QScopedValueRollback<bool> busy(m_busy, true);
     for (const Stage& stage : kStages) {
       apply(stage);
-      if (m_bar->sizeHint().width() <= m_bar->width()) break;
+      m_fitNeed = m_bar->sizeHint().width();
+      if (m_fitNeed <= m_bar->width()) break;
     }
+    m_fitWidth = m_bar->width();
   }
 
   QToolBar* m_bar;
   Qt::ToolButtonStyle m_labelStyle;
   int m_width = -1;
+  int m_fitWidth = -1;  // the bar's width and the width its buttons needed when the last fit ended
+  int m_fitNeed = -1;
   bool m_queued = false;
+  bool m_always = false;
   bool m_busy = false;
 };
 

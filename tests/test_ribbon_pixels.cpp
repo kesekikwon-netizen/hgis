@@ -98,14 +98,25 @@ void TestRibbonPixels::chips_stayWholeAtEverySize() {
   QCoreApplication::processEvents();
   const QList<int> widths = ribbon->lookWidths();  // after the first show: the group frames are polished
   const QColor tileFill(0xE4, 0xEA, 0xED);
-  QSet<int> tilesSeen;
+  // A ribbon exactly as wide as a size needs draws that size, unless the size before it needed the same
+  // width: then it draws that one. So the sizes drawn are the first size and every size narrower than the
+  // one before it. A size is named by its tile, negative when the labels are hidden.
+  const QList<RibbonLook> looks = KaBeginnerRibbon::looks();
+  const auto sizeName = [](const RibbonLook& look) { return look.tile * (look.labels ? 1 : -1); };
+  QSet<int> expected;
+  QList<int> sharedWidth;
+  for (int i = 0; i < widths.size(); ++i) {
+    if (i == 0 || widths.at(i) < widths.at(i - 1)) expected.insert(sizeName(looks.at(i)));
+    else sharedWidth << sizeName(looks.at(i));
+  }
+  QSet<int> drawn;
   const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");  // one picture per size, to look at
   for (int i = 0; i < widths.size(); ++i) {
     ribbon->setFixedWidth(widths.at(i));  // exactly the width this size needs
     toolbar.resize(widths.at(i) + 40, 200);
     QTest::qWait(20);  // the groups take their new places over a few layout rounds
     const RibbonLook look = ribbon->look();
-    tilesSeen.insert(look.tile * (look.labels ? 1 : -1));
+    drawn.insert(sizeName(look));
     if (!output.isEmpty() && QDir(output).exists())
       toolbar.grab().save(QDir(output).filePath(QStringLiteral("ribbon-size-%1-%2.png").arg(i, 2, 10, QLatin1Char('0')).arg(look.tile)));
     for (QToolButton* chip : {buttons.at(0), buttons.at(3), buttons.at(17)}) {  // 신규, 다른 이름, 도면
@@ -142,7 +153,11 @@ void TestRibbonPixels::chips_stayWholeAtEverySize() {
                               .arg(image.width()).arg(image.height())));
     }
   }
-  QVERIFY2(tilesSeen.size() >= 14, qPrintable(QStringLiteral("only %1 different sizes were drawn").arg(tilesSeen.size())));
+  qInfo() << "sizes that need the width of the size before them and are drawn as that one:" << sharedWidth;
+  QStringList never;
+  for (int name : expected - drawn) never << QString::number(name);
+  QVERIFY2(drawn == expected, qPrintable(QStringLiteral("%1 sizes drawn, %2 expected; never drawn: %3")
+                                             .arg(drawn.size()).arg(expected.size()).arg(never.join(QLatin1Char(',')))));
 }
 
 QTEST_MAIN(TestRibbonPixels)

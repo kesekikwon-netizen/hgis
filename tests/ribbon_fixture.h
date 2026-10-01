@@ -150,4 +150,30 @@ inline void verifyWhole(KaBeginnerRibbon* ribbon, const RibbonSource& source) {
   }
 }
 
+// The ribbon's session-log lines ("[ribbon] 크기 ...") while a LogCapture lives; any other message goes on to the
+// handler that was there before.
+inline QStringList g_ribbonLog;
+inline QtMessageHandler g_previousHandler = nullptr;
+inline void collectRibbonLog(QtMsgType type, const QMessageLogContext& context, const QString& message) {
+  if (message.startsWith(QLatin1String("[ribbon]"))) g_ribbonLog << message;
+  else if (g_previousHandler) g_previousHandler(type, context, message);
+}
+
+// Collects the ribbon's session-log lines while it lives and puts the previous message handler back.
+struct LogCapture {
+  LogCapture() {
+    g_ribbonLog.clear();
+    g_previousHandler = qInstallMessageHandler(collectRibbonLog);
+  }
+  ~LogCapture() { qInstallMessageHandler(g_previousHandler); }
+};
+
+// The place of a size in KaBeginnerRibbon::looks(): the tile alone does not name it (32 has two).
+inline int lookIndex(const RibbonLook& look) {
+  const QList<RibbonLook> all = KaBeginnerRibbon::looks();
+  for (int i = 0; i < all.size(); ++i)
+    if (all.at(i).tile == look.tile && all.at(i).labels == look.labels) return i;
+  return -1;
+}
+
 }  // namespace RibbonFixture

@@ -1382,7 +1382,7 @@ if(KA_HGIS_BUILD_TESTS)
     ribbonButtonsAllHaveDifferentIcons
     ribbonGroupsMatchTheirPurpose
     narrowWindowKeepsDrawingAndPrintVisible
-    subToolbarKeepsTextAt1904WhileSketching
+    subToolbarFitsAt1904WhileSketching
     unsavedSaveChipLabelTurnsBoldAndBack
     recordToolsWaitForASurvey
     provinceChipMovesMapWithoutLoadingLayers)

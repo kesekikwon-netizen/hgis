@@ -1062,8 +1062,9 @@ private slots:
   }
   // 그리기 보조 줄(#subToolbar)도 리본처럼 접지 않는다: » 펼침 단추가 나오지 않는다. 1904 창에서 그리기를 시작하면
   // 단추 글자가 보이고, 줄이 모자라면 글자를 숨긴 뒤 아이콘을 20에서 16으로 줄인다. 한 점을 찍으면 완료·되돌리기·취소가
-  // 줄에 더해져 길어지므로(1904 창에서는 글자가 안 들어간다) 줄은 그에 맞춰 아이콘만 남긴다.
-  void subToolbarKeepsTextAt1904WhileSketching() {
+  // 줄에 더해져 길어지므로(1904 창에서는 글자가 안 들어간다) 줄은 20 px 아이콘만 남긴다. 이 모양은 받아들인 것이고(도구
+  // 여섯 개의 아이콘과 자석 설정을 줄이는 일은 뒤 과제), 그때까지 20 px가 16 px로 줄거나 »가 돌아오면 안 된다.
+  void subToolbarFitsAt1904WhileSketching() {
     const QString path = makeSurvey(QStringLiteral("그리기줄글자"));
     QVERIFY(!path.isEmpty());
     MainWindow window;
@@ -1119,6 +1120,7 @@ private slots:
       if (action->property("kaSketch").toString() == QLatin1String("finish")) finish = action;
     QVERIFY2(finish && finish->isVisible(), "fixture: 완료 shows while a shape is being drawn");
     QTRY_VERIFY2(allShown() && !extShown(), qPrintable(where()));
+    QVERIFY2(sub->toolButtonStyle() == Qt::ToolButtonIconOnly && sub->iconSize() == QSize(20, 20), qPrintable(where()));
     qInfo().noquote() << "sub toolbar at 1904, one vertex placed:" << where();
 
     // What each stage needs on this row (the bar's own sizes, measured by trying them; the fit follows).
@@ -1139,8 +1141,9 @@ private slots:
     QTRY_VERIFY2(allShown() && !extShown(), qPrintable(where()));
     QVERIFY2(sub->toolButtonStyle() == Qt::ToolButtonIconOnly && sub->iconSize() == QSize(16, 16), qPrintable(where()));
     qInfo().noquote() << "sub toolbar at the smallest stage:" << where();
-    window.resize(1904, 1000);  // room again: back to what 1904 showed
+    window.resize(1904, 1000);  // room again: back to what 1904 showed, icons only at 20 px
     QTRY_VERIFY2(allShown() && !extShown() && sub->iconSize() == QSize(20, 20), qPrintable(where()));
+    QVERIFY2(sub->toolButtonStyle() == Qt::ToolButtonIconOnly, qPrintable(where()));
 
     // 1024 (the window itself stops at about 1082): the row has text-only tools and the snap settings, about
     // 1360 px even as bare icons, so the smallest stage is as far as it can go there and the » may show.
