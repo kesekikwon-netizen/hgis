@@ -24,6 +24,7 @@
 #include <QSet>
 #include <QSignalSpy>
 #include <QStatusBar>
+#include <QStyle>
 #include <QTabWidget>
 #include <QToolBar>
 #include <QToolButton>
@@ -34,6 +35,7 @@
 #include "app/KaIcons.h"
 #include "app/KaIconsMockup.h"
 #include "app/KaTheme.h"
+#include "ribbon_label_ink.h"
 
 class TestTheme : public QObject {
   Q_OBJECT
@@ -62,6 +64,7 @@ private slots:
   void requiredSelectorsPresent();
   void toolbarCheckedHasDistinctTreatment();
   void ribbonChip_hoverShowsTileFillOnly();
+  void ribbonChip_unsavedLabelTurnsBold();
   void subToolbar_usesTileIconsAndRibbonLabelSize();
   void primaryToolbarIconsRemainReadable();
   void noCheapSpinArrowBlock();
@@ -424,6 +427,7 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
     QVERIFY(qobject_cast<QFrame*>(button->parentWidget()));
     QCOMPARE(button->iconSize(), QSize(32, 32));
     QCOMPARE(button->font().pixelSize(), 13);
+    QCOMPARE(button->palette().color(QPalette::ButtonText), KaTheme::tokens().ribbonLabelInk);
     const int labelWidth = QFontMetrics(button->font()).horizontalAdvance(button->text());
     QVERIFY(button->width() >= KaTheme::buttonMetrics().ribbonChipWidth);
     QCOMPARE(button->width(), qMax(40, labelWidth + 8));
@@ -488,6 +492,15 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
     const qreal gap = (inkTop - tileBottom - 1) / dpr;
     QVERIFY2(gap >= 5 && gap <= 7,
              qPrintable(chip->text() + QStringLiteral(": label ink starts %1 px under the tile").arg(gap)));
+    // The darkest label pixel is the mockup's label ink (strokes this thin may stop a little short of it).
+    QColor darkest(Qt::white);
+    for (int y = inkTop; y < image.height(); ++y)
+      for (int x = 0; x < image.width(); ++x)
+        if (image.pixelColor(x, y).lightness() < darkest.lightness()) darkest = image.pixelColor(x, y);
+    const QColor labelInk = KaTheme::tokens().ribbonLabelInk;
+    QVERIFY2(qAbs(darkest.red() - labelInk.red()) <= 16 && qAbs(darkest.green() - labelInk.green()) <= 16 &&
+                 qAbs(darkest.blue() - labelInk.blue()) <= 16,
+             qPrintable(chip->text() + QStringLiteral(": darkest label pixel ") + darkest.name()));
   }
   QVERIFY2(!KaBeginnerRibbon::twoLine(QStringLiteral("조사 열기")).contains(QLatin1Char('\n')),
            "twoLine keeps spaced Korean on one line");
@@ -841,7 +854,8 @@ void TestTheme::strataPalette_matchesSpec() {
   QCOMPARE(tokens.inkMuted, QColor(0x5B, 0x68, 0x75));
   QCOMPARE(tokens.inkDisabled, QColor(0x59, 0x68, 0x74));
   QCOMPARE(tokens.border, QColor(0xDC, 0xE3, 0xEA));
-  // Ribbon inks of the mockup: the chosen tool's label and the group names.
+  // Ribbon inks of the mockup: chip labels, the chosen tool's label and the group names.
+  QCOMPARE(tokens.ribbonLabelInk, QColor(0x20, 0x28, 0x30));
   QCOMPARE(tokens.ribbonActiveInk, QColor(0x10, 0x50, 0x88));
   QCOMPARE(tokens.ribbonGroupInk, QColor(0x5E, 0x66, 0x70));
   // The gloss stops remain as flat aliases so older selectors paint plainly.
@@ -1091,6 +1105,45 @@ void TestTheme::ribbonChip_hoverShowsTileFillOnly() {
   QCOMPARE(logicalPixel(hover, onFace.x(), onFace.y()), KaTheme::tokens().surface);
 }
 
+void TestTheme::ribbonChip_unsavedLabelTurnsBold() {
+  // MainWindow::syncShellChips marks the 「저장」 chip with the dynamic property `unsaved` and repolishes it;
+  // the sheet then draws the label bold (spec row 「저장 안 됨」; the blue tile and dot come from the icon).
+  QToolBar toolbar;
+  toolbar.setAttribute(Qt::WA_DontShowOnScreen);
+  toolbar.setObjectName(QStringLiteral("mainToolbar"));
+  auto* ribbon = new KaBeginnerRibbon(&toolbar);
+  ribbon->addGroup(QStringLiteral("survey"), QStringLiteral("조사"));
+  QToolButton* chip = ribbon->addAction(
+      QStringLiteral("survey"), new QAction(KaIcons::icon(QStringLiteral("save")), QStringLiteral("저장"), ribbon));
+  toolbar.addWidget(ribbon);
+  toolbar.resize(300, toolbar.sizeHint().height());
+  toolbar.show();
+  QCoreApplication::processEvents();
+
+  const QSize size = chip->size();
+  const RibbonLabelInk::Measure plain = RibbonLabelInk::measure(chip);
+  QVERIFY2(plain.pixels > 0, "the label has ink");
+  const auto markUnsaved = [&](bool unsaved) {
+    chip->setProperty("unsaved", unsaved);
+    chip->style()->unpolish(chip);
+    chip->style()->polish(chip);
+    QCoreApplication::processEvents();
+  };
+  markUnsaved(true);
+  const RibbonLabelInk::Measure bold = RibbonLabelInk::measure(chip);
+  qInfo() << "unsaved label ink" << plain.pixels << "->" << bold.pixels << "columns" << bold.left << ".." << bold.right
+          << "in a" << chip->width() << "px chip";
+  QVERIFY2(bold.pixels > plain.pixels * 1.15,
+           qPrintable(QStringLiteral("unsaved label ink %1 vs plain %2").arg(bold.pixels).arg(plain.pixels)));
+  // Bold must not clip: the ink stays inside the border and padding (2 px each side) of the 40 px chip.
+  QVERIFY2(bold.left >= 2 && bold.right <= chip->width() - 3,
+           qPrintable(QStringLiteral("bold label spans %1..%2 in a %3 px chip").arg(bold.left).arg(bold.right).arg(chip->width())));
+  QCOMPARE(chip->size(), size);
+  markUnsaved(false);
+  QVERIFY2(RibbonLabelInk::measure(chip).pixels <= plain.pixels * 1.05, "saved again: the label is regular");
+  QCOMPARE(chip->size(), size);
+}
+
 void TestTheme::subToolbar_usesTileIconsAndRibbonLabelSize() {
   // The drawing sub-toolbar (MainWindowRibbon.cpp, KaDrawSketchTools.cpp) speaks the ribbon's grammar:
   // tile icons from the Mockup set, 13 px labels, and the same tile emphasis on the chosen tool.
@@ -1135,7 +1188,7 @@ void TestTheme::subToolbar_usesTileIconsAndRibbonLabelSize() {
     } else {
       QCOMPARE(opaquePixelsMatching(face, blueBorder), 0);
       QVERIFY2(opaquePixelsMatching(face, tileFill) >= 150, qPrintable(button->text() + QStringLiteral(": tile icon")));
-      QCOMPARE(button->palette().color(QPalette::ButtonText), KaTheme::tokens().ink);  // the ribbon's label ink
+      QCOMPARE(button->palette().color(QPalette::ButtonText), KaTheme::tokens().ribbonLabelInk);  // the ribbon's label ink
     }
   }
   QCOMPARE(checkedButtons, 1);

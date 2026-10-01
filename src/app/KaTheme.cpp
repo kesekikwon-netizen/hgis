@@ -82,6 +82,7 @@ Tokens strataTokens() {
   t.railMuted = QColor(0xD5, 0xE6, 0xF5);    // >= 4.5 on rail and accentDeep
   t.progressFill = QColor(0x60, 0x99, 0xD0);  // ink 5.0:1 on it, 3.0:1 against white
   t.focusRing = t.accent;
+  t.ribbonLabelInk = QColor(0x20, 0x28, 0x30);   // 14.9:1 on white, 13.5:1 on the hover wash
   t.ribbonActiveInk = QColor(0x10, 0x50, 0x88);  // 8.3:1 on white, 7.5:1 on the hover wash
   t.ribbonGroupInk = QColor(0x5E, 0x66, 0x70);   // 5.8:1 on white
   fillLegacyAliases(t);

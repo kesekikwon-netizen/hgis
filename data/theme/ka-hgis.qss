@@ -260,7 +260,7 @@ QToolBar#subToolbar {
 /* Same label size and ink as the ribbon chips. The 13 px labels are wider than the old 12 px ones,
    so the side padding is 7 px (was 10) to keep the whole drawing row on screen at 1920. */
 QToolBar#subToolbar QToolButton {
-  color: @ink@;
+  color: @ribbonLabelInk@;
   font-size: @ribbonFontSize@px;
   padding: 6px 7px;
 }
@@ -331,7 +331,7 @@ QWidget#beginnerRibbon QToolButton {
   margin: 0;
   padding: @buttonPadding@px @buttonPadding@px @ribbonBottomPad@px @buttonPadding@px;
   background: @surface@;
-  color: @ink@;
+  color: @ribbonLabelInk@;
   font-size: @ribbonFontSize@px;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -362,6 +362,11 @@ QWidget#beginnerRibbon QToolButton:enabled:checked:hover {
   font-weight: 700;
   border: 1px solid transparent;
   border-radius: 8px;
+}
+/* 「저장」 while the survey has unsaved changes: MainWindow::syncShellChips sets this property (the
+   blue tile and the orange dot come from the icon) and the label turns bold. */
+QWidget#beginnerRibbon QToolButton[unsaved="true"] {
+  font-weight: 700;
 }
 QWidget#beginnerRibbon QToolButton::menu-button {
   border: none;

@@ -80,13 +80,13 @@
 564 tests/test_perf.cpp
 400 tests/test_polygon_erase.cpp
 802 tests/test_reference_download.cpp
-5706 tests/test_save_open.cpp
+5743 tests/test_save_open.cpp
 1314 tests/test_section_layout.cpp
 411 tests/test_section_studio.cpp
 1099 tests/test_storage_safety.cpp
 338 tests/test_survey_contour.cpp
 607 tests/test_terrain_3d.cpp
-1384 tests/test_theme.cpp
+1437 tests/test_theme.cpp
 415 tests/test_tile_print.cpp
 1442 tests/test_topographic_browser.cpp
 320 tests/test_topographic_catalog.cpp

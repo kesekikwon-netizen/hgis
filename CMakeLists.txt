@@ -1357,6 +1357,7 @@ if(KA_HGIS_BUILD_TESTS)
     ribbonButtonsAllHaveDifferentIcons
     ribbonGroupsMatchTheirPurpose
     narrowWindowKeepsDrawingAndPrintVisible
+    unsavedSaveChipLabelTurnsBoldAndBack
     recordToolsWaitForASurvey
     provinceChipMovesMapWithoutLoadingLayers)
   ka_add_qtest_filter(save_open_topo ka_save_open_tests

@@ -97,6 +97,9 @@ void TestThemeOptions::stateWashesStepLightToStrong() {
     QVERIFY(contrast(t.inkDisabled, t.disabledSurface) >= 4.5);
     // Ribbon inks: group names on the toolbar, the chosen tool's label on the toolbar and on the hover wash.
     QVERIFY2(contrast(t.ribbonGroupInk, t.surface) >= 4.5, "ribbon group names");
+    QVERIFY2(contrast(t.ribbonLabelInk, t.surface) >= 4.5, "ribbon chip labels");
+    QVERIFY2(contrast(t.ribbonLabelInk, t.hover) >= 4.5, "ribbon chip labels on hover");
+    QVERIFY2(contrast(t.ribbonLabelInk, t.pressed) >= 4.5, "ribbon chip labels while pressed");
     QVERIFY2(contrast(t.ribbonActiveInk, t.surface) >= 4.5, "chosen ribbon label");
     QVERIFY2(contrast(t.ribbonActiveInk, t.hover) >= 4.5, "chosen ribbon label on hover");
     QVERIFY2(contrast(t.ink, t.progressFill) >= 4.5, "progress text on the chunk");

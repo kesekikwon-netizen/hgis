@@ -48,6 +48,7 @@
 #include "app/KaPrintDialog.h"
 #include "app/KaTheme.h"
 #include "app/KaBeginnerRibbon.h"
+#include "ribbon_label_ink.h"
 #include <QPdfDocument>
 #include "app/KaRegionLocator.h"
 #include "app/KaSurveyAreaDialog.h"
@@ -1050,6 +1051,42 @@ private slots:
       QVERIFY(maximized.grab().save(QDir(output).filePath(QStringLiteral("ribbon-maximized.png"))));
       QgsProject::instance()->setDirty(false);
     }
+  }
+  // 저장 안 됨(스펙 「아이콘 체계」 표): 「저장」 칩은 파란 타일·주황 점에 더해 라벨이 굵어지고,
+  // 저장하면 보통 굵기로 돌아온다. 굵기는 창이 칩에 붙이는 `unsaved` 속성을 QSS 가 읽어 정한다.
+  void unsavedSaveChipLabelTurnsBoldAndBack() {
+    MainWindow window;
+    disableRendering(window);
+    window.resize(1400, 800);
+    window.show();
+    const QString path = makeSurvey(QStringLiteral("굵은저장"));
+    QVERIFY(!path.isEmpty());
+    QVERIFY(openSettled(window, path));
+    QgsProject::instance()->setDirty(false);
+    QTest::qWait(450);  // the 300 ms chip merge (shellSyncTimer) settles on the clean state
+    auto* save = window.findChild<QToolButton*>(QStringLiteral("ribbonSave"));
+    QVERIFY(save && save->isVisible());
+    QVERIFY(!save->property("unsaved").toBool());
+    const RibbonLabelInk::Measure plain = RibbonLabelInk::measure(save);
+    QVERIFY2(plain.pixels > 0, "the 「저장」 label has ink");
+
+    QgsProject::instance()->setDirty(true);
+    QTRY_VERIFY(save->property("unsaved").toBool());
+    QApplication::processEvents();
+    const RibbonLabelInk::Measure bold = RibbonLabelInk::measure(save);
+    qInfo() << "저장 label ink" << plain.pixels << "->" << bold.pixels << "columns" << bold.left << ".." << bold.right
+            << "in a" << save->width() << "px chip";
+    QVERIFY2(bold.pixels > plain.pixels * 1.15,
+             qPrintable(QStringLiteral("unsaved label ink %1 vs saved %2").arg(bold.pixels).arg(plain.pixels)));
+    // The 40 px chip must not clip the bold label: ink stays inside its 2 px of border and padding.
+    QVERIFY2(bold.left >= 2 && bold.right <= save->width() - 3,
+             qPrintable(QStringLiteral("bold label spans %1..%2 in a %3 px chip").arg(bold.left).arg(bold.right).arg(save->width())));
+
+    QVERIFY(saveNow(window));
+    QTRY_VERIFY(!save->property("unsaved").toBool());
+    QApplication::processEvents();
+    QVERIFY2(RibbonLabelInk::measure(save).pixels <= plain.pixels * 1.05, "saved again: the label is regular");
+    QgsProject::instance()->setDirty(false);
   }
   void recordToolsWaitForASurvey() {
     MainWindow window;

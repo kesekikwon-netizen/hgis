@@ -30,8 +30,8 @@ struct Tokens {
   // Progress chunk: ink text on it and the chunk on white both stay readable.
   QColor progressFill;
   QColor focusRing;
-  // Ribbon (mockup): the chosen tool's label, and the group names under the chips.
-  QColor ribbonActiveInk, ribbonGroupInk;
+  // Ribbon (mockup): chip labels, the chosen tool's label, and the group names under the chips.
+  QColor ribbonLabelInk, ribbonActiveInk, ribbonGroupInk;
 
   // Legacy aliases (same values as above). Do not use in new code.
   QColor sky0, sky1, sky2, sky3, sky4, sky5, sky6;

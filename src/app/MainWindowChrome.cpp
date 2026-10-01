@@ -24,6 +24,7 @@
 #include <QSettings>
 #include <QShortcut>
 #include <QSplitter>
+#include <QStyle>
 #include <QTabWidget>
 #include <QTimer>
 #include <QToolButton>
@@ -131,8 +132,18 @@ void MainWindow::setupStrataShell() {
     if (m_status)
       m_status->setUnsavedCount(unsaved ? EditBufferSummary::summarize(QgsProject::instance())
                                         : EditBufferSummary::Summary{});
-    if (m_actSave)
+    if (m_actSave) {
       m_actSave->setIcon(KaIcons::strongIcon(unsaved ? QStringLiteral("save_unsaved") : QStringLiteral("save")));
+      // The 「저장」 label turns bold while unsaved: the style sheet keys on this property
+      // (QWidget#beginnerRibbon QToolButton[unsaved="true"]), and a changed property needs a repolish.
+      for (QObject* object : m_actSave->associatedObjects()) {
+        auto* chip = qobject_cast<QToolButton*>(object);
+        if (!chip || chip->property("unsaved").toBool() == unsaved) continue;
+        chip->setProperty("unsaved", unsaved);
+        chip->style()->unpolish(chip);
+        chip->style()->polish(chip);
+      }
+    }
   });
   connect(QgsProject::instance(), &QgsProject::isDirtyChanged, this, [this](bool) { syncShellChips(); });
   // A buffered edit does not flip the dirty flag once it is set: the layers report too.

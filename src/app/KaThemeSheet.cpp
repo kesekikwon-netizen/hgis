@@ -44,7 +44,8 @@ QHash<QString, QString> replacementTable() {
       {"successSurface", c.successSurface}, {"dangerSurface", c.dangerSurface},
       {"warn", c.warn}, {"warnSurface", c.warnSurface}, {"rail", c.rail},
       {"railText", c.railText}, {"railMuted", c.railMuted}, {"progressFill", c.progressFill},
-      {"focusRing", c.focusRing}, {"ribbonActiveInk", c.ribbonActiveInk}, {"ribbonGroupInk", c.ribbonGroupInk},
+      {"focusRing", c.focusRing}, {"ribbonLabelInk", c.ribbonLabelInk}, {"ribbonActiveInk", c.ribbonActiveInk},
+      {"ribbonGroupInk", c.ribbonGroupInk},
       // Legacy placeholders, kept so older sheets still resolve.
       {"glossMiddle", c.glossMiddle}, {"glossBottom", c.glossBottom}, {"hoverTop", c.hoverTop},
       {"hoverBottom", c.hoverBottom}, {"pressedTop", c.pressedTop}, {"pressedBottom", c.pressedBottom},
