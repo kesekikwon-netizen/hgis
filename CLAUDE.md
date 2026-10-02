@@ -4,7 +4,7 @@
 
 ## superpowers 사용 방식 (스킬 지침보다 우선한다)
 
-1. 해당 상황이면 예외 없이 알맞은 superpowers 스킬을 먼저 불러 쓴다(사용자 지시 2026-10-01 「무조건 해당상황일때 무조건 사용하라」). 새 기능이나 동작 변경은 superpowers:brainstorming, 증상·버그 신고·스크린샷·「예전으로 돌아갔다」는 superpowers:systematic-debugging, 코드를 고칠 때는 한두 줄 수정이라도 superpowers:test-driven-development, 여러 파일을 바꾼 뒤에는 superpowers:requesting-code-review, 끝났다고 말하기 전에는 superpowers:verification-before-completion을 쓴다. 진행 중인 계획 중간에 들어온 요청도 같다. 어떤 스킬을 쓰는지 사용자에게 한국어로 밝힌다.
+1. superpowers는 가볍게 쓴다(사용자 지시 2026-10-02 「빠르게 진행」. 2026-10-01의 「무조건 사용」을 바꿨다). 증상·버그 신고·스크린샷·「예전으로 돌아갔다」는 superpowers:systematic-debugging으로 원인부터 찾고, 코드를 고칠 때는 superpowers:test-driven-development로 시험을 먼저 쓰고, 끝났다고 말하기 전에는 superpowers:verification-before-completion을 쓴다. superpowers:brainstorming은 현장 쓰임새를 물어야 하는 새 기능에만 쓴다. 계획이 있는 큰 기능도 과제마다 작업자·검토자를 따로 돌리지 않는다(superpowers:subagent-driven-development를 쓰지 않는다). 이 대화에서 차례로 만들고(superpowers:executing-plans), 기능 하나가 끝났을 때 superpowers:requesting-code-review로 한 번 검토받는다. 어떤 단계인지 사용자에게 한국어로 밝힌다.
 2. 사용자는 개발자가 아니다. "해줘/고쳐줘"라는 요청 자체가 진행 승인이다. 설계 승인, 접근법 고르기, 스펙·계획 검토, 실행 방식 선택, 브랜치 마무리 선택 같은 기술 결정은 묻지 말고 가장 안전한 쪽을 스스로 골라 끝까지 진행하고, 고른 것을 보고에 한 줄로 적는다. 멈추고 묻는 것은 앱이 현장에서 어떻게 보이고 동작해야 하는지(제품 질문)가 정말 불분명할 때만, 쉬운 한국어로 한 번에 묶어 묻는다.
 3. docs/superpowers 스펙·계획 문서는 여러 단계짜리 큰 기능에서만 쓰고 한국어로 쓴다. 테스트를 붙일 수 없는 UI 코드는 지우지 말고 빌드와 가장 가까운 기존 테스트로 확인한다. ctest 기준선 실패 4개(workflow_engine, cadastral, storage_safety, save_open_portable)는 원래 실패하므로 묻지 말고 진행한다. 끝나면 현재 브랜치에 커밋까지만 하고 push·merge·PR은 사용자가 요청할 때만 한다.
 4. 새 기능에서 현장 쓰임새가 두 갈래 이상으로 갈리면(예: 번호 매기는 규칙, 화면에 보이는 위치·모양, 지우거나 고칠 때 처리) 코드를 쓰기 전에 한 번만 묻는다. 한 번에 4개 이하, 질문마다 추천 답을 붙인다. 코드가 지금 어떻게 동작하는지, 파일 위치, 좌표계 같은 사실은 직접 찾아보고 묻지 않는다. 사용자가 "추천대로"라고 하면 남은 질문도 추천 답으로 정하고 바로 만든다. 버그 수정과 작은 변경은 묻지 않는다.
@@ -15,7 +15,7 @@ How the superpowers skills fit this repo:
 - Baseline: do not run the whole suite as a baseline. Build, then run only the ctest groups for the area you will touch.
 - brainstorming: do not offer the visual companion; describe screens in words.
 - finishing-a-development-branch: no option menu. Commit on the session branch (rule 3); merging into main and pushing follow the Git section.
-- Code review: after a multi-file change, run superpowers:requesting-code-review (or the built-in /code-review) before committing; fix real findings inside the requested change and mention the rest in one line.
+- Code review: once per finished feature or change set (never per plan task), run superpowers:requesting-code-review (or the built-in /code-review) before the last commit of that feature; fix real findings inside the requested change and mention the rest in one line.
 - TDD: put tests into the existing QtTest files and targets (see Tests). Do not add a new test framework.
 - Files in docs/superpowers dated 2026-09-13 or earlier are history, not current requirements.
 

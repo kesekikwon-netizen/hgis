@@ -44,6 +44,16 @@ test('inside the Strata repo every message gets the skill routing', () => {
   }
 });
 
+// 2026-10-02 「빠르게 진행」: no per-task worker/reviewer loop; plans run in this session and get
+// one review when the feature is done.
+test('the routing is the light 2026-10-02 workflow', () => {
+  const text = reminderOf(runHook(JSON.stringify({ cwd: 'A:\qgis' })));
+  assert.ok(text.includes('2026-10-02'), text);
+  assert.ok(text.includes('superpowers:executing-plans'), text);
+  assert.ok(!text.includes('superpowers:subagent-driven-development로 이어진다'), text);
+  assert.ok(text.includes('기능 하나가 끝났을 때') && text.includes('한 번'), text);
+});
+
 test('outside the Strata repo nothing is added', () => {
   for (const cwd of ['C:\\Users\\someone\\other', 'A:\\qgis2\\src', 'A:\\']) {
     assert.equal(reminderOf(runHook(JSON.stringify({ cwd }))), '', cwd);
