@@ -3793,14 +3793,31 @@ private slots:
     QTimer choose;
     bool selected = false;
     bool folderChosen = false;
+    bool nameFocused = false;
     connect(&choose, &QTimer::timeout, [&] {
       auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
       if (!dialog) return;
       if (auto* folder = qobject_cast<QFileDialog*>(dialog)) {
-        folder->setDirectory(m_files.path());
-        folder->selectFile(m_files.path());
-        folderChosen = true;
         choose.stop();
+        // CI(2026-10-03 e252ac3)에서는 폴더 창이 먼저 활성이 되어 이름 칸에 초점이 있었던 것으로
+        // 보인다. 그때 selectFile은 창을 위 폴더로 옮기고 이름 칸은 채우지 않아, 시험 폴더의 위
+        // 폴더가 골라졌다. 그 상태를 만든 뒤 이름 칸을 직접 채운다.
+        auto* pathEdit = folder->findChild<QLineEdit*>(QStringLiteral("fileNameEdit"));
+        folder->activateWindow();
+        if (QTest::qWaitForWindowActive(folder) && pathEdit) {
+          pathEdit->setFocus();
+          nameFocused = pathEdit->hasFocus();
+        }
+        const QFileInfo desired(m_files.path());
+        folder->setDirectory(desired.absolutePath());
+        folder->selectFile(desired.fileName());
+        if (pathEdit) pathEdit->setText(desired.fileName());
+        const QStringList selectedFolders = folder->selectedFiles();
+        folderChosen = selectedFolders.size() == 1 &&
+            QFileInfo(selectedFolders.first()).canonicalFilePath() == desired.canonicalFilePath();
+        qInfo() << "New survey selected folders:" << selectedFolders << "name focused:" << nameFocused
+                << "matches fixture:" << folderChosen;
+        if (!folderChosen) { folder->reject(); return; }
         QMetaObject::invokeMethod(folder, "accept", Qt::DirectConnection);
       } else if (!selected && dialog->windowTitle() == QStringLiteral("새 조사")) {
         dialog->findChild<QLineEdit*>()->setText(name);
@@ -3821,6 +3838,7 @@ private slots:
     QVERIFY(QMetaObject::invokeMethod(&window, "newSurvey", Qt::DirectConnection));
     choose.stop();
     QVERIFY(selected && folderChosen);
+    QVERIFY2(nameFocused, "폴더 창 이름 칸에 초점을 두지 못해 CI 상황을 재현하지 못했다");
     QVERIFY(QFile::exists(path));
     auto* canvas = window.findChild<QgsMapCanvas*>(QStringLiteral("mapCanvas"));
     auto* chip = window.findChild<QToolButton*>(QStringLiteral("crsButton"));
