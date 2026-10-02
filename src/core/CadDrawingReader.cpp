@@ -60,7 +60,19 @@ Label labelOf(const QByteArray& style) {
   return label;
 }
 
-// 2D 한 조각으로 나눈다. 곡선은 직선 조각으로 바꾼다.
+// 모음·여러 조각은 끝까지 풀어 2D 한 조각씩 담는다(블록 안의 블록은 모음 안의 모음으로 온다).
+// 곡선은 직선 조각으로 바꾼다.
+void addSingleParts(const QgsAbstractGeometry* geometry, QVector<QgsGeometry>* parts) {
+  if (const auto* collection = qgsgeometry_cast<const QgsGeometryCollection*>(geometry)) {
+    for (int i = 0; i < collection->numGeometries(); ++i) addSingleParts(collection->geometryN(i), parts);
+    return;
+  }
+  QgsGeometry part(QgsWkbTypes::isCurvedType(geometry->wkbType()) ? geometry->segmentize() : geometry->clone());
+  part.get()->dropZValue();
+  part.get()->dropMValue();
+  *parts << part;
+}
+
 QVector<QgsGeometry> singleParts(const OGRGeometry* source) {
   QVector<QgsGeometry> parts;
   QByteArray wkb(int(source->WkbSize()), Qt::Uninitialized);
@@ -68,21 +80,7 @@ QVector<QgsGeometry> singleParts(const OGRGeometry* source) {
     return parts;
   QgsGeometry geometry;
   geometry.fromWkb(wkb);
-  if (geometry.isNull()) return parts;
-  if (QgsWkbTypes::isCurvedType(geometry.wkbType())) geometry = QgsGeometry(geometry.constGet()->segmentize());
-  if (const auto* collection = qgsgeometry_cast<const QgsGeometryCollection*>(geometry.constGet())) {
-    for (int i = 0; i < collection->numGeometries(); ++i) {
-      QgsGeometry part(collection->geometryN(i)->clone());
-      if (QgsWkbTypes::isCurvedType(part.wkbType())) part = QgsGeometry(part.constGet()->segmentize());
-      parts << part;
-    }
-  } else {
-    parts << geometry;
-  }
-  for (QgsGeometry& part : parts) {
-    part.get()->dropZValue();
-    part.get()->dropMValue();
-  }
+  if (!geometry.isNull()) addSingleParts(geometry.constGet(), &parts);
   return parts;
 }
 

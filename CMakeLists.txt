@@ -472,6 +472,7 @@ add_executable(ka-hgis
   src/app/KaSurveyContourDialog.cpp
   src/app/KaCadCrsDialog.cpp
   src/app/KaCadImport.cpp
+  src/app/KaCadImportNotice.cpp
   src/app/KaBlockingTask.cpp
   src/app/MainWindowSurveyContour.cpp
   src/app/KaSurveyAreaDialog.cpp
@@ -543,6 +544,7 @@ add_executable(ka-hgis
   src/app/KaSurveyContourDialog.h
   src/app/KaCadCrsDialog.h
   src/app/KaCadImport.h
+  src/app/KaCadImportNotice.h
   src/app/KaBlockingTask.h
   src/app/KaStatusBar.h
   src/app/KaRegionLocator.h
@@ -806,6 +808,15 @@ if(KA_HGIS_BUILD_TESTS)
   target_compile_definitions(ka_align_tool_tests PRIVATE ${KA_TEST_DEFS})
   set_target_properties(ka_align_tool_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(align_tool ka_align_tool_tests)
+  # 도면(CAD 변환본) 정합: 도면 전체가 같이 움직이고, 다시 시작·다시 불러오기·좌표계 바뀜에도 안전하다.
+  add_executable(ka_cad_align_tests tests/test_cad_align.cpp
+    src/app/KaAlignMapTool.cpp src/app/KaAlignMapTool.h src/app/KaAlignMapToolEdit.cpp src/app/KaAlignMapToolSave.cpp)
+  target_link_libraries(ka_cad_align_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_cad_align_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_cad_align_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_cad_align_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_cad_align_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(cad_align ka_cad_align_tests)
 
   add_executable(ka_align_image_view_tests
     tests/test_align_image_view.cpp
@@ -1080,7 +1091,8 @@ if(KA_HGIS_BUILD_TESTS)
   ka_add_qtest(cad_dialog ka_cad_dialog_tests)
   # 도면을 좌표계를 알아내 참조 지도 제자리에 올리는 흐름(KaCadImport). 앱 창 대신 창·지도·알림 막대를 따로 만든다.
   add_executable(ka_cad_import_tests tests/test_cad_import.cpp
-    src/app/KaCadImport.cpp src/app/KaCadImport.h src/app/KaBlockingTask.cpp src/app/KaBlockingTask.h
+    src/app/KaCadImport.cpp src/app/KaCadImport.h src/app/KaCadImportNotice.cpp src/app/KaCadImportNotice.h
+    src/app/KaBlockingTask.cpp src/app/KaBlockingTask.h
     src/app/KaCadCrsDialog.cpp src/app/KaCadCrsDialog.h src/app/KaUserError.cpp src/app/KaUserError.h)
   target_include_directories(ka_cad_import_tests PRIVATE src ${KA_INCLUDES})
   target_link_directories(ka_cad_import_tests PRIVATE ${KA_LIBDIRS})
@@ -1088,6 +1100,13 @@ if(KA_HGIS_BUILD_TESTS)
   target_compile_definitions(ka_cad_import_tests PRIVATE "KA_TEST_CAD_DATA=\"${CMAKE_SOURCE_DIR}/tests/data/cad\"")
   set_target_properties(ka_cad_import_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(cad_import ka_cad_import_tests)
+  # 무거운 일을 돌리는 동안의 진행 창(KaBlockingTask): 취소해도 일이 실제로 멈출 때까지 창을 둔다.
+  add_executable(ka_blocking_task_tests tests/test_blocking_task.cpp src/app/KaBlockingTask.cpp src/app/KaBlockingTask.h)
+  target_include_directories(ka_blocking_task_tests PRIVATE src ${KA_INCLUDES})
+  target_link_directories(ka_blocking_task_tests PRIVATE ${KA_LIBDIRS})
+  target_link_libraries(ka_blocking_task_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_blocking_task_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(blocking_task ka_blocking_task_tests)
   add_executable(ka_shell_tests tests/test_shell.cpp
     src/app/KaShellUi.cpp src/app/KaShellUi.h
     src/app/KaShellStartup.cpp src/app/KaShellStartup.h
@@ -1586,7 +1605,7 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(layer_roles layer_styles layer_edits layer_panel layer_tree_undo PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(georef_quality georef_backup align_tool align_image_view PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
-    set_tests_properties(cad_dwg cad_reader cad_crs cad_store cad_layers cad_dialog cad_import PROPERTIES
+    set_tests_properties(cad_dwg cad_reader cad_crs cad_store cad_layers cad_dialog cad_import cad_align blocking_task PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     set_tests_properties(dem_legend PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(topographic_catalog PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)

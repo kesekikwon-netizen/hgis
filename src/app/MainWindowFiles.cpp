@@ -260,6 +260,7 @@ bool MainWindow::tryAddDroppedUrls(const QList<QUrl>& urls) {
 
 bool MainWindow::tryAddDroppedPaths(const QStringList& paths) {
   int n = 0;
+  bool cad = false;  // 도면은 취소·실패해도 그 흐름이 알렸다: 파일함에서 고른 다른 파일로 넘어가지 않는다
   for (const QString& path : paths) {
     const QString low = path.toLower();
     if (!(low.endsWith(QLatin1String(".shp")) || low.endsWith(QLatin1String(".dxf")) ||
@@ -268,6 +269,7 @@ bool MainWindow::tryAddDroppedPaths(const QStringList& paths) {
           GeorefService::isImagePath(path)))
       continue;
     const bool raster = GeorefService::isImagePath(path);
+    cad = cad || GeorefService::isCadPath(path);
     if (raster ? addRasterFromPath(path) : addVectorFromPath(path))
       ++n;
   }
@@ -276,6 +278,6 @@ bool MainWindow::tryAddDroppedPaths(const QStringList& paths) {
       m_layersCard->setVisible(true);
     statusBar()->showMessage(QStringLiteral("레이어 %1개 추가됨 (파일→지도)").arg(n), 5000);
   }
-  return n > 0;
+  return n > 0 || cad;
 }
 

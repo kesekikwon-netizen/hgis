@@ -101,7 +101,11 @@ QgsCoordinateReferenceSystem KaAlignMapTool::workCrs() const {
 
 bool KaAlignMapTool::beginLayer(QgsMapLayer* layer, const QgsCoordinateReferenceSystem& workCrs,
                                 QString* errorOut) {
+  // 도면 맞춤 복제본으로 다시 시작하면 원본으로(끝내면서 그 복제본을 지운다). 다른 벡터는 복제본을 계속 맞춘다.
+  if (layer && layer == m_layer.data() && m_hiddenSource && !m_cadDrawing.isEmpty()) layer = m_hiddenSource;
+  const QPointer<QgsMapLayer> target(layer);
   endSession();
+  if (!target) layer = nullptr;  // 끝내면서 지운 레이어(맞춤 복제본)는 쓰지 않는다
   if (!GeorefService::isAlignableLayer(layer)) {
     if (errorOut) *errorOut = QStringLiteral("이 레이어는 맞출 수 없습니다");
     return false;
@@ -148,7 +152,8 @@ bool KaAlignMapTool::beginLayer(QgsMapLayer* layer, const QgsCoordinateReference
           node->setItemVisibilityChecked(false);
       }
       m_hiddenSource = vl;
-      m_cadHidden = CadDrawingLayers::hideCompanions(QgsProject::instance(), CadDrawingLayers::drawingIdOf(vl), vl);
+      m_cadDrawing = CadDrawingLayers::drawingIdOf(vl);
+      m_cadHidden = CadDrawingLayers::hideCompanions(QgsProject::instance(), m_cadDrawing, vl);
       m_layer = mem;
       vl = mem;
     } else {
@@ -167,16 +172,6 @@ bool KaAlignMapTool::beginLayer(QgsMapLayer* layer, const QgsCoordinateReference
   if (m_layer) m_layer->setOpacity(0.72);
   emit statusChanged(statusText());
   return true;
-}
-
-void KaAlignMapTool::captureOriginals(QgsVectorLayer* vl) {
-  m_originals.clear();
-  if (!vl) return;
-  QgsFeatureIterator it = vl->getFeatures();
-  QgsFeature f;
-  while (it.nextFeature(f)) {
-    if (f.hasGeometry()) m_originals.insert(f.id(), f.geometry());
-  }
 }
 
 void KaAlignMapTool::endSession() {

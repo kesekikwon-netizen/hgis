@@ -139,4 +139,5 @@ private:
   int m_dragIndex = -1;
   QPoint m_dragPress;
   QStringList m_cadHidden;  // 도면 정합 동안 숨긴 같은 도면의 다른 레이어
+  QString m_cadDrawing;     // 맞추는 도면의 id. 원본 레이어가 지워져도 남아 정리와 저장 거절에 쓴다
 };

@@ -29,11 +29,21 @@ class Task final : public QgsTask {
   QgsFeedback* m_feedback;
 };
 
+// 「취소」·Esc·창 닫기는 canceled 만 알리고 창은 그대로 둔다. 창은 일이 실제로 멈춰 run 이 끝날 때 닫힌다:
+// 그 사이에 앱 창을 만지면 도면을 또 불러오거나 조사를 닫아, 아직 도는 일이 사라진 자료를 건드릴 수 있다.
+class Progress final : public QProgressDialog {
+ public:
+  Progress(const QString& label, QWidget* parent) : QProgressDialog(label, QStringLiteral("취소"), 0, 0, parent) {
+    disconnect(this, &QProgressDialog::canceled, this, nullptr);  // 기본 canceled → cancel() 은 창을 바로 숨긴다
+  }
+  void reject() override { emit canceled(); }
+};
+
 }  // namespace
 
 bool run(QWidget* parent, const QString& label, const std::function<bool(QgsFeedback*)>& work) {
   QgsFeedback feedback;
-  QProgressDialog progress(label, QStringLiteral("취소"), 0, 0, parent);
+  Progress progress(label, parent);
   progress.setWindowModality(Qt::WindowModal);
   progress.setMinimumDuration(0);
   progress.setAutoClose(false);
@@ -53,6 +63,7 @@ bool run(QWidget* parent, const QString& label, const std::function<bool(QgsFeed
     loop.quit();
   });
   QObject::connect(&progress, &QProgressDialog::canceled, &loop, [&] {
+    progress.setLabelText(QStringLiteral("취소하는 중…"));
     feedback.cancel();
     if (live) live->cancel();
   });

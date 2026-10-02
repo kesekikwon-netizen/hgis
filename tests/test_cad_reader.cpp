@@ -125,6 +125,24 @@ class TestCadReader : public QObject {
     QCOMPARE(t->color, QColor(0, 255, 0));
   }
 
+  // 블록 안의 블록(겹친 INSERT)도 한 조각씩 빠짐없이 읽는다. GDAL 은 그것을 모음 안의 모음(선·점이 섞인 블록)이나
+  // 여러선(선만 있는 블록)으로 주는데, 변환본 표는 한 조각 선·점만 받는다(2026-10-02 ogrinfo 로 잰 모양).
+  void read_nestedBlocksGiveSingleParts() {
+    QTemporaryDir dir;
+    const QByteArray blocks =
+        CadFixture::block("MIXED", CadFixture::line("A", 1, 0, 0, 10, 0) + CadFixture::point("A", 1, 3, 3)) +
+        CadFixture::block("LINES", CadFixture::line("A", 1, 0, 0, 10, 0) + CadFixture::line("A", 1, 0, 0, 0, 5)) +
+        CadFixture::block("OUTER", CadFixture::line("A", 1, 0, 0, 0, 10) + CadFixture::insert("A", "MIXED", 100, 0) +
+                                       CadFixture::insert("A", "LINES", 200, 0));
+    const Read r =
+        readBytes(dir, CadFixture::document("ANSI_1252", CadFixture::insert("A", "OUTER", 1000, 0), blocks));
+    QVERIFY2(r.ok, qUtf8Printable(r.error + QLatin1Char(' ') + r.details));
+    QCOMPARE(countKind(r.drawing, CadKind::Line), 4);
+    QCOMPARE(countKind(r.drawing, CadKind::Point), 1);
+    for (const CadEntity& e : r.drawing.entities)
+      QVERIFY2(!QgsWkbTypes::isMultiType(e.geometry.wkbType()), qUtf8Printable(e.geometry.asWkt(0)));
+  }
+
   void read_dropsZ() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());

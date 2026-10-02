@@ -20,11 +20,19 @@ inline QByteArray num(double value) {
   return QByteArray::number(value, 'f', 6);
 }
 
-// HEADER($ACADVER AC1015, $DWGCODEPAGE) + ENTITIES.
-inline QByteArray document(const QByteArray& codepage, const QByteArray& entities) {
+// HEADER($ACADVER AC1015, $DWGCODEPAGE) + BLOCKS(있으면) + ENTITIES.
+inline QByteArray document(const QByteArray& codepage, const QByteArray& entities,
+                           const QByteArray& blocks = QByteArray()) {
   return pair(0, "SECTION") + pair(2, "HEADER") + pair(9, "$ACADVER") + pair(1, "AC1015") +
-         pair(9, "$DWGCODEPAGE") + pair(3, codepage) + pair(0, "ENDSEC") + pair(0, "SECTION") +
-         pair(2, "ENTITIES") + entities + pair(0, "ENDSEC") + pair(0, "EOF");
+         pair(9, "$DWGCODEPAGE") + pair(3, codepage) + pair(0, "ENDSEC") +
+         (blocks.isEmpty() ? QByteArray() : pair(0, "SECTION") + pair(2, "BLOCKS") + blocks + pair(0, "ENDSEC")) +
+         pair(0, "SECTION") + pair(2, "ENTITIES") + entities + pair(0, "ENDSEC") + pair(0, "EOF");
+}
+
+// 기준점 0,0 인 블록 정의. document 의 blocks 로 넘긴다.
+inline QByteArray block(const char* name, const QByteArray& entities) {
+  return pair(0, "BLOCK") + pair(8, "0") + pair(2, name) + pair(70, "0") + pair(10, "0") + pair(20, "0") +
+         pair(30, "0") + pair(3, name) + entities + pair(0, "ENDBLK") + pair(8, "0");
 }
 
 inline QByteArray head(const char* type, const char* layer, int aci, bool paper = false) {
@@ -47,6 +55,10 @@ inline QByteArray text(const char* layer, int aci, double x, double y, double he
                        const QByteArray& value) {
   return head("TEXT", layer, aci) + pair(10, num(x)) + pair(20, num(y)) + pair(30, num(0)) + pair(40, num(height)) +
          pair(1, value) + pair(50, num(angle)) + pair(11, num(0)) + pair(21, num(0)) + pair(31, num(0));
+}
+
+inline QByteArray insert(const char* layer, const char* blockName, double x, double y) {
+  return head("INSERT", layer, 7) + pair(2, blockName) + pair(10, num(x)) + pair(20, num(y)) + pair(30, num(0));
 }
 
 inline QByteArray point(const char* layer, int aci, double x, double y) {

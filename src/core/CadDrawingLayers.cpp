@@ -115,46 +115,83 @@ QgsLayerTreeGroup* referenceGroup(const QgsProject* project) {
   return reference ? reference : root->addGroup(HeritageImport::referenceGroupName());
 }
 
+// 바로 아래 레이어에 도면 id 가 적힌 묶음만 도면 묶음이다. 사용자가 도면 묶음을 옮겨 넣은 바깥 묶음은 아니다.
+QString ownDrawingId(const QgsLayerTreeGroup* group) {
+  for (QgsLayerTreeNode* node : group->children())
+    if (QgsLayerTree::isLayer(node))
+      if (const QString id = drawingIdOf(QgsLayerTree::toLayer(node)->layer()); !id.isEmpty()) return id;
+  return {};
+}
+
+// 참조 지도 아래 어느 깊이에 있든 도면 묶음 모두.
+QList<QgsLayerTreeGroup*> drawingGroups(const QgsProject* project) {
+  QList<QgsLayerTreeGroup*> groups;
+  QgsLayerTreeGroup* reference =
+      project ? project->layerTreeRoot()->findGroup(HeritageImport::referenceGroupName()) : nullptr;
+  for (QgsLayerTreeGroup* group : reference ? reference->findGroups(true) : QList<QgsLayerTreeGroup*>())
+    if (!ownDrawingId(group).isEmpty()) groups << group;
+  return groups;
+}
+
 }  // namespace
 
 QString groupTitle(const QString& sourcePath) {
   return QFileInfo(sourcePath).completeBaseName() + QStringLiteral(" (도면)");
 }
 
+QString titleFor(const QgsProject* project, const QString& sourcePath) {
+  const QString wanted = QFileInfo(sourcePath).absoluteFilePath();
+  QStringList taken;
+  for (QgsLayerTreeGroup* group : drawingGroups(project)) {
+    const QList<QgsVectorLayer*> layers = layersOf(project, ownDrawingId(group));
+    if (layers.isEmpty()) continue;
+    const QString gpkg = QgsProviderRegistry::instance()
+                             ->decodeUri(QStringLiteral("ogr"), layers.first()->source())
+                             .value(QStringLiteral("path"))
+                             .toString();
+    const QString source = CadDrawingStore::readInfo(gpkg).sourcePath;
+    if (QFileInfo(source).absoluteFilePath().compare(wanted, Qt::CaseInsensitive) == 0) return group->name();
+    taken << group->name();
+  }
+  QString title = groupTitle(sourcePath);
+  for (int n = 2; taken.contains(title); ++n)
+    title = QStringLiteral("%1 (도면 %2)").arg(QFileInfo(sourcePath).completeBaseName(), QString::number(n));
+  return title;
+}
+
 QList<QgsVectorLayer*> addToProject(QgsProject* project, const QString& gpkgPath, const QString& title,
                                     const QString& drawingId, QString* error) {
   QList<QgsVectorLayer*> added;
   if (!project) return added;
-  const QString previous = drawingIdOfGroup(project, title);
-  if (!previous.isEmpty()) removeFromProject(project, previous);
-  QgsLayerTreeGroup* reference = referenceGroup(project);
-  if (QgsLayerTreeGroup* empty = reference->findGroup(title)) reference->removeChildNode(empty);
-  // 참조 지도 맨 위에 둔다: 배경 지도에 가리지 않는다. 참조 지도가 꺼져 있었으면 켠다.
-  QgsLayerTreeGroup* group = reference->insertGroup(0, title);
-  group->setItemVisibilityCheckedParentRecursive(true);
+  // 새 레이어를 먼저 모두 연다. 하나라도 못 열면 같은 제목의 예전 묶음은 건드리지 않는다.
   const QStringList tables = CadDrawingStore::tableNames(gpkgPath);
   for (const Part& part : parts()) {
     if (!tables.contains(part.table)) continue;
     auto* layer = new QgsVectorLayer(gpkgPath + QStringLiteral("|layername=") + part.table, part.title,
                                      QStringLiteral("ogr"));
-    if (!layer->isValid()) {
-      delete layer;
-      removeFromProject(project, drawingId);
-      reference->removeChildNode(group);
-      if (error) *error = QStringLiteral("도면 레이어를 열지 못했습니다.");
-      return {};
-    }
+    added << layer;
+    if (!layer->isValid()) break;
     part.style(layer);
     LayerOps::markReferenceLayer(layer);
     layer->setCustomProperty(QStringLiteral("ka_hgis/imported_reference"), true);
     layer->setCustomProperty(QString::fromLatin1(kPropDrawing), drawingId);
+  }
+  if (added.isEmpty() || !added.last()->isValid()) {
+    qDeleteAll(added);
+    if (error) *error = QStringLiteral("도면 레이어를 열지 못했습니다.");
+    return {};
+  }
+  const QString previous = drawingIdOfGroup(project, title);
+  if (!previous.isEmpty()) removeFromProject(project, previous);
+  QgsLayerTreeGroup* reference = referenceGroup(project);
+  if (QgsLayerTreeGroup* empty = reference->findGroup(title); empty && empty->children().isEmpty())
+    if (auto* parent = qobject_cast<QgsLayerTreeGroup*>(empty->parent())) parent->removeChildNode(empty);
+  // 참조 지도 맨 위에 둔다: 배경 지도에 가리지 않는다. 참조 지도가 꺼져 있었으면 켠다.
+  QgsLayerTreeGroup* group = reference->insertGroup(0, title);
+  group->setItemVisibilityCheckedParentRecursive(true);
+  for (QgsVectorLayer* layer : added) {
     project->addMapLayer(layer, false);
     group->addLayer(layer);
-    added << layer;
-  }
-  if (added.isEmpty()) {
-    reference->removeChildNode(group);
-    if (error) *error = QStringLiteral("도면 레이어를 열지 못했습니다.");
   }
   return added;
 }
@@ -197,15 +234,8 @@ void removeFromProject(QgsProject* project, const QString& drawingId) {
 }
 
 QString drawingIdOfGroup(const QgsProject* project, const QString& title) {
-  if (!project) return {};
-  QgsLayerTreeGroup* reference = project->layerTreeRoot()->findGroup(HeritageImport::referenceGroupName());
-  QgsLayerTreeGroup* group = reference ? reference->findGroup(title) : nullptr;
-  if (!group) return {};
-  for (QgsLayerTreeLayer* node : group->findLayers()) {
-    const QString id = node->layer() ? node->layer()->customProperty(QString::fromLatin1(kPropDrawing)).toString()
-                                     : QString();
-    if (!id.isEmpty()) return id;
-  }
+  for (QgsLayerTreeGroup* group : drawingGroups(project))
+    if (group->name() == title) return ownDrawingId(group);
   return {};
 }
 

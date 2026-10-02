@@ -2,6 +2,7 @@
 
 #include "KaBlockingTask.h"
 #include "KaCadCrsDialog.h"
+#include "KaCadImportNotice.h"
 #include "KaUserError.h"
 #include "core/CadCrsGuess.h"
 #include "core/CadDrawingLayers.h"
@@ -16,14 +17,10 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QHBoxLayout>
 #include <QMainWindow>
-#include <QMenu>
-#include <QPushButton>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTemporaryDir>
-#include <QToolButton>
 #include <QUuid>
 
 #include <algorithm>
@@ -32,8 +29,6 @@
 #include <qgsexception.h>
 #include <qgsfeedback.h>
 #include <qgsmapcanvas.h>
-#include <qgsmessagebar.h>
-#include <qgsmessagebaritem.h>
 #include <qgsogrproviderutils.h>
 #include <qgsproject.h>
 #include <qgsproviderregistry.h>
@@ -92,45 +87,6 @@ QgsRectangle viewInWork(const QgsMapCanvas* canvas, const QgsCoordinateReference
   } catch (const QgsCsException&) {
     return {};
   }
-}
-
-// 「도면을 … 로 읽어 … 로 바꿔 올렸습니다」와 [다른 좌표계로 바꾸기 ▾] [직접 맞추기]. 사용자가 닫을 때까지 둔다.
-void showNotice(const Hooks& hooks, const QString& drawingId, const QString& sourcePath, const CadCrsResult& guess,
-                const QString& usedAuthId, const QString& workAuthId) {
-  if (!hooks.messageBar) return;
-  auto* widget = new QWidget();
-  auto* row = new QHBoxLayout(widget);
-  row->setContentsMargins(0, 0, 0, 0);
-  auto* other = new QToolButton(widget);
-  other->setObjectName(QStringLiteral("cadOtherCrs"));
-  other->setText(QStringLiteral("다른 좌표계로 바꾸기"));
-  other->setPopupMode(QToolButton::InstantPopup);
-  auto* menu = new QMenu(other);
-  const auto reimport = [hooks, sourcePath](const QString& authId) {
-    if (!QFileInfo::exists(sourcePath)) {
-      KaUserError::warn(hooks.window, {kTitle, QStringLiteral("원본 도면 파일을 찾지 못했습니다."),
-                                       QDir::toNativeSeparators(sourcePath),
-                                       QStringLiteral("원본 파일을 원래 자리에 두고 다시 고르세요.")});
-      return;
-    }
-    if (hooks.reimport) hooks.reimport(sourcePath, authId);
-  };
-  for (const CadCrsCandidate& candidate : guess.candidates)
-    if (candidate.authId != usedAuthId)
-      menu->addAction(CadCrsGuess::describe(candidate), menu, [reimport, authId = candidate.authId] { reimport(authId); });
-  menu->addSeparator();
-  menu->addAction(QStringLiteral("좌표 없는 도면으로 보기"), menu, [reimport] { reimport(QString::fromLatin1(kNoCrs)); });
-  other->setMenu(menu);
-  auto* alignNow = new QPushButton(QStringLiteral("직접 맞추기"), widget);
-  alignNow->setObjectName(QStringLiteral("cadAlignNow"));
-  QObject::connect(alignNow, &QPushButton::clicked, widget, [hooks, drawingId] {
-    if (hooks.startAlign) hooks.startAlign(CadDrawingLayers::alignLayerOf(QgsProject::instance(), drawingId));
-  });
-  row->addWidget(other);
-  row->addWidget(alignNow);
-  const QString text = QStringLiteral("도면을 %1(%2)로 읽어 %3로 바꿔 올렸습니다.")
-                           .arg(CadCrsGuess::label(usedAuthId), usedAuthId, workAuthId);
-  hooks.messageBar->pushItem(new QgsMessageBarItem(QStringLiteral("도면"), text, widget, Qgis::MessageLevel::Info, 0));
 }
 
 }  // namespace
@@ -210,13 +166,15 @@ bool run(const Hooks& hooks, const QString& path, const QString& forcedAuthId) {
   const CadStoreInfo info{path, sha, authId, isDwg ? CadDwgConverter::converterLabel() : QString()};
   error.clear();
   canceled = false;
+  bool stored = false;
   const bool written = KaBlockingTask::run(hooks.window, QStringLiteral("도면을 저장하는 중…"), [&](QgsFeedback* feedback) {
-    const bool ok = CadDrawingStore::write(drawing, info, workCrs, context, out, &error,
-                                           [feedback] { return feedback->isCanceled(); });
+    stored = CadDrawingStore::write(drawing, info, workCrs, context, out, &error,
+                                    [feedback] { return feedback->isCanceled(); });
     canceled = feedback->isCanceled();
-    return ok;
+    return stored;
   });
   if (!written) {
+    if (stored) QFile::remove(out);  // 다 쓴 뒤에 취소했으면 변환본을 남기지 않는다
     if (canceled || error.isEmpty()) {
       status(hooks, kCanceled);
     } else {
@@ -226,13 +184,16 @@ bool run(const Hooks& hooks, const QString& path, const QString& forcedAuthId) {
     return false;
   }
 
-  // 4. 지도에 올린다. 같은 제목 묶음은 새것으로 바꾸고, 앱이 만든 옛 변환본 파일은 지울 수 있으면 지운다.
-  const QString title = CadDrawingLayers::groupTitle(path);
+  // 4. 지도에 올린다. 같은 원본에서 올린 묶음은 새것으로 바꾸고(이름만 같은 다른 도면은 「(도면 2)」로 따로 둔다),
+  //    앱이 만든 옛 변환본 파일은 지울 수 있으면 지운다.
+  const QString title = CadDrawingLayers::titleFor(project, path);
   QStringList oldFiles;
   for (QgsVectorLayer* layer : CadDrawingLayers::layersOf(project, CadDrawingLayers::drawingIdOfGroup(project, title)))
     if (!oldFiles.contains(sourceFile(layer))) oldFiles << sourceFile(layer);
   const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
   if (CadDrawingLayers::addToProject(project, out, title, id, &error).isEmpty()) {
+    QgsOgrProviderUtils::invalidateCachedDatasets(out);
+    QFile::remove(out);
     KaUserError::warn(hooks.window, {kTitle, error, QDir::toNativeSeparators(out),
                                      QStringLiteral("변환본 파일을 다른 프로그램이 열고 있지 않은지 확인해 주세요.")});
     return false;
@@ -248,19 +209,19 @@ bool run(const Hooks& hooks, const QString& path, const QString& forcedAuthId) {
     QFile::remove(clean);  // 아직 열려 있으면 남는다. 실패해도 넘어간다
   }
 
-  // 5. 판단용 범위로 화면을 옮기고 알린다.
+  // 5. 판단용 범위로 화면을 옮기고 알린다. 좌표 없는 도면은 정합 화면에서 보므로 지도 화면을 그대로 둔다.
   LayerOps::ensureOtfEnabled(project, hooks.canvas, workCrs.authid());
   if (hooks.canvas) {
     LayerOps::syncMapCanvas(project, hooks.canvas, false);
-    QgsRectangle view = drawing.robustExtent;
     if (!authId.isEmpty()) {
+      QgsRectangle view = drawing.robustExtent;
       try {
         view = QgsCoordinateTransform(QgsCoordinateReferenceSystem(authId), workCrs, context).transformBoundingBox(view);
       } catch (const QgsCsException&) {
       }
+      view.grow(std::max({view.width(), view.height(), 10.0}) * 0.1);
+      hooks.canvas->setExtent(view);
     }
-    view.grow(std::max({view.width(), view.height(), 10.0}) * 0.1);
-    hooks.canvas->setExtent(view);
     LayerOps::refreshCanvasIfIdle(hooks.canvas);
   }
   int counts[4] = {0, 0, 0, 0};
@@ -282,10 +243,11 @@ bool run(const Hooks& hooks, const QString& path, const QString& forcedAuthId) {
                               authId.isEmpty() ? QStringLiteral("없음") : authId, tally));
 
   // 6. 좌표가 없으면 그 도면의 선 레이어로 정합을 바로 시작하고, 있으면 바꿀 수 있게 알림을 둔다.
+  dropNotices(hooks.messageBar, title);
   if (authId.isEmpty()) {
     if (hooks.startAlign) hooks.startAlign(CadDrawingLayers::alignLayerOf(project, id));
   } else {
-    showNotice(hooks, id, path, guess, authId, workCrs.authid());
+    showNotice(hooks, title, id, path, guess, authId, workCrs.authid());
   }
   return true;
 }

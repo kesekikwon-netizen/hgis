@@ -234,6 +234,37 @@ class TestCadLayers : public QObject {
     QVERIFY(std::abs(t.attribute(QStringLiteral("text_height")).toDouble() - 5.0) < 1e-9);
   }
 
+  // 새 변환본을 열지 못하면 같은 제목의 예전 묶음을 지우지 않는다.
+  void addToProject_failureKeepsThePreviousGroup() {
+    QTemporaryDir tmp;
+    const QString gpkg = writeGpkg(tmp, QStringLiteral("가수리"), {line(), text()});
+    QgsProject project;
+    QString error;
+    QCOMPARE(CadDrawingLayers::addToProject(&project, gpkg, QStringLiteral("가수리 (도면)"), kId, &error).size(), 2);
+    QVERIFY(CadDrawingLayers::addToProject(&project, tmp.filePath(QStringLiteral("없음.gpkg")), QStringLiteral("가수리 (도면)"),
+                                           kOtherId, &error)
+                .isEmpty());
+    QCOMPARE(CadDrawingLayers::drawingIdOfGroup(&project, QStringLiteral("가수리 (도면)")), kId);
+    QCOMPARE(CadDrawingLayers::layersOf(&project, kId).size(), 2);
+  }
+
+  // 도면 묶음을 사용자가 다른 묶음 안으로 옮겨도 같은 원본만 그 묶음을 이어 쓰고, 바깥 묶음은 도면으로 보지 않는다.
+  void titleFor_seesDrawingGroupsMovedIntoAFolder() {
+    QTemporaryDir tmp;
+    QgsProject project;
+    QString error;
+    QVERIFY(!CadDrawingLayers::addToProject(&project, writeGpkg(tmp, QStringLiteral("가수리"), {line()}),
+                                            QStringLiteral("가수리 (도면)"), kId, &error).isEmpty());
+    QgsLayerTreeGroup* reference = project.layerTreeRoot()->findGroup(HeritageImport::referenceGroupName());
+    QgsLayerTreeGroup* drawing = reference->findGroup(QStringLiteral("가수리 (도면)"));
+    reference->addGroup(QStringLiteral("묶음"))->addChildNode(drawing->clone());
+    reference->removeChildNode(drawing);
+    QCOMPARE(CadDrawingLayers::titleFor(&project, QStringLiteral("C:/x/가수리.dxf")), QStringLiteral("가수리 (도면)"));
+    QCOMPARE(CadDrawingLayers::titleFor(&project, QStringLiteral("D:/y/가수리.dxf")), QStringLiteral("가수리 (도면 2)"));
+    QVERIFY(CadDrawingLayers::drawingIdOfGroup(&project, QStringLiteral("묶음")).isEmpty());
+    QCOMPARE(CadDrawingLayers::drawingIdOfGroup(&project, QStringLiteral("가수리 (도면)")), kId);
+  }
+
   void removeFromProject_dropsLayersAndGroup() {
     QTemporaryDir tmp;
     const QString gpkg = writeGpkg(tmp, QStringLiteral("가수리"), {line(), text()});

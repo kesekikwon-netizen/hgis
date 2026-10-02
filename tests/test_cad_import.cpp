@@ -213,6 +213,46 @@ class TestCadImport : public QObject {
     QCOMPARE(drawingGroup(QStringLiteral("가수리 (도면)"))->findLayers().size(), 2);
   }
 
+  // 다른 폴더의 같은 이름 도면은 바꾸지 않고 「(도면 2)」로 둘 다 둔다. 먼저 올린 변환본도 그대로다.
+  void run_sameNameFromAnotherFolderKeepsBoth() {
+    QTemporaryDir tmp;
+    addYeongcheonSurveyArea();
+    const QString first = writeGasuriDxf(tmp.filePath(QStringLiteral("A")), QStringLiteral("가수리"));
+    const QString second = writeGasuriDxf(tmp.filePath(QStringLiteral("B")), QStringLiteral("가수리"));
+    Fixture fx;
+    const KaCadImport::Hooks hooks = fx.hooks(tmp.filePath(QStringLiteral("조사/영천 조사.gpkg")));
+    QVERIFY(KaCadImport::run(hooks, first) && KaCadImport::run(hooks, second));
+    QVERIFY(drawingGroup(QStringLiteral("가수리 (도면)")) && drawingGroup(QStringLiteral("가수리 (도면 2)")));
+    QVERIFY(QFileInfo::exists(tmp.filePath(QStringLiteral("조사/가져온자료/도면/가수리.gpkg"))));
+  }
+
+  // 좌표 없는 도면은 정합을 바로 시작하므로 화면을 도면 숫자(바다)로 옮기지 않는다.
+  void run_localDrawingKeepsTheView() {
+    QTemporaryDir tmp;
+    const QString dxf = tmp.filePath(QStringLiteral("로컬.dxf"));
+    QVERIFY(CadFixture::write(dxf, CadFixture::document("ANSI_949", CadFixture::line("A", 1, 0, 0, 100, 80))));
+    Fixture fx;
+    const QgsRectangle view(207000, 378000, 208000, 379000);
+    fx.canvas->setExtent(view);
+    const QgsRectangle before = fx.canvas->extent();
+    QVERIFY(KaCadImport::run(fx.hooks(tmp.filePath(QStringLiteral("조사/조사.gpkg"))), dxf));
+    QCOMPARE(fx.alignCalls, 1);
+    QVERIFY2(fx.canvas->extent().center().distance(before.center()) < 1, qUtf8Printable(fx.canvas->extent().toString()));
+  }
+
+  // 다른 좌표계로 다시 불러오면 그 도면의 지난 알림은 내리고 새 알림 하나만 둔다.
+  void run_reimportKeepsOneNotice() {
+    QTemporaryDir tmp;
+    addYeongcheonSurveyArea();
+    const QString dxf = writeGasuriDxf(tmp.filePath(QStringLiteral("원본")), QStringLiteral("가수리"));
+    Fixture fx;
+    const KaCadImport::Hooks hooks = fx.hooks(tmp.filePath(QStringLiteral("조사/영천 조사.gpkg")));
+    QVERIFY(KaCadImport::run(hooks, dxf));
+    QVERIFY(KaCadImport::run(hooks, dxf, QStringLiteral("EPSG:5181")));
+    QCOMPARE(fx.bar->items().size(), 1);
+    QVERIFY(fx.bar->currentItem()->text().contains(QStringLiteral("EPSG:5181")));
+  }
+
   void run_withoutSurveyWritesIntoAppData() {
     QTemporaryDir tmp;
     const QString dxf = writeGasuriDxf(tmp.filePath(QStringLiteral("원본")), QStringLiteral("가수리 앱"));
