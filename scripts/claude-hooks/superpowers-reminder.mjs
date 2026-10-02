@@ -14,6 +14,7 @@ const REMINDER = [
   'Strata 저장소의 작업 방식(CLAUDE.md 「superpowers 사용 방식」, 사용자가 2026-10-02에 「빠르게 진행」으로 바꿈): superpowers를 가볍게 쓴다.',
   '- 증상·버그 신고·스크린샷·「안 돼요」·「예전으로 돌아갔다」는 superpowers:systematic-debugging으로 원인부터 찾는다.',
   '- 코드 수정은 superpowers:test-driven-development로 시험을 먼저 쓴다.',
+  '- 새 기능이나 동작 변경은 전역 capture-intent 스킬로 요청 기록(docs/intent/)부터 만들고, 질문과 함께 한 번 보여 「진행」을 받은 뒤 만든다. 「진행」이 설계 승인이다.',
   '- superpowers:brainstorming은 현장 쓰임새를 물어야 하는 새 기능에만 쓴다. 스펙·계획 문서는 여러 단계짜리 큰 기능에서만 쓴다.',
   '- 계획이 있어도 과제마다 작업자·검토자를 따로 돌리지 않는다. 이 대화에서 차례로 만들고(superpowers:executing-plans), 기능 하나가 끝났을 때 superpowers:requesting-code-review로 한 번 검토받는다.',
   '- 「다 됐다」고 말하기 전에는 superpowers:verification-before-completion으로 확인한다.',

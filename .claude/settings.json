@@ -4,5 +4,19 @@
     "superpowers@superpowers-marketplace": true,
     "security-guidance@claude-plugins-official": true,
     "superpowers@claude-plugins-official": false
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/commit-gate.mjs\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
   }
 }

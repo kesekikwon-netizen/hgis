@@ -18,6 +18,7 @@ const ROUTES = [
   'superpowers:test-driven-development',
   'superpowers:requesting-code-review',
   'superpowers:verification-before-completion',
+  'capture-intent', // 2026-10-02: new features start with the global request record (intent)
 ];
 
 const tempDir = (t, prefix) => {
