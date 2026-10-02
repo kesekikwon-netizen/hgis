@@ -116,6 +116,7 @@ add_library(ka_core STATIC
   src/core/TopographicSettings.cpp
   src/core/ChecklistEngine.cpp
   src/core/SurveyProjectFactory.cpp
+  src/core/FileCleanup.cpp
   src/core/SurveyHandles.cpp
   src/core/SurveySaveAs.cpp
   src/core/SurveyStorage.cpp
@@ -230,6 +231,7 @@ add_library(ka_core STATIC
   src/core/CadDrawingLayers.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
+  src/core/FileCleanup.h
   src/core/SurveyHandles.h
   src/core/SurveySaveAs.h
   src/core/SurveyStorage.h
@@ -1456,6 +1458,13 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_save_handles_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_save_handles_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(save_handles ka_save_handles_tests)
+  # 아직 열린 파일은 잠시 뒤 다시 지운다: 같은 도면을 다시 불러오면 옛 변환본이 남던 일(R89).
+  add_executable(ka_file_cleanup_tests tests/test_file_cleanup.cpp)
+  target_include_directories(ka_file_cleanup_tests PRIVATE src ${KA_INCLUDES})
+  target_link_directories(ka_file_cleanup_tests PRIVATE ${KA_LIBDIRS})
+  target_link_libraries(ka_file_cleanup_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_file_cleanup_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(file_cleanup ka_file_cleanup_tests)
   # Six write-through generation saves take ~108 s alone on the field PC (13-23 s each);
   # 120 s left no room for a parallel ctest run.
   set_tests_properties(storage_generation PROPERTIES TIMEOUT 300)

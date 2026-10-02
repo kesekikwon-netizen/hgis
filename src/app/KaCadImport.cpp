@@ -9,6 +9,7 @@
 #include "core/CadDrawingReader.h"
 #include "core/CadDrawingStore.h"
 #include "core/CadDwgConverter.h"
+#include "core/FileCleanup.h"
 #include "core/KaSessionLog.h"
 #include "core/LayerOps.h"
 #include "core/SurveyBundle.h"
@@ -29,7 +30,6 @@
 #include <qgsexception.h>
 #include <qgsfeedback.h>
 #include <qgsmapcanvas.h>
-#include <qgsogrproviderutils.h>
 #include <qgsproject.h>
 #include <qgsproviderregistry.h>
 #include <qgsvectorlayer.h>
@@ -174,7 +174,7 @@ bool run(const Hooks& hooks, const QString& path, const QString& forcedAuthId) {
     return stored;
   });
   if (!written) {
-    if (stored) QFile::remove(out);  // 다 쓴 뒤에 취소했으면 변환본을 남기지 않는다
+    if (stored) FileCleanup::removeWhenFree(out);  // 다 쓴 뒤에 취소했으면 변환본을 남기지 않는다
     if (canceled || error.isEmpty()) {
       status(hooks, kCanceled);
     } else {
@@ -192,8 +192,7 @@ bool run(const Hooks& hooks, const QString& path, const QString& forcedAuthId) {
     if (!oldFiles.contains(sourceFile(layer))) oldFiles << sourceFile(layer);
   const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
   if (CadDrawingLayers::addToProject(project, out, title, id, &error).isEmpty()) {
-    QgsOgrProviderUtils::invalidateCachedDatasets(out);
-    QFile::remove(out);
+    FileCleanup::removeWhenFree(out);
     KaUserError::warn(hooks.window, {kTitle, error, QDir::toNativeSeparators(out),
                                      QStringLiteral("변환본 파일을 다른 프로그램이 열고 있지 않은지 확인해 주세요.")});
     return false;
@@ -205,8 +204,7 @@ bool run(const Hooks& hooks, const QString& path, const QString& forcedAuthId) {
     const QString clean = QFileInfo(file).absoluteFilePath();
     if (clean == QFileInfo(out).absoluteFilePath() || !(clean.contains(collected) || clean.startsWith(appDrawings)))
       continue;
-    QgsOgrProviderUtils::invalidateCachedDatasets(clean);
-    QFile::remove(clean);  // 아직 열려 있으면 남는다. 실패해도 넘어간다
+    FileCleanup::removeWhenFree(clean);  // 지도가 아직 읽고 있으면 잠시 뒤 다시 지운다(R89)
   }
 
   // 5. 판단용 범위로 화면을 옮기고 알린다. 좌표 없는 도면은 정합 화면에서 보므로 지도 화면을 그대로 둔다.

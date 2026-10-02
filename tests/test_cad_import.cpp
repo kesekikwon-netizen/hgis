@@ -211,6 +211,8 @@ class TestCadImport : public QObject {
     QVERIFY(KaCadImport::run(hooks, dxf));
     QCOMPARE(groupCount(QStringLiteral("가수리 (도면)")), 1);
     QCOMPARE(drawingGroup(QStringLiteral("가수리 (도면)"))->findLayers().size(), 2);
+    // 옛 변환본은 남기지 않는다(새것은 「가수리 (2).gpkg」로 생긴다): 도면 폴더에 변환본은 하나뿐이다(R89).
+    QCOMPARE(QDir(tmp.filePath(QStringLiteral("조사/가져온자료/도면"))).entryList({QStringLiteral("*.gpkg")}, QDir::Files).size(), 1);
   }
 
   // 다른 폴더의 같은 이름 도면은 바꾸지 않고 「(도면 2)」로 둘 다 둔다. 먼저 올린 변환본도 그대로다.
