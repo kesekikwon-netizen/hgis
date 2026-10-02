@@ -13,6 +13,7 @@
 #include "KaTerrain3dLayoutStudio.h"
 #include "KaTerrain3dStudio.h"
 #include "KaTheme.h"
+#include "KaUndoGroup.h"
 #include "KaUserError.h"
 #include "core/FeaturePresets.h"   // [pkg K] F041 시대색·종류 무늬
 #include "core/FeatureRecord.h"    // [pkg K] F054 audit fields
@@ -813,14 +814,13 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
       if (kindIdx >= 0) feat.setAttribute(kindIdx, QStringLiteral("미분류"));
       if (statusIdx >= 0) feat.setAttribute(statusIdx, QStringLiteral("가설"));
     }
-    QString addError;
-    if (!LayerOps::runEditCommand(layer, QStringLiteral("도형 그리기"), [&]() {
-          return layer->addFeature(feat);
-        }, &addError)) {
+    // 도형과 이름·번호를 되돌리기 한 단계로 묶는다(Ctrl+Z 한 번). 「겹친 곳 지우기」는 따로 한 단계다.
+    KaUndoGroup drawStep(layer, QStringLiteral("도형 그리기"));
+    if (!layer->addFeature(feat)) {
       KaUserError::warn(this, {
           QStringLiteral("그리기"),
           QStringLiteral("그린 도형을 「%1」에 넣지 못했습니다.").arg(layer->name()),
-          addError,
+          QStringLiteral("편집을 시작하지 못했거나 파일에 쓸 수 없습니다."),
           QStringLiteral("같은 파일을 연 다른 프로그램을 닫은 뒤 다시 그리세요."),
       });
       return;
@@ -835,7 +835,7 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
     if (layer->geometryType() == Qgis::GeometryType::Polygon) {
       m_lastDrawnLayer = layer;
       m_lastDrawnFid = feat.id();
-      erased = offerEraseWithDrawnShape(layer, feat.id());
+      erased = offerEraseWithDrawnShape(layer, feat.id(), [&] { drawStep.close(); });
     }
 
     // The name/number form comes only after the shape is in (never while drawing).

@@ -602,7 +602,7 @@ private:
   bool runErasePlan(const PolygonErase::Plan& plan);
   // 같은 레이어의 도형 위에 겹쳐 그렸으면 그 자리에 선택창(겹친 곳 지우기 / 그대로 두기)을 띄운다.
   // 지웠으면 true.
-  bool offerEraseWithDrawnShape(QgsVectorLayer* layer, QgsFeatureId fid);
+  bool offerEraseWithDrawnShape(QgsVectorLayer* layer, QgsFeatureId fid, const std::function<void()>& beforeErase = {});
   void forgetStaleLinkedEdits();
   void rememberLinkedEdit(const QList<QPointer<QgsVectorLayer>>& layers);
   bool undoLinkedEdit(QgsVectorLayer* layer);

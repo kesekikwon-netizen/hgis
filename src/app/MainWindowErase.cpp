@@ -119,8 +119,10 @@ bool MainWindow::runErasePlan(const PolygonErase::Plan& plan) {
 
 // 도형을 다 그렸을 때(우클릭·Enter), 같은 레이어의 도형 위에 겹쳐 그렸으면 그 자리에 선택창을
 // 띄운다. 조사구역 안에 유구를 그리는 것처럼 다른 레이어의 도형 위에 그리는 것은 늘 하는
-// 그리기라서 묻지 않는다. 선택창을 그냥 닫으면 「그대로 두기」와 같다.
-bool MainWindow::offerEraseWithDrawnShape(QgsVectorLayer* layer, QgsFeatureId fid) {
+// 그리기라서 묻지 않는다. 선택창을 그냥 닫으면 「그대로 두기」와 같다. 지우기 직전에 beforeErase 를 부른다
+// (그리기 묶음을 닫아, 지우기를 따로 한 단계로 되돌리게 한다).
+bool MainWindow::offerEraseWithDrawnShape(QgsVectorLayer* layer, QgsFeatureId fid,
+                                          const std::function<void()>& beforeErase) {
   auto* project = QgsProject::instance();
   if (!project || !layer) return false;
   PolygonErase::Shape drawn;
@@ -141,6 +143,7 @@ bool MainWindow::offerEraseWithDrawnShape(QgsVectorLayer* layer, QgsFeatureId fi
   connect(erase, &QAction::triggered, &menu, [&chosen] { chosen = true; });
   QAction* picked = menu.exec(QCursor::pos());
   if (!chosen && picked != erase) return false;
+  if (beforeErase) beforeErase();
   return runErasePlan(plan);
 }
 

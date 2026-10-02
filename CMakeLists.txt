@@ -546,6 +546,7 @@ add_executable(ka-hgis
   src/app/KaCadImport.h
   src/app/KaCadImportNotice.h
   src/app/KaBlockingTask.h
+  src/app/KaUndoGroup.h
   src/app/KaStatusBar.h
   src/app/KaRegionLocator.h
   src/app/KaCrashGuard.h
@@ -1107,6 +1108,13 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_blocking_task_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_blocking_task_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(blocking_task ka_blocking_task_tests)
+  # 도형을 그리고 이름·번호를 넣으면 Ctrl+Z 한 번에 둘 다 사라지게 묶는 KaUndoGroup(헤더만).
+  add_executable(ka_undo_group_tests tests/test_undo_group.cpp src/app/KaUndoGroup.h)
+  target_include_directories(ka_undo_group_tests PRIVATE src ${KA_INCLUDES})
+  target_link_directories(ka_undo_group_tests PRIVATE ${KA_LIBDIRS})
+  target_link_libraries(ka_undo_group_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_undo_group_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(undo_group ka_undo_group_tests)
   add_executable(ka_shell_tests tests/test_shell.cpp
     src/app/KaShellUi.cpp src/app/KaShellUi.h
     src/app/KaShellStartup.cpp src/app/KaShellStartup.h
@@ -1602,7 +1610,7 @@ if(KA_HGIS_BUILD_TESTS)
     string(JOIN "\\;" _ka_path_esc ${_ka_path})
     set_tests_properties(layer_labels layer_information checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss user_error recent_surveys section_layout_engine section_studio_engine terrain_3d_engine ${KA_SAVE_OPEN_TESTS} e2e_opaque_suite network_services storage_safety reference_download region_locator_popup layer_state_regressions map_render above_labels above_labels_125 above_labels_150 above_labels_200 PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
-    set_tests_properties(layer_roles layer_styles layer_edits layer_panel layer_tree_undo PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
+    set_tests_properties(layer_roles layer_styles layer_edits layer_panel layer_tree_undo undo_group PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(georef_quality georef_backup align_tool align_image_view PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(cad_dwg cad_reader cad_crs cad_store cad_layers cad_dialog cad_import cad_align blocking_task PROPERTIES
