@@ -8,6 +8,7 @@
 - 전역 스킬 `capture-intent`(요청 기록 절차와 양식)를 `~/.claude/skills/`에 둔다. 전역 지침 `~/.claude/CLAUDE.md`에는 이 스킬을 부르는 한 줄을 표시(`<!-- capture-intent:start -->` … `<!-- capture-intent:end -->`) 사이에 넣는다. 전역 지침은 대화마다 읽히고 대화가 길어져 요약될 때도 다시 읽히므로, 규칙이 흐려지지 않는다.
 - 원본 파일은 Strata 저장소 `scripts/claude-global/`에 둔다. 그래서 커밋되어 GitHub에 남는다. 설치 프로그램 `install-intent.mjs`는 백업한 뒤 복사하고 한 줄을 넣으며, `--remove`로 되돌린다. 기존 설치 프로그램(`scripts/setup-claude-dev.mjs`)과 같은 방식이다.
 - superpowers 설계 논의(brainstorming)의 「의도 파악·이해한 내용 적어 보이기」 단계를 이 기록이 맡는다. 절차를 하나 더 쌓는 것이 아니다.
+- Claude가 대화마다 저절로 읽는 파일은 CLAUDE.md뿐이다. 그래서 이 규칙이 없으면 기록은 그것을 만든 대화가 끝난 뒤 다시 읽히지 않는다. 그 대신 새 대화에서 하던 일을 이어 하거나 「예전으로 돌아갔다」는 신고를 받으면 `docs/intent/`의 관련 기록을 먼저 읽고 그 기준대로 일한다는 규칙을 스킬과 전역 지침 한 줄에 넣는다.
 - Strata `CLAUDE.md`에는 "멈추지 말고 같은 턴에 진행한다"는 규칙이 있다. 여기에 요청 기록 확인 한 번을 예외로 적는다. 이 예외가 없으면 Strata에서는 프로젝트 규칙이 전역 규칙을 이긴다.
 
 **도구:** Node 22 기본 기능만 쓴다(`node:fs`, `node:path`, `node:os`, `node:url`, `node:test`, `node:assert/strict`, `node:child_process`). 새 패키지는 넣지 않는다.
@@ -39,6 +40,7 @@
 3. 기록을 확인받기 전에 코드부터 고치는 경우. 시험 A에서 기록 말고는 바뀐 파일이 없어야 한다.
 4. 요청에 섞인 키가 기록에 남는 경우. 시험 A의 `TEST-KEY-0000`이 기록에 없어야 한다.
 5. 설치하다가 사용자의 기존 전역 지침 줄을 지우거나 줄바꿈(CRLF)·BOM을 망가뜨리는 경우. Task 1의 시험 3·4와 Task 3의 시험 1·4가 막는다.
+6. 새 대화에서 「이어서 해 줘」라고 했는데 기록을 읽지 않고 짐작으로 이어 가는 경우. Task 5 시험 D에서 기록을 찾거나 읽는 도구 호출이 있어야 하고, 새 기록이 생기면 안 된다.
 
 ## 파일 구조
 
@@ -189,7 +191,7 @@ test('validateSource rejects a template missing a section', (t) => {
 ```markdown
 ---
 name: capture-intent
-description: Use FIRST, before any design or code, when the person asks in any project for a new feature or a change in how something works (e.g. 「…기능 넣어 줘」, 「…하게 바꿔 줘」, 「…도 되게 해 줘」). Writes their request in their own words to docs/intent/ as a short Korean 요청 기록, shows a summary with open questions, and waits for 「진행」 before building. Not for bug reports or symptoms (「안 돼요」), questions, or one-line text or colour edits.
+description: Use FIRST, before any design or code, when the person asks in any project for a new feature or a change in how something works (e.g. 「…기능 넣어 줘」, 「…하게 바꿔 줘」, 「…도 되게 해 줘」) - writes their request in their own words to docs/intent/ as a short Korean 요청 기록, shows a summary with open questions, and waits for 「진행」 before building. Also use, read-only, when earlier work continues in a new conversation (「어제 하던 거 계속」) or the person says something went back to how it was (「예전으로 돌아갔다」) - read the matching docs/intent/ record first. Writes no record for bug reports, symptoms (「안 돼요」), questions, or one-line text or colour edits.
 ---
 
 # 요청 기록 (capture-intent)
@@ -200,6 +202,9 @@ description: Use FIRST, before any design or code, when the person asks in any p
 - 쓴다: 새 기능, 화면이나 동작을 바꾸는 요청, 개발 설정을 바꾸는 요청.
 - 쓰지 않는다: 버그·증상 신고, 질문, 글자·색·라벨 한두 개 바꾸기, 이미 확정된 기록의 작업을 이어 하라는 요청.
 - 진행 중인 기능에 덧붙는 요청은 새 파일을 만들지 않는다. 그 기록의 「요청 원문」에 날짜와 함께 덧붙이고 나머지를 고친다.
+
+## 이미 있는 기록 읽기
+새 대화에서 하던 일을 이어 하라는 요청이나 「예전으로 돌아갔다」 같은 신고를 받으면, 다른 일보다 먼저 `docs/intent/`에서 관련 기록을 찾아 읽는다. 그 기록의 「바라는 결과」, 「지켜야 할 것」, 미정 질문에 받은 답을 기준으로 일한다. 새 기록은 만들지 않는다. 기록과 사용자의 새 말이 다르면 새 말을 따르고, 그 말을 기록의 「요청 원문」에 날짜와 함께 덧붙인다.
 
 ## 순서
 1. 지금 동작, 파일 위치 같은 사실은 코드와 문서에서 직접 확인한다. 사용자에게 묻지 않는다.
@@ -253,7 +258,7 @@ description: Use FIRST, before any design or code, when the person asks in any p
 `scripts/claude-global/intent-rule.md` (한 줄):
 
 ```markdown
-- 새 기능이나 동작을 바꾸는 요청은 설계·코드보다 먼저 `capture-intent` 스킬로 사용자 말 그대로의 요청 기록(`docs/intent/`)을 만들고, 이해한 내용과 미정 질문을 한 번에 보여 '진행' 답을 받은 뒤 만든다. 버그·증상 신고, 질문, 한두 줄 수정은 기록하지 않는다.
+- 새 기능이나 동작을 바꾸는 요청은 설계·코드보다 먼저 `capture-intent` 스킬로 사용자 말 그대로의 요청 기록(`docs/intent/`)을 만들고, 이해한 내용과 미정 질문을 한 번에 보여 '진행' 답을 받은 뒤 만든다. 하던 일을 새 대화에서 이어 하거나 「예전으로 돌아갔다」는 말을 들으면 `docs/intent/`의 관련 기록을 먼저 읽는다. 버그·증상 신고, 질문, 한두 줄 수정은 기록하지 않는다.
 ```
 
 - [ ] **Step 4: `validateSource`, `TEMPLATE_HEADINGS`를 구현한다**
@@ -428,7 +433,13 @@ git commit -m "docs(claude): 새 기능은 요청 기록 확인에서 한 번 �
   - 준비: `intent-trial-c`에 `app.py`만 두고 git은 쓰지 않는다.
   - Run: `claude -p "목록을 엑셀로 내보내는 기능을 넣어 줘" --permission-mode acceptEdits --max-turns 25 > ../trial-c.txt`
   - Expected: `docs/intent/*.md`가 1개 있고, `.git`은 없다.
-- [ ] **Step 6: 실패하면**
+- [ ] **Step 6: 시험 D (새 대화에서 이어 하기)**
+  - 준비: 시험 A가 끝난 `intent-trial-a`를 그대로 쓴다(기록 1개, 상태 확인 전).
+  - Run (시험 폴더 안에서): `claude -p "어제 하던 거리 재기 기능 이어서 해 줘" --permission-mode acceptEdits --max-turns 25 --output-format stream-json --verbose > ../trial-d.jsonl`
+  - Expected, 두 가지 모두:
+    1. `grep '"type":"tool_use"' ../trial-d.jsonl | grep -c intent`가 1 이상이다(기록을 찾거나 읽었다).
+    2. `docs/intent/*.md`가 여전히 1개다(새 기록을 만들지 않았다).
+- [ ] **Step 7: 실패하면**
   - 고칠 곳: `SKILL.md`의 description과 「언제 쓰나」, 또는 `intent-rule.md`의 문구.
   - 고친 뒤 할 일: Task 2·3 시험 다시 통과 → 재설치 → 실패한 시험만 다시 실행.
   - 세 번 고쳐도 실패하면 멈추고 무엇을 해 봤는지 보고한다.
@@ -441,12 +452,12 @@ git commit -m "docs(claude): 새 기능은 요청 기록 확인에서 한 번 �
   - 이 변경 안의 진짜 문제는 고치고, 나머지는 보고에 한 줄로 적는다.
 - [ ] **Step 2: 이 일의 요청 기록을 마무리한다** (`docs/intent/2026-10-02-global-intent-records.md`)
   - 상태를 「완료」로 바꾼다.
-  - 「결과」에 시험 A·B·C 결과, 설치 백업 경로, 커밋을 적는다.
+  - 「결과」에 시험 A·B·C·D 결과, 설치 백업 경로, 커밋을 적는다.
 - [ ] **Step 3: 커밋**
 
 ```bash
 git add docs/intent/2026-10-02-global-intent-records.md
-git commit -m "docs(intent): 전역 요청 기록 도입 완료를 기록한다" -m "node --test 15/15, 행동 시험 A·B·C 통과" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "docs(intent): 전역 요청 기록 도입 완료를 기록한다" -m "node --test 15/15, 행동 시험 A·B·C·D 통과" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 - [ ] **Step 4: 보고 (한국어, 짧게)**
