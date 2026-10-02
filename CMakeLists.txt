@@ -655,7 +655,8 @@ if(KA_HGIS_BUILD_TESTS)
     target_compile_options(ka_workflow_tests PRIVATE /utf-8)
   endif()
   ka_add_qtest(workflow_engine ka_workflow_tests)
-  set_tests_properties(workflow_engine PROPERTIES TIMEOUT 300)
+  # 이 PC 약 90초. GitHub 무료 기계는 GPKG 열기만 6~11초 걸려 300초를 넘겼다(2026-10-02 CI).
+  set_tests_properties(workflow_engine PROPERTIES TIMEOUT 900)
 
   add_executable(ka_editing_tools_tests tests/test_editing_tools.cpp
     src/app/KaCaptureMapTool.cpp src/app/KaCaptureMapTool.h
@@ -1163,7 +1164,8 @@ if(KA_HGIS_BUILD_TESTS)
   target_include_directories(ka_perf_tests PRIVATE ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
   target_compile_options(ka_perf_tests PRIVATE /utf-8 /FS)
   ka_add_qtest(perf_engine ka_perf_tests)
-  set_tests_properties(perf_engine PROPERTIES TIMEOUT 300)
+  # 시간을 재는 시험이라 다른 시험과 함께 돌지 않는다.
+  set_tests_properties(perf_engine PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
   add_executable(ka_map_geotiff_export_tests tests/test_map_geotiff_export.cpp)
   target_link_libraries(ka_map_geotiff_export_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_map_geotiff_export_tests PROPERTIES WIN32_EXECUTABLE FALSE)
@@ -1196,7 +1198,8 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_polygon_erase_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_polygon_erase_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(polygon_erase ka_polygon_erase_tests)
-  set_tests_properties(polygon_erase PROPERTIES TIMEOUT 60)
+  # 혼자 약 40초: 4개씩 함께 돌면 60초를 넘겼다(2026-10-03 전체 실행).
+  set_tests_properties(polygon_erase PROPERTIES TIMEOUT 180)
   add_executable(ka_heritage_download_retry_tests tests/test_heritage_download_retry.cpp
     src/app/KaHeritageBrowser.cpp src/app/KaHeritageBrowser.h)
   target_link_libraries(ka_heritage_download_retry_tests PRIVATE ka_core Qt6::Test Qt6::WebEngineWidgets)
@@ -1452,7 +1455,8 @@ if(KA_HGIS_BUILD_TESTS)
   add_executable(ka_storage_safety_tests tests/test_storage_safety.cpp)
   target_link_libraries(ka_storage_safety_tests PRIVATE ka_core Qt6::Test)
   ka_add_qtest(storage_safety ka_storage_safety_tests)
-  set_tests_properties(storage_safety PROPERTIES TIMEOUT 120)
+  # 이 PC 약 50초, GitHub 무료 기계에서는 120초를 넘겼다(2026-10-02 CI).
+  set_tests_properties(storage_safety PROPERTIES TIMEOUT 300)
   add_executable(ka_storage_generation_tests tests/test_storage_generation.cpp)
   target_link_libraries(ka_storage_generation_tests PRIVATE ka_core Qt6::Test)
   ka_add_qtest(storage_generation ka_storage_generation_tests)
@@ -1681,7 +1685,7 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(basemap_reference vworld_settings PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(log_session PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(webengine_smoke PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 120)
-    set_tests_properties(topographic_browser PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 150)
+    set_tests_properties(topographic_browser PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 300)
     # 기본 검사는 로컬 HTTP fixture에서 전송·취소·로그인 세션을 검증한다.
     # 실제 사이트 3개 검사는 KA_HGIS_LIVE_NGII_* opt-in 없이는 skip한다.
     set_tests_properties(dem_rendering PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
@@ -1891,6 +1895,7 @@ if(KA_HGIS_BUILD_TESTS)
   # already belongs to ka_shell_tests (tests/test_shell.cpp), so this one is shell_widgets.
   add_executable(ka_shell_chrome_tests tests/test_shell_chrome.cpp
     src/app/KaStatusBar.cpp src/app/KaStatusBar.h
+    src/app/KaAppBar.cpp src/app/KaAppBar.h
     src/app/KaLayerOpacityRail.cpp src/app/KaLayerOpacityRail.h
     ${_ka_p5_app_sources} ${_ka_p1_chip_sources} ${_ka_p5_theme_sources})
   set_target_properties(ka_shell_chrome_tests PROPERTIES WIN32_EXECUTABLE FALSE)

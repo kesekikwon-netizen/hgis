@@ -176,10 +176,9 @@ bool isAllowlistedNestedEventLoop(const QString& path, const QString& kind) {
   if (kind == QLatin1String("waitForFinishedWithEventLoop") &&
       pathEndsWith(path, QStringLiteral("src/app/KaTerrain3dStudio.cpp")))
     return true;
-  if (kind == QLatin1String("QEventLoop") &&
-      (pathEndsWith(path, QStringLiteral("src/app/KaApplication.cpp")) ||
-       pathEndsWith(path, QStringLiteral("src/app/MainWindow.cpp"))))
-    return true;
+  // KaBlockingTask: DWG·DXF 변환 동안 창 모달 진행 창(「취소」)으로 QgsTask 를 기다리는 한 곳(CAD 불러오기).
+  for (const char* site : {"src/app/KaApplication.cpp", "src/app/MainWindow.cpp", "src/app/KaBlockingTask.cpp"})
+    if (kind == QLatin1String("QEventLoop") && pathEndsWith(path, QString::fromLatin1(site))) return true;
   return false;
 }
 

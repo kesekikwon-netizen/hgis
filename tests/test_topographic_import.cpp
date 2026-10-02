@@ -883,8 +883,8 @@ private slots:
     QCOMPARE(merged->featureCount(), 2);
     const QString id = merged->id();
     const QByteArray firstDigest = digest(first.filePath(QStringLiteral("A0010000_1.shp")));
-    // A newly received sheet is appended to the same published file.
-    QVERIFY(dialog.importVerified(later));
+    // Once the map has drawn, a new sheet is appended to the same file (while drawing, a new file is written).
+    QTest::qWait(200); QTRY_VERIFY_WITH_TIMEOUT(!canvas.isDrawing(), 10000); QVERIFY(dialog.importVerified(later));
     QTRY_VERIFY_WITH_TIMEOUT(!dialog.isAutomaticLoading() && topographic() &&
                              qobject_cast<QgsVectorLayer*>(topographic())->featureCount() == 3, 10000);
     QCOMPARE(topographic()->id(), id);
