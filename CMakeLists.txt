@@ -443,6 +443,7 @@ add_executable(ka-hgis
   src/app/KaTerrain3dView.cpp
   src/app/KaAlignMapTool.cpp
   src/app/KaAlignMapToolEdit.cpp
+  src/app/KaAlignMapToolSave.cpp
   src/app/KaImageView.cpp
   src/app/KaAlignImageDetail.cpp
   src/app/KaStartPage.cpp
@@ -798,7 +799,7 @@ if(KA_HGIS_BUILD_TESTS)
   ka_add_qtest(georef_backup ka_georef_backup_tests)
 
   add_executable(ka_align_tool_tests tests/test_align_tool.cpp
-    src/app/KaAlignMapTool.cpp src/app/KaAlignMapTool.h src/app/KaAlignMapToolEdit.cpp)
+    src/app/KaAlignMapTool.cpp src/app/KaAlignMapTool.h src/app/KaAlignMapToolEdit.cpp src/app/KaAlignMapToolSave.cpp)
   target_link_libraries(ka_align_tool_tests PRIVATE ${KA_TEST_LIBS})
   target_include_directories(ka_align_tool_tests PRIVATE ${KA_INCLUDES})
   target_link_directories(ka_align_tool_tests PRIVATE ${KA_LIBDIRS})

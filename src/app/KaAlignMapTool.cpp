@@ -1,4 +1,5 @@
 #include "KaAlignMapTool.h"
+#include "core/CadDrawingLayers.h"
 #include "core/GeorefQuality.h"
 #include "core/LayerOps.h"
 
@@ -147,6 +148,7 @@ bool KaAlignMapTool::beginLayer(QgsMapLayer* layer, const QgsCoordinateReference
           node->setItemVisibilityChecked(false);
       }
       m_hiddenSource = vl;
+      m_cadHidden = CadDrawingLayers::hideCompanions(QgsProject::instance(), CadDrawingLayers::drawingIdOf(vl), vl);
       m_layer = mem;
       vl = mem;
     } else {
@@ -179,6 +181,7 @@ void KaAlignMapTool::captureOriginals(QgsVectorLayer* vl) {
 
 void KaAlignMapTool::endSession() {
   clearMarks();
+  finishDrawingSession();
   if (m_displayClone) {
     delete m_displayClone;
     m_displayClone = nullptr;
@@ -449,28 +452,7 @@ bool KaAlignMapTool::saveAligned(QString* savedPath, QString* errorOut) {
     if (savedPath) *savedPath = GeorefService::worldFilePathFor(rl->source());
     return true;
   }
-  auto* vl = qobject_cast<QgsVectorLayer*>(m_layer.data());
-  if (!vl) return false;
-  QString base = vl->name();
-  base.replace(QStringLiteral(" 맞춤"), QString());
-  QString dir;
-  if (m_hiddenSource && !m_hiddenSource->source().isEmpty())
-    dir = QFileInfo(m_hiddenSource->source().section(QLatin1Char('|'), 0, 0)).absolutePath();
-  if (dir.isEmpty()) dir = QFileInfo(vl->source()).absolutePath();
-  if (dir.isEmpty() || dir == QLatin1String(".")) dir = QDir::tempPath();
-  // Never delete a file this session did not write: an older <name>_aligned.gpkg gets a
-  // numbered sibling instead; saving again in the same session rewrites our own copy.
-  if (m_savedVectorPath.isEmpty())
-    m_savedVectorPath = GeorefBackup::uniqueOutputPath(
-        dir + QLatin1Char('/') + QFileInfo(base).completeBaseName() + QStringLiteral("_aligned.gpkg"));
-  const QString out = m_savedVectorPath;
-  if (QFile::exists(out)) QFile::remove(out);
-  const QString written = GeorefService::saveVectorCopyGpkg(vl, out, workCrs(), errorOut);
-  if (written.isEmpty()) return false;
-  if (savedPath) *savedPath = written;
-  LayerOps::markReferenceLayer(vl);
-  LayerOps::applyLegendCrsLabel(vl);
-  return true;
+  return saveVectorAligned(savedPath, errorOut);
 }
 
 QString KaAlignMapTool::statusText() const {

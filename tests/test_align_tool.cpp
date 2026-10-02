@@ -6,6 +6,8 @@
 #include <QTemporaryDir>
 
 #include "app/KaAlignMapTool.h"
+#include "core/CadDrawingLayers.h"
+#include "core/CadDrawingStore.h"
 #include "core/GeorefService.h"
 
 #include <qgsapplication.h>
@@ -13,6 +15,7 @@
 #include <qgscoordinatetransformcontext.h>
 #include <qgsfeature.h>
 #include <qgsgeometry.h>
+#include <qgslayertree.h>
 #include <qgsmapcanvas.h>
 #include <qgsmapmouseevent.h>
 #include <qgsmaptopixel.h>
@@ -31,6 +34,8 @@ private slots:
   void rasterRestore_beforeAnyWrite_saysNothingChanged();
   void rasterRestore_afterMove_putsTheImageBack();
   void vectorSave_keepsAnOlderAlignedFile();
+  void drawingSave_movesEveryTableAndWritesNoAlignedCopy();
+  void drawingCancel_removesTheCloneAndShowsEverything();
   void cleanup() { QgsProject::instance()->removeAllMapLayers(); }
 };
 
@@ -70,6 +75,40 @@ void pickPair(KaAlignMapTool& tool, Canvas& c, double sx, double sy, double mx, 
   QgsMapMouseEvent press(&c.canvas, QEvent::MouseButtonPress, c.px(mx, my), Qt::LeftButton,
                          Qt::LeftButton);
   tool.canvasPressEvent(&press);
+}
+
+// 로컬 숫자 도면(선 하나·글자 하나)을 변환본으로 써서 참조 지도 「로컬 (도면)」 묶음으로 올린다.
+QList<QgsVectorLayer*> addLocalDrawing(const QTemporaryDir& dir, QString* gpkgOut) {
+  CadDrawing drawing;
+  drawing.entities = {
+      CadEntity{.kind = CadKind::Line, .geometry = QgsGeometry::fromPolylineXY({QgsPointXY(10, 10), QgsPointXY(90, 10)})},
+      CadEntity{.kind = CadKind::Text, .geometry = QgsGeometry::fromPointXY(QgsPointXY(50, 50)),
+                .text = QStringLiteral("374-1전"), .textHeight = 2.5, .textAngle = 30}};
+  *gpkgOut = dir.filePath(QStringLiteral("로컬.gpkg"));
+  QString error;
+  if (!CadDrawingStore::write(drawing, CadStoreInfo{QStringLiteral("C:/x/로컬.dxf"), QStringLiteral("ab"), QString(), QString()},
+                              workCrs(), QgsProject::instance()->transformContext(), *gpkgOut, &error))
+    return {};
+  return CadDrawingLayers::addToProject(QgsProject::instance(), *gpkgOut, QStringLiteral("로컬 (도면)"),
+                                        QStringLiteral("drawing-1"), &error);
+}
+
+QgsVectorLayer* named(const QList<QgsVectorLayer*>& layers, const QString& name) {
+  for (QgsVectorLayer* layer : layers)
+    if (layer->name() == name) return layer;
+  return nullptr;
+}
+
+bool shown(const QgsMapLayer* layer) {
+  const QgsLayerTreeLayer* node = QgsProject::instance()->layerTreeRoot()->findLayer(layer->id());
+  return node && node->itemVisibilityChecked();
+}
+
+QgsPointXY firstPoint(const QString& gpkg, const QString& table) {
+  QgsVectorLayer layer(gpkg + QStringLiteral("|layername=") + table, table, QStringLiteral("ogr"));
+  QgsFeature f;
+  layer.getFeatures().nextFeature(f);
+  return QgsPointXY(f.geometry().vertexAt(0));
 }
 
 }  // namespace
@@ -189,6 +228,56 @@ void TestAlignTool::vectorSave_keepsAnOlderAlignedFile() {
   QVERIFY(!QFile::exists(dir.filePath(QStringLiteral("cad_aligned_3.gpkg"))));
   tool.endSession();
   QgsProject::instance()->removeAllMapLayers();  // files close before the temp dir goes
+}
+
+// 도면 정합 저장은 변환본의 모든 표에 같은 변환을 쓰고 원본 옆 _aligned.gpkg 를 만들지 않는다.
+void TestAlignTool::drawingSave_movesEveryTableAndWritesNoAlignedCopy() {
+  QTemporaryDir dir;
+  QString gpkg;
+  const QList<QgsVectorLayer*> layers = addLocalDrawing(dir, &gpkg);
+  QgsVectorLayer* lines = named(layers, QStringLiteral("선"));
+  QgsVectorLayer* texts = named(layers, QStringLiteral("글자"));
+  QVERIFY(lines && texts);
+  Canvas c;
+  KaAlignMapTool tool(&c.canvas);
+  QString err;
+  QVERIFY2(tool.beginLayer(lines, workCrs(), &err), qPrintable(err));
+  QVERIFY(!shown(texts));  // 맞추는 동안 같은 도면의 다른 레이어는 숨긴다
+  QVERIFY(!QgsProject::instance()->mapLayersByName(QStringLiteral("선 맞춤")).isEmpty());
+  pickPair(tool, c, 0, 0, 200100, 450100);
+  pickPair(tool, c, 100, 0, 200200, 450100);
+  QString saved;
+  QVERIFY2(tool.saveAligned(&saved, &err), qPrintable(err));
+  QCOMPARE(QFileInfo(saved).absoluteFilePath(), QFileInfo(gpkg).absoluteFilePath());
+  QVERIFY(QgsProject::instance()->mapLayersByName(QStringLiteral("선 맞춤")).isEmpty());
+  QVERIFY(shown(lines) && shown(texts));
+  QVERIFY(QDir(dir.path()).entryList({QStringLiteral("*_aligned*.gpkg")}, QDir::Files).isEmpty());
+  const QgsPointXY start = firstPoint(gpkg, QStringLiteral("lines"));  // (10, 10) → (200110, 450110)
+  QVERIFY2(start.distance(QgsPointXY(200110, 450110)) < 1, qPrintable(start.toString(2)));
+  const QgsPointXY label = firstPoint(gpkg, QStringLiteral("texts"));  // (50, 50) → (200150, 450150)
+  QVERIFY2(label.distance(QgsPointXY(200150, 450150)) < 1, qPrintable(label.toString(2)));
+  tool.endSession();
+  QgsProject::instance()->removeAllMapLayers();  // files close before the temp dir goes
+}
+
+// 저장하지 않고 끝내면 맞춤 복제본을 빼고 도면 레이어를 모두 다시 보이며, 변환본은 그대로다.
+void TestAlignTool::drawingCancel_removesTheCloneAndShowsEverything() {
+  QTemporaryDir dir;
+  QString gpkg;
+  const QList<QgsVectorLayer*> layers = addLocalDrawing(dir, &gpkg);
+  QgsVectorLayer* lines = named(layers, QStringLiteral("선"));
+  QgsVectorLayer* texts = named(layers, QStringLiteral("글자"));
+  QVERIFY(lines && texts);
+  Canvas c;
+  KaAlignMapTool tool(&c.canvas);
+  QString err;
+  QVERIFY2(tool.beginLayer(lines, workCrs(), &err), qPrintable(err));
+  pickPair(tool, c, 0, 0, 200100, 450100);
+  tool.endSession();
+  QVERIFY(QgsProject::instance()->mapLayersByName(QStringLiteral("선 맞춤")).isEmpty());
+  QVERIFY(shown(lines) && shown(texts));
+  QCOMPARE(firstPoint(gpkg, QStringLiteral("lines")), QgsPointXY(10, 10));
+  QgsProject::instance()->removeAllMapLayers();
 }
 
 #include "test_align_tool.moc"

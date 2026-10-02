@@ -209,4 +209,37 @@ QString drawingIdOfGroup(const QgsProject* project, const QString& title) {
   return {};
 }
 
+QString drawingIdOf(const QgsMapLayer* layer) {
+  return layer ? layer->customProperty(QString::fromLatin1(kPropDrawing)).toString() : QString();
+}
+
+QStringList hideCompanions(QgsProject* project, const QString& drawingId, const QgsMapLayer* keep) {
+  QStringList hidden;
+  if (!project) return hidden;
+  for (QgsVectorLayer* layer : layersOf(project, drawingId)) {
+    QgsLayerTreeLayer* node = project->layerTreeRoot()->findLayer(layer->id());
+    if (layer == keep || !node || !node->itemVisibilityChecked()) continue;
+    node->setItemVisibilityChecked(false);
+    hidden << layer->id();
+  }
+  return hidden;
+}
+
+void showLayers(QgsProject* project, const QStringList& layerIds) {
+  if (!project) return;
+  for (const QString& id : layerIds)
+    if (QgsLayerTreeLayer* node = project->layerTreeRoot()->findLayer(id)) node->setItemVisibilityChecked(true);
+}
+
+bool saveAlignment(QgsProject* project, const QString& drawingId, const GeorefService::Affine& a, QString* error) {
+  const QList<QgsVectorLayer*> layers = layersOf(project, drawingId);
+  if (layers.isEmpty()) {
+    if (error) *error = QStringLiteral("맞출 도면 레이어가 없습니다.");
+    return false;
+  }
+  if (!CadDrawingStore::applyAffine(layers, a, error)) return false;
+  for (QgsVectorLayer* layer : layers) layer->triggerRepaint();
+  return true;
+}
+
 }  // namespace CadDrawingLayers

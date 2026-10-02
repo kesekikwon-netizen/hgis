@@ -32,6 +32,7 @@
 | 2004 이후 DWG를 넣으면 열리지 않고 영어 GDAL 오류만 기록된다 | libopencad(GDAL의 DWG 읽기)는 R2000만 읽는다. | DWG는 LibreDWG 0.14 `dwg2dxf --as r2000`(별도 프로그램, `CadDwgConverter`)로 DXF로 바꾼 뒤 연다. 시험: `cad_dwg` |
 | DXF를 넣으면 지도에 안 보임(5174 도면이 약 200 km 떨어진 동해에 놓임) | DXF에 좌표계가 없어 도면 숫자를 작업 좌표계(5187) 숫자로 그대로 썼다. | 도면 숫자와 조사 위치로 좌표계를 판단해(CadCrsGuess) 작업 좌표계 변환본으로 올린다. 애매하면 지역 이름이 붙은 목록에서 고른다. 시험: `cad_crs`, `cad_import`. |
 | DXF·DWG 하위 레이어 이름이 「entities」로 나옴 | GDAL DXF 드라이버의 표 이름을 그대로 썼다. | 참조 지도 아래 「<원본 이름> (도면)」 묶음에 글자·점·선·면으로 올린다. 시험: `cad_layers`. |
+| 도면을 정합으로 맞추면 첫 하위 레이어(선)만 움직이고 글자·점은 제자리, 원본 옆에 「_aligned.gpkg」가 생김 | 정합 도구가 고른 레이어 하나의 복제본만 옮겨 따로 저장했다. | 도면 레이어면 같은 변환을 변환본의 모든 표에 쓰고(글자 각도·높이 포함) 세션을 끝낸다. 맞추는 동안 같은 도면의 다른 레이어는 숨겼다가 다시 보인다. 시험: `align_tool`, `cad_layers`. |
 | GitHub 자동 검사(CI)만 「Build Release」에서 실패하고 이 PC에서는 빌드됨(2026-10-02, `cannot convert from 'std::unique_ptr<QgsSymbol…>' to 'QgsSymbol *'`) | CI는 OSGeo4W 최신 qgis-dev(1237)를, 이 PC는 1201을 쓴다. 그 사이 QGIS가 `QgsSymbol::defaultSymbol`·`Qgs*SymbolLayer::create` 같은 함수를 unique_ptr 반환으로 바꿨다. | 받은 값을 `std::unique_ptr<T>(f()).release()`로 감싸 두 판 모두에서 컴파일한다. 새 판에서 깨지는 곳은 그 판의 헤더만 끼운 임시 OSGEO4W_ROOT(A:\tmp\osgeo-1237, 폴더 연결)로 전체를 컴파일해 찾는다. 확인: 새 헤더 컴파일 오류 0, layer_styles·feature_records·heritage_style 통과. |
 
 ## 지적 GetMap (확인된 사실)

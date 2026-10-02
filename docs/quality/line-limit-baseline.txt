@@ -1,12 +1,12 @@
 # C++ files already over the 300-line limit and their size when recorded.
 # scripts/scorecard.ps1 -LineLimitOnly fails when a file not listed here passes 300 lines
 # or a listed file grows. Shrinking is always fine; rewrite with -WriteBaseline after it.
-583 src/app/KaAlignMapTool.cpp
+565 src/app/KaAlignMapTool.cpp
 975 src/app/KaApplication.cpp
 343 src/app/KaBeginnerRibbon.cpp
 464 src/app/KaCaptureMapTool.cpp
 3851 src/app/KaDrawingStudio.cpp
-559 src/app/KaFeatureSelectTool.cpp
+499 src/app/KaFeatureSelectTool.cpp
 381 src/app/KaFileBrowserPanel.cpp
 1538 src/app/KaHeritageBrowser.cpp
 1120 src/app/KaIcons.cpp
@@ -19,7 +19,7 @@
 996 src/app/KaTopographicImportDialog.cpp
 632 src/app/KaTopographicScopePanel.cpp
 524 src/app/KaVertexEditTool.cpp
-3259 src/app/MainWindow.cpp
+3253 src/app/MainWindow.cpp
 652 src/app/MainWindow.h
 881 src/app/MainWindowAlign.cpp
 478 src/app/MainWindowContextMenus.cpp

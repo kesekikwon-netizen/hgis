@@ -2,7 +2,11 @@
 
 #include <QList>
 #include <QString>
+#include <QStringList>
 
+#include "GeorefService.h"
+
+class QgsMapLayer;
 class QgsProject;
 class QgsVectorLayer;
 
@@ -22,5 +26,12 @@ QList<QgsVectorLayer*> layersOf(const QgsProject* project, const QString& drawin
 QgsVectorLayer* alignLayerOf(const QgsProject* project, const QString& drawingId);  // 선 → 면 → 점 → 글자
 void removeFromProject(QgsProject* project, const QString& drawingId);
 QString drawingIdOfGroup(const QgsProject* project, const QString& title);  // 그 제목 묶음의 도면 id, 없으면 ""
+QString drawingIdOf(const QgsMapLayer* layer);  // 도면 레이어면 그 id, 아니면 ""
+
+// 정합: 맞추는 동안 같은 도면의 다른 레이어를 숨기고(숨긴 id), 끝나면 다시 보인다. 맞춘 변환은 그 도면의
+// 변환본 모든 표에 같이 쓴다(CadDrawingStore::applyAffine). 성공하면 레이어마다 다시 그린다.
+QStringList hideCompanions(QgsProject* project, const QString& drawingId, const QgsMapLayer* keep);
+void showLayers(QgsProject* project, const QStringList& layerIds);
+bool saveAlignment(QgsProject* project, const QString& drawingId, const GeorefService::Affine& a, QString* error);
 
 }  // namespace CadDrawingLayers

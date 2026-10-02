@@ -4,8 +4,11 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <cmath>
+
 #include "core/CadDrawingLayers.h"
 #include "core/CadDrawingStore.h"
+#include "core/GeorefService.h"
 #include "core/HeritageImport.h"
 #include "core/LayerRole.h"
 
@@ -180,6 +183,55 @@ class TestCadLayers : public QObject {
     QgsVectorLayer* onlyText = CadDrawingLayers::alignLayerOf(&project, kOtherId);
     QVERIFY(onlyText);
     QCOMPARE(onlyText->name(), QStringLiteral("글자"));
+  }
+
+  void hideCompanions_keepsTheAlignLayer() {
+    QTemporaryDir tmp;
+    const QString gpkg = writeGpkg(tmp, QStringLiteral("가수리"), {line(), text()});
+    QgsProject project;
+    QString error;
+    const QList<QgsVectorLayer*> layers =
+        CadDrawingLayers::addToProject(&project, gpkg, QStringLiteral("가수리 (도면)"), kId, &error);
+    QgsVectorLayer* lines = named(layers, QStringLiteral("선"));
+    QgsVectorLayer* texts = named(layers, QStringLiteral("글자"));
+    QVERIFY(lines && texts);
+    QCOMPARE(CadDrawingLayers::drawingIdOf(lines), kId);
+    const QStringList hidden = CadDrawingLayers::hideCompanions(&project, kId, lines);
+    QCOMPARE(hidden, QStringList{texts->id()});
+    QVERIFY(!project.layerTreeRoot()->findLayer(texts->id())->itemVisibilityChecked());
+    QVERIFY(project.layerTreeRoot()->findLayer(lines->id())->itemVisibilityChecked());
+    CadDrawingLayers::showLayers(&project, hidden);
+    QVERIFY(project.layerTreeRoot()->findLayer(texts->id())->itemVisibilityChecked());
+    QVERIFY(CadDrawingLayers::hideCompanions(&project, QString(), lines).isEmpty());
+  }
+
+  // 90° 회전 · 2배 · (10, 20) 이동을 도면의 선·글자 표 모두에 같이 적용한다.
+  void saveAlignment_movesEveryLayerOfTheDrawing() {
+    QTemporaryDir tmp;
+    const QString gpkg = writeGpkg(tmp, QStringLiteral("가수리"), {line(), text()});
+    QgsProject project;
+    QString error;
+    CadDrawingLayers::addToProject(&project, gpkg, QStringLiteral("가수리 (도면)"), kId, &error);
+    GeorefService::Affine a;
+    a.a = 0;
+    a.b = -2;
+    a.c = 10;
+    a.d = 2;
+    a.e = 0;
+    a.f = 20;
+    a.valid = true;
+    QVERIFY2(CadDrawingLayers::saveAlignment(&project, kId, a, &error), qUtf8Printable(error));
+    QgsVectorLayer lines(gpkg + QStringLiteral("|layername=lines"), QStringLiteral("l"), QStringLiteral("ogr"));
+    QgsFeature f;
+    QVERIFY(lines.getFeatures().nextFeature(f));
+    const QgsPointXY start(f.geometry().vertexAt(0));  // (0, 0) → (10, 20)
+    QVERIFY2(start.distance(QgsPointXY(10, 20)) < 1e-6, qUtf8Printable(start.toString(6)));
+    QgsVectorLayer texts(gpkg + QStringLiteral("|layername=texts"), QStringLiteral("t"), QStringLiteral("ogr"));
+    QgsFeature t;
+    QVERIFY(texts.getFeatures().nextFeature(t));
+    QVERIFY2(t.geometry().asPoint().distance(QgsPointXY(0, 30)) < 1e-6, qUtf8Printable(t.geometry().asWkt()));  // (5, 5)
+    QVERIFY(std::abs(t.attribute(QStringLiteral("text_angle")).toDouble() - 120.0) < 1e-9);
+    QVERIFY(std::abs(t.attribute(QStringLiteral("text_height")).toDouble() - 5.0) < 1e-9);
   }
 
   void removeFromProject_dropsLayersAndGroup() {

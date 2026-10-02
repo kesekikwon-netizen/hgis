@@ -107,6 +107,8 @@ private:
   bool ensureRasterBackup(QString* errorOut);
   int pairMarkAt(const QPoint& screen) const;
   bool beginPairDrag(QgsMapMouseEvent* e);
+  bool saveVectorAligned(QString* savedPath, QString* errorOut);  // KaAlignMapToolSave.cpp
+  void finishDrawingSession();  // 도면: 맞춤 복제본을 빼고 그 도면 레이어를 모두 다시 보인다
 
   QPointer<QgsMapLayer> m_layer;
   QPointer<QgsVectorLayer> m_hiddenSource;
@@ -136,4 +138,5 @@ private:
   QString m_savedVectorPath;
   int m_dragIndex = -1;
   QPoint m_dragPress;
+  QStringList m_cadHidden;  // 도면 정합 동안 숨긴 같은 도면의 다른 레이어
 };
