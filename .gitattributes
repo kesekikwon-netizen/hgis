@@ -10,6 +10,8 @@
 *.dwg binary
 *.dll binary
 *.exe binary
+# 받은 그대로 둔다(줄바꿈을 바꾸지 않아 COPYING 의 sha256 이 유지된다).
+third_party/** -text
 
 # Cloud agent scripts run on Ubuntu and must stay LF.
 .cursor/Dockerfile text eol=lf

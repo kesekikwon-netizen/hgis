@@ -23,6 +23,9 @@ struct Result {
 // dwgPath 를 <outDir>/source.dwg 로 복사하고, 작업 폴더 outDir 에서
 // `<tool> --as r2000 -y -o source.dxf source.dwg` 를 창 없이 돌린다. canceled 는 100 ms마다 본다.
 // 취소·시간 초과·실패이면 프로세스를 끝내고 source.dwg·source.dxf 를 지운다. 성공이면 source.dwg 만 지운다.
+// outDir 은 변환기가 쓰는 작업 폴더다(새 임시 폴더를 넘긴다). 그 안의 이전 source.dxf 는 시작 전에 지운다.
+// timeoutMs 가 0 이하이면 시작하자마자 시간이 다 된 것이다(Qt 의 -1 = 무제한과 다르다).
+// 프로세스가 끝날 때까지 돌아오지 않으므로 화면 스레드가 아닌 작업에서 부른다.
 Result convert(const QString& dwgPath, const QString& outDir, const QString& tool, int timeoutMs = 120000,
                const std::function<bool()>& canceled = {});
 

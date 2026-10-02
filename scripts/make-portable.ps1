@@ -324,7 +324,7 @@ function Write-SourceArchive([string]$portableRoot) {
   $ErrorActionPreference = 'Continue'
   try {
     $paths = @(& git -C $root -c core.quotepath=false ls-files --cached --others --exclude-standard -- `
-        src tests data cmake scripts templates launch.ps1 CMakeLists.txt CMakePresets.json VERSION `
+        src tests data cmake scripts templates third_party launch.ps1 CMakeLists.txt CMakePresets.json VERSION `
         VERSION_QGIS_PIN.txt dev-env.lock.json LICENSE COPYING README.md THIRD_PARTY_NOTICES.md 2>$null)
   } finally {
     $ErrorActionPreference = $old

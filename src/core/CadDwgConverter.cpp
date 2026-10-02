@@ -78,6 +78,9 @@ Result convert(const QString& dwgPath, const QString& outDir, const QString& too
     QFile::remove(workDxf);
     return failure(error, details);
   };
+  // 앞서 돌린 변환의 source.dxf 가 남아 있으면 도구가 아무것도 쓰지 않고 끝나도 결과로 보이므로 먼저 지운다.
+  if (QFile::exists(workDxf) && !QFile::remove(workDxf))
+    return fail(readError, QStringLiteral("작업 폴더의 이전 결과를 지우지 못했습니다: ") + QDir::toNativeSeparators(workDxf));
 
   QProcess process;
   process.setProgram(tool);

@@ -24,9 +24,9 @@ OSGeo4W에서 복사한 QGIS `LICENSE`/`AUTHORS`는 포터블 `licenses/QGIS-*`.
 
 ## 함께 두는 별도 프로그램
 
-| 구성 | 라이선스 | 소스 주소·sha256 |
+| 구성 | 라이선스 | 받은 파일·소스 주소·sha256 |
 | --- | --- | --- |
-| LibreDWG 0.14 (`tools/libredwg/dwg2dxf.exe`) | GPLv3 이상, 별도 프로세스(링크하지 않는다). 전문은 `tools/libredwg/COPYING` | https://github.com/LibreDWG/libredwg/releases/download/0.14/libredwg-0.14.tar.xz · sha256 `62ebb73b984f865960f20ed26619ea5f8789d5e3fd088fa40a2598384da81275`. 받은 곳은 `tools/libredwg/SOURCE.txt` |
+| LibreDWG 0.14 (`tools/libredwg/dwg2dxf.exe`) | GPLv3 이상, 별도 프로세스(링크하지 않는다). 전문은 `tools/libredwg/COPYING` | https://github.com/LibreDWG/libredwg/releases/download/0.14/libredwg-0.14.tar.xz · sha256 `62ebb73b984f865960f20ed26619ea5f8789d5e3fd088fa40a2598384da81275`. 앱에 넣은 Windows 판: https://github.com/LibreDWG/libredwg/releases/download/0.14/libredwg-0.14-win64.zip · sha256 `1ad7e15344d20b3426c3435b078d82fb84b35062815946b2cca9c5fc9810fea8`. 자세한 내용은 `tools/libredwg/SOURCE.txt` |
 
 ## 글꼴
 
