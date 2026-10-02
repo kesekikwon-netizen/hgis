@@ -1,7 +1,7 @@
 # Quick end-to-end smoke on the Windows build PC. ASCII only.
 #   default          rule file + hard-coded path checks, unit test exe, app --smoke-quit
 #   -SkipTests       skip test executables (CI already ran them through ctest)
-#   -SkipSmoke       skip --smoke-quit (CI runs scripts/run-ka-hgis.ps1 --smoke-quit itself)
+#   -SkipSmoke       skip --smoke-quit (CI starts ka-hgis.exe --smoke-quit itself and checks its exit code)
 #   -IncludeWorkflow also run ka_workflow_tests.exe (about 70 s; ctest runs it too)
 # Evidence goes to build/e2e-smoke (the old .omo/evidence path belonged to a removed harness).
 param([switch]$SkipTests, [switch]$SkipSmoke, [switch]$IncludeWorkflow)

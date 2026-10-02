@@ -79,7 +79,7 @@ Grok이 여섯 도구를 빠뜨리던 이유는 지시가 `AGENTS.md` 안에만 
 
 클라우드 에이전트는 Ubuntu다. 설정은 `.cursor/environment.json`과 `.cursor/Dockerfile`이다. https://cursor.com/docs/cloud-agent/setup 그 VM에는 OSGeo4W와 Visual Studio가 없다. Release·CTest·smoke는 이 Windows PC에서만 한다. 클라우드에 비밀키를 파일로 넣지 않는다. 대시보드 Secrets를 쓴다. https://cursor.com/dashboard/cloud-agents#environments
 
-Windows CI는 비공개 저장소의 self-hosted runner다. 러너가 꺼져 있거나 `vars.ENABLE_SELF_HOSTED_BUILD` 가 없으면 `Windows build gate` 잡이 "Windows build not run" 경고를 남긴다(`vars.REQUIRE_WINDOWS_BUILD=true` 면 실패). Linux `Sanity checks (no build)` 초록은 빌드 통과가 아니다. 저장소가 비공개여도 GPL 대응 소스는 포터블의 `source/ka-hgis-source.zip` 으로 함께 간다. https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners 이 문서 수정은 제품 C++를 바꾸지 않는다.
+Windows CI는 GitHub가 무료로 주는 `windows-2022` 실행 환경에서 돈다(2026-10-02부터, 공개 저장소). OSGeo4W qgis-dev를 `dev-env.lock.json` 꾸러미 목록대로 설치해 주마다 캐시하고, 구성·빌드·CTest·앱 시작 확인·한글 임시 폴더 시험·E2E 점검을 한다. `windows-latest`는 Visual Studio 2026뿐이라 쓰지 않는다. 비밀키는 쓰지 않는다. Linux `Sanity checks (no build)`는 같이 돌지만 빌드 통과가 아니다. 예전 self-hosted runner(`ka-hgis-pc`)는 더 쓰지 않는다. 공개 저장소에서는 지우는 것이 안전하다. GPL 대응 소스는 포터블의 `source/ka-hgis-source.zip` 으로 함께 간다. 이 문서 수정은 제품 C++를 바꾸지 않는다.
 
 과거 Codex 설정 근거(호환): [프로젝트 MCP 설정](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), [프로젝트 스킬](https://learn.chatgpt.com/docs/build-skills). Cursor는 USER MCP와 위 Cursor 설정을 우선한다. 실제 이 PC의 유효 설정과 실행 결과를 우선한다.
 

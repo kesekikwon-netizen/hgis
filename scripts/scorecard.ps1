@@ -17,7 +17,8 @@ function Get-OversizeSources() {
     if (-not (Test-Path -LiteralPath $base)) { continue }
     # Filter by extension: Windows PowerShell 5.1 ignores -Include with -LiteralPath and counted .ico/.dxf.
     Get-ChildItem -LiteralPath $base -Recurse -File | Where-Object { $_.Extension -in '.cpp', '.h', '.hpp' } | ForEach-Object {
-      $count = @(Get-Content -LiteralPath $_.FullName).Count
+      # Read as UTF-8: Windows PowerShell 5.1 reads BOM-less UTF-8 as the ANSI code page (cp949) and miscounts lines.
+      $count = @(Get-Content -LiteralPath $_.FullName -Encoding UTF8).Count
       if ($count -gt $lineLimit) {
         $relative = $_.FullName.Substring($root.Length).TrimStart('\', '/') -replace '\\', '/'
         $rows += [pscustomobject]@{ path = $relative; lines = $count }
@@ -66,7 +67,7 @@ $nowPath = Join-Path $root '.codex\NOW.md'
 
 function Count-Lines([string]$path) {
   if (-not (Test-Path -LiteralPath $path)) { return $null }
-  return @(Get-Content -LiteralPath $path).Count
+  return @(Get-Content -LiteralPath $path -Encoding UTF8).Count
 }
 
 function Count-TodoFixme() {
