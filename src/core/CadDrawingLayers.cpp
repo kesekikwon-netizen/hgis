@@ -1,11 +1,13 @@
 #include "CadDrawingLayers.h"
 
+#include "CadDrawingReader.h"
 #include "CadDrawingStore.h"
 #include "HeritageImport.h"
 #include "LayerOps.h"
 
 #include <QFileInfo>
 
+#include <algorithm>
 #include <memory>
 
 #include <qgsfillsymbol.h>
@@ -237,6 +239,26 @@ QString drawingIdOfGroup(const QgsProject* project, const QString& title) {
   for (QgsLayerTreeGroup* group : drawingGroups(project))
     if (group->name() == title) return ownDrawingId(group);
   return {};
+}
+
+QgsRectangle viewExtent(QgsVectorLayer* layer) {
+  if (drawingIdOf(layer).isEmpty()) return layer ? layer->extent() : QgsRectangle();
+  QVector<QgsRectangle> boxes;
+  QVector<QgsPointXY> centres;
+  QgsFeature feature;
+  for (QgsFeatureIterator it = layer->getFeatures(QgsFeatureRequest().setNoAttributes()); it.nextFeature(feature);)
+    if (feature.hasGeometry() && !feature.geometry().isEmpty()) {
+      boxes << feature.geometry().boundingBox();
+      centres << boxes.last().center();
+    }
+  QgsRectangle near = CadDrawingReader::robustExtent(centres);
+  if (near.isNull()) return layer->extent();
+  near.grow(std::max({near.width(), near.height(), 5000.0}));  // 5 km 안은 도면(2지점 등), 그 밖 몇 개만 뺀다
+  QgsRectangle view;
+  view.setNull();
+  for (const QgsRectangle& box : boxes)
+    if (near.contains(box.center())) view.combineExtentWith(box);
+  return view.isNull() ? layer->extent() : view;
 }
 
 QString drawingIdOf(const QgsMapLayer* layer) {

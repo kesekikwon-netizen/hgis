@@ -4,6 +4,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <qgsrectangle.h>
+
 #include "GeorefService.h"
 
 class QgsMapLayer;
@@ -32,6 +34,9 @@ void removeFromProject(QgsProject* project, const QString& drawingId);
 // 그 제목 도면 묶음(참조 지도 아래 어느 깊이든, 바로 아래 레이어에 도면 id 가 있는 묶음)의 도면 id, 없으면 ""
 QString drawingIdOfGroup(const QgsProject* project, const QString& title);
 QString drawingIdOf(const QgsMapLayer* layer);  // 도면 레이어면 그 id, 아니면 ""
+// 「이 레이어로 이동」 범위. 도면이면 멀리 떨어진 몇 개(사용자 test1: 85 km 밖 선 하나)를 뺀 범위:
+// 도형 중심 5~95 % 상자를 그 크기(적어도 5 km)만큼 넓힌 둘레 안에 중심이 드는 도형의 범위. 도면이 아니면 레이어 범위.
+QgsRectangle viewExtent(QgsVectorLayer* layer);
 
 // 정합: 맞추는 동안 같은 도면의 다른 레이어를 숨기고(숨긴 id), 끝나면 다시 보인다. 맞춘 변환은 그 도면의
 // 변환본 모든 표에 같이 쓴다(CadDrawingStore::applyAffine). 성공하면 레이어마다 다시 그린다.

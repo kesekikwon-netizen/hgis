@@ -541,7 +541,7 @@ static bool extentUsable(const QgsRectangle& ext) {
 static QgsRectangle vectorFeatureExtent(QgsVectorLayer* vl) {
   if (!vl) return {};
   vl->updateExtents();
-  QgsRectangle ext = vl->extent();
+  QgsRectangle ext = CadDrawingLayers::viewExtent(vl);  // 도면은 멀리 떨어진 몇 개를 뺀 범위
   if (extentUsable(ext)) return ext;
   QgsRectangle acc;
   bool any = false;

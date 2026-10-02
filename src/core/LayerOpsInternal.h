@@ -2,6 +2,8 @@
 
 #include <QString>
 
+#include "CadDrawingLayers.h"  // 「이 레이어로 이동」의 도면 범위(BasemapOps vectorFeatureExtent)
+
 // Shared by LayerOps.cpp and BasemapOps.cpp. Not a public API.
 inline QString kaStripLegendCrsSuffix(QString name) {
   int bracket = name.lastIndexOf(QStringLiteral(" [EPSG:"));

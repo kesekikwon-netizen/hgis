@@ -13,6 +13,7 @@
 #include "app/KaCadImport.h"
 #include "cad_fixture.h"
 #include "core/HeritageImport.h"
+#include "core/LayerOps.h"
 
 #include <qgsapplication.h>
 #include <qgslayertree.h>
@@ -29,11 +30,16 @@ const QgsRectangle kKoreaWide(0, 200000, 400000, 600000);        // 한반도 �
 const QgsRectangle kYeongcheon(177000, 348000, 237000, 408000);  // 영천 둘레 60 km: 가수리 자리 하나만 든다
 
 // 가수리 지적선 30개(베셀 중부원점 보정 EPSG:5174 숫자). 5186 으로 읽으면 부산 쪽, 5174 면 경북 가수리다.
-QString writeGasuriDxf(const QString& dir, const QString& name) {
+// stray 면 사용자 test1.dwg 처럼 「text」 층 선 하나를 북서쪽 약 85 km 밖에 두고, 1 km 동쪽에 2지점 선 하나를 둔다.
+QString writeGasuriDxf(const QString& dir, const QString& name, bool stray = false) {
   QByteArray entities;
   for (int i = 0; i < 30; ++i) {
     const double x = 387699.70 - 300 + i * 20;
     entities += CadFixture::line("JIJUK", 1, x, 280239.90 - 300, x + 10, 280239.90 + 300);
+  }
+  if (stray) {
+    entities += CadFixture::line("text", 7, 387699.70 - 51000, 280239.90 + 73000, 387699.70 - 50990, 280239.90 + 73010);
+    entities += CadFixture::line("JIJUK", 1, 387699.70 + 1000, 280239.90, 387699.70 + 1010, 280239.90 + 10);
   }
   const QString path = QDir(dir).filePath(name + QStringLiteral(".dxf"));
   return CadFixture::write(path, CadFixture::document("ANSI_949", entities)) ? path : QString();
@@ -116,6 +122,22 @@ class TestCadImportAuto : public QObject {
     QVERIFY(fx.run(first));
     QVERIFY(fx.run(second));
     QVERIFY2(fx.notice().contains(QStringLiteral("가장 그럴듯한")), qUtf8Printable(fx.notice()));
+  }
+
+  // 「이 레이어로 이동」은 도면에서 멀리 떨어진 몇 개 때문에 멀어지지 않는다(2026-10-03 사용자 스크린샷: 1:429,796).
+  void zoomingToADrawingLayerIgnoresAFewStrayShapes() {
+    QTemporaryDir tmp;
+    const QString dxf = writeGasuriDxf(tmp.path(), QStringLiteral("가수리_5174"), true);
+    Fixture fx(kKoreaWide);
+    QVERIFY(fx.run(dxf));
+    QgsVectorLayer* lines = drawingLines(QStringLiteral("가수리_5174 (도면)"));
+    QVERIFY(lines);
+    QCOMPARE(lines->featureCount(), 32);  // 떨어진 선도 도면 그대로 남긴다
+    QVERIFY(LayerOps::zoomToLayerMax(fx.canvas, lines));
+    const QgsRectangle view = fx.canvas->extent();
+    QVERIFY2(view.width() < 10000 && view.contains(kExpected), qUtf8Printable(view.toString(0)));
+    // 선이 몇 개뿐인 1 km 옆 2지점은 진짜 도면이다: 화면에 남는다(검토 2026-10-03).
+    QVERIFY2(view.contains(QgsPointXY(kExpected.x() + 1005, kExpected.y())), qUtf8Printable(view.toString(0)));
   }
 
   // 조사구역이 없어도 지도 화면이 조사 지역을 보고 있으면 그 자리다.
