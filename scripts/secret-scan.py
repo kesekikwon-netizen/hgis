@@ -10,7 +10,8 @@ Looks for:
     secrets.ini, ka-hgis-vworld.ini), whatever their content
 
 Allowlisted test fakes: 11111111-2222-..., AAAAAAAA-BBBB-..., and a few other
-fixture GUIDs used in workflow tests.
+fixture GUIDs used in workflow tests, plus the secretvalueN tokens the log-masking
+tests feed in on purpose.
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ ALLOW_GUIDS = {
     "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
     "00000000-1111-2222-3333-444455556666",
     "11112222-3333-4444-5555-666677778888",
+    "0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9",  # tests/test_log_session.cpp masking fixture
 }
 
 GUID_RE = re.compile(
@@ -36,6 +38,8 @@ PASSWORD_RE = re.compile(
 SECRET_FILE_RE = re.compile(
     r"(?i)(^|/)(secrets\.ini|ka-hgis-vworld\.ini|[^/]*-account\.ini|config/[^/]*-local\.ini)$"
 )
+# Fake values the log-masking tests write on purpose (tests/test_log_session.cpp).
+FAKE_SECRET_RE = re.compile(r"(?i)^secretvalue\d+$")
 BEARER_RE = re.compile(r"(?i)Authorization\s*:\s*Bearer\s+(\S+)")
 
 SKIP_SUFFIX = {
@@ -90,6 +94,8 @@ for raw in files:
             if re.match(r"(?i)(form|document|new|null|undefined|true|false)\b", val):
                 continue
             if re.search(r"(?i)\b(const|let|var|auto)\s+\*?password\s*=", line):
+                continue
+            if FAKE_SECRET_RE.match(val):
                 continue
             # Test code that asserts the token is absent.
             if "contains" in ctx and "password" in ctx:

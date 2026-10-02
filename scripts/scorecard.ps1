@@ -15,7 +15,8 @@ function Get-OversizeSources() {
   foreach ($dir in @('src', 'tests')) {
     $base = Join-Path $root $dir
     if (-not (Test-Path -LiteralPath $base)) { continue }
-    Get-ChildItem -LiteralPath $base -Recurse -File -Include *.cpp,*.h,*.hpp | ForEach-Object {
+    # Filter by extension: Windows PowerShell 5.1 ignores -Include with -LiteralPath and counted .ico/.dxf.
+    Get-ChildItem -LiteralPath $base -Recurse -File | Where-Object { $_.Extension -in '.cpp', '.h', '.hpp' } | ForEach-Object {
       $count = @(Get-Content -LiteralPath $_.FullName).Count
       if ($count -gt $lineLimit) {
         $relative = $_.FullName.Substring($root.Length).TrimStart('\', '/') -replace '\\', '/'
@@ -73,7 +74,7 @@ function Count-TodoFixme() {
   foreach ($dir in @('src', 'tests')) {
     $base = Join-Path $root $dir
     if (-not (Test-Path -LiteralPath $base)) { continue }
-    Get-ChildItem -LiteralPath $base -Recurse -File -Include *.cpp,*.h,*.hpp | ForEach-Object {
+    Get-ChildItem -LiteralPath $base -Recurse -File | Where-Object { $_.Extension -in '.cpp', '.h', '.hpp' } | ForEach-Object {
       $n += @(Select-String -LiteralPath $_.FullName -Pattern 'TODO|FIXME' -AllMatches).Count
     }
   }

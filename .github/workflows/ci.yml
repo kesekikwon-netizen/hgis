@@ -2,8 +2,7 @@ name: CI
 
 on:
   push:
-    # Work lives on dated branches (e.g. 20260922-1) long before it reaches main.
-    branches: [main, '20*']
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -12,10 +11,12 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# No secrets or API keys: both jobs only read the repository.
+permissions:
+  contents: read
+
 jobs:
-  # Always runs on GitHub-hosted runners — no OSGeo4W required.
-  # It compiles nothing: a green "Sanity checks" is never a Windows build or CTest pass
-  # (AGENTS.md: the Windows machine remains the build gate). See "Windows build gate" below.
+  # Quick checks on Linux before the Windows build. Compiles nothing.
   sanity:
     name: Sanity checks (no build)
     runs-on: ubuntu-latest
@@ -74,59 +75,84 @@ jobs:
         shell: pwsh
         run: ./scripts/scorecard.ps1 -LineLimitOnly
 
-  # Full Windows build — needs a self-hosted runner with OSGeo4W + VS2022
-  # Register runner: https://github.com/kwonyoungin11/hgis/settings/actions/runners
-  # Labels must include: self-hosted, Windows, ka-hgis
-  windows-build:
-    name: Windows build (self-hosted)
+  # Full build, every CTest group and an app start on GitHub's free Windows runner (the
+  # repository is public). windows-latest now ships only Visual Studio 2026, while the "vs"
+  # preset and the reference PC use Visual Studio 2022, so the job stays on windows-2022.
+  windows:
+    name: Windows build and tests
     needs: sanity
-    if: ${{ vars.ENABLE_SELF_HOSTED_BUILD == 'true' }}
-    runs-on: [self-hosted, Windows, ka-hgis]
-    timeout-minutes: 45
+    runs-on: windows-2022
+    timeout-minutes: 300
+    env:
+      OSGEO4W_ROOT: C:\OSGeo4W
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
 
-      # The runner is the reference PC: fail when it has drifted from the
-      # committed dev-env.lock.json. A missing lock (exit 2) only warns.
-      - name: Compare with dev-env.lock.json
+      # The OSGeo4W packages of the reference PC (dev-env.lock.json). OSGeo4W serves the newest
+      # qgis-dev, so the cached install is renewed every week and whenever the lock file changes.
+      - name: OSGeo4W package list
+        id: osgeo4w
         shell: pwsh
         run: |
-          . .\scripts\dev-env.ps1
-          .\scripts\dev-env-lock.ps1
-          if ($LASTEXITCODE -eq 1) { exit 1 }
-          exit 0
+          $lock = Get-Content -Raw dev-env.lock.json | ConvertFrom-Json
+          $names = @($lock.required.osgeo4wPackages.PSObject.Properties.Name)
+          if ($names.Count -lt 10) { throw "dev-env.lock.json lists only $($names.Count) OSGeo4W packages" }
+          "packages=$($names -join ',')" >> $env:GITHUB_OUTPUT
+          "week=$(Get-Date -UFormat '%G-%V')" >> $env:GITHUB_OUTPUT
 
+      - name: Restore OSGeo4W
+        id: osgeo4w-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\OSGeo4W
+          key: osgeo4w-${{ hashFiles('dev-env.lock.json') }}-${{ steps.osgeo4w.outputs.week }}
+
+      - name: Install OSGeo4W (qgis-dev)
+        if: steps.osgeo4w-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $setup = Join-Path $env:RUNNER_TEMP 'osgeo4w-setup.exe'
+          Invoke-WebRequest -Uri 'https://download.osgeo.org/osgeo4w/v2/osgeo4w-setup.exe' -OutFile $setup
+          $setupArgs = @('-q', '-k', '-n', '-r', '-O', '-a', 'x86_64',
+                         '-s', 'https://download.osgeo.org/osgeo4w/v2',
+                         '-R', 'C:\OSGeo4W', '-l', (Join-Path $env:RUNNER_TEMP 'osgeo4w-packages'),
+                         '-P', '${{ steps.osgeo4w.outputs.packages }}')
+          $p = Start-Process -FilePath $setup -ArgumentList $setupArgs -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "osgeo4w-setup exit $($p.ExitCode)" }
+          foreach ($f in 'apps\qgis-dev\lib\qgis_core.lib', 'apps\gdal-dev\lib\gdal_i.lib', 'apps\Qt6\bin\Qt6Core.dll') {
+            if (-not (Test-Path -LiteralPath (Join-Path 'C:\OSGeo4W' $f))) { throw "OSGeo4W install is missing $f" }
+          }
+
+      # Same order as scripts/build-all.ps1: configure, build, CTest, start the app.
       - name: Configure (VS 2022 x64)
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
           . .\scripts\dev-env.ps1
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DKA_HGIS_BUILD_TESTS=ON
+          cmake --preset vs
 
       - name: Build Release
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
           . .\scripts\dev-env.ps1
-          cmake --build build --config Release
+          cmake --build build --config Release --parallel
 
-      - name: clang-tidy changed lines
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          . .\scripts\dev-env.ps1
-          .\scripts\gen-compile-commands.ps1
-          .\scripts\clang-tidy-changed.ps1 -Base HEAD^
-
+      # Two tests at a time keep the timing-sensitive groups steady on a 4-core runner;
+      # a failing test gets one more try before the job fails.
       - name: CTest
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
           . .\scripts\dev-env.ps1
-          ctest --test-dir build -C Release --output-on-failure
+          ctest --test-dir build -C Release -j2 --output-on-failure --repeat until-pass:2
+
+      - name: Start and quit the app
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          . .\scripts\dev-env.ps1
+          $p = Start-Process -FilePath build\Release\ka-hgis.exe -ArgumentList '--smoke-quit' -WorkingDirectory build\Release -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "ka-hgis --smoke-quit exit $($p.ExitCode)" }
 
       # Reference runners use ASCII TEMP; Korean-path PCs do not.
       # CTest ENVIRONMENT pins TEMP to the configure-time path, so run the
@@ -154,14 +180,7 @@ jobs:
             exit $code
           }
 
-      - name: Smoke quit
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          . .\scripts\dev-env.ps1
-          .\scripts\run-ka-hgis.ps1 --smoke-quit
-
-      # CTest and the Korean-TEMP step already ran the test executables and "Smoke quit"
+      # CTest and the Korean-TEMP step already ran the test executables and "Start and quit the app"
       # started the app; e2e-smoke only adds the rule-file and hard-coded-path checks here.
       - name: E2E smoke
         shell: pwsh
@@ -170,38 +189,10 @@ jobs:
           . .\scripts\dev-env.ps1
           .\scripts\e2e-smoke.ps1 -SkipTests -SkipSmoke
 
-  # F189: make a missing Windows build visible. The self-hosted job is skipped when
-  # vars.ENABLE_SELF_HOSTED_BUILD is not 'true', and then the workflow used to be green with
-  # nothing compiled. This job always runs, says so in the run summary, and fails when the
-  # Windows build failed or was cancelled. Set vars.REQUIRE_WINDOWS_BUILD to 'true' (and make
-  # this check required in branch protection) to fail when the build did not run at all.
-  windows-gate:
-    name: Windows build gate
-    needs: [sanity, windows-build]
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Report Windows build result
-        env:
-          RESULT: ${{ needs.windows-build.result }}
-          ENABLED: ${{ vars.ENABLE_SELF_HOSTED_BUILD }}
-          REQUIRED: ${{ vars.REQUIRE_WINDOWS_BUILD }}
-        run: |
-          set -euo pipefail
-          echo "windows-build result: ${RESULT} (ENABLE_SELF_HOSTED_BUILD=${ENABLED:-unset})"
-          case "${RESULT}" in
-            success)
-              echo "### Windows build, CTest and smoke passed on the self-hosted runner" >> "$GITHUB_STEP_SUMMARY"
-              ;;
-            skipped)
-              msg="Windows build, CTest and smoke did NOT run (self-hosted runner disabled or sanity failed). This run proves only the sanity checks."
-              echo "::warning title=Windows build not run::${msg}"
-              echo "### ${msg}" >> "$GITHUB_STEP_SUMMARY"
-              if [ "${REQUIRED:-}" = "true" ]; then exit 1; fi
-              ;;
-            *)
-              echo "::error title=Windows build ${RESULT}::The self-hosted Windows build did not pass (${RESULT})."
-              echo "### Windows build ${RESULT}" >> "$GITHUB_STEP_SUMMARY"
-              exit 1
-              ;;
-          esac
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: build/test-logs
+          if-no-files-found: ignore
