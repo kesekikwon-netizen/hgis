@@ -92,6 +92,16 @@ test('validateSource rejects a skill without its name', (t) => {
   assert.throws(() => validateSource(dir), /SKILL\.md/);
 });
 
+// The block also carries the skill-routing line (duplication check: engineering:* and productivity:*
+// skills do the same jobs as superpowers), so the rule file may hold several "- " lines.
+test('validateSource accepts several rule lines and checks each one', (t) => {
+  const dir = copySourceToTemp(t);
+  fs.writeFileSync(path.join(dir, 'intent-rule.md'), '- 첫 줄 `capture-intent`\r\n- 둘째 줄\r\n');
+  assert.equal(validateSource(dir).rule, '- 첫 줄 `capture-intent`\n- 둘째 줄');
+  fs.writeFileSync(path.join(dir, 'intent-rule.md'), '- 첫 줄 `capture-intent`\n둘째 줄\n');
+  assert.throws(() => validateSource(dir), /intent-rule\.md/);
+});
+
 // The template lives inside SKILL.md: a separate file under ~/.claude is outside the project, and
 // reading it was refused in the behaviour trials, so the record came out without the template.
 test('validateSource rejects a skill whose template misses a section', (t) => {
@@ -105,7 +115,7 @@ test('installIntent copies the skill and keeps the old CLAUDE.md in the backup',
   const { backupDir } = installIntent({ configDir: cfg, sourceDir: HERE, stamp: '2026-10-02-0900' });
   assert.equal(read(cfg, 'skills/capture-intent/SKILL.md'), read(HERE, 'skills/capture-intent/SKILL.md'));
   assert.equal(fs.existsSync(path.join(cfg, 'skills/capture-intent/template.md')), false);
-  const rule = read(HERE, 'intent-rule.md').trim();
+  const rule = read(HERE, 'intent-rule.md').trim().replace(/\r\n/g, '\n');
   assert.equal(read(cfg, 'CLAUDE.md'), `${ORIGINAL}\n${START}\n${rule}\n${END}\n`);
   assert.equal(read(backupDir, 'CLAUDE.md'), ORIGINAL);
   assert.equal(backupDir, path.join(cfg, '_reset_backup', '2026-10-02-0900-intent'));

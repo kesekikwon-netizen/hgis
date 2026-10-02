@@ -4,8 +4,9 @@
 //   node scripts/claude-global/install-intent.mjs --remove   제거
 //
 // Install copies skills/capture-intent/SKILL.md (the record template is inside it) into
-// <config>/skills/capture-intent/, replacing that folder, and puts the one line from
-// intent-rule.md into <config>/CLAUDE.md between two markers, so it can be updated and removed
+// <config>/skills/capture-intent/, replacing that folder, and puts the lines from intent-rule.md
+// (the request-record rule and the skill-routing rule) into <config>/CLAUDE.md between two
+// markers, so they can be updated and removed
 // again without touching the person's own lines (their line ending and a leading BOM are kept).
 // <config> is CLAUDE_CONFIG_DIR, else ~/.claude. Before changing anything it copies the old
 // CLAUDE.md and skill folder to <config>/_reset_backup/<YYYY-MM-DD-HHMM>-intent/.
@@ -52,11 +53,14 @@ export function validateSource(sourceDir) {
   const missing = TEMPLATE_HEADINGS.filter((heading) => !lines.includes(heading));
   if (missing.length) throw new Error(`SKILL.md: 양식에 ${missing.join(', ')} 칸이 없습니다`);
 
-  const rule = readSource(sourceDir, 'intent-rule.md').split('\n').filter((line) => line.trim());
-  if (rule.length !== 1 || !rule[0].startsWith('- ') || !rule[0].includes(`\`${SKILL}\``)) {
-    throw new Error(`intent-rule.md: '- '로 시작하고 \`${SKILL}\`을 담은 한 줄이어야 합니다`);
+  // One "- " line per rule: the request-record rule, plus the skill-routing rule beside it.
+  const rule = readSource(sourceDir, 'intent-rule.md').split('\n').filter((line) => line.trim())
+    .map((line) => line.trimEnd());
+  if (!rule.length || rule.some((line) => !line.startsWith('- '))
+      || !rule.some((line) => line.includes(`\`${SKILL}\``))) {
+    throw new Error(`intent-rule.md: 줄마다 '- '로 시작하고, 그중 한 줄은 \`${SKILL}\`을 담아야 합니다`);
   }
-  return { description, rule: rule[0].trimEnd() };
+  return { description, rule: rule.join('\n') };
 }
 
 // null when there are no markers; throws when they are half there, reversed or repeated.
