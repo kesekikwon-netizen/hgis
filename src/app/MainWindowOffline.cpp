@@ -369,9 +369,7 @@ static void afterBasemapAdded(MainWindow* self, QgsMapCanvas* canvas, const QStr
   QString next = QStringLiteral("%1을 올렸습니다. 「그리기」로 구역을 그리세요.").arg(label);
   if (label.contains(QStringLiteral("지적")))
     next = QStringLiteral("지적을 올렸습니다. 가까이 보면 번지가 보입니다.");
-  else if (label.contains(QStringLiteral("위성")))  // 이 길은 Google 위성뿐: 지적과 어긋나는 까닭을 알린다(R52)
-    next = BasemapPolicy::googlePositionNotice();
-  self->statusBar()->showMessage(next, next.size() > 60 ? 20000 : 8000);
+  self->statusBar()->showMessage(next, 8000);
 }
 #endif
 
@@ -495,7 +493,9 @@ void MainWindow::addBasemapGoogle() {
   if (!LayerOps::addKoreaBasemap(QgsProject::instance(), m_canvas, LayerOps::KoreaBasemap::GoogleSatellite, &err))
     notify(Notice::Warning, QStringLiteral("배경"),
            QStringLiteral("위성 배경지도를 올리지 못했습니다."), err);
-  else
+  else {
     afterBasemapAdded(this, m_canvas, m_workCrs, QStringLiteral("위성"));
+    notify(Notice::Warning, QStringLiteral("위치 주의"), BasemapPolicy::googlePositionNotice());  // 닫을 때까지 둔다(R52)
+  }
 #endif
 }

@@ -1429,6 +1429,11 @@ if(KA_HGIS_BUILD_TESTS)
   ka_add_qtest(above_labels_150 ka_hgis_above_labels_tests)
   ka_add_qtest(above_labels_200 ka_hgis_above_labels_tests)
   set_tests_properties(above_labels above_labels_125 above_labels_150 above_labels_200 PROPERTIES TIMEOUT 60)
+  add_executable(ka_hgis_above_labels_names_tests tests/test_above_labels_names.cpp src/app/KaAboveLabelsOverlay.cpp)
+  set_target_properties(ka_hgis_above_labels_names_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_hgis_above_labels_names_tests PRIVATE ka_core Qt6::Test)
+  ka_add_qtest(above_labels_names ka_hgis_above_labels_names_tests)
+  set_tests_properties(above_labels_names PROPERTIES TIMEOUT 60)
 
   add_executable(ka_recent_tests
     tests/test_recent.cpp
@@ -1644,7 +1649,7 @@ if(KA_HGIS_BUILD_TESTS)
     string(JOIN "\\;" _ka_path_esc ${_ka_path})
     set_tests_properties(layer_labels layer_information checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss user_error recent_surveys section_layout_engine section_studio_engine terrain_3d_engine ${KA_SAVE_OPEN_TESTS} e2e_opaque_suite network_services storage_safety reference_download region_locator_popup layer_state_regressions map_render above_labels above_labels_125 above_labels_150 above_labels_200 PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
-    set_tests_properties(layer_roles layer_styles layer_edits layer_panel layer_tree_undo undo_group survey_save_as PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
+    set_tests_properties(layer_roles layer_styles layer_edits layer_panel layer_tree_undo undo_group survey_save_as above_labels_names PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(georef_quality georef_backup align_tool align_image_view PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(cad_dwg cad_reader cad_crs cad_store cad_layers cad_dialog cad_import cad_align blocking_task PROPERTIES

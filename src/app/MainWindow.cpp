@@ -199,7 +199,6 @@
 #include <qgslayertreelayer.h>
 #include <qgslayertreeview.h>
 #include <qgslayertreemodel.h>
-#include <qgslayertreemapcanvasbridge.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgsmaptool.h>
 #include <qgsmaptoolemitpoint.h>
@@ -663,8 +662,8 @@ void MainWindow::buildUi() {
   connect(m_layerTree, &QTreeView::doubleClicked, this, [this](const QModelIndex& index) {
     if (index.column() == 0) onLayerTreeDoubleClicked(index);
   });
-  m_bridge = new QgsLayerTreeMapCanvasBridge(layerTreeRoot, m_canvas, this);
-  m_bridge->setAutoSetupOnFirstLayer(false);
+  // 레이어 창 ↔ 지도 연결. 덧그림이 그리는 레이어는 연결이 지도 목록에 다시 넣을 때마다 뺀다(R83).
+  m_bridge = KaAboveLabelsOverlay::makeLayerTreeBridge(layerTreeRoot, m_canvas, this);
 
   m_canvas->setContextMenuPolicy(Qt::DefaultContextMenu);
   m_canvas->installEventFilter(this);

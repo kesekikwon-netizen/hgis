@@ -7,11 +7,14 @@
 #include <QPointer>
 #include <QSize>
 #include <QString>
+#include <QStringList>
 #include <memory>
 
 #include <qgsrectangle.h>
 
 class QObject;
+class QgsLayerTree;
+class QgsLayerTreeMapCanvasBridge;
 class QgsMapLayer;
 class QgsMapCanvas;
 
@@ -29,7 +32,8 @@ class QgsMapCanvas;
 //
 // The cached picture is drawn at the canvas device pixel ratio (125-200 % field
 // screens stay sharp) and is rebuilt only when its inputs change: the layer list,
-// a watched layer's style/data/edit signal, or the extent, size, DPR, CRS or
+// the main map's layer list (a layer the main map draws gets its names from there,
+// never twice), a watched layer's style/data/edit signal, or the extent, size, DPR, CRS or
 // rotation. A finished base-map render alone does not redraw it.
 class KaAboveLabelsOverlay : public QgsMapCanvasItem {
 public:
@@ -41,6 +45,10 @@ public:
   bool isEmpty() const { return m_layers.isEmpty(); }
 
   void updatePosition() override;
+
+  // 레이어 창 ↔ 본 지도 연결. 체크·묶음이 바뀔 때마다 연결이 보이는 레이어를 모두 지도 목록에 다시 넣으므로,
+  // 이 덧그림이 그리는 레이어를 그때마다 다시 뺀다(R83).
+  static QgsLayerTreeMapCanvasBridge* makeLayerTreeBridge(QgsLayerTree* root, QgsMapCanvas* canvas, QObject* parent);
 
   // Tests and diagnostics: physical cache size, its DPR, and how often it was rebuilt.
   QSize cachePixelSize() const { return m_cache.size(); }
@@ -64,6 +72,8 @@ private:
   QImage m_cache;
   QString m_cacheKey;
   QSize m_cacheSize;
+  // 본 지도가 마지막으로 다 그린 레이어(id). 이 안의 레이어 이름은 본 지도가 이미 썼으니 여기서 쓰지 않는다.
+  QStringList m_canvasDrawnIds;
   bool m_dirty = true;
   bool m_painting = false;
   int m_rebuilds = 0;

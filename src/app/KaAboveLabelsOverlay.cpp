@@ -4,13 +4,33 @@
 
 #include <QObject>
 #include <QPainter>
+#include <QTimer>
 
+#include <qgslayertreemapcanvasbridge.h>
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
 #include <qgsmaprenderercustompainterjob.h>
 #include <qgsmapsettings.h>
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
+
+namespace {
+
+// 레이어 창 연결이 덧그림 레이어를 다시 넣은 렌더가 시작되기 전에 뺀다. 그리는 중이면 목록을 건드리지 않고
+// 끝난 뒤에 뺀다(타일을 받는 동안 다시 그리기 금지 규칙). 연결이 넣은 목록에서 덧그림 레이어만 뺀다: 목록을
+// 새로 만들면 저장 중 잠깐 끊긴 레이어가 빠진 채 남는다(LayerOps::syncMapCanvas 참고).
+void keepOverlayLayersOff(const QPointer<QgsMapCanvas>& canvas) {
+  if (!canvas) return;
+  if (canvas->isDrawing()) {
+    QTimer::singleShot(80, canvas.data(), [canvas] { keepOverlayLayersOff(canvas); });
+    return;
+  }
+  QList<QgsMapLayer*> base = canvas->layers();
+  for (QgsMapLayer* layer : LayerOps::layersDrawnAboveLabels(QgsProject::instance())) base.removeAll(layer);
+  if (base != canvas->layers()) canvas->setLayers(base);
+}
+
+}  // namespace
 
 KaAboveLabelsOverlay::KaAboveLabelsOverlay(QgsMapCanvas* canvas)
     : QgsMapCanvasItem(canvas), m_canvasContext(std::make_unique<QObject>()),
@@ -21,11 +41,28 @@ KaAboveLabelsOverlay::KaAboveLabelsOverlay(QgsMapCanvas* canvas)
   // 지도가 다시 그려지면 대상 목록만 다시 읽는다(조회만 하는 함수). 그림은 목록이나
   // 레이어가 실제로 바뀌었을 때만 다시 만든다.
   if (canvas)
-    QObject::connect(canvas, &QgsMapCanvas::renderComplete, m_canvasContext.get(),
-                     [this](QPainter*) { syncWithProject(); });
+    QObject::connect(canvas, &QgsMapCanvas::renderComplete, m_canvasContext.get(), [this](QPainter*) {
+      // 본 지도가 방금 다 그린 레이어 목록. 그림이 바뀌는 이때에 맞춰 이름을 누가 쓸지도 바꾼다(rebuildCache).
+      QStringList drawn;
+      for (const QgsMapLayer* layer : mMapCanvas->layers()) drawn << layer->id();
+      if (drawn != m_canvasDrawnIds) {
+        m_canvasDrawnIds = drawn;
+        markDirty();
+      }
+      syncWithProject();
+    });
 }
 
 KaAboveLabelsOverlay::~KaAboveLabelsOverlay() = default;
+
+QgsLayerTreeMapCanvasBridge* KaAboveLabelsOverlay::makeLayerTreeBridge(QgsLayerTree* root, QgsMapCanvas* canvas,
+                                                                       QObject* parent) {
+  auto* bridge = new QgsLayerTreeMapCanvasBridge(root, canvas, parent);
+  bridge->setAutoSetupOnFirstLayer(false);
+  QObject::connect(bridge, &QgsLayerTreeMapCanvasBridge::canvasLayersChanged, canvas,
+                   [target = QPointer<QgsMapCanvas>(canvas)] { keepOverlayLayersOff(target); });
+  return bridge;
+}
 
 void KaAboveLabelsOverlay::syncWithProject() {
   const QList<QgsMapLayer*> above = LayerOps::layersDrawnAboveLabels(QgsProject::instance());
@@ -170,10 +207,12 @@ void KaAboveLabelsOverlay::rebuildCache(qreal dpr) {
   // The vector-only pass stays sequential like the base map (WMS crash class rule).
   QgsMapRendererCustomPainterJob job(ms, &p);
   job.renderSynchronously();
+  // 레이어 창 연결(bridge)이 이 레이어를 본 지도에 다시 넣었으면 본 지도가 이미 이름을 쓴다. 여기서 또 쓰면
+  // 두 엔진이 다른 자리를 골라 「오외도지석묘1호호」처럼 겹친다(R83). 이름은 한 엔진에만 맡긴다.
   QList<QgsMapLayer*> labeled;
   for (QgsMapLayer* layer : live) {
     auto* vector = qobject_cast<QgsVectorLayer*>(layer);
-    if (vector && vector->labelsEnabled() && vector->labeling())
+    if (vector && vector->labelsEnabled() && vector->labeling() && !m_canvasDrawnIds.contains(layer->id()))
       labeled.append(vector);
   }
   if (!labeled.isEmpty()) {
