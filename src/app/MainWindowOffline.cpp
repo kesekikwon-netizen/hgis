@@ -369,9 +369,9 @@ static void afterBasemapAdded(MainWindow* self, QgsMapCanvas* canvas, const QStr
   QString next = QStringLiteral("%1을 올렸습니다. 「그리기」로 구역을 그리세요.").arg(label);
   if (label.contains(QStringLiteral("지적")))
     next = QStringLiteral("지적을 올렸습니다. 가까이 보면 번지가 보입니다.");
-  else if (label.contains(QStringLiteral("위성")))
-    next = QStringLiteral("위성을 올렸습니다. 「그리기」로 구역을 그리세요.");
-  self->statusBar()->showMessage(next, 8000);
+  else if (label.contains(QStringLiteral("위성")))  // 이 길은 Google 위성뿐: 지적과 어긋나는 까닭을 알린다(R52)
+    next = BasemapPolicy::googlePositionNotice();
+  self->statusBar()->showMessage(next, next.size() > 60 ? 20000 : 8000);
 }
 #endif
 

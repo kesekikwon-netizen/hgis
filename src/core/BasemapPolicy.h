@@ -138,6 +138,12 @@ inline QString drawingNotice(const QgsMapLayer* layer) {
                         "확인하세요. 제출용 배경은 VWorld 위성을 권장합니다.");
 }
 
+// Google 위성을 올릴 때 알릴 말: 국내 정사영상이 아니어서 지적과 곳에 따라 어긋난다(2026-10-02 실측, R52).
+inline QString googlePositionNotice() {
+  return QStringLiteral("Google 위성을 올렸습니다. Google 사진은 국내 정사영상이 아니라서 지적선과 곳에 따라 수 m~15 m 넘게 "
+                        "어긋날 수 있습니다. 지적·조사구역 위치 확인과 제출 도면에는 VWorld 위성을 쓰세요.");
+}
+
 // The notice for the first background shown in the legend that needs one, or empty.
 inline QString drawingNoticeForProject(const QgsProject* project) {
   const QgsLayerTree* root = project ? project->layerTreeRoot() : nullptr;

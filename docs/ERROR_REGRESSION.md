@@ -45,6 +45,7 @@
 | 같은 도면(DXF·DWG)을 다시 불러오면 옛 변환본(「이름.gpkg」)이 지워지지 않고 남음 | 옛 변환본을 한 번만 지워 보고 실패하면 넘어갔다. 지도가 그리는 동안 연 GPKG 손잡이(QGIS 연결 풀)가 아직 열려 있으면 그 순간에는 지울 수 없다. | 앱이 만든 파일은 FileCleanup::removeWhenFree 로 지금 못 지우면 5초·60초 뒤 다시 지운다(옛 변환본, 실패·늦은 취소 때의 새 변환본). 시험: `file_cleanup`, `cad_import`. |
 | 앱을 터미널에서 켜면 「ERROR 1: … unable to open database file」이 1000개 넘게 쏟아짐(2026-09-18) | 오류 자체(저장 직후 끊긴 연결, 세대 폴더 경로)는 09-18 에 고쳤고, 그 뒤 기록에는 하루 1~14번(대부분 저장 직후 gpkg_metadata)만 남는다. 남은 것은 기록 장치가 세션 기록에 남긴 오류를 GDAL 기본 처리기로 터미널에 또 찍은 것이다. | 이전 처리기가 GDAL 기본 처리기면 넘기지 않는다(세션 기록에는 남고 반복은 접힌다). 시험: `gdal_error_log` (`failuresAreNotRepeatedOnTheTerminal`). |
 | GitHub 자동 검사(CI)만 「Build Release」에서 실패하고 이 PC에서는 빌드됨(2026-10-02, `cannot convert from 'std::unique_ptr<QgsSymbol…>' to 'QgsSymbol *'`) | CI는 OSGeo4W 최신 qgis-dev(1237)를, 이 PC는 1201을 쓴다. 그 사이 QGIS가 `QgsSymbol::defaultSymbol`·`Qgs*SymbolLayer::create` 같은 함수를 unique_ptr 반환으로 바꿨다. | 받은 값을 `std::unique_ptr<T>(f()).release()`로 감싸 두 판 모두에서 컴파일한다. 새 판에서 깨지는 곳은 그 판의 헤더만 끼운 임시 OSGEO4W_ROOT(A:\tmp\osgeo-1237, 폴더 연결)로 전체를 컴파일해 찾는다. 확인: 새 헤더 컴파일 오류 0, layer_styles·feature_records·heritage_style 통과. |
+| 「구글지도는 지적과 맞지 않다」 — Google 위성 위에서 지적선·조사구역이 어긋나 보임(2026-10-02 R52) | 앱의 좌표 변환 탓이 아니다. Google 사진 자체가 국내 정사영상이 아니어서 곳에 따라 어긋난다: 같은 곳을 실측하면 제주에서 VWorld 위성보다 약 13 m 남서, 지적선과 약 15 m, 내륙에서는 1~7 m 동쪽. VWorld 위성과 지적은 서로 맞는다. | Google 위성을 올리면 까닭과 대안(위치 확인·제출 도면은 VWorld 위성)을 상태줄에 20초 알린다(BasemapPolicy::googlePositionNotice). 장소별 숫자는 이 표에만 둔다. 시험: `basemap_reference`. |
 
 ## 지적 GetMap (확인된 사실)
 

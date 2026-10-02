@@ -99,6 +99,8 @@ private slots:
     QgsRasterLayer googleLayer(google, QStringLiteral("Google 위성"), QStringLiteral("wms"));
     QVERIFY(!offlineCaching(&googleLayer).allowed);
     QVERIFY(!drawingNotice(&googleLayer).isEmpty());
+    // Google 사진은 국내 정사영상이 아니어서 지적과 곳에 따라 어긋난다(2026-10-02 실측): 올릴 때 까닭과 대안을 알린다(R52).
+    QVERIFY(googlePositionNotice().contains(QStringLiteral("지적")) && googlePositionNotice().contains(QStringLiteral("VWorld 위성")));
     QgsRasterLayer vworldLayer(vworld, QStringLiteral("VWorld 위성"), QStringLiteral("wms"));
     QVERIFY(offlineCaching(&vworldLayer).allowed && !offlineCaching(&vworldLayer).askFirst);
     QVERIFY(drawingNotice(&vworldLayer).isEmpty());
