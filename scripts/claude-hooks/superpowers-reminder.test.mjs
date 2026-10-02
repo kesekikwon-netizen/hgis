@@ -90,6 +90,9 @@ const settingsOf = (dir) => JSON.parse(readFileSync(join(dir, 'settings.json'), 
 const ourHooks = (settings) =>
   (settings.hooks?.UserPromptSubmit ?? []).flatMap((e) => e.hooks).filter((h) => h.command.includes('superpowers-reminder.mjs'));
 
+const finishHooks = (settings) =>
+  (settings.hooks?.Stop ?? []).flatMap((e) => e.hooks).filter((h) => h.command.includes('finish-check.mjs'));
+
 const SNAPSHOT_STOP = [{ hooks: [{ type: 'command', command: 'node "C:/x/.claude/hooks/worktree-snapshot.mjs"' }] }];
 const ORIGINAL = {
   model: 'opus',
@@ -108,7 +111,9 @@ test('install adds one bounded reminder, keeps every other setting and backs up 
   const ours = ourHooks(settings);
   assert.equal(ours.length, 1);
   assert.ok(ours[0].timeout > 0 && ours[0].timeout <= 30, 'a stuck hook must not hold a message for long');
-  assert.deepEqual(settings.hooks.Stop, SNAPSHOT_STOP);
+  assert.deepEqual(settings.hooks.Stop.slice(0, 1), SNAPSHOT_STOP);
+  assert.equal(finishHooks(settings).length, 1);
+  assert.ok(existsSync(join(dir, 'hooks', 'finish-check.mjs')));
   assert.equal(settings.model, 'opus');
   assert.deepEqual(settings.enabledPlugins, ORIGINAL.enabledPlugins);
   assert.ok(existsSync(join(dir, 'hooks', 'superpowers-reminder.mjs')));
@@ -158,6 +163,22 @@ test('remove takes out only the reminder', (t) => {
   assert.equal(ourHooks(settings).length, 0);
   assert.deepEqual(settings.hooks.Stop, SNAPSHOT_STOP);
   assert.ok(!existsSync(join(dir, 'hooks', 'superpowers-reminder.mjs')));
+  assert.ok(!existsSync(join(dir, 'hooks', 'finish-check.mjs')));
+});
+
+// 2026-10-03 docs/intent/2026-10-03-finish-check.md: the same installer puts the closing check on Stop.
+test('the installed finish check stops a code turn that skipped the before-done check', (t) => {
+  const dir = freshConfig(t, JSON.stringify(ORIGINAL));
+  assert.equal(install(dir).status, 0);
+  const command = finishHooks(settingsOf(dir))[0].command;
+  const cwd = 'A:\\qgis\\.claude\\worktrees\\x';
+  const transcript = join(dir, 'transcript.jsonl');
+  writeFileSync(transcript, [
+    { type: 'user', message: { role: 'user', content: '고쳐 줘' } },
+    { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: `${cwd}\\src\\core\\A.cpp` } }] } },
+  ].map((l) => JSON.stringify(l)).join('\n'));
+  const out = execSync(command, { input: JSON.stringify({ cwd, transcript_path: transcript, stop_hook_active: false }), encoding: 'utf8' });
+  assert.equal(JSON.parse(out).decision, 'block');
 });
 
 test('remove with no settings file creates nothing', (t) => {

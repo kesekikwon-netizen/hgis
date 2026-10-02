@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Installs the per-message superpowers reminder in the Claude Code user settings, or takes it out
-// with --remove. Copies superpowers-reminder.mjs to <config>/hooks/ (so it survives the worktree)
-// and keeps exactly one UserPromptSubmit hook for it. Every other setting and every other tool's
+// Installs the Strata Claude hooks in the Claude Code user settings, or takes them out with
+// --remove: the per-message superpowers reminder (UserPromptSubmit) and the closing-step check
+// (finish-check.mjs on Stop, docs/intent/2026-10-03-finish-check.md). Copies each script to
+// <config>/hooks/ (so it survives the worktree) and keeps exactly one hook entry for each. Every other setting and every other tool's
 // hook stays as it was, and settings.json is backed up to
 // <config>/_reset_backup/<stamp>-superpowers-reminder/ before a change.
 // A settings.json that is not valid JSON is left untouched.
@@ -13,7 +14,10 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const MARK = 'superpowers-reminder.mjs';
+const HOOKS = [
+  { mark: 'superpowers-reminder.mjs', event: 'UserPromptSubmit' },
+  { mark: 'finish-check.mjs', event: 'Stop' },
+];
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argValue = (name) => {
   const i = process.argv.indexOf(name);
@@ -29,7 +33,7 @@ const repoRoot = () =>
 const remove = process.argv.includes('--remove');
 const configDir = path.resolve(argValue('--config-dir') || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'));
 const settingsFile = path.join(configDir, 'settings.json');
-const hookFile = path.join(configDir, 'hooks', MARK);
+const hookFileOf = (mark) => path.join(configDir, 'hooks', mark);
 
 let text = null;
 let settings = {};
@@ -45,30 +49,32 @@ try {
 
 const before = JSON.stringify(settings);
 const hooks = settings.hooks ?? {};
-// Drop only the reminder hook itself; a neighbour hook in the same entry stays.
-const withoutReminder = (entry) => {
+// Drop only our own hook; a neighbour hook in the same entry stays.
+const without = (mark) => (entry) => {
   const all = entry?.hooks ?? [];
-  const kept = all.filter((h) => !String(h?.command ?? '').includes(MARK));
+  const kept = all.filter((h) => !String(h?.command ?? '').includes(mark));
   if (kept.length === all.length) return entry;
   return kept.length ? { ...entry, hooks: kept } : null;
 };
-const others = (hooks.UserPromptSubmit ?? []).map(withoutReminder).filter(Boolean);
-if (remove) {
-  if (others.length) hooks.UserPromptSubmit = others;
-  else delete hooks.UserPromptSubmit;
-} else {
-  const root = slashes(path.resolve(argValue('--root') || repoRoot()));
-  const command = `node "${slashes(hookFile)}" --root "${root}"`;
-  hooks.UserPromptSubmit = [...others, { hooks: [{ type: 'command', command, timeout: 10 }] }];
+const root = remove ? null : slashes(path.resolve(argValue('--root') || repoRoot()));
+for (const { mark, event } of HOOKS) {
+  const others = (hooks[event] ?? []).map(without(mark)).filter(Boolean);
+  if (remove) {
+    if (others.length) hooks[event] = others;
+    else delete hooks[event];
+  } else {
+    const command = `node "${slashes(hookFileOf(mark))}" --root "${root}"`;
+    hooks[event] = [...others, { hooks: [{ type: 'command', command, timeout: 10 }] }];
+  }
 }
 if (Object.keys(hooks).length) settings.hooks = hooks;
 else delete settings.hooks;
 
-const source = path.join(here, MARK);
-const hookCurrent = fs.existsSync(hookFile) && fs.readFileSync(hookFile, 'utf8') === fs.readFileSync(source, 'utf8');
+const current = ({ mark }) => fs.existsSync(hookFileOf(mark))
+  && fs.readFileSync(hookFileOf(mark), 'utf8') === fs.readFileSync(path.join(here, mark), 'utf8');
 const settingsChanged = JSON.stringify(settings) !== before || (text === null && !remove);
-if (!settingsChanged && (remove ? !fs.existsSync(hookFile) : hookCurrent)) {
-  console.log(remove ? '알림이 이미 없습니다. 바꾼 것이 없습니다.' : '알림이 이미 설치되어 있습니다. 바꾼 것이 없습니다.');
+if (!settingsChanged && (remove ? HOOKS.every(({ mark }) => !fs.existsSync(hookFileOf(mark))) : HOOKS.every(current))) {
+  console.log(remove ? '알림과 마무리 직전 확인 장치가 이미 없습니다. 바꾼 것이 없습니다.' : '알림과 마무리 직전 확인 장치가 이미 설치되어 있습니다. 바꾼 것이 없습니다.');
   process.exit(0);
 }
 
@@ -85,9 +91,9 @@ if (text !== null && settingsChanged) {
   console.log(`예전 설정을 백업했습니다: ${backupDir}`);
 }
 if (!remove) {
-  // The hook file goes in before settings point at it, and comes out only after they stop.
-  fs.mkdirSync(path.dirname(hookFile), { recursive: true });
-  fs.copyFileSync(source, hookFile);
+  // The hook files go in before settings point at them, and come out only after they stop.
+  fs.mkdirSync(path.join(configDir, 'hooks'), { recursive: true });
+  for (const { mark } of HOOKS) fs.copyFileSync(path.join(here, mark), hookFileOf(mark));
 }
 if (settingsChanged) {
   fs.mkdirSync(configDir, { recursive: true });
@@ -96,7 +102,7 @@ if (settingsChanged) {
   fs.writeFileSync(temporary, `${JSON.stringify(settings, null, 2)}\n`);
   fs.renameSync(temporary, settingsFile);
 }
-if (remove) fs.rmSync(hookFile, { force: true });
+if (remove) for (const { mark } of HOOKS) fs.rmSync(hookFileOf(mark), { force: true });
 console.log(remove
-  ? '메시지마다 붙던 슈퍼파워 알림을 뺐습니다. 새로 여는 대화부터 확실히 적용됩니다.'
-  : '메시지마다 슈퍼파워 알림이 붙도록 설치했습니다. 새로 여는 대화부터 확실히 적용됩니다.');
+  ? '메시지마다 붙던 슈퍼파워 알림과 마무리 직전 확인 장치를 뺐습니다. 새로 여는 대화부터 확실히 적용됩니다.'
+  : '메시지마다 슈퍼파워 알림과 마무리 직전 확인 장치를 설치했습니다. 새로 여는 대화부터 확실히 적용됩니다.');
