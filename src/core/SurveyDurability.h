@@ -28,6 +28,11 @@ bool replaceFileDurably(const QString& from, const QString& to, quint32* nativeE
 // Win32 오류 번호가 "다른 프로그램이 잠깐 잡고 있다"(접근 거부·공유 위반·잠금 위반)인가.
 bool isTransientLockError(quint32 nativeError);
 
+// 잠긴 파일을 다시 바꿔 보기 전에 ms 만큼 기다린다. 주 스레드에서는 먼저, 이미 「나중에 지우기」로 예약된 객체를
+// 지운다: 다 그린 지도 그리기 작업이 그때까지 조사 파일의 읽기 손잡이를 쥐어, 닫기 물음의 「저장」이 그 정리
+// 차례보다 먼저 와서 옆 「-저장.gpkg」로 빠졌다(2026-10-03 R67 원인 3). 이벤트 루프는 돌리지 않는다.
+void waitBeforeRetry(int ms);
+
 // 진단 전용(저장이 이미 거부된 뒤에만 부른다). 답은 부른 그 순간 기준이다.
 // path 를 지금 열고 있는 프로그램들: 「실행 파일 이름 «설명» (pid N)」, 이 프로그램이면 「· 이 앱」.
 // Windows Restart Manager 로 묻는다. 묻지 못하면 빈 목록이고 note 에 까닭을 적는다

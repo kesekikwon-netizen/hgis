@@ -1,8 +1,10 @@
 #include "SurveyDurability.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QThread>
 
 #include <vector>
 
@@ -51,6 +53,12 @@ bool flushPathToDisk(const QString& path) {
 bool flushToDisk(QFile& file) {
   if (!file.isOpen() || !file.flush()) return false;
   return flushPathToDisk(file.fileName());
+}
+
+void waitBeforeRetry(int ms) {
+  if (QCoreApplication* app = QCoreApplication::instance(); app && QThread::currentThread() == app->thread())
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  QThread::msleep(ms);
 }
 
 bool isTransientLockError(quint32 nativeError) {

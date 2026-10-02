@@ -20,7 +20,6 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QScopeGuard>
-#include <QThread>
 #include <QSet>
 #include <QTemporaryDir>
 
@@ -396,7 +395,7 @@ bool validateForOpen(const QString& gpkgPath, QString* errorOut) {
 // 5~7초 더 잡고 있었다(ctest 부하에서 재현). 그보다 짧으면 저장이 옆 파일로 빠진다.
 bool replaceWithStaged(const QString& staged, const QString& target, QString* errorOut) {
   for (int attempt = 0; attempt < 40; ++attempt) {
-    if (attempt) QThread::msleep(attempt < 10 ? 100 : 300);
+    if (attempt) SurveyDurability::waitBeforeRetry(attempt < 10 ? 100 : 300);  // 지우기 예약된 읽기 손잡이부터 놓는다
     quint32 code = 0;
     if (SurveyDurability::replaceFileDurably(staged, target, &code, errorOut)) return true;
 #ifdef Q_OS_WIN
