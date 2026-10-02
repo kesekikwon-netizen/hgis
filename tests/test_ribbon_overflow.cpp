@@ -248,7 +248,7 @@ void TestRibbonOverflow::sizeChangeIsLoggedOnce() {
       QStringLiteral("^\\[ribbon\\] 크기 타일 (\\d+) · 글자 (보임|숨김) · 창 \\d+ · 가용 \\d+$"));
   RibbonLook before = ribbon->look();
   int stepsThatChanged = 0;
-  for (int width : {1904, 1900, 1700, 1696, 1300, 1100, 1024, 1100, 1904}) {
+  for (int width : {1904, 1900, 1700, 1696, 1300, 1130, 1024, 1130, 1904}) {  // 앱 바 핀·돋보기 뒤(10-03) 1130 이 타일 24
     const qsizetype logged = fx::g_ribbonLog.size();
     window.resize(width, 768);
     fx::settle();

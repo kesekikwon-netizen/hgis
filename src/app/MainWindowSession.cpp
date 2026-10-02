@@ -8,6 +8,7 @@
 #include "KaSectionDrawingStudio.h"
 #include "KaStartPage.h"
 #include "KaStatusBar.h"
+#include "KaSurveyBadge.h"
 #include "KaTerrain3dLayoutStudio.h"
 #include "KaTerrain3dStudio.h"
 #include "KaTopographicBrowser.h"
@@ -201,7 +202,7 @@ void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sou
   scheduleDefaultBasemaps();
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   rememberSurvey(gpkgPath, QFileInfo(gpkgPath).completeBaseName());
-  setWindowTitle(QFileInfo(gpkgPath).completeBaseName());
+  refreshWindowTitle();  // 「<조사 이름> * - Strata」
   showMapWorkspace();
   updateNextActionStatus();
   KaCrashGuard::logLine(
@@ -582,7 +583,7 @@ void MainWindow::openRecentSurvey(const QString& path) {
   if (ext == QLatin1String("gpkg")) {
     if (openSurveyGpkg(path)) {
       rememberSurvey(path, QFileInfo(path).completeBaseName());
-      setWindowTitle(QFileInfo(path).completeBaseName());
+      refreshWindowTitle();  // 「<조사 이름> * - Strata」
       showMapWorkspace();
     }
     return;
@@ -592,7 +593,7 @@ void MainWindow::openRecentSurvey(const QString& path) {
   if (QFile::exists(companionGpkg)) {
     if (openSurveyGpkg(companionGpkg)) {
       rememberSurvey(path, QFileInfo(path).completeBaseName());
-      setWindowTitle(QFileInfo(path).completeBaseName());
+      refreshWindowTitle();  // 「<조사 이름> * - Strata」
       showMapWorkspace();
     }
     return;
@@ -647,7 +648,7 @@ void MainWindow::openRecentSurvey(const QString& path) {
   if (m_canvas) m_canvas->refresh();
   scheduleDefaultBasemaps();
   rememberSurvey(path, QFileInfo(path).completeBaseName());
-  setWindowTitle(QFileInfo(path).completeBaseName());
+  refreshWindowTitle();  // 「<조사 이름> * - Strata」
   showMapWorkspace();
   updateNextActionStatus();
 #endif
@@ -742,7 +743,7 @@ void MainWindow::newSurvey() {
     b86->setChecked(!m_workCrs.contains(QLatin1String("5187")));
   if (auto* b87 = findChild<QToolButton*>(QStringLiteral("btnCrs5187")))
     b87->setChecked(m_workCrs.contains(QLatin1String("5187")));
-  setWindowTitle(name);
+  refreshWindowTitle();  // 「<조사 이름> * - Strata」
   m_surveySessionReady = true;
   syncRecordTools();
   rememberSurvey(path, name);
@@ -1332,10 +1333,9 @@ void MainWindow::offerRecoverySnapshot() {
 }
 
 void MainWindow::refreshWindowTitle() {
-  QString base = windowTitle();
-  if (base.endsWith(QLatin1String(" *"))) base.chop(2);
-  if (base.isEmpty()) return;
-  const QString wanted = base + (surveyHasUnsavedChanges() ? QStringLiteral(" *") : QString());
+  // 목업: 「<조사 이름> * - Strata」, 조사가 없으면 「Strata」(* 는 저장 안 됐을 때만).
+  const QString name = QFileInfo(m_surveyPath.isEmpty() ? QgsProject::instance()->fileName() : m_surveyPath).completeBaseName();
+  const QString wanted = KaSurveyBadge::windowTitleFor(name, surveyHasUnsavedChanges());
   if (windowTitle() != wanted)
     QMainWindow::setWindowTitle(wanted);
   syncShellChips();  // [P6] 배지 · 「저장 안 됨 n건」 · 「저장」 점 (300 ms 합치기)
@@ -1616,7 +1616,7 @@ void MainWindow::saveProjectAs() {
     KaRecoverySnapshots::forgetUnsaved(st, previousSurvey);
     KaRecoverySnapshots::forgetUnsaved(st, targetGpkg);
   }
-  setWindowTitle(newFi.completeBaseName());
+  refreshWindowTitle();  // 「<조사 이름> * - Strata」
   rememberSurvey(targetGpkg, newFi.completeBaseName());
   rememberSurveyDir(targetGpkg);
   markSurveySaved();
@@ -1647,14 +1647,14 @@ void MainWindow::openProject() {
   if (path.isEmpty()) return;
   if (QFileInfo(path).suffix().compare(QLatin1String("gpkg"), Qt::CaseInsensitive) == 0) {
     if (openSurveyGpkg(path))
-      setWindowTitle(QFileInfo(path).completeBaseName());
+      refreshWindowTitle();  // 「<조사 이름> * - Strata」
     return;
   }
   const QString companionGpkg =
       QFileInfo(path).dir().filePath(QFileInfo(path).completeBaseName() + QStringLiteral(".gpkg"));
   if (QFile::exists(companionGpkg)) {
     if (openSurveyGpkg(companionGpkg)) {
-      setWindowTitle(QFileInfo(path).completeBaseName());
+      refreshWindowTitle();  // 「<조사 이름> * - Strata」
     }
     return;
   }
@@ -1730,7 +1730,7 @@ void MainWindow::openProject() {
   m_startupViewApplied = true;
   if (m_canvas) m_canvas->refresh();
   scheduleDefaultBasemaps();
-  setWindowTitle(QFileInfo(path).completeBaseName());
+  refreshWindowTitle();  // 「<조사 이름> * - Strata」
   rememberSurvey(path, QFileInfo(path).completeBaseName());
   showMapWorkspace();
   updateNextActionStatus();

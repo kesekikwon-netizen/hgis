@@ -18,6 +18,8 @@ class KaSurveyBadge : public KaChip {
   bool unsaved() const { return m_unsaved; }
   // 「조사 열림 · {name}」 or 「{name} · 저장 안 됨」; empty for an empty name.
   static QString textFor(const QString& name, bool unsaved);
+  // 창 제목(목업): 「<조사 이름> * - Strata」, * 는 저장 안 됐을 때만. 조사가 없으면 「Strata」.
+  static QString windowTitleFor(const QString& name, bool unsaved);
 
   QSize sizeHint() const override;
 

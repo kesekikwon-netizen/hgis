@@ -1,4 +1,5 @@
 #include "KaCrashGuard.h"
+#include "core/FileCleanup.h"
 #include "core/KaLogExcept.h"
 #include "KaTopographicImportDialog.h"
 #include "core/LayerOps.h"
@@ -962,8 +963,7 @@ void KaTopographicImportDialog::publishPrepared() {
           else ++loaded;
         }
         project->removeMapLayer(existing);
-        if (QFileInfo(oldFile).fileName().startsWith(QStringLiteral("수치지형도-합침-")))
-          QFile::remove(oldFile);
+        if (QFileInfo(oldFile).fileName().startsWith(QStringLiteral("수치지형도-합침-"))) FileCleanup::removeWhenFree(oldFile);
       }
     }
     out->setCustomProperty(QStringLiteral("ka_hgis/topographic_source"), keys.first());

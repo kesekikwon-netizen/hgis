@@ -49,6 +49,25 @@ class TestUiTerms : public QObject {
     }
     QVERIFY2(hits.isEmpty(), qUtf8Printable(hits.join(QLatin1Char('\n'))));
   }
+
+  // 창 제목은 「<조사 이름> * - Strata」 하나로 만든다(목업 Task 3, refreshWindowTitle). 조사를 연 뒤 다른 곳이
+  // 이름만 써 넣으면 「광령리1」처럼 꼬리 없는 제목이 남는다(2026-10-03 검토): 주 창 코드는 이름을 직접 쓰지 않는다.
+  void mainWindowTitleComesFromRefreshOnly() {
+    const QString root = QString::fromUtf8(KA_SOURCE_DIR);
+    // moc 가 R"(...)" 를 읽지 못하므로 보통 문자열로 쓴다.
+    const QRegularExpression direct(QStringLiteral("(?<![\\w.>:])setWindowTitle\\((?!QStringLiteral\\()"));
+    QStringList hits;
+    QDirIterator it(root + QStringLiteral("/src/app"), {QStringLiteral("MainWindow*.cpp")}, QDir::Files);
+    while (it.hasNext()) {
+      const QString path = it.next();
+      QFile file(path);
+      QVERIFY(file.open(QIODevice::ReadOnly));
+      const QStringList lines = QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'));
+      for (int n = 0; n < lines.size(); ++n)
+        if (direct.match(lines.at(n)).hasMatch()) hits << QStringLiteral("%1:%2").arg(path.mid(root.size() + 1)).arg(n + 1);
+    }
+    QVERIFY2(hits.isEmpty(), qUtf8Printable(hits.join(QLatin1Char('\n'))));
+  }
 };
 
 QTEST_GUILESS_MAIN(TestUiTerms)

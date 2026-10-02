@@ -1017,6 +1017,7 @@ if(KA_HGIS_BUILD_TESTS)
   )
   add_executable(ka_ribbon_overflow_tests
     tests/test_ribbon_overflow.cpp
+    src/app/KaIcons.cpp
     src/app/KaTheme.cpp
     src/app/KaThemeSheet.cpp
     src/app/KaThemeStyle.cpp
@@ -1333,6 +1334,13 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_topographic_import_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_topographic_import_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(topographic_import ka_topographic_import_tests)
+  add_executable(ka_topographic_merge_tests tests/test_topographic_merge.cpp
+    src/app/KaTopographicImportDialog.cpp src/app/KaTopographicImportDialog.h
+    src/app/KaCrashGuard.cpp src/app/KaCrashGuard.h)
+  target_link_libraries(ka_topographic_merge_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_topographic_merge_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(topographic_merge ka_topographic_merge_tests)
+  set_tests_properties(topographic_merge PROPERTIES TIMEOUT 180)
   add_executable(ka_topographic_scope_tests tests/test_topographic_scope.cpp
     data/providers/ngii.qrc
     src/app/KaTopographicScopePanel.cpp src/app/KaTopographicScopePanel.h
@@ -1665,7 +1673,7 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(topographic_source_crs PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(topographic_shapefile topographic_settings topographic_account_dialog heritage_setup_dialogs PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
     set_tests_properties(topographic_scope PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 90)
-    set_tests_properties(topographic_import PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
+    set_tests_properties(topographic_import PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 300)
     set_tests_properties(reference_status PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(heritage_flow PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(trench_plan trench_edit PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")

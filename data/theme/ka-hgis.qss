@@ -107,7 +107,7 @@ QToolBar#mainToolbar QToolButton#appBarRegion {
   background: @surface@;
   border: 1px solid @border@;
   border-radius: 8px;
-  padding: 4px 14px;
+  padding: 4px 10px;
   min-width: 36px;
   min-height: 30px;
   font-size: 12px;
@@ -752,6 +752,15 @@ QTabBar::tab {
   margin: 0 2px;
 }
 QTabBar::tab:selected { color: @accentDeep@; border-bottom: 2px solid @accent@; }
+/* 홈·지도 탭 줄(목업): 바탕은 작업대 색, 고른 탭은 흰 판에 위·좌·우 1px 테두리와 위 모서리 8, 밑줄 없음. */
+QTabWidget#viewTabs > QTabBar { background: @desk@; }
+QTabWidget#viewTabs > QTabBar::tab {
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+QTabWidget#viewTabs > QTabBar::tab:selected { background: @surface@; border: 1px solid @border@; border-bottom: none; }
 /* ---- Left Dock (레이어 위 / 파일함 아래 동시 노출) ---- */
 QSplitter#leftSplit,
 QSplitter#studioLeftSplit,

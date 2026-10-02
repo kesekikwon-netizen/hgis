@@ -8,11 +8,13 @@
 #include <QComboBox>
 #include <QDir>
 #include <QLabel>
+#include <QLineEdit>
 #include <QSignalSpy>
 #include <QTabWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include "app/KaAppBar.h"
 #include "app/KaChip.h"
 #include "app/KaDrawGuideBand.h"
 #include "app/KaIcons.h"
@@ -134,6 +136,30 @@ class TestShellChrome : public QObject {
     QVERIFY(badge.unsaved() && badge.surveyName() == QStringLiteral("광령리1"));
     QCOMPARE(badge.sizeHint().height(), KaTheme::buttonMetrics().chipHeight);
     QVERIFY(badge.sizeHint().width() > 80);
+  }
+
+  // 목업 맞추기 Task 3: 테두리 있는 조사 칩, 「<조사 이름> * - Strata」 창 제목, 「지역」 핀·검색 돋보기.
+  void badgeOutlineTitleAndAppBar() {
+    KaSurveyBadge badge;
+    badge.setSurvey(QStringLiteral("광령리1"), false);
+    badge.resize(badge.sizeHint());
+    const QImage chip = badge.grab().toImage();
+    const int edge = chip.pixelColor(chip.width() / 3, 0).lightness(), fill = chip.pixelColor(chip.width() / 3, 4).lightness();
+    QVERIFY2(fill - edge >= 50, qPrintable(QStringLiteral("edge %1 fill %2").arg(edge).arg(fill)));
+    QCOMPARE(KaSurveyBadge::windowTitleFor(QStringLiteral("광령리1"), true), QStringLiteral("광령리1 * - Strata"));
+    QCOMPARE(KaSurveyBadge::windowTitleFor(QStringLiteral("광령리1"), false), QStringLiteral("광령리1 - Strata"));
+    QCOMPARE(KaSurveyBadge::windowTitleFor(QString(), false), QStringLiteral("Strata"));
+    KaAppBar bar;
+    auto* region = bar.findChild<QToolButton*>(QStringLiteral("appBarRegion"));
+    auto* search = bar.findChild<QLineEdit*>(QStringLiteral("appBarSearch"));
+    QVERIFY(region && search && !region->icon().isNull());
+    QCOMPARE(search->placeholderText(), QStringLiteral("도로명·지번 (예: 하회종가길 40)  Ctrl+F"));
+    bar.resize(400, 40);
+    bar.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&bar));
+    bool leading = false;
+    for (auto* icon : search->findChildren<QToolButton*>()) leading = leading || (icon->isVisible() && icon->geometry().right() < search->width() / 2);
+    QVERIFY(leading);
   }
 
   void badge_clickEmits() {

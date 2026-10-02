@@ -1,4 +1,5 @@
 #include "app/KaSurveyBadge.h"
+#include "app/KaTheme.h"
 
 #include <QFontMetrics>
 #include <QKeyEvent>
@@ -22,6 +23,12 @@ QString KaSurveyBadge::textFor(const QString& name, bool unsaved) {
   const QString trimmed = name.trimmed();
   if (trimmed.isEmpty()) return QString();
   return unsaved ? QStringLiteral("%1 · 저장 안 됨").arg(trimmed) : QStringLiteral("조사 열림 · %1").arg(trimmed);
+}
+
+QString KaSurveyBadge::windowTitleFor(const QString& name, bool unsaved) {
+  const QString star = unsaved ? QStringLiteral(" *") : QString();
+  const QString trimmed = name.trimmed();
+  return trimmed.isEmpty() ? QStringLiteral("Strata") + star : trimmed + star + QStringLiteral(" - Strata");
 }
 
 void KaSurveyBadge::setSurvey(const QString& name, bool unsaved) {
@@ -50,7 +57,17 @@ void KaSurveyBadge::paintEvent(QPaintEvent* event) {
   Q_UNUSED(event);
   QPainter p(this);
   p.setFont(font());
-  paintChip(p, rect().adjusted(0, 0, -kRightGap, 0), text(), tone(), glyph());
+  const QRect pill = rect().adjusted(0, 0, -kRightGap, 0);
+  paintChip(p, pill, text(), tone(), glyph());
+  // 목업의 조사 칩은 톤 색 테두리가 또렷한 알약이다(공용 칩의 옅은 가장자리 위에 한 번 더).
+  const int h = KaTheme::buttonMetrics().chipHeight, radius = KaTheme::buttonMetrics().chipRadius;
+  QColor edge = toneInk(tone());
+  edge.setAlpha(150);
+  p.setRenderHint(QPainter::Antialiasing, true);
+  p.setPen(QPen(edge, 1.0));
+  p.setBrush(Qt::NoBrush);
+  p.drawRoundedRect(QRectF(pill.left(), pill.top() + (pill.height() - h) / 2, pill.width(), h).adjusted(0.5, 0.5, -0.5, -0.5),
+                    radius - 0.5, radius - 0.5);
 }
 
 void KaSurveyBadge::mousePressEvent(QMouseEvent* event) {

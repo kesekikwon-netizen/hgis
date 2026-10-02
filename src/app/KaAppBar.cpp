@@ -1,6 +1,9 @@
 #include "KaAppBar.h"
+#include "KaIcons.h"
+#include "KaTheme.h"
 #include "core/AddressQuery.h"
 
+#include <QAction>
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QMenu>
@@ -24,14 +27,17 @@ KaAppBar::KaAppBar(QWidget* parent) : QWidget(parent) {
   m_region->setToolTip(QStringLiteral("시·도를 고른 뒤 시·군·동과 지번으로 찾아갑니다"));
   m_region->setAccessibleName(QStringLiteral("지역 고르기"));
   m_region->setPopupMode(QToolButton::InstantPopup);
-  m_region->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  // 목업: 「지역」 앞 지도 핀, 검색칸 앞 돋보기(16px).
+  m_region->setIcon(KaIcons::icon(QStringLiteral("gps"), KaTheme::tokens().inkMuted));
+  m_region->setIconSize(QSize(16, 16));
+  m_region->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   m_region->hide();  // shown once the province chips are handed over
   row->addWidget(m_region);
 
   m_search = new QLineEdit(this);
   m_search->setObjectName(QStringLiteral("appBarSearch"));
-  m_search->setPlaceholderText(
-      QStringLiteral("도로명·지번 (예: 하회종가길 40, 광령리 1615)  Ctrl+F"));
+  m_search->setPlaceholderText(QStringLiteral("도로명·지번 (예: 하회종가길 40)  Ctrl+F"));
+  m_search->addAction(KaIcons::icon(QStringLiteral("search"), KaTheme::tokens().inkMuted), QLineEdit::LeadingPosition);
   m_search->setClearButtonEnabled(true);
   // The placeholder vanishes once typing starts; the name stays for screen readers.
   m_search->setAccessibleName(QStringLiteral("주소·지번 찾기"));
@@ -41,7 +47,7 @@ KaAppBar::KaAppBar(QWidget* parent) : QWidget(parent) {
   // this placeholder grew 8 px, so at 150 the ribbon got 1642 - 2 = 1640 and 정합·기타
   // folded by one pixel. 116 plus the 8 px left margin gives ~17 px of slack; the field
   // still expands into any wider window.
-  m_search->setMinimumWidth(116);
+  m_search->setMinimumWidth(116);  // 목업의 핀·돋보기(2026-10-03)로 앱 바가 34px 넓어져 1904 에서 리본 타일 52 -> 50
   m_search->setMaximumWidth(320);
   m_search->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   connect(m_search, &QLineEdit::returnPressed, this, [this]() {

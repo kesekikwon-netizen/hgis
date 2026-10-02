@@ -269,7 +269,13 @@ bool MainWindow::tryAddDroppedPaths(const QStringList& paths) {
           GeorefService::isImagePath(path)))
       continue;
     const bool raster = GeorefService::isImagePath(path);
-    cad = cad || GeorefService::isCadPath(path);
+    if (GeorefService::isCadPath(path)) {
+      // 도면 변환은 진행 창을 띄우고 오래 기다린다. 끌어 놓기 처리 안에서 하면 탐색기가 그동안 멈춘다:
+      // 놓기는 바로 받고 변환은 다음 차례에 한다(2026-10-03 검토).
+      cad = true;
+      QTimer::singleShot(0, this, [this, path] { addVectorFromPath(path); });
+      continue;
+    }
     if (raster ? addRasterFromPath(path) : addVectorFromPath(path))
       ++n;
   }
