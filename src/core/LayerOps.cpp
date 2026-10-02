@@ -201,7 +201,7 @@ bool LayerOps::applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerK
   QgsSymbol* sym = LayerStyleDefaults::buildSymbol(static_cast<int>(gt), base, fill, stroke, strokeW,
                                                    markerSize, noFill, noStroke, dashed);
   if (!sym) {
-    sym = QgsSymbol::defaultSymbol(gt);
+    sym = std::unique_ptr<QgsSymbol>(QgsSymbol::defaultSymbol(gt)).release();  // QGIS 판마다 반환형이 달라 감싼다
     if (sym) sym->setColor(stroke);
   }
   if (!sym) return false;

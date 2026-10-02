@@ -2130,7 +2130,7 @@ static void applySoilCategoryStyle(QgsVectorLayer* layer, const QString& categor
       });
       return fs.release();
     }
-    QgsSymbol* s = QgsSymbol::defaultSymbol(gt);
+    QgsSymbol* s = std::unique_ptr<QgsSymbol>(QgsSymbol::defaultSymbol(gt)).release();  // QGIS 판마다 반환형이 달라 감싼다
     if (s) s->setColor(c);
     return s;
   };

@@ -32,7 +32,9 @@ const QColor kCasing(51, 65, 85);     // keeps pale period colours visible as li
 QString mm(double value) { return QString::number(value, 'f', 2); }
 
 void appendLineHatch(QgsFillSymbol* fill, double angle) {
-  QgsSymbolLayer* layer = QgsLinePatternFillSymbolLayer::create({});
+  // QGIS 개발판 1201 이후(1237에서 확인) 기호·기호 층을 만드는 함수가 unique_ptr 를 돌려준다(1201은 맨 포인터).
+  // 두 판 모두에서 컴파일되게 unique_ptr 로 감싼 뒤 꺼낸다. LayerOps·BasemapOps·HeritageLayoutNumbers 도 같다.
+  QgsSymbolLayer* layer = std::unique_ptr<QgsSymbolLayer>(QgsLinePatternFillSymbolLayer::create({})).release();
   auto* hatch = dynamic_cast<QgsLinePatternFillSymbolLayer*>(layer);
   if (!hatch) {
     delete layer;
@@ -52,7 +54,7 @@ void appendLineHatch(QgsFillSymbol* fill, double angle) {
 }
 
 void appendDots(QgsFillSymbol* fill) {
-  QgsSymbolLayer* layer = QgsPointPatternFillSymbolLayer::create({});
+  QgsSymbolLayer* layer = std::unique_ptr<QgsSymbolLayer>(QgsPointPatternFillSymbolLayer::create({})).release();
   auto* dots = dynamic_cast<QgsPointPatternFillSymbolLayer*>(layer);
   if (!dots) {
     delete layer;
@@ -124,7 +126,8 @@ QgsSymbol* FeaturePresets::symbolFor(int geomType, const Kind& kind, const QColo
     std::unique_ptr<QgsLineSymbol> line = QgsLineSymbol::createSimple(lineProps(kCasing, 1.1, kind.line));
     // 미정: a hollow (white) core inside the casing.
     const QColor core = periodColor.isValid() ? periodColor : QColor(Qt::white);
-    line->appendSymbolLayer(QgsSimpleLineSymbolLayer::create(lineProps(core, 0.6, kind.line)));
+    line->appendSymbolLayer(
+        std::unique_ptr<QgsSymbolLayer>(QgsSimpleLineSymbolLayer::create(lineProps(core, 0.6, kind.line))).release());
     return line.release();
   }
   const QColor fill = periodColor.isValid() ? periodColor : QColor(Qt::white);
