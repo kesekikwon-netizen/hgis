@@ -1,7 +1,9 @@
 #include "KaSessionLog.h"
+#include "KaLogExcept.h"
 #include "SurveyProjectFactory.h"
 #include "KaSafeQgis.h"
 #include "SurveyStorage.h"
+#include "SurveySchema.h"
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -67,67 +69,17 @@ QString SurveyProjectFactory::createNewSurvey(const QString& directory,
     const QString stagedQgz = staging.filePath(safe + QStringLiteral(".qgz"));
     QgsCoordinateTransformContext transformContext;
 
-    struct LayerDef {
-      const char* name;
-      const char* geom;
-    };
-    const LayerDef defs[] = {
-        {"survey_area", "Polygon"},     {"feature_poly", "Polygon"}, {"feature_line", "LineString"},
-        {"section_line", "LineString"}, {"control_points", "Point"}, {"artifact_point", "Point"},
-        {"trial_trench", "Polygon"},
-    };
-
+    // One schema table (SurveySchema) for the factory, the docs YAML and the save-time migration.
     bool first = true;
-    for (const LayerDef& d : defs) {
-      const QString uri = QStringLiteral("%1?crs=%2").arg(QString::fromUtf8(d.geom), crs.authid());
+    for (const SurveySchema::LayerDef& d : SurveySchema::layers()) {
+      const QString uri = QStringLiteral("%1?crs=%2").arg(QString::fromUtf8(d.geometry), crs.authid());
       QgsVectorLayer mem(uri, QString::fromUtf8(d.name), QStringLiteral("memory"));
       if (!mem.isValid()) {
         if (errorOut) *errorOut = QStringLiteral("새 조사의 도형 저장 공간을 준비하지 못했습니다. 다시 시도해 주세요.");
         return {};
       }
-      QgsFields fields;
       const QString n = QString::fromUtf8(d.name);
-      if (n == QLatin1String("survey_area")) {
-        fields.append(QgsField(QStringLiteral("survey_name"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("site_name"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("note"), QMetaType::Type::QString));
-      } else if (n == QLatin1String("feature_poly")) {
-        fields.append(QgsField(QStringLiteral("kind"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("period"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("feature_no"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("note"), QMetaType::Type::QString));
-      } else if (n == QLatin1String("feature_line")) {
-        fields.append(QgsField(QStringLiteral("kind"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("period"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("note"), QMetaType::Type::QString));
-      } else if (n == QLatin1String("section_line")) {
-        fields.append(QgsField(QStringLiteral("section_id"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("note"), QMetaType::Type::QString));
-      } else if (n == QLatin1String("artifact_point")) {
-        fields.append(QgsField(QStringLiteral("kind"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("period"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("artifact_no"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("note"), QMetaType::Type::QString));
-      } else if (n == QLatin1String("trial_trench")) {
-        fields.append(QgsField(QStringLiteral("name"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("width"), QMetaType::Type::Double));
-        fields.append(QgsField(QStringLiteral("length"), QMetaType::Type::Double));
-      } else {
-        fields.append(QgsField(QStringLiteral("point_id"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("x"), QMetaType::Type::Double));
-        fields.append(QgsField(QStringLiteral("y"), QMetaType::Type::Double));
-        fields.append(QgsField(QStringLiteral("z"), QMetaType::Type::Double));
-        fields.append(QgsField(QStringLiteral("datum"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("ellipsoid"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("projection"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("origin"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("accuracy"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("accuracy_m"), QMetaType::Type::Double));
-        fields.append(QgsField(QStringLiteral("pdop"), QMetaType::Type::Double));
-        fields.append(QgsField(QStringLiteral("fix_type"), QMetaType::Type::QString));
-        fields.append(QgsField(QStringLiteral("pixel_x"), QMetaType::Type::Double));
-        fields.append(QgsField(QStringLiteral("pixel_y"), QMetaType::Type::Double));
-      }
+      const QgsFields fields = SurveySchema::fieldsFor(n);
       if (!mem.dataProvider()->addAttributes(fields.toList())) {
         if (errorOut) *errorOut = QStringLiteral("새 조사의 기록 항목을 준비하지 못했습니다. 다시 시도해 주세요.");
         return {};
@@ -156,6 +108,14 @@ QString SurveyProjectFactory::createNewSurvey(const QString& directory,
                   .arg(errorMessage);
         return {};
       }
+    }
+
+    // The schema version travels inside the GPKG, so a later save knows what to migrate.
+    QString versionError;
+    if (!SurveySchema::writeVersion(stagedGpkg, SurveySchema::kCurrentVersion, &versionError)) {
+      if (errorOut)
+        *errorOut = QStringLiteral("새 조사 파일을 기록하지 못했습니다. 다시 시도해 주세요.\n%1").arg(versionError);
+      return {};
     }
 
     QString validationError;
@@ -216,7 +176,7 @@ QString SurveyProjectFactory::createNewSurvey(const QString& directory,
                       .arg(QString::fromUtf8(ex.what()));
     return {};
   } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/SurveyProjectFactory.cpp:217"));
+    KA_LOG_EXCEPT();
     if (errorOut)
       *errorOut = QStringLiteral(
           "새 조사 준비 중 오류가 발생했습니다. 기존 조사는 그대로 두었습니다. 다른 이름이나 폴더로 다시 시도해 "

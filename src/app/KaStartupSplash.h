@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QElapsedTimer>
+#include <QImage>
 #include <QPixmap>
 #include <QRectF>
 #include <QWidget>
@@ -29,6 +30,10 @@ public:
   QRectF cardRect() const;
   // The lane the progress dots cross.
   QRectF dotsRect() const;
+  // Where the copyright and data lines are painted.
+  QRectF noticesRect() const;
+  // The card without any text (shadow, blue, contours, icon), for contrast QA.
+  QImage backdropImage() const;
 
 signals:
   void readyToShow();
@@ -41,6 +46,7 @@ private:
   void placeWindow();
   QString statusText() const;
   const QPixmap& staticLayer();
+  void paintBackdrop(QPainter& painter, qreal dpr) const;
 
   int m_readingDurationMs;
   QElapsedTimer m_readingClock;

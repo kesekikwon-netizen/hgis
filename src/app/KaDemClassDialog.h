@@ -3,6 +3,7 @@
 #include <QPointer>
 class QgsRasterLayer;
 class QgsMapCanvas;
+class QgsRectangle;
 class QComboBox;
 class QCheckBox;
 class QDoubleSpinBox;
@@ -14,6 +15,9 @@ public:
   explicit KaDemClassDialog(QgsRasterLayer* layer, QWidget* parent = nullptr, QgsMapCanvas* canvas = nullptr);
 private:
   void applyStyle();
+  void fitToView();
+  void suggestViewport();
+  bool canvasExtentInLayerCrs(QgsRectangle* extent) const;
   QPointer<QgsRasterLayer> m_layer;
   QPointer<QgsMapCanvas> m_canvas;
   QComboBox* m_preset = nullptr;

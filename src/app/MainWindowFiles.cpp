@@ -17,7 +17,6 @@
 #include "KaTerrain3dStudio.h"
 #include "KaTerrain3dLayoutStudio.h"
 #include "KaStartPage.h"
-#include "KaCoordPointMapTool.h"
 #include "KaMeasureMapTool.h"
 #include "core/DemAnalyzer.h"
 #include "core/TilePackService.h"
@@ -26,7 +25,6 @@
 #include "KaCanvasGridOverlay.h"
 #include "KaTrenchMoveTool.h"
 #include "KaFeatureSelectTool.h"
-#include "KaFoundLocationMark.h"
 #include "KaStatusBar.h"
 #include "KaBeginnerRibbon.h"
 #include "KaSnapSettingsWidget.h"
@@ -68,7 +66,6 @@
 #include "core/LocationSearch.h"
 #include "core/CadastralImport.h"
 #include "core/KoreaRegionCatalog.h"
-#include "core/AdminBoundaryService.h"
 #include "KaRegionLocator.h"
 #include "KaAppBar.h"
 #include "KaMapControls.h"
@@ -216,46 +213,6 @@
 #include <qgsvectordataprovider.h>
 #include <qgsprovidersublayerdetails.h>
 #endif
-namespace {
-
-class FileListView : public QListWidget {
-public:
-  explicit FileListView(QWidget* parent = nullptr) : QListWidget(parent) {
-    setDragEnabled(true);
-    setDragDropMode(QAbstractItemView::DragOnly);
-    setDefaultDropAction(Qt::CopyAction);
-    setSelectionMode(QAbstractItemView::ExtendedSelection);
-    setUniformItemSizes(true);
-    setIconSize(QSize(0, 0));
-  }
-
-protected:
-  void startDrag(Qt::DropActions) override {
-    QList<QUrl> urls;
-    const auto items = selectedItems();
-    for (QListWidgetItem* it : items) {
-      if (!it || it->data(Qt::UserRole + 1).toBool()) continue;
-      const QString p = it->data(Qt::UserRole).toString();
-      if (!p.isEmpty()) urls.append(QUrl::fromLocalFile(p));
-    }
-    if (urls.isEmpty()) return;
-    auto* md = new QMimeData;
-    md->setUrls(urls);
-    QDrag drag(this);
-    drag.setMimeData(md);
-    drag.exec(Qt::CopyAction);
-  }
-};
-
-}  // namespace
-
-void MainWindow::setupFileBrowser() {
-  auto* view = new FileListView(this);
-  m_fileBrowser = view;
-  m_fileBrowser->setObjectName(QStringLiteral("fileBrowser"));
-  connect(m_fileBrowser, &QListWidget::itemDoubleClicked, this, &MainWindow::onFileBrowserActivated);
-  goFileBrowserRoot(QString());
-}
 
 QString MainWindow::resolvedDesktopPath() {
   static QString cached;
@@ -277,102 +234,6 @@ QString MainWindow::resolvedDesktopPath() {
   }
   cached = QDir::homePath();
   return cached;
-}
-
-void MainWindow::goFileBrowserRoot(const QString& path) {
-  if (!m_fileBrowser) return;
-  m_fileBrowser->clear();
-
-  QString p = QDir::fromNativeSeparators(path.trimmed());
-  if (p.length() == 2 && p[1] == QLatin1Char(':'))
-    p += QLatin1Char('/');
-
-  auto addRow = [this](const QString& label, const QString& full, bool isDir) {
-    auto* it = new QListWidgetItem(label);
-    it->setData(Qt::UserRole, full);
-    it->setData(Qt::UserRole + 1, isDir);
-    it->setToolTip(QDir::toNativeSeparators(full));
-    m_fileBrowser->addItem(it);
-  };
-
-  if (p.isEmpty()) {
-    m_browserPath.clear();
-    const QFileInfoList drives = QDir::drives();
-    for (const QFileInfo& d : drives)
-      addRow(QDir::toNativeSeparators(d.absoluteFilePath()),
-             QDir::fromNativeSeparators(d.absoluteFilePath()), true);
-    statusBar()->showMessage(QStringLiteral("드라이브 목록 — 폴더를 더블클릭하세요"), 5000);
-    return;
-  }
-
-  p = QDir::cleanPath(p);
-  const QFileInfo fi(p);
-  if (!fi.exists() || !fi.isDir()) {
-    statusBar()->showMessage(QStringLiteral("폴더 없음 → 드라이브 목록"), 5000);
-    goFileBrowserRoot(QString());
-    return;
-  }
-  m_browserPath = QDir::cleanPath(fi.absoluteFilePath());
-
-  QDir dir(m_browserPath);
-  dir.setFilter(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks);
-  dir.setSorting(QDir::Name | QDir::IgnoreCase);
-  const QStringList folders = dir.entryList();
-  int n = 0;
-  for (const QString& name : folders) {
-    if (n >= 250) break;
-    if (name.compare(QLatin1String("$Recycle.Bin"), Qt::CaseInsensitive) == 0 ||
-        name.compare(QLatin1String("System Volume Information"), Qt::CaseInsensitive) == 0)
-      continue;
-    addRow(QStringLiteral("[폴더] ") + name, dir.absoluteFilePath(name), true);
-    ++n;
-  }
-  dir.setFilter(QDir::Files | QDir::NoSymLinks);
-  dir.setNameFilters({QStringLiteral("*.shp"), QStringLiteral("*.dxf"), QStringLiteral("*.dwg"),
-                      QStringLiteral("*.gpkg"), QStringLiteral("*.geojson"), QStringLiteral("*.json"),
-                      QStringLiteral("*.tif"), QStringLiteral("*.tiff"), QStringLiteral("*.gtiff"),
-                      QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"), QStringLiteral("*.png")});
-  const QStringList files = dir.entryList();
-  for (const QString& name : files) {
-    if (n >= 400) break;
-    addRow(name, dir.absoluteFilePath(name), false);
-    ++n;
-  }
-  statusBar()->showMessage(
-      QStringLiteral("경로: %1").arg(QDir::toNativeSeparators(m_browserPath)), 6000);
-}
-
-void MainWindow::browseDataFolder() {
-  const QString dir = QFileDialog::getExistingDirectory(
-      this, QStringLiteral("조사 데이터 폴더 선택"),
-      QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
-  if (!dir.isEmpty())
-    goFileBrowserRoot(dir);
-}
-
-void MainWindow::onFileBrowserActivated(QListWidgetItem* item) {
-  if (!item) return;
-  const QString path = item->data(Qt::UserRole).toString();
-  const bool isDir = item->data(Qt::UserRole + 1).toBool();
-  if (path.isEmpty()) return;
-  if (isDir) {
-    goFileBrowserRoot(path);
-    return;
-  }
-  const QString low = path.toLower();
-  const bool raster = GeorefService::isImagePath(path);
-  if (raster ? !addRasterFromPath(path) : !addVectorFromPath(path)) {
-    KaUserError::warn(this, {
-        QStringLiteral("파일"),
-        QStringLiteral("선택한 파일을 지도 레이어로 열지 못했습니다."),
-        QStringLiteral("SHP/DXF/DWG/GPKG/GeoTIFF/JPG만 지도에 올릴 수 있습니다.\n%1")
-            .arg(QDir::toNativeSeparators(path)),
-        QStringLiteral("지원 형식인지 확인한 뒤 다시 열어 주세요. DWG는 DXF로 저장해 보세요."),
-    });
-  } else {
-    if (m_layersCard && !m_layersCard->isVisible())
-      m_layersCard->setVisible(true);
-  }
 }
 
 QStringList MainWindow::selectedBrowserFiles() const {

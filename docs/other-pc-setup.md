@@ -1,6 +1,6 @@
 # 다른 PC에서 바로 개발하기 (Windows)
 
-원격: **https://github.com/kwonyoungin11/hgis** · 브랜치: 지금 작업 중인 브랜치(예: `20260922-1`). `main`은 뒤처져 있을 수 있다.  
+원격: **https://github.com/kesekikwon-netizen/hgis** · 브랜치: 지금 작업 중인 브랜치(예: `20260922-1`). `main`은 뒤처져 있을 수 있다.  
 DLL 미포함 → 대상 PC에 **OSGeo4W `qgis-dev`** 필요.
 
 ---
@@ -15,8 +15,10 @@ DLL 미포함 → 대상 PC에 **OSGeo4W `qgis-dev`** 필요.
 | MSVC 도구 모음 · Windows SDK · CMake | 같은 판을 설치. MSVC·CMake는 `dev-env.lock.json`의 앞 두 자리, SDK는 전체 판 |
 | Git · Node · Python · clangd | 경고만. Graft는 Node 주 판이 같아야 한다 |
 | Cursor | 모델 Grok 4.7. `.\scripts\setup-dev-paths.ps1`이 USER MCP `hgis_graft`를 이 체크아웃으로 쓴다 |
-| 계정·API 키 | PC마다 앱에서 입력(DPAPI). git·번들로 옮기지 않는다 |
+| 계정·API 키 | PC마다 앱에서 입력(DPAPI). git 에는 절대 넣지 않는다. 배포 번들 기본값도 미포함(아래 개인용 포터블 예외만 다름) |
 | 조사 GPKG·SHP | git에 없음. OneDrive/NAS 별도 |
+
+**개인용 포터블 예외:** 사용자가 요청한 개인용 포터블(`make-portable.ps1 -IncludeLocalCredentials`)만 이 PC 의 VWorld 키와 계정 비밀번호를 폴더 `config` 에 **암호화 없이** 담는다(키는 그대로, 비밀번호는 앱과 같은 가림 형식 `password_portable=` 이며 암호화가 아니다). 다른 PC 에서 로그인 없이 쓰려는 사용자 결정이다. 기본값은 미포함이고, 담을 때 스크립트가 경고를 띄우며 `PORTABLE-MANIFEST.json` 의 `credentialsIncluded` 가 `true` 가 된다. 그 폴더는 본인 USB·PC 에만 두고 남에게 주거나 올리지 않는다. 자세한 것은 [portable-desktop.md](portable-desktop.md).
 
 **기준 PC**는 `dev-env.lock.json`을 마지막으로 쓴 컴퓨터다. 폴더 위치는 PC마다 달라도 된다. OSGeo4W나 VS를 업데이트할 때마다 1~2를 다시 한다.
 
@@ -28,7 +30,7 @@ DLL 미포함 → 대상 PC에 **OSGeo4W `qgis-dev`** 필요.
 **다른 PC**
 
 ```powershell
-git clone https://github.com/kwonyoungin11/hgis.git
+git clone https://github.com/kesekikwon-netizen/hgis.git
 cd hgis
 git checkout 20260922-1                               # 지금 작업 브랜치
 .\scripts\osgeo4w-bundle.ps1 -Import E:\ka-hgis-sdk  # 잠금의 OSGeo 경로. 없으면 -Root
@@ -47,7 +49,7 @@ git checkout 20260922-1                               # 지금 작업 브랜치
 ## 30초 요약 (기준 PC를 처음 만들 때)
 
 ```powershell
-git clone https://github.com/kwonyoungin11/hgis.git
+git clone https://github.com/kesekikwon-netizen/hgis.git
 cd hgis
 # 최초 1회만 — 관리자 PowerShell 권장 (CMake/VS/OSGeo4W 설치 시도)
 # 다른 PC는 설치 대신 위 「같은 개발 환경 만들기」의 -Import 를 쓴다.
@@ -100,7 +102,7 @@ cd <클론>\hgis
 ### 원클릭
 
 ```powershell
-git clone https://github.com/kwonyoungin11/hgis.git
+git clone https://github.com/kesekikwon-netizen/hgis.git
 cd hgis
 git checkout 20260922-1   # 지금 작업 브랜치
 git pull
@@ -156,7 +158,7 @@ git push
 다른 PC에서 push 한 뒤 원래 PC로 돌아오면 작업 전에 `git pull`부터 한다. 먼저 커밋했다면 push가 거절되므로 `git pull` 후 다시 push 한다.
 
 - 조사 파일 `*.gpkg` / 필드 SHP는 **git에 없음** → OneDrive/NAS 별도.
-- VWorld 키: **도움말 → VWorld API 키 설정** (PC 로컬, 커밋 금지).
+- VWorld 키: **더보기 → API 키 입력** (PC 로컬, 커밋 금지).
 
 ---
 
@@ -206,7 +208,7 @@ git push
 | DLL 없음 / 즉시 종료 | `dev-env.ps1` 후 실행; `pdal-dev\bin` PATH |
 | CMake 없음 | `winget install Kitware.CMake` |
 | VS 제너레이터 실패 | VS 2022 Build Tools + C++ 워크로드 |
-| VWorld 배경 안 됨 | 도움말 → API 키 (로컬) |
+| VWorld 배경 안 됨 | 더보기 → API 키 입력 (로컬) |
 | 조판 창 안 뜸 | Release 빌드 후 `도구 → 조판 편집 창` |
 
 ---

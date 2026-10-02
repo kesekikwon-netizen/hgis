@@ -4,8 +4,12 @@
 #include "HeritageImport.h"
 #include "LayerOps.h"
 
+#include <QFileInfo>
+
 #include <algorithm>
 
+#include <gdal_priv.h>
+#include <ogrsf_frmts.h>
 #include <qgsfillsymbol.h>
 #include <qgsgraduatedsymbolrenderer.h>
 #include <qgslayertree.h>
@@ -159,4 +163,57 @@ bool SurveyContourStyle::apply(QgsProject* project, const QString& gpkgPath, con
     if (node) node->setItemVisibilityChecked(false);
   }
   return true;
+}
+
+bool SurveyContourStyle::readResult(const QString& gpkgPath, SurveyContourResult* out) {
+  if (!out || !QFileInfo::exists(gpkgPath)) return false;
+  GDALAllRegister();
+  GDALDataset* data = static_cast<GDALDataset*>(GDALOpenEx(
+      gpkgPath.toUtf8().constData(), GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr));
+  if (!data) return false;
+  SurveyContourResult result;
+  auto count = [data](const char* table) {
+    OGRLayer* layer = data->GetLayerByName(table);
+    return layer ? static_cast<int>(layer->GetFeatureCount(TRUE)) : 0;
+  };
+  result.lineCount = count("contour_lines");
+  result.bandCount = count("contour_bands");
+  result.pointCount = count("survey_points");
+  const char* minText = data->GetMetadataItem("KA_HGIS_MIN_CM");
+  const char* maxText = data->GetMetadataItem("KA_HGIS_MAX_CM");
+  const char* bandText = data->GetMetadataItem("KA_HGIS_BAND_CM");
+  if (minText && maxText && bandText) {
+    result.minCm = QByteArray(minText).toInt();
+    result.maxCm = QByteArray(maxText).toInt();
+    result.bandIntervalCm = QByteArray(bandText).toInt();
+  } else if (OGRLayer* points = data->GetLayerByName("survey_points")) {
+    // Results written before the metadata: point heights and the first band's width.
+    bool first = true;
+    points->ResetReading();
+    while (OGRFeature* feature = points->GetNextFeature()) {
+      const int cm = feature->GetFieldAsInteger("elev_cm");
+      result.minCm = first ? cm : std::min(result.minCm, cm);
+      result.maxCm = first ? cm : std::max(result.maxCm, cm);
+      first = false;
+      OGRFeature::DestroyFeature(feature);
+    }
+    if (OGRLayer* bands = data->GetLayerByName("contour_bands")) {
+      bands->ResetReading();
+      if (OGRFeature* feature = bands->GetNextFeature()) {
+        result.bandIntervalCm = feature->GetFieldAsInteger("elev_max_cm") - feature->GetFieldAsInteger("elev_min_cm");
+        OGRFeature::DestroyFeature(feature);
+      }
+    }
+  }
+  GDALClose(data);
+  result.ok = result.lineCount > 0 || result.pointCount > 0;
+  *out = result;
+  return result.ok;
+}
+
+bool SurveyContourStyle::reapply(QgsProject* project, const QString& gpkgPath, const QString& groupTitle) {
+  SurveyContourResult previous;
+  if (!project || !readResult(gpkgPath, &previous)) return false;
+  QString ignored;
+  return apply(project, gpkgPath, groupTitle, previous, &ignored);
 }

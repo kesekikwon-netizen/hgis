@@ -1,9 +1,14 @@
 #include "KaAttributeMapTool.h"
+#include "KaEditTolerance.h"
+#include "KaPickLayers.h"
+#include "core/FeaturePick.h"
+#include "core/LayerOps.h"
 
 #include <qgsmapcanvas.h>
 #include <qgsmapmouseevent.h>
 #include <qgsvectorlayer.h>
 #include <qgsmaplayer.h>
+#include <qgsproject.h>
 
 #include <QKeyEvent>
 #include <QStatusTipEvent>
@@ -33,19 +38,52 @@ bool KaAttributeMapTool::pickAtScreen(const QPoint& screenPos, QgsVectorLayer** 
   *outLayer = nullptr;
   *outFeat = QgsFeature();
 
-  const QList<IdentifyResult> results = identify(
-      screenPos.x(), screenPos.y(),
-      QgsMapToolIdentify::TopDownStopAtFirst,
-      QgsMapToolIdentify::VectorLayer);
+  // Same picking rules as 도형선택 (core/FeaturePick): survey shapes before reference and
+  // cadastral ones, then the smallest shape under the click. The canvas list leaves out layers
+  // painted above the labels (KaAboveLabelsOverlay), so those are added in front of it.
+  QList<QgsMapLayer*> layers = LayerOps::layersDrawnAboveLabels(QgsProject::instance());
+  for (QgsMapLayer* layer : mCanvas->layers())
+    if (layer && !layers.contains(layer)) layers.append(layer);
+  const FeaturePick::Hit hit = FeaturePick::at(
+      layers, toMapCoordinates(screenPos), mCanvas->mapUnitsPerPixel() * KaEditTolerance::kFeaturePickPx,
+      mCanvas->mapSettings().destinationCrs(), QgsProject::instance()->transformContext());
+  if (!hit.valid()) return false;
+  // An inner piece (a hole, a part inside a part) stands for its whole shape here.
+  const QgsFeature feature = hit.layer->getFeature(hit.fid);
+  if (!feature.isValid()) return false;
 
-  if (results.isEmpty()) return false;
-
-  auto* vl = qobject_cast<QgsVectorLayer*>(results.first().mLayer);
-  if (!vl || !results.first().mFeature.isValid()) return false;
-
-  *outLayer = vl;
-  *outFeat = results.first().mFeature;
+  *outLayer = hit.layer;
+  *outFeat = feature;
   return true;
+}
+
+bool KaAttributeMapTool::isEditableLayer(const QgsMapLayer* layer) {
+  const auto* vl = qobject_cast<const QgsVectorLayer*>(layer);
+  if (!vl || !vl->isValid()) return false;
+  return !LayerOps::isReferenceOrBasemapLayer(vl) && !LayerOps::isCadastralLayer(vl) &&
+         !LayerOps::isReferenceLayer(vl);
+}
+
+bool KaAttributeMapTool::pickEditableAtScreen(const QPoint& screenPos, QgsVectorLayer** outLayer,
+                                              QgsFeature* outFeat) {
+  if (!mCanvas || !outLayer || !outFeat) return false;
+  *outLayer = nullptr;
+  *outFeat = QgsFeature();
+  QList<QgsMapLayer*> candidates;
+  for (QgsMapLayer* layer : kaPickLayers(mCanvas)) {
+    if (isEditableLayer(layer)) candidates.append(layer);
+  }
+  if (candidates.isEmpty()) return false;
+  const QList<IdentifyResult> results =
+      identify(screenPos.x(), screenPos.y(), candidates, QgsMapToolIdentify::TopDownStopAtFirst);
+  for (const IdentifyResult& result : results) {
+    auto* vl = qobject_cast<QgsVectorLayer*>(result.mLayer);
+    if (!vl || !result.mFeature.isValid()) continue;
+    *outLayer = vl;
+    *outFeat = result.mFeature;
+    return true;
+  }
+  return false;
 }
 
 void KaAttributeMapTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
@@ -57,11 +95,12 @@ void KaAttributeMapTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
 
   QgsVectorLayer* layer = nullptr;
   QgsFeature feat;
-  if (!pickAtScreen(e->pos(), &layer, &feat) || !layer) {
+  if (!pickEditableAtScreen(e->pos(), &layer, &feat) || !layer) {
     if (mCanvas) {
-      mCanvas->setStatusTip(QStringLiteral("이 위치에 도형 없음 — 조사 데이터 레이어 도형을 클릭하세요"));
-      QApplication::sendEvent(mCanvas, new QStatusTipEvent(
-          QStringLiteral("이 위치에 도형 없음 — 조사 데이터 레이어 도형을 클릭하세요")));
+      const QString tip = QStringLiteral("이 위치에 조사 도형이 없습니다. 참조 지도·지적도는 고칠 수 없습니다.");
+      mCanvas->setStatusTip(tip);
+      QStatusTipEvent event(tip);
+      QApplication::sendEvent(mCanvas, &event);
     }
     return;
   }

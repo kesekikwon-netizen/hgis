@@ -17,7 +17,6 @@
 #include "KaTerrain3dStudio.h"
 #include "KaTerrain3dLayoutStudio.h"
 #include "KaStartPage.h"
-#include "KaCoordPointMapTool.h"
 #include "KaMeasureMapTool.h"
 #include "core/DemAnalyzer.h"
 #include "core/TilePackService.h"
@@ -26,7 +25,6 @@
 #include "KaCanvasGridOverlay.h"
 #include "KaTrenchMoveTool.h"
 #include "KaFeatureSelectTool.h"
-#include "KaFoundLocationMark.h"
 #include "KaStatusBar.h"
 #include "KaBeginnerRibbon.h"
 #include "KaSnapSettingsWidget.h"
@@ -49,6 +47,9 @@
 #include "core/SurveyStorage.h"
 #include "core/SurveySession.h"
 #include "core/GeorefService.h"
+#include "core/GeorefBackup.h"
+#include "core/GeorefPixelWindow.h"
+#include "core/GeorefQuality.h"
 #include "core/BufferAnalysis.h"
 #include "core/ChecklistEngine.h"
 #include "core/SurveyProjectFactory.h"
@@ -247,6 +248,9 @@ void MainWindow::ensureAlignSplit() {
     if (m_subToolsMode == QLatin1String("align"))
       updateAlignOverlay();
   });
+  connect(m_alignImage, &KaImageView::markDragged, this, [this](int i, double x, double y) {
+    if (m_alignTool) m_alignTool->movePairSource(i, x, y);
+  });
   ll->addWidget(m_alignImage, 1);
 
   m_alignLeftCanvas = new QgsMapCanvas(m_alignLeftPane);
@@ -260,6 +264,9 @@ void MainWindow::ensureAlignSplit() {
     if (!m_alignTool) return;
     m_alignTool->setSourcePoint(pt.x(), pt.y());
     if (m_canvas) m_canvas->setMapTool(m_alignTool);
+  });
+  connect(m_alignPickTool, &KaAlignPickTool::pointDragged, this, [this](int i, const QgsPointXY& pt) {
+    if (m_alignTool) m_alignTool->movePairSource(i, pt.x(), pt.y());
   });
   m_alignLeftCanvas->setMapTool(m_alignPickTool);
   connect(m_alignLeftCanvas, &QgsMapCanvas::extentsChanged, this, [this]() {
@@ -354,9 +361,14 @@ bool MainWindow::loadAlignPreviewFromRaster() {
            QStringLiteral("왼쪽에 그림을 띄우지 못했습니다: %1").arg(rl->name()), why);
     return false;
   }
+  // Zooming past the preview reads the visible part again from the original file.
+  const QString source = m_alignTool->rasterSourcePath();
+  m_alignImage->setDetailReader([source](const QRect& window, const QSize& out) {
+    return GeorefService::readPixelWindow(source, window, out);
+  });
   statusBar()->showMessage(
-      QStringLiteral("원본 %1 x %2 화소는 Qt 로 한 번에 못 엽니다. 축소본(%3 x %4)으로 "
-                     "찍으세요 — 좌표는 원본 기준으로 계산됩니다.")
+      QStringLiteral("원본 %1 x %2 화소는 Qt 로 한 번에 못 엽니다. 축소본(%3 x %4)을 띄우고, "
+                     "확대하면 원본에서 다시 읽습니다 — 좌표는 원본 기준으로 계산됩니다.")
           .arg(nw).arg(nh).arg(img.width()).arg(img.height()),
       12000);
   return true;
@@ -449,16 +461,29 @@ void MainWindow::refreshAlignUi() {
       addMk(QgsPointXY(pend->x(), pend->y()), QColor(234, 179, 8));
   }
 
+  if (m_alignPickTool) {
+    QVector<QgsPointXY> dragPts;
+    for (const QPointF& p : pts) dragPts.append(QgsPointXY(p.x(), p.y()));
+    m_alignPickTool->setDragPoints(dragPts);
+  }
+
   if (m_alignPointList) {
     m_alignPointList->clear();
     const auto& pairs = m_alignTool->pairs();
-    for (int i = 0; i < pairs.size(); ++i) {
-      m_alignPointList->addItem(
-          QStringLiteral("%1번  왼쪽 → 오른쪽").arg(i + 1));
-    }
+    // Per-point residual and shape warnings only; the fit and its reference-map role stay.
+    const GeorefQuality::Report quality =
+        GeorefQuality::assess(pairs, m_alignTool->isRasterSession());
+    for (int i = 0; i < pairs.size(); ++i)
+      m_alignPointList->addItem(GeorefQuality::rowText(quality, i));
     if (m_alignTool->hasPendingSource()) {
       m_alignPointList->addItem(
           QStringLiteral("%1번  왼쪽만 — 오른쪽 모서리를 찍으세요").arg(pairs.size() + 1));
+    }
+    for (const QString& note : GeorefQuality::notes(quality)) {
+      auto* item = new QListWidgetItem(note, m_alignPointList);
+      item->setFlags(Qt::ItemIsEnabled);  // not selectable, so 「점 지우기」 never targets it
+      item->setForeground(note.startsWith(QStringLiteral("주의")) ? KaTheme::tokens().danger
+                                                                  : KaTheme::tokens().inkMuted);
     }
   }
 
@@ -639,8 +664,15 @@ void MainWindow::applyAlignMove() {
     stacked.insert(insertAt, aligned);
     m_canvas->setLayers(stacked);
 
-    QgsRectangle ext = aligned->extent();
-    if (!ext.isEmpty() && ext.isFinite() && ext.xMinimum() > 1000.0) {
+    // Zoom only when the result sits in real map coordinates: judged by the canvas CRS
+    // units and the pixel-plane test, not by the size of the numbers.
+    QgsRectangle ext =
+        m_canvas->mapSettings().layerExtentToOutputExtent(aligned, aligned->extent());
+    const QgsCoordinateReferenceSystem viewCrs = m_canvas->mapSettings().destinationCrs();
+    const auto* alignedRaster = qobject_cast<QgsRasterLayer*>(aligned);
+    const bool onMap = viewCrs.isValid() && viewCrs.mapUnits() != Qgis::DistanceUnit::Unknown &&
+                       !(alignedRaster && GeorefService::looksUnreferencedRaster(alignedRaster));
+    if (onMap && !ext.isEmpty() && ext.isFinite()) {
       m_canvas->setExtent(ext);
       m_canvas->zoomToFeatureExtent(ext);
       m_canvas->zoomScale(m_canvas->scale() * 1.25, true);
@@ -658,8 +690,15 @@ void MainWindow::applyAlignMove() {
   kickAlignedPaint();
   QTimer::singleShot(0, this, kickAlignedPaint);
   QTimer::singleShot(350, this, kickAlignedPaint);
+  // Honest about what was written: the image's world file next to it, with the previous
+  // coordinates kept in the backup folder that 「되돌리기」 restores from.
+  const QString backup = m_alignTool ? m_alignTool->backupFolder() : QString();
   statusBar()->showMessage(
-      QStringLiteral("맞춘 도면을 지금 보는 지적 위에 올렸습니다. 흰 종이만 빼고 먹선은 진하게 보이게 했습니다."),
+      QStringLiteral("맞춘 도면을 지금 보는 지적 위에 올렸습니다. 흰 종이만 빼고 먹선은 진하게 보이게 했습니다.")
+          + (backup.isEmpty()
+                 ? QString()
+                 : QStringLiteral(" 그림 옆 좌표 파일을 새로 썼고, 원래 좌표는 %1 에 백업했습니다.")
+                       .arg(QDir::toNativeSeparators(backup))),
       10000);
 #endif
 }
@@ -690,10 +729,19 @@ void MainWindow::showSubToolsAlign() {
     if (m_alignTool) statusBar()->showMessage(m_alignTool->statusText(), 4000);
   });
   m_subToolbar->addAction(QStringLiteral("되돌리기"), this, [this]() {
-    if (m_alignTool) m_alignTool->restoreOriginals();
+    if (!m_alignTool) return;
+    // The message says what really happened: restored from the backup, nothing written
+    // yet, or a failure (then the backup folder is named).
+    QString message;
+    const bool restored = m_alignTool->restoreOriginals(&message);
     m_alignApplied = false;
+    if (m_alignTool->hasSession() && m_alignLeftPane && !m_alignLeftPane->isVisible())
+      showAlignSplit();
     refreshAlignUi();
-    statusBar()->showMessage(QStringLiteral("맞추기를 처음 상태로 되돌렸습니다"), 4000);
+    if (restored)
+      statusBar()->showMessage(message, 8000);
+    else
+      notify(Notice::Warning, QStringLiteral("맞추기"), message);
   });
   m_subToolbar->addAction(KaIcons::icon(QStringLiteral("save")), QStringLiteral("맞추기 저장"),
                           this, [this]() {
@@ -774,6 +822,8 @@ void MainWindow::startAlignSession(QgsMapLayer* layer) {
       QgsProject::instance() && QgsProject::instance()->crs().isValid()
           ? QgsProject::instance()->crs()
           : QgsCoordinateReferenceSystem(m_workCrs);
+  // Coordinates an image already has are backed up here before the first world-file write.
+  m_alignTool->setBackupRoot(GeorefBackup::backupRootFor(m_surveyPath));
   if (!m_alignTool->beginLayer(layer, crs, &err)) {
     QMessageBox::warning(this, QStringLiteral("맞추기"), err);
     return;

@@ -1,5 +1,7 @@
 #include "KaSessionLog.h"
+#include "KaLogExcept.h"
 #include "KaPortableRuntime.h"
+#include "VworldSettings.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
@@ -294,15 +296,23 @@ bool KaPortableRuntime::prependOsgeoPath() {
 }
 
 void KaPortableRuntime::isolateUserState(const KaPortablePaths& paths) {
-  if (!paths.looksBundled())
+  // KA_HGIS_SETTINGS_DIR (QA runs of a development build) asks for the bundle's isolation, so a
+  // smoke or capture run leaves the user's ini, key store and QGIS profile alone.
+  const QString qaDir = qEnvironmentVariable("KA_HGIS_SETTINGS_DIR").trimmed();
+  if (!paths.looksBundled() && qaDir.isEmpty())
     return;
-  const QString cfg = QDir(paths.exeDir).filePath(QStringLiteral("config"));
+  const QString cfg = qaDir.isEmpty() ? QDir(paths.exeDir).filePath(QStringLiteral("config")) : qaDir;
   QDir().mkpath(cfg);
   // 다른 PC에 남은 이전 설치 AppData/레지스트리를 쓰지 않는다.
   QSettings::setDefaultFormat(QSettings::IniFormat);
   QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, QDir(cfg).absolutePath());
   QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, QDir(cfg).absolutePath());
-  const QString inherited = inheritSiblingSettings(paths.exeDir, cfg);
+  if (!qaDir.isEmpty()) {
+    VworldSettings::Scope keys;  // the key store follows into the folder: no registry, no AppData ini
+    keys.folder = cfg;
+    VworldSettings::setScope(keys);
+  }
+  const QString inherited = qaDir.isEmpty() ? inheritSiblingSettings(paths.exeDir, cfg) : QString();
   if (!inherited.isEmpty())
     KaSessionLog::line(QStringLiteral("[boot] 이전 포터블의 설정을 이어받음 — %1")
                            .arg(QDir::toNativeSeparators(inherited)));
@@ -377,7 +387,7 @@ bool KaPortableRuntime::koreaWorkAndWebCrsValid() {
     const QgsPointXY out = xf.transform(QgsPointXY(14135000.0, 4510000.0));
     return std::isfinite(out.x()) && std::isfinite(out.y());
   } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/KaPortableRuntime.cpp:351"));
+    KA_LOG_EXCEPT();
     return false;
   }
 }

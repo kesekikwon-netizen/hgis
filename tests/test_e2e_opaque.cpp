@@ -537,8 +537,7 @@ void TestE2EOpaque::testT2_Checklist_BlockOnError() {
 
   QVERIFY(res.isEmpty());
   QVERIFY(!err.isEmpty());
-  QVERIFY(err.contains(QStringLiteral("Checklist errors remain"), Qt::CaseInsensitive)
-          || err.contains(QStringLiteral("blocked"), Qt::CaseInsensitive));
+  QVERIFY2(err.contains(QStringLiteral("검수 오류")), qPrintable(err));
 }
 
 void TestE2EOpaque::testT2_InvalidDestination_DirectoryHandling() {

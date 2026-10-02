@@ -89,7 +89,7 @@ QString KaStartupSplash::attributionText() {
 
 QString KaStartupSplash::creditsText() {
   return KaSplashCredits::plainText() +
-         QStringLiteral("\n자세한 저작권 안내는 앱의 도움말 → 정보에서 다시 볼 수 있습니다.");
+         QStringLiteral("\n자세한 저작권 안내는 앱의 더보기 → 정보에서 다시 볼 수 있습니다.");
 }
 
 KaStartupSplash::KaStartupSplash(QWidget* parent, int readingDurationMs)
@@ -129,6 +129,27 @@ QRectF KaStartupSplash::cardRect() const {
 
 QRectF KaStartupSplash::dotsRect() const {
   return layoutFor(QRectF(rect())).dots;
+}
+
+QRectF KaStartupSplash::noticesRect() const {
+  return layoutFor(QRectF(rect())).notices;
+}
+
+void KaStartupSplash::paintBackdrop(QPainter& painter, qreal dpr) const {
+  const Layout l = layoutFor(QRectF(rect()));
+  painter.setRenderHint(QPainter::Antialiasing);
+  KaSplashArt::paintShadow(painter, l.card, kRadius);
+  KaSplashArt::paintCard(painter, l.card, kRadius,
+                         KaSplashArt::contours(l.card.size(), dpr, l.icon.center() - l.card.topLeft()));
+  KaSplashArt::paintIcon(painter, l.icon, m_icon);
+}
+
+QImage KaStartupSplash::backdropImage() const {
+  QImage image(size(), QImage::Format_ARGB32_Premultiplied);
+  image.fill(Qt::transparent);
+  QPainter painter(&image);
+  paintBackdrop(painter, 1.0);
+  return image;
 }
 
 void KaStartupSplash::markReady() {
@@ -171,12 +192,8 @@ const QPixmap& KaStartupSplash::staticLayer() {
   m_static.fill(Qt::transparent);
   const Layout l = layoutFor(QRectF(rect()));
   QPainter painter(&m_static);
-  painter.setRenderHint(QPainter::Antialiasing);
   painter.setRenderHint(QPainter::TextAntialiasing);
-  KaSplashArt::paintShadow(painter, l.card, kRadius);
-  KaSplashArt::paintCard(painter, l.card, kRadius,
-                         KaSplashArt::contours(l.card.size(), dpr, l.icon.center() - l.card.topLeft()));
-  KaSplashArt::paintIcon(painter, l.icon, m_icon);
+  paintBackdrop(painter, dpr);
   KaSplashCredits::paintTitle(painter, l.title, l.unit, QCoreApplication::applicationVersion());
   KaSplashCredits::paintNotices(painter, l.notices, l.unit);
   return m_static;

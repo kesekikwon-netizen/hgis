@@ -6,6 +6,7 @@
 #include "core/TopographicSheets.h"
 #include "core/TopographicSourceCrs.h"
 #include "core/TopographicShapefileCache.h"
+#include "core/ReferenceSheetSnapshot.h"
 #include <QCheckBox>
 #include <QCryptographicHash>
 #include <QDir>
@@ -50,6 +51,12 @@ struct Prepared {
 Prepared prepareOne(const QString& source,const QJsonObject& metadata,const QString& library,
                     const QgsCoordinateTransformContext& context,const std::function<bool()>& canceled,
                     bool remember,const PreparationProgress& progress);
+// F202: a clean preparation leaves a size/time snapshot beside its index entry,
+// so a pan that re-selects a kept sheet neither re-hashes nor re-converts it.
+void rememberSnapshot(const QString& indexFile,const QString& source,const Prepared& prepared) {
+  ReferenceSheetSnapshot::rememberBeside(indexFile,source,prepared.records,prepared.reviewRecords.isEmpty() &&
+      prepared.warnings.isEmpty(),TopographicSourceCrs::kSolverVersion,prepared.crsNames.value(0),prepared.evidence);
+}
 QString crsName(const QString& authId) {
   QString origin;
   const int code=authId.section(QLatin1Char(':'),1).toInt();
@@ -291,6 +298,7 @@ Prepared prepareOne(const QString& source, const QJsonObject& metadata, const QS
     if (!QDir().mkpath(index) || !output.open(QIODevice::WriteOnly) || output.write(json)!=json.size() || !output.commit()) {
       result.error=QStringLiteral("도엽 보관 정보를 저장하지 못했습니다. 받은 원본은 유지됩니다."); result.records.clear(); return result;
     }
+    rememberSnapshot(QDir(index).filePath(id+QStringLiteral(".json")),source,result);
   }
   result.available.append(number);
   return result;
@@ -314,12 +322,19 @@ Prepared restoreNearby(const QString& library,const QgsPointXY& center5179,doubl
     const auto number=metadata.value("num").toString();
     if (item.value("schema").toInt()!=1 || bounds.isEmpty() || result.available.contains(number)) continue;
     if (QgsGeometry::fromRect(bounds).distance(point)>radius) continue;
-    auto prepared=prepareOne(item.value("source").toString(),metadata,library,context,canceled,false,progress);
+    const QString source=item.value("source").toString();
+    // Unchanged original, SHP files and solver: reuse the verified records.
+    const auto cached=ReferenceSheetSnapshot::restoreBeside(file.absoluteFilePath(),source,number,TopographicSourceCrs::kSolverVersion);
+    Prepared prepared;
+    if (!cached.valid) prepared=prepareOne(source,metadata,library,context,canceled,false,progress);
+    else { prepared.records=cached.records; prepared.available={number}; prepared.evidence=cached.evidence;
+      if (!cached.crsName.isEmpty()) prepared.crsNames={cached.crsName}; }
     if (!prepared.error.isEmpty()) { result.warnings.append(prepared.error); continue; }
     result.records.append(prepared.records); result.available.append(prepared.available);
     result.reviewRecords.append(prepared.reviewRecords); result.crsNames.append(prepared.crsNames); result.crsNames.removeDuplicates();
     result.warnings.append(prepared.warnings);
     if (!prepared.evidence.isEmpty()) result.evidence=prepared.evidence;
+    if (!cached.valid && !canceled() && prepared.available.contains(number)) rememberSnapshot(file.absoluteFilePath(),source,prepared);
   }
   restoreReviewReceipts(result,library,center5179,radius,context,canceled,progress);
   return result;
@@ -374,6 +389,9 @@ KaTopographicScopePanel::KaTopographicScopePanel(QgsMapCanvas* canvas, KaTopogra
   m_libraryDirectory=directory.isEmpty()?QString():QDir(directory).absolutePath();
   if (browser && !m_libraryDirectory.isEmpty())
     browser->setDownloadRoot(QDir(m_libraryDirectory).filePath(QStringLiteral("원본")));
+  // Merged sheet lines live beside the survey's downloads, never in the working folder.
+  if (m_importer && !m_libraryDirectory.isEmpty())
+    m_importer->setMergeDirectory(QDir(m_libraryDirectory).filePath(QStringLiteral("합침")));
   auto* layout=new QVBoxLayout(this); layout->setContentsMargins(0,0,0,0);
   auto* row=new QHBoxLayout;
   m_enabled=new QCheckBox(QStringLiteral("수치지형도 자동 받기"),this); m_enabled->setChecked(true);
@@ -475,6 +493,7 @@ void KaTopographicScopePanel::setLibraryDirectory(const QString& directory) {
   m_enabled->setChecked(false);
   m_available.clear(); m_reviewMessages.clear(); m_libraryDirectory=path;
   if (m_browser && !path.isEmpty()) m_browser->setDownloadRoot(QDir(path).filePath(QStringLiteral("원본")));
+  if (m_importer) m_importer->setMergeDirectory(path.isEmpty()?QString():QDir(path).filePath(QStringLiteral("합침")));
 }
 void KaTopographicScopePanel::clearBoundaries() { m_boundaries.clear(); }
 void KaTopographicScopePanel::refreshScope() {
@@ -575,8 +594,10 @@ void KaTopographicScopePanel::startNext() {
       else for (const auto& number:prepared.available) if (!guard->m_available.contains(number)) guard->m_available.append(number);
       for (const auto& number:guard->m_available) guard->m_reviewMessages.remove(number);
       if (!prepared.records.isEmpty()) {
-        guard->setStatus(QStringLiteral("도엽 %1장 보관. 화면 중심 반경 10km에 겹치는 SHP %2개를 지도에 올립니다 · %3")
-          .arg(prepared.available.size()).arg(prepared.records.size()).arg(prepared.crsNames.join(QStringLiteral(" / "))));
+        // The search radius is the single kRadiusKm constant; never restate an old value here.
+        guard->setStatus(QStringLiteral("도엽 %1장 보관. 화면 중심 반경 %2km에 겹치는 SHP %3개를 지도에 올립니다 · %4")
+          .arg(prepared.available.size()).arg(kRadiusKm,0,'f',0).arg(prepared.records.size())
+          .arg(prepared.crsNames.join(QStringLiteral(" / "))));
         guard->m_status->setToolTip(prepared.evidence);
       }
       QStringList warnings=prepared.warnings;

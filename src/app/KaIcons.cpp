@@ -1,7 +1,12 @@
 #include "KaIcons.h"
+#include "KaIconMetrics.h"
+#include "KaIconsMockup.h"
+#include "KaIconsOutline.h"
 #include "KaTheme.h"
+#include <QDebug>
 #include <QFont>
 #include <QHash>
+#include <QSet>
 #include <QImage>
 #include <QPainter>
 #include <QPainterPath>
@@ -17,6 +22,8 @@ thread_local QIcon::State tState = QIcon::Off;
 thread_local bool tGlossyTile = true;
 // 저장·도면·인쇄처럼 자주 누르는 단추만 진한 색 타일. 나머지는 옅은 타일이라 지도가 먼저 보인다.
 thread_local bool tStrongTile = false;
+// Mockup by default; KA_HGIS_ICON_STYLE=outline|tile or setGlyphStyle() keeps the older styles.
+KaIcons::GlyphStyle tStyle = KaIcons::glyphStyleFromEnvironment();
 
 // t 만큼 b 쪽으로 섞는다.
 QColor blend(const QColor& a, const QColor& b, qreal t) {
@@ -71,9 +78,14 @@ QPixmap base(int s = 64) {
   return pm;
 }
 
+// The glyph's own stroke width, floored so no line drops under 1 px at 32 px.
+qreal strokeFor(const QPainter& p, qreal width) {
+  return KaIconMetrics::strokeWidth(width, p.worldTransform().m11());
+}
+
 void prep(QPainter& p, qreal width = 3.0) {
   p.setRenderHint(QPainter::Antialiasing, true);
-  p.setPen(QPen(tInk, qMax(3.0, width), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.setPen(QPen(tInk, strokeFor(p, width), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
   if (!tGlossyTile) p.setBrush(tAccent.lighter(150));
   else if (tMode == QIcon::Disabled) p.setBrush(QColor(240, 240, 240));
   else p.setBrush(tStrongTile ? QColor(0xF1, 0xF5, 0xF7) : QColor(Qt::white));
@@ -105,6 +117,8 @@ QIcon bakeIcon(void (*fn)(QPainter&), const QColor& accent) {
     }
     p.save();
     if (tGlossyTile) { p.translate(5.1, 5.1); p.scale(0.84, 0.84); }
+    // Outline-only drawers (home, warn, pencil...) read the ink from the pen when a tile borrows them.
+    p.setPen(QPen(tInk, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     fn(p);
     p.restore();
     if (mode == QIcon::Selected) {
@@ -204,11 +218,21 @@ void dMap(QPainter& p) {
   p.drawEllipse(QPointF(34, 30), 3.5, 3.5);
 }
 
+// 위성: 몸체와 양쪽 태양 전지판. 지구 모양(좌표계·웹)과 겹치지 않게 한다.
 void dSatellite(QPainter& p) {
-  prep(p, 2.5);
-  p.drawEllipse(QPointF(32, 32), 16, 16);
-  p.drawEllipse(QPointF(32, 32), 7, 16);
-  p.drawLine(16, 32, 48, 32);
+  prep(p, 2.4);
+  p.save();
+  p.translate(32, 28);
+  p.rotate(-35);
+  p.drawRoundedRect(QRectF(-7, -7, 14, 14), 2, 2);
+  p.drawLine(QPointF(-12, 0), QPointF(-7, 0));
+  p.drawLine(QPointF(7, 0), QPointF(12, 0));
+  p.setBrush(tAccent);
+  p.drawRect(QRectF(-24, -6, 12, 12));
+  p.drawRect(QRectF(12, -6, 12, 12));
+  p.restore();
+  p.setBrush(Qt::NoBrush);
+  p.drawArc(QRectF(20, 40, 24, 16), 200 * 16, 140 * 16);
 }
 
 void dPolygon(QPainter& p) {
@@ -314,12 +338,22 @@ void dSection(QPainter& p) {
   p.drawLine(QPointF(16, 42), QPointF(48, 42));
 }
 
+// 좌표계: 원점에서 뻗은 X·Y 축과 한 점의 좌표 보조선. 지구(위성·웹)와 구별한다.
 void dCrs(QPainter& p) {
   prep(p, 2.6);
-  p.drawEllipse(QPointF(32, 32), 16, 16);
-  p.drawEllipse(QPointF(32, 32), 8, 16);
-  p.drawLine(16, 32, 48, 32);
-  p.drawLine(32, 16, 32, 48);
+  p.setBrush(Qt::NoBrush);
+  p.drawLine(QPointF(16, 48), QPointF(16, 13));
+  p.drawLine(QPointF(16, 48), QPointF(51, 48));
+  p.drawLine(QPointF(16, 13), QPointF(11, 20));
+  p.drawLine(QPointF(16, 13), QPointF(21, 20));
+  p.drawLine(QPointF(51, 48), QPointF(44, 43));
+  p.drawLine(QPointF(51, 48), QPointF(44, 53));
+  p.setPen(QPen(tInk, strokeFor(p, 1.8), Qt::DashLine, Qt::RoundCap));
+  p.drawLine(QPointF(16, 27), QPointF(36, 27));
+  p.drawLine(QPointF(36, 27), QPointF(36, 48));
+  p.setPen(QPen(tInk, strokeFor(p, 2.6)));
+  p.setBrush(tAccent);
+  p.drawEllipse(QPointF(36, 27), 4.5, 4.5);
 }
 
 void dTransform(QPainter& p) {
@@ -332,12 +366,20 @@ void dTransform(QPainter& p) {
   p.drawLine(32, 50, 20, 42);
 }
 
+// 올리기: 구름으로 올라가는 화살표. 트레이로 내리는 「내보내기」와 모양을 나눈다.
 void dUpload(QPainter& p) {
-  prep(p, 3.2);
-  p.drawLine(32, 44, 32, 16);
-  p.drawLine(20, 28, 32, 14);
-  p.drawLine(44, 28, 32, 14);
-  p.drawRoundedRect(QRectF(13, 47, 38, 7), 2, 2);
+  prep(p, 2.8);
+  QPainterPath cloud;
+  cloud.moveTo(19, 42);
+  cloud.cubicTo(9, 42, 9, 28, 20, 28);
+  cloud.cubicTo(21, 16, 39, 14, 42, 25);
+  cloud.cubicTo(54, 24, 57, 42, 45, 42);
+  cloud.closeSubpath();
+  p.drawPath(cloud);
+  p.setPen(QPen(tInk, strokeFor(p, 3.2), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.drawLine(QPointF(32, 54), QPointF(32, 29));
+  p.drawLine(QPointF(25, 36), QPointF(32, 29));
+  p.drawLine(QPointF(39, 36), QPointF(32, 29));
 }
 
 void dTrash(QPainter& p) {
@@ -801,10 +843,14 @@ void dScaleBar(QPainter& p) {
   p.drawLine(42, 26, 42, 38);
 }
 
+// 축척 글자: 24 px 아래에서도 읽히게 격자 높이의 3/8 크기 굵은 글자로 쓴다.
 void dScaleText(QPainter& p) {
   prep(p, 2.4);
-  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 11, QFont::Bold));
-  p.drawText(QRectF(6, 16, 52, 32), Qt::AlignCenter, QStringLiteral("1:n"));
+  QFont font(QStringLiteral("Malgun Gothic"));
+  font.setPixelSize(24);
+  font.setBold(true);
+  p.setFont(font);
+  p.drawText(QRectF(2, 14, 60, 36), Qt::AlignCenter, QStringLiteral("1:n"));
 }
 
 void dLegend(QPainter& p) {
@@ -898,9 +944,97 @@ void dEasyDraw(QPainter& p) {
   p.drawEllipse(QPointF(50, 16), 3.6, 3.6);
 }
 
+// 정의되지 않은 id: 점선 상자와 물음표. 오타가 조용히 「새 조사」 그림이 되지 않게 한다.
+void dMissing(QPainter& p) {
+  prep(p, 2.4);
+  p.setBrush(Qt::NoBrush);
+  p.setPen(QPen(tInk, strokeFor(p, 2.4), Qt::DashLine, Qt::RoundCap, Qt::RoundJoin));
+  p.drawRoundedRect(QRectF(13, 13, 38, 38), 6, 6);
+  QFont font(QStringLiteral("Malgun Gothic"));
+  font.setPixelSize(26);
+  font.setBold(true);
+  p.setFont(font);
+  p.setPen(tInk);
+  p.drawText(QRectF(13, 13, 38, 38), Qt::AlignCenter, QStringLiteral("?"));
+}
+
+using Glyph = void (*)(QPainter&);
+
+// Every icon id and its glyph. Aliases share a glyph on purpose.
+Glyph glyphFor(const QString& id) {
+  static const QHash<QString, Glyph> glyphs = {
+      {QStringLiteral("new"), dDocPlus}, {QStringLiteral("open"), dFolder}, {QStringLiteral("import"), dFolder},
+      {QStringLiteral("save"), dSave}, {QStringLiteral("save_unsaved"), dSave}, {QStringLiteral("save_as"), dSaveAs},
+      {QStringLiteral("old_map"), dFoldedMap}, {QStringLiteral("old_topo"), dOldSheet},
+      {QStringLiteral("topo_download"), dTopoDownload}, {QStringLiteral("geotiff"), dGeoImage},
+      {QStringLiteral("web"), dBrowser}, {QStringLiteral("heritage"), dPavilion},
+      {QStringLiteral("export_convert"), dTransform}, {QStringLiteral("transform"), dTransform},
+      {QStringLiteral("layer"), dLayer}, {QStringLiteral("map"), dMap}, {QStringLiteral("vworld_base"), dMap},
+      {QStringLiteral("vworld_hybrid"), dMap}, {QStringLiteral("hybrid"), dMap},
+      {QStringLiteral("satellite"), dSatellite}, {QStringLiteral("vworld_sat"), dSatellite},
+      {QStringLiteral("vworld_cadastral"), dCadastral}, {QStringLiteral("cadastral"), dCadastral},
+      {QStringLiteral("vworld_contour"), dContour}, {QStringLiteral("contour"), dContour},
+      {QStringLiteral("survey_contour"), dSurveyContour}, {QStringLiteral("dark_mode"), dDark},
+      {QStringLiteral("polygon"), dPolygon}, {QStringLiteral("survey_area"), dPolygon},
+      {QStringLiteral("line"), dLine}, {QStringLiteral("feature_line"), dLine},
+      {QStringLiteral("feature_poly"), dToolPoly}, {QStringLiteral("draw_poly"), dToolPoly},
+      {QStringLiteral("gps"), dGps}, {QStringLiteral("check"), dCheck}, {QStringLiteral("saveedit"), dCheck},
+      {QStringLiteral("layout_activate_done"), dCheck}, {QStringLiteral("export"), dExport},
+      {QStringLiteral("pdf"), dPdf}, {QStringLiteral("print"), dPrint},
+      {QStringLiteral("section"), dSection}, {QStringLiteral("section_layout"), dSection},
+      {QStringLiteral("terrain_3d"), dTerrain3d}, {QStringLiteral("terrain3d"), dTerrain3d},
+      {QStringLiteral("crs"), dCrs}, {QStringLiteral("upload"), dUpload}, {QStringLiteral("trash"), dTrash},
+      {QStringLiteral("georef"), dGeoref}, {QStringLiteral("palette"), dPalette}, {QStringLiteral("stop"), dStop},
+      {QStringLiteral("help"), dHelp}, {QStringLiteral("more"), dMore}, {QStringLiteral("search"), dSearch},
+      {QStringLiteral("draw_line"), dToolLine}, {QStringLiteral("draw_area"), dToolArea},
+      {QStringLiteral("snap"), dSnap}, {QStringLiteral("easy_draw"), dEasyDraw}, {QStringLiteral("undo"), dUndo},
+      {QStringLiteral("redo"), dRedo}, {QStringLiteral("buffer"), dBuffer}, {QStringLiteral("artifact"), dArtifact},
+      {QStringLiteral("select"), dSelect}, {QStringLiteral("arrow"), dSelect},
+      {QStringLiteral("measure"), dMeasureTape}, {QStringLiteral("tape"), dMeasureTape},
+      {QStringLiteral("dem"), dDem}, {QStringLiteral("hillshade"), dDem},
+      {QStringLiteral("trench_grid"), dTrenchGrid}, {QStringLiteral("trench"), dTrenchGrid},
+      {QStringLiteral("soil"), dSoil}, {QStringLiteral("paleo"), dPaleo}, {QStringLiteral("paleo_landform"), dPaleo},
+      {QStringLiteral("geology"), dGeology}, {QStringLiteral("river"), dRiver}, {QStringLiteral("hydro"), dRiver},
+      {QStringLiteral("map_grid"), dMapGrid}, {QStringLiteral("graticule"), dMapGrid},
+      {QStringLiteral("layout_map_frame"), dLayoutFrame}, {QStringLiteral("layout_select"), dLayoutSelect},
+      {QStringLiteral("layout_pan"), dLayoutPan}, {QStringLiteral("layout_zoom_full"), dLayoutZoom},
+      {QStringLiteral("layout_north"), dNorth}, {QStringLiteral("layout_scalebar"), dScaleBar},
+      {QStringLiteral("layout_scale"), dScaleText}, {QStringLiteral("layout_legend"), dLegend},
+      {QStringLiteral("layout_activate"), dActivate}, {QStringLiteral("layout_center"), dCenter},
+      {QStringLiteral("layout_coord_point"), dCoordPoint},
+  };
+  return glyphs.value(id, nullptr);
+}
+
+// The legacy drawer without its tile, in charcoal: the outline engine tints it for ids that
+// have no outline glyph yet (layout studio, 웹, 좌표계...).
+QImage flatLegacyImage(const QString& id, int size) {
+  QScopedValueRollback<bool> tileGuard(tGlossyTile, false);
+  QScopedValueRollback<bool> strongGuard(tStrongTile, false);
+  QScopedValueRollback<KaIcons::GlyphStyle> styleGuard(tStyle, KaIcons::GlyphStyle::Tile);
+  return KaIcons::icon(id).pixmap(QSize(size, size), 1.0, QIcon::Normal, QIcon::Off).toImage();
+}
+
 }  // namespace
 
 namespace KaIcons {
+
+bool hasIcon(const QString& id) { return glyphFor(id) != nullptr || KaIconsOutline::hasOutlineGlyph(id); }
+
+GlyphStyle glyphStyleFromEnvironment() {
+  const QByteArray style = qgetenv("KA_HGIS_ICON_STYLE").trimmed().toLower();
+  return style == "tile" ? GlyphStyle::Tile : style == "outline" ? GlyphStyle::Outline : GlyphStyle::Mockup;
+}
+
+GlyphStyle glyphStyle() { return tStyle; }
+
+void setGlyphStyle(GlyphStyle style) { tStyle = style; }
+
+QPixmap glyphPixmap(const QString& id, const QColor& ink, int px, qreal dpr) {
+  if (KaIconsOutline::Glyph outlined = KaIconsOutline::outlineGlyphFor(id))
+    return KaIconsOutline::renderGlyph(outlined, ink, px, dpr);
+  return icon(id, ink).pixmap(QSize(px, px), dpr);
+}
 
 QIcon appIcon() {
   static const QIcon cached(QStringLiteral(":/ka-hgis/app-icon.png"));
@@ -909,87 +1043,35 @@ QIcon appIcon() {
 
 QIcon icon(const QString& id) {
   static QHash<QString, QIcon> cache;
+  // The mockup style draws mapped ids only; any other id is drawn in the outline style.
+  const bool mockup = tGlossyTile && tStyle == GlyphStyle::Mockup && !KaIconsMockup::svgPathFor(id).isEmpty();
+  // In the outline and mockup styles strong and plain are one icon; save_unsaved is told apart by its id.
+  const bool outline = tGlossyTile && !mockup && tStyle != GlyphStyle::Tile;
   const QString cacheKey = id + (!tGlossyTile ? QStringLiteral("/flat")
+                                 : mockup      ? QStringLiteral("/mockup")
+                                 : outline     ? QStringLiteral("/outline")
                                  : tStrongTile ? QStringLiteral("/strong")
                                                : QStringLiteral("/glossy"));
   if (cache.contains(cacheKey)) return cache.value(cacheKey);
+  if (mockup) return *cache.insert(cacheKey, KaIconsMockup::mockupIcon(id, id == QLatin1String("save_unsaved")));
 
   // Solid tiles (저장·도면·인쇄) share the chrome's one blue accent; two dark tile
   // colours in one ribbon row read as two different kinds of button.
-  const QColor accent = tStrongTile ? KaTheme::tokens().sky1 : groupColor(id);
+  const QColor accent = tStrongTile ? KaTheme::tokens().accent : groupColor(id);
   const auto bake = [&accent](void (*draw)(QPainter&)) { return bakeIcon(draw, accent); };
-  QIcon ic;
-  if (id == QLatin1String("new")) ic = bake(dDocPlus);
-  else if (id == QLatin1String("open") || id == QLatin1String("import")) ic = bake(dFolder);
-  else if (id == QLatin1String("save")) ic = bake(dSave);
-  else if (id == QLatin1String("save_as")) ic = bake(dSaveAs);
-  else if (id == QLatin1String("old_map")) ic = bake(dFoldedMap);
-  else if (id == QLatin1String("old_topo")) ic = bake(dOldSheet);
-  else if (id == QLatin1String("topo_download")) ic = bake(dTopoDownload);
-  else if (id == QLatin1String("geotiff")) ic = bake(dGeoImage);
-  else if (id == QLatin1String("web")) ic = bake(dBrowser);
-  else if (id == QLatin1String("heritage")) ic = bake(dPavilion);
-  else if (id == QLatin1String("export_convert")) ic = bake(dTransform);
-  else if (id == QLatin1String("layer")) ic = bake(dLayer);
-  else if (id == QLatin1String("map") || id == QLatin1String("vworld_base") ||
-           id == QLatin1String("vworld_hybrid") || id == QLatin1String("hybrid"))
-    ic = bake(dMap);
-  else if (id == QLatin1String("satellite") || id == QLatin1String("vworld_sat")) ic = bake(dSatellite);
-  else if (id == QLatin1String("vworld_cadastral") || id == QLatin1String("cadastral")) ic = bake(dCadastral);
-  else if (id == QLatin1String("vworld_contour") || id == QLatin1String("contour")) ic = bake(dContour);
-  else if (id == QLatin1String("survey_contour")) ic = bake(dSurveyContour);
-  else if (id == QLatin1String("dark_mode")) ic = bake(dDark);
-  else if (id == QLatin1String("polygon") || id == QLatin1String("survey_area")) ic = bake(dPolygon);
-  else if (id == QLatin1String("line") || id == QLatin1String("feature_line")) ic = bake(dLine);
-  else if (id == QLatin1String("feature_poly") || id == QLatin1String("draw_poly")) ic = bake(dToolPoly);
-  else if (id == QLatin1String("gps")) ic = bake(dGps);
-  else if (id == QLatin1String("check") || id == QLatin1String("saveedit") ||
-           id == QLatin1String("layout_activate_done"))
-    ic = bake(dCheck);
-  else if (id == QLatin1String("export")) ic = bake(dExport);
-  else if (id == QLatin1String("pdf")) ic = bake(dPdf);
-  else if (id == QLatin1String("print")) ic = bake(dPrint);
-  else if (id == QLatin1String("section") || id == QLatin1String("section_layout")) ic = bake(dSection);
-  else if (id == QLatin1String("terrain_3d") || id == QLatin1String("terrain3d")) ic = bake(dTerrain3d);
-  else if (id == QLatin1String("crs")) ic = bake(dCrs);
-  else if (id == QLatin1String("transform")) ic = bake(dTransform);
-  else if (id == QLatin1String("upload")) ic = bake(dUpload);
-  else if (id == QLatin1String("trash")) ic = bake(dTrash);
-  else if (id == QLatin1String("georef")) ic = bake(dGeoref);
-  else if (id == QLatin1String("palette")) ic = bake(dPalette);
-  else if (id == QLatin1String("stop")) ic = bake(dStop);
-  else if (id == QLatin1String("help")) ic = bake(dHelp);
-  else if (id == QLatin1String("more")) ic = bake(dMore);
-  else if (id == QLatin1String("search")) ic = bake(dSearch);
-  else if (id == QLatin1String("draw_line")) ic = bake(dToolLine);
-  else if (id == QLatin1String("draw_area")) ic = bake(dToolArea);
-  else if (id == QLatin1String("snap")) ic = bake(dSnap);
-  else if (id == QLatin1String("easy_draw")) ic = bake(dEasyDraw);
-  else if (id == QLatin1String("undo")) ic = bake(dUndo);
-  else if (id == QLatin1String("redo")) ic = bake(dRedo);
-  else if (id == QLatin1String("buffer")) ic = bake(dBuffer);
-  else if (id == QLatin1String("artifact")) ic = bake(dArtifact);
-  else if (id == QLatin1String("select") || id == QLatin1String("arrow")) ic = bake(dSelect);
-  else if (id == QLatin1String("measure") || id == QLatin1String("tape")) ic = bake(dMeasureTape);
-  else if (id == QLatin1String("dem") || id == QLatin1String("hillshade")) ic = bake(dDem);
-  else if (id == QLatin1String("trench_grid") || id == QLatin1String("trench")) ic = bake(dTrenchGrid);
-  else if (id == QLatin1String("soil")) ic = bake(dSoil);
-  else if (id == QLatin1String("paleo") || id == QLatin1String("paleo_landform")) ic = bake(dPaleo);
-  else if (id == QLatin1String("geology")) ic = bake(dGeology);
-  else if (id == QLatin1String("river") || id == QLatin1String("hydro")) ic = bake(dRiver);
-  else if (id == QLatin1String("map_grid") || id == QLatin1String("graticule")) ic = bake(dMapGrid);
-  else if (id == QLatin1String("layout_map_frame")) ic = bake(dLayoutFrame);
-  else if (id == QLatin1String("layout_select")) ic = bake(dLayoutSelect);
-  else if (id == QLatin1String("layout_pan")) ic = bake(dLayoutPan);
-  else if (id == QLatin1String("layout_zoom_full")) ic = bake(dLayoutZoom);
-  else if (id == QLatin1String("layout_north")) ic = bake(dNorth);
-  else if (id == QLatin1String("layout_scalebar")) ic = bake(dScaleBar);
-  else if (id == QLatin1String("layout_scale")) ic = bake(dScaleText);
-  else if (id == QLatin1String("layout_legend")) ic = bake(dLegend);
-  else if (id == QLatin1String("layout_activate")) ic = bake(dActivate);
-  else if (id == QLatin1String("layout_center")) ic = bake(dCenter);
-  else if (id == QLatin1String("layout_coord_point")) ic = bake(dCoordPoint);
-  else ic = bake(dDocPlus);
+  Glyph draw = glyphFor(id);
+  const KaIconsOutline::Glyph outlined = KaIconsOutline::outlineGlyphFor(id);
+  if (!draw && !outlined) {
+    // A typo used to turn silently into the 「새 조사」 picture.
+    static QSet<QString> reported;
+    if (!reported.contains(id)) {
+      reported.insert(id);
+      qWarning().noquote() << "KaIcons: no glyph for icon id" << id;
+    }
+    draw = dMissing;
+  }
+  // A tile borrows an outline-only glyph; the outline engine tints a tile-only drawing flat.
+  const QIcon ic = outline ? KaIconsOutline::outlineIcon(id, outlined, flatLegacyImage) : bake(draw ? draw : outlined);
 
   cache.insert(cacheKey, ic);
   return ic;
@@ -1002,6 +1084,9 @@ QIcon strongIcon(const QString& id) {
 }
 
 QIcon icon(const QString& id, const QColor& ink) {
+  if (ink.isValid() && tStyle != GlyphStyle::Tile)
+    if (KaIconsOutline::Glyph outlined = KaIconsOutline::outlineGlyphFor(id))
+      return KaIconsOutline::outlineIcon(id, outlined, nullptr, ink);
   // Monochrome utility consumers need the glyph, not a solid tinted tile.
   QScopedValueRollback<bool> tileGuard(tGlossyTile, !ink.isValid());
   const QIcon source = icon(id);

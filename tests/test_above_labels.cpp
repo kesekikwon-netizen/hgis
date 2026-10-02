@@ -35,6 +35,7 @@ class TestAboveLabels : public QObject {
 private slots:
   void overlayMatchesCanvas_data();
   void overlayMatchesCanvas();
+  void cacheUsesCanvasPixelsAndRedrawsOnlyOnChange();
 };
 
 void TestAboveLabels::overlayMatchesCanvas_data() {
@@ -126,6 +127,53 @@ void TestAboveLabels::overlayMatchesCanvas() {
     }
   }
   QVERIFY2(count > 0 && outside == 0, qPrintable(QStringLiteral("misaligned boundary pixels: %1/%2").arg(outside).arg(count)));
+}
+
+void TestAboveLabels::cacheUsesCanvasPixelsAndRedrawsOnlyOnChange() {
+  QgsVectorLayer ring(QStringLiteral("LineString?crs=EPSG:5187"), QStringLiteral("구역"), QStringLiteral("memory"));
+  QgsFeature feature;
+  feature.setGeometry(QgsGeometry::fromWkt(QStringLiteral("LINESTRING(200400 450250,200600 450400)")));
+  QgsFeatureList features{feature};
+  QVERIFY(ring.dataProvider()->addFeatures(features));
+  ring.updateExtents();
+  QgsMapCanvas canvas;
+  canvas.setFrameShape(QFrame::NoFrame);
+  canvas.resize(640, 480);
+  canvas.setParallelRenderingEnabled(false);
+  canvas.setPreviewJobsEnabled(false);
+  canvas.setDestinationCrs(ring.crs());
+  auto* overlay = new KaAboveLabelsOverlay(&canvas);
+  canvas.setLayers({&ring});
+  canvas.show();
+  QCoreApplication::processEvents();
+  canvas.setExtent(QgsRectangle(200000, 450000, 200800, 450600));
+  LayerOps::applyCanvasScreenDpi(&canvas);
+  QSignalSpy rendered(&canvas, &QgsMapCanvas::mapCanvasRefreshed);
+  canvas.refresh();
+  QTRY_VERIFY_WITH_TIMEOUT(!rendered.isEmpty(), 10000);
+  overlay->setLayers({&ring});
+  (void)canvas.grab();
+  const qreal dpr = canvas.mapSettings().devicePixelRatio();
+  qInfo() << "DPR" << dpr << "cache" << overlay->cachePixelSize();
+  // Same physical resolution as the base map: sharp at 125-200 %.
+  QCOMPARE(overlay->cacheDevicePixelRatio(), dpr);
+  QVERIFY(qAbs(overlay->cachePixelSize().width() - qRound(canvas.width() * dpr)) <= 1);
+  const int built = overlay->rebuildCount();
+  QVERIFY(built >= 1);
+  // A finished base-map render alone does not redraw the overlay.
+  rendered.clear();
+  canvas.refresh();
+  QTRY_VERIFY_WITH_TIMEOUT(!rendered.isEmpty(), 10000);
+  (void)canvas.grab();
+  QCOMPARE(overlay->rebuildCount(), built);
+  // Handing in the same list again (the label stack is re-applied often) keeps it too.
+  overlay->setLayers({&ring});
+  (void)canvas.grab();
+  QCOMPARE(overlay->rebuildCount(), built);
+  // A real change of the layer does.
+  ring.triggerRepaint();
+  (void)canvas.grab();
+  QCOMPARE(overlay->rebuildCount(), built + 1);
 }
 
 int main(int argc, char** argv) {

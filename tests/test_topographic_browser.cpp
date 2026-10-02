@@ -546,6 +546,10 @@ private slots:
       QVERIFY(summary->text().contains(QStringLiteral("도엽 수신 완료 0/1장")));
       QVERIFY(summary->text().contains(QStringLiteral("0/2개")));
       QVERIFY(summary->text().contains(QStringLiteral("terrain_378044.zip")));QVERIFY(received.isEmpty());
+      // The hidden scope panel's automatic order is visible in the compact window.
+      auto* order=browser.findChild<QLabel*>(QStringLiteral("topographicOrderSheets"));QVERIFY(order);
+      QVERIFY(order->isVisible());
+      QVERIFY(order->text().contains(QStringLiteral("378044")));QVERIFY(order->text().contains(QStringLiteral("1장")));
       browser.setProcessing(true);
       browser.setPreparationProgress(QStringLiteral("지도에 올리기"),QStringLiteral("SHP 변환 · 378044 강릉"));
       QVERIFY(server.finishTransfer());
@@ -559,6 +563,19 @@ private slots:
       const QString failedSummary=summary->text();const QString failedStage=stage->text();
       QTest::qWait(1200);QVERIFY(browser.isVisible());QCOMPARE(stage->text(),failedStage);QCOMPARE(summary->text(),failedSummary);
       QVERIFY(browser.findChild<QWidget*>(QStringLiteral("topographicOfficialDetails"))->isHidden());
+      // Fail-closed stays closed, but the window names where it stopped (no query
+      // strings or form values) and offers the existing manual folder import.
+      auto* outline=browser.findChild<QLabel*>(QStringLiteral("topographicFailureOutline"));QVERIFY(outline);
+      QVERIFY(outline->isVisible());QVERIFY(outline->text().contains(QStringLiteral("NlipMap.do")));
+      QVERIFY(!outline->text().contains(QStringLiteral("tabGb")));QVERIFY(!outline->text().contains(QStringLiteral("1990")));
+      auto* order=browser.findChild<QLabel*>(QStringLiteral("topographicOrderSheets"));QVERIFY(order);
+      QVERIFY(order->isVisible());QVERIFY(order->text().contains(QStringLiteral("378044")));
+      auto* compactStatus=browser.findChild<QLabel*>(QStringLiteral("topographicCompactStatus"));QVERIFY(compactStatus);
+      QVERIFY(compactStatus->text().contains(QStringLiteral("받은 자료 불러오기")));
+      auto* fallback=browser.findChild<QPushButton*>(QStringLiteral("topographicImportFallback"));
+      QVERIFY(fallback);QVERIFY(fallback->isVisible());
+      QSignalSpy importRequested(&browser,&KaTopographicBrowser::importFolderRequested);
+      QTest::mouseClick(fallback,Qt::LeftButton);QCOMPARE(importRequested.size(),1);
       QVERIFY(saveCompactCapture(browser,QStringLiteral("file-preparation-failed.png")));
       QCOMPARE(server.searchCount,1);
       auto* main=qobject_cast<QWebEngineView*>(browser.findChild<QTabWidget*>(QStringLiteral("topographicTabs"))->widget(0));
@@ -743,9 +760,12 @@ private slots:
     QSignalSpy attention(&browser,&KaTopographicBrowser::automationNeedsInput);
     browser.prepareSheets(1125000,1980000,5000,{QStringLiteral("378044")});
     auto* tabs=browser.findChild<QTabWidget*>(QStringLiteral("topographicTabs"));QVERIFY(tabs);
-    QTRY_COMPARE_WITH_TIMEOUT(tabs->count(),2,15000);
+    // WebEngine page loads slow down under parallel ctest; these waits only
+    // matter when slow and never change what the test asserts.
+    constexpr int kWebWaitMs=30000;
+    QTRY_COMPARE_WITH_TIMEOUT(tabs->count(),2,kWebWaitMs);
     auto* login=qobject_cast<QWebEngineView*>(tabs->widget(1));QVERIFY(login);
-    if(parsingPaused)QTRY_VERIFY_WITH_TIMEOUT(server.pendingLoginScript,10000);
+    if(parsingPaused)QTRY_VERIFY_WITH_TIMEOUT(server.pendingLoginScript,kWebWaitMs);
     // Synchronize with a real automatic poll; do not simulate the production
     // adapter or release the held HTTP response after an arbitrary sleep.
     auto state=std::make_shared<QVariantMap>();
@@ -753,7 +773,7 @@ private slots:
       const password=document.getElementById('mem_pw');
       return {polled:!!window.__kaLoginWait,empty:!password||password.value==='',parsing:document.readyState!=='complete'};
     })())JS"),[state](const QVariant& value){*state=value.toMap();});return state->value(QStringLiteral("polled")).toBool();};
-    QTRY_VERIFY_WITH_TIMEOUT(polled(),10000);
+    QTRY_VERIFY_WITH_TIMEOUT(polled(),kWebWaitMs);
     const bool failedBeforeReady=!attention.isEmpty();
     if(failedBeforeReady)QVERIFY(saveCompactCapture(browser,QStringLiteral("login-form-before-failed.png")));
     QVERIFY2(!failedBeforeReady,"Automatic polling rejected an official form before its page/ready handler finished");
@@ -764,10 +784,10 @@ private slots:
       server.pendingLoginScript->write("HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
       server.pendingLoginScript->disconnectFromHost();
     } else login->page()->runJavaScript(QStringLiteral("finishReady();"));
-    QTRY_VERIFY_WITH_TIMEOUT(server.loginSubmissionCount==1 || !attention.isEmpty(),10000);
+    QTRY_VERIFY_WITH_TIMEOUT(server.loginSubmissionCount==1 || !attention.isEmpty(),kWebWaitMs);
     QVERIFY2(attention.isEmpty(),"The prepared official login form failed to resume");
     QCOMPARE(server.loginSubmissionCount,1);
-    QTRY_COMPARE_WITH_TIMEOUT(tabs->count(),1,10000);
+    QTRY_COMPARE_WITH_TIMEOUT(tabs->count(),1,kWebWaitMs);
     QVERIFY(server.loggedIn);
     browser.stopAutomatic();
   }

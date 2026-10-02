@@ -101,6 +101,9 @@ bool KaImageView::applyPixmap(const QPixmap& pm) {
   clearMarks();
   scene()->clear();
   m_pix = nullptr;
+  m_detail = nullptr;  // owned by the scene, deleted by clear()
+  m_detailWindow = QRect();
+  m_dragMark = -1;
   m_fitted = false;
   if (pm.isNull()) return false;
   m_pix = scene()->addPixmap(pm);
@@ -112,6 +115,8 @@ bool KaImageView::applyPixmap(const QPixmap& pm) {
 
 bool KaImageView::loadPath(const QString& path) {
   m_srcScale = 1.0;
+  m_srcSize = QSize();
+  m_detailReader = nullptr;
   m_lastError.clear();
   // Qt 는 그림 한 장을 통째로 메모리에 편다. Qt6 기본 상한이 256MB 라서
   // 항공사진 원판(1억 화소 이상)은 여기서 조용히 빈 그림으로 떨어진다.
@@ -127,6 +132,7 @@ bool KaImageView::loadPath(const QString& path) {
     applyPixmap(QPixmap());
     return false;
   }
+  m_srcSize = img.size();
   return applyPixmap(QPixmap::fromImage(img));
 }
 
@@ -136,6 +142,8 @@ bool KaImageView::setPreview(const QPixmap& preview, int sourceWidth, int source
     return false;
   // 보여 주는 건 축소본이지만 바깥에는 원본 픽셀로 말한다.
   m_srcScale = double(sourceWidth) / double(preview.width());
+  m_srcSize = QSize(sourceWidth, sourceHeight);
+  m_detailReader = nullptr;  // a reader belongs to one image; the caller sets it afterwards
   return applyPixmap(preview);
 }
 
@@ -145,6 +153,7 @@ void KaImageView::clearMarks() {
     delete m;
   }
   m_marks.clear();
+  m_markPixels.clear();
 }
 
 void KaImageView::addMarkItem(double pixelX, double pixelY, int number, const QColor& ring) {
@@ -179,6 +188,7 @@ void KaImageView::addMarkItem(double pixelX, double pixelY, int number, const QC
 
 void KaImageView::setMarks(const QVector<QPointF>& pts, const QPointF* pending) {
   clearMarks();
+  m_markPixels = pts;  // finished pairs only: those can be dragged
   for (int i = 0; i < pts.size(); ++i)
     addMarkItem(pts[i].x(), pts[i].y(), i + 1, QColor(220, 38, 38));
   if (pending)
@@ -193,12 +203,14 @@ void KaImageView::fitImage() {
   if (!m_pix) return;
   fitInView(m_pix, Qt::KeepAspectRatio);
   m_fitted = true;
+  scheduleDetail();
 }
 
 void KaImageView::wheelEvent(QWheelEvent* e) {
   const double s = e->angleDelta().y() > 0 ? 1.15 : 1.0 / 1.15;
   scale(s, s);
   m_fitted = false;
+  scheduleDetail();
   emit viewChanged();
 }
 
@@ -211,6 +223,14 @@ void KaImageView::mousePressEvent(QMouseEvent* e) {
     return;
   }
   if (e->button() == Qt::LeftButton && m_pix) {
+    // Pressing on a numbered mark drags it for fine-tuning instead of picking anew.
+    m_dragMark = markAt(e->pos());
+    if (m_dragMark >= 0) {
+      m_dragPress = e->pos();
+      setCursor(Qt::SizeAllCursor);
+      e->accept();
+      return;
+    }
     const QPointF sc = mapToScene(e->pos());
     emit pixelClicked(sc.x() * m_srcScale, sc.y() * m_srcScale);
     e->accept();
@@ -220,6 +240,12 @@ void KaImageView::mousePressEvent(QMouseEvent* e) {
 }
 
 void KaImageView::mouseMoveEvent(QMouseEvent* e) {
+  if (m_dragMark >= 0 && m_dragMark < m_marks.size()) {
+    const QPointF src = sourcePixelAt(e->pos());
+    m_marks[m_dragMark]->setPos(src.x() / m_srcScale, src.y() / m_srcScale);
+    e->accept();
+    return;
+  }
   if (m_panning) {
     const QPoint d = e->pos() - m_lastPan;
     m_lastPan = e->pos();
@@ -233,6 +259,21 @@ void KaImageView::mouseMoveEvent(QMouseEvent* e) {
 }
 
 void KaImageView::mouseReleaseEvent(QMouseEvent* e) {
+  if (m_dragMark >= 0 && e->button() == Qt::LeftButton) {
+    const int index = m_dragMark;
+    m_dragMark = -1;
+    setCursor(Qt::CrossCursor);
+    // Barely moved: keep the old click meaning (a new left point there).
+    if ((e->pos() - m_dragPress).manhattanLength() < 3) {
+      const QPointF sc = mapToScene(m_dragPress);
+      emit pixelClicked(sc.x() * m_srcScale, sc.y() * m_srcScale);
+    } else {
+      const QPointF src = sourcePixelAt(e->pos());
+      emit markDragged(index, src.x(), src.y());
+    }
+    e->accept();
+    return;
+  }
   if (m_panning && e->button() == Qt::MiddleButton) {
     m_panning = false;
     setCursor(Qt::CrossCursor);
@@ -245,5 +286,9 @@ void KaImageView::mouseReleaseEvent(QMouseEvent* e) {
 void KaImageView::resizeEvent(QResizeEvent* e) {
   QGraphicsView::resizeEvent(e);
   if (m_fitted) fitImage();
+  scheduleDetail();
   emit viewChanged();
 }
+
+// markAt, sourcePixelAt, scrollContentsBy and the original-resolution detail:
+// KaAlignImageDetail.cpp

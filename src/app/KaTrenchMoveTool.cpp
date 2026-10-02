@@ -1,7 +1,9 @@
 #include "KaTrenchMoveTool.h"
 #include "KaCanvasGridOverlay.h"
 #include "core/LayerOps.h"
+#include "core/TrenchLayerEdit.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include <QKeyEvent>
@@ -13,35 +15,38 @@
 #include <qgsrubberband.h>
 #include <qgsvectorlayer.h>
 
-KaTrenchMoveTool::KaTrenchMoveTool(QgsMapCanvas* canvas)
-    : QgsMapTool(canvas) {
+namespace {
+QString trenchLabel(const QString& name) {
+  return name.isEmpty() ? QStringLiteral("트렌치") : name;
+}
+}  // namespace
+
+KaTrenchMoveTool::KaTrenchMoveTool(QgsMapCanvas* canvas) : QgsMapTool(canvas) {
   setCursor(Qt::ArrowCursor);
 }
 
 KaTrenchMoveTool::~KaTrenchMoveTool() {
-  delete m_rubber;
-  delete m_singleRubber;
+  disconnect(m_layerWatch);
+  delete m_rubber.data();
+  delete m_singleRubber.data();
 }
 
 void KaTrenchMoveTool::setLayer(QgsVectorLayer* layer) {
+  disconnect(m_layerWatch);
   m_layer = layer;
   clearSingleSelection();
+  // Ctrl+Z / Ctrl+Y change trenches behind this tool: keep the highlight on the real shape.
+  if (layer)
+    m_layerWatch = connect(layer, &QgsVectorLayer::layerModified, this, [this]() { refreshSelection(); });
 }
 
-void KaTrenchMoveTool::setSnapMeters(double meters) {
-  m_snapM = meters > 0.0 ? meters : 0.0;
-}
+void KaTrenchMoveTool::setSnapMeters(double meters) { m_snapM = meters > 0.0 ? meters : 0.0; }
 
-void KaTrenchMoveTool::setGridOverlay(KaCanvasGridOverlay* grid) {
-  m_grid = grid;
-}
+void KaTrenchMoveTool::setGridOverlay(KaCanvasGridOverlay* grid) { m_grid = grid; }
 
 void KaTrenchMoveTool::setMode(Mode mode) {
   m_mode = mode;
-  m_awaitDrop = false;
-  m_dragSingle = false;
-  if (m_rubber)
-    m_rubber->reset(Qgis::GeometryType::Polygon);
+  cancelDrag();
   clearSingleSelection();
   setCursor(mode == Mode::Single ? Qt::ArrowCursor : Qt::CrossCursor);
 }
@@ -55,32 +60,9 @@ QgsPointXY KaTrenchMoveTool::snapPt(const QgsPointXY& p) const {
                     std::round(p.y() / m_snapM) * m_snapM);
 }
 
-QgsPointXY KaTrenchMoveTool::nearestVertex(const QgsPointXY& p) const {
-  if (!m_layer)
-    return p;
-  QgsPointXY best = p;
-  double bestD = 1e99;
-  QgsFeature f;
-  auto it = m_layer->getFeatures();
-  while (it.nextFeature(f)) {
-    const QgsGeometry g = f.geometry();
-    if (g.isNull())
-      continue;
-    for (auto v = g.vertices_begin(); v != g.vertices_end(); ++v) {
-      const QgsPointXY xy((*v).x(), (*v).y());
-      const double d = xy.sqrDist(p);
-      if (d < bestD) {
-        bestD = d;
-        best = xy;
-      }
-    }
-  }
-  return best;
-}
-
 QgsFeatureId KaTrenchMoveTool::hitTrench(const QgsPointXY& p, QString* nameOut) const {
   if (!m_layer)
-    return -1;
+    return FID_NULL;
   QgsFeature f;
   QgsFeatureIterator it = m_layer->getFeatures();
   while (it.nextFeature(f)) {
@@ -93,7 +75,7 @@ QgsFeatureId KaTrenchMoveTool::hitTrench(const QgsPointXY& p, QString* nameOut) 
       return f.id();
     }
   }
-  return -1;
+  return FID_NULL;
 }
 
 void KaTrenchMoveTool::rebuildRubber(const QgsPointXY& offset) {
@@ -120,7 +102,7 @@ void KaTrenchMoveTool::rebuildRubber(const QgsPointXY& offset) {
 }
 
 void KaTrenchMoveTool::rebuildSingleRubber(QgsFeatureId fid, const QgsPointXY& offset) {
-  if (!canvas() || !m_layer || fid < 0)
+  if (!canvas() || !m_layer || FID_IS_NULL(fid))
     return;
   if (!m_singleRubber) {
     m_singleRubber = new QgsRubberBand(canvas(), Qgis::GeometryType::Polygon);
@@ -137,88 +119,79 @@ void KaTrenchMoveTool::rebuildSingleRubber(QgsFeatureId fid, const QgsPointXY& o
   m_singleRubber->addGeometry(g, nullptr, true);
 }
 
+void KaTrenchMoveTool::cancelDrag() {
+  m_dragging = false;
+  m_dragSingle = false;
+  if (m_rubber)
+    m_rubber->reset(Qgis::GeometryType::Polygon);
+}
+
 void KaTrenchMoveTool::clearSingleSelection() {
-  m_selFid = -1;
+  m_selFid = FID_NULL;
   m_selName.clear();
   if (m_singleRubber)
     m_singleRubber->reset(Qgis::GeometryType::Polygon);
 }
 
-void KaTrenchMoveTool::applyTranslate(double dx, double dy) {
-  if (!m_layer || (dx == 0.0 && dy == 0.0))
+void KaTrenchMoveTool::refreshSelection() {
+  if (FID_IS_NULL(m_selFid) || m_dragSingle)
     return;
-  if (!m_layer->isEditable() && !m_layer->startEditing())
+  if (!m_layer || !m_layer->getFeature(m_selFid).isValid()) {
+    clearSingleSelection();
     return;
-  QgsFeatureIterator it = m_layer->getFeatures();
-  QgsFeature f;
-  while (it.nextFeature(f)) {
-    QgsGeometry g = f.geometry();
-    if (g.isNull())
-      continue;
-    g.translate(dx, dy);
-    m_layer->changeGeometry(f.id(), g);
   }
-  m_layer->commitChanges(false);
-  if (!m_layer->isEditable())
-    m_layer->startEditing();
-  m_layer->updateExtents();
-  m_layer->triggerRepaint();
-  if (canvas())
-    canvas()->refresh();
+  rebuildSingleRubber(m_selFid, QgsPointXY(0, 0));
 }
 
-void KaTrenchMoveTool::applyTranslateOne(QgsFeatureId fid, double dx, double dy) {
-  if (!m_layer || fid < 0 || (dx == 0.0 && dy == 0.0))
-    return;
-  if (!m_layer->isEditable() && !m_layer->startEditing())
-    return;
-  QgsFeature f = m_layer->getFeature(fid);
-  if (f.isValid() && f.hasGeometry()) {
-    QgsGeometry g = f.geometry();
-    g.translate(dx, dy);
-    m_layer->changeGeometry(fid, g);
+void KaTrenchMoveTool::afterEdit() {
+  if (canvas()) LayerOps::refreshCanvasIfIdle(canvas());  // never cancels a WMS job in flight
+  emit trenchesEdited();
+}
+
+bool KaTrenchMoveTool::applyTranslate(const QgsFeatureIds& fids, double dx, double dy) {
+  if (!m_layer || (dx == 0.0 && dy == 0.0))
+    return false;
+  QString error;
+  const QString title = fids.isEmpty() ? QStringLiteral("시굴격자 전체 이동") : QStringLiteral("트렌치 이동");
+  if (!TrenchLayerEdit::translate(m_layer, fids, dx, dy, title, &error)) {
+    emit statusMessage(error.isEmpty() ? QStringLiteral("트렌치를 옮기지 못했습니다. 기존 배치는 유지됩니다.")
+                                       : error);
+    return false;
   }
-  m_layer->commitChanges(false);
-  if (!m_layer->isEditable())
-    m_layer->startEditing();
-  m_layer->updateExtents();
-  m_layer->triggerRepaint();
-  if (canvas())
-    canvas()->refresh();
+  afterEdit();
+  return true;
 }
 
 void KaTrenchMoveTool::deleteTrench(QgsFeatureId fid, const QString& name) {
-  if (!m_layer || fid < 0)
+  if (!m_layer || FID_IS_NULL(fid))
     return;
-  if (!m_layer->isEditable() && !m_layer->startEditing())
+  QString error;
+  if (!TrenchLayerEdit::deleteTrench(m_layer, fid, &error)) {
+    emit statusMessage(error.isEmpty() ? QStringLiteral("트렌치를 지우지 못했습니다.") : error);
     return;
-  m_layer->deleteFeature(fid);
-  m_layer->commitChanges(false);
-  if (!m_layer->isEditable())
-    m_layer->startEditing();
-  m_layer->updateExtents();
-  m_layer->triggerRepaint();
-  if (canvas())
-    canvas()->refresh();
+  }
   if (m_selFid == fid)
     clearSingleSelection();
-  emit statusMessage(QStringLiteral("%1 삭제. 남은 트렌치 %2개.")
-                         .arg(name.isEmpty() ? QStringLiteral("트렌치") : name)
+  afterEdit();
+  emit statusMessage(QStringLiteral("%1 삭제 — Ctrl+Z로 되돌릴 수 있습니다. 남은 트렌치 %2개.")
+                         .arg(trenchLabel(name))
                          .arg(m_layer->featureCount()));
 }
 
+bool KaTrenchMoveTool::deleteSelectedTrench() {
+  if (FID_IS_NULL(m_selFid)) return false;
+  deleteTrench(m_selFid, m_selName);
+  return true;
+}
+
 void KaTrenchMoveTool::canvasPressEvent(QgsMapMouseEvent* e) {
-  if (!e)
-    return;
+  if (!e) return;
   if (e->button() == Qt::RightButton) {
-    // 우클릭 = 그 트렌치 하나만 삭제 (양쪽 모드 공통)
-    m_awaitDrop = false;
-    m_dragSingle = false;
-    if (m_rubber)
-      m_rubber->reset(Qgis::GeometryType::Polygon);
+    // 우클릭 = 그 트렌치 하나만 바로 삭제(양쪽 모드 공통). 확인 창 없이 Ctrl+Z로 되돌린다.
+    cancelDrag();
     QString name;
     const QgsFeatureId fid = hitTrench(e->mapPoint(), &name);
-    if (fid < 0) {
+    if (FID_IS_NULL(fid)) {
       emit statusMessage(QStringLiteral("지울 트렌치 위에서 우클릭하세요."));
       return;
     }
@@ -232,33 +205,31 @@ void KaTrenchMoveTool::canvasPressEvent(QgsMapMouseEvent* e) {
   if (m_mode == Mode::Single) {
     QString name;
     const QgsFeatureId fid = hitTrench(click, &name);
-    if (fid < 0) {
+    if (FID_IS_NULL(fid)) {
       clearSingleSelection();
       emit statusMessage(QStringLiteral("트렌치를 클릭해 선택하세요. 끌면 이동, Delete·우클릭이면 삭제됩니다."));
       return;
     }
     m_selFid = fid;
     m_selName = name;
-    m_from = click;
+    // Same snapped reference as the drop point, so the move is a whole number of grid steps.
+    m_from = snapPt(click);
     m_dragSingle = true;
     rebuildSingleRubber(fid, QgsPointXY(0, 0));
-    emit statusMessage(QStringLiteral("%1 선택 — 끌어서 이동, Delete = 삭제")
-                           .arg(name.isEmpty() ? QStringLiteral("트렌치") : name));
+    emit statusMessage(QStringLiteral("%1 선택 — 끌어서 이동, Delete = 삭제").arg(trenchLabel(name)));
     return;
   }
 
   m_from = snapPt(click);
-  m_awaitDrop = false;
   m_dragging = true;
   rebuildRubber(QgsPointXY(0, 0));
   emit statusMessage(QStringLiteral("격자를 끌어 옮기세요. 놓으면 전체가 이동합니다."));
 }
 
 void KaTrenchMoveTool::canvasMoveEvent(QgsMapMouseEvent* e) {
-  if (!e)
-    return;
+  if (!e) return;
   if (m_mode == Mode::Single) {
-    if (!m_dragSingle || m_selFid < 0)
+    if (!m_dragSingle || FID_IS_NULL(m_selFid))
       return;
     const QgsPointXY dest = snapPt(e->mapPoint());
     rebuildSingleRubber(m_selFid, QgsPointXY(dest.x() - m_from.x(), dest.y() - m_from.y()));
@@ -279,35 +250,30 @@ void KaTrenchMoveTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
   const double mupp = canvas() ? std::max(canvas()->mapUnitsPerPixel(), 1e-6) : 1.0;
   if (m_mode == Mode::Whole && m_dragging) {
     m_dragging = false;
-    if (std::hypot(dx, dy) > 2.0 * mupp)
-      applyTranslate(dx, dy);
+    const bool moved = std::hypot(dx, dy) > 2.0 * mupp && applyTranslate({}, dx, dy);
     if (m_rubber)
       m_rubber->reset(Qgis::GeometryType::Polygon);
-    emit statusMessage(QStringLiteral("격자 이동 완료. 다시 끌어 옮기거나 우클릭으로 하나씩 지우세요."));
+    if (moved)
+      emit statusMessage(QStringLiteral("격자 이동 완료 — Ctrl+Z로 되돌립니다. 다시 끌거나 우클릭으로 하나씩 지우세요."));
     return;
   }
-  if (m_mode != Mode::Single || !m_dragSingle || m_selFid < 0)
+  if (m_mode != Mode::Single || !m_dragSingle || FID_IS_NULL(m_selFid))
     return;
   m_dragSingle = false;
-  if (std::hypot(dx, dy) > 2.0 * mupp) {
-    applyTranslateOne(m_selFid, dx, dy);
-    emit statusMessage(QStringLiteral("%1 이동 완료. Delete = 삭제, 다른 트렌치 클릭 = 선택 변경")
-                           .arg(m_selName.isEmpty() ? QStringLiteral("트렌치") : m_selName));
+  if (std::hypot(dx, dy) > 2.0 * mupp && applyTranslate({m_selFid}, dx, dy)) {
+    emit statusMessage(QStringLiteral("%1 이동 완료 — Ctrl+Z로 되돌립니다. Delete = 삭제, 다른 트렌치 클릭 = 선택 변경")
+                           .arg(trenchLabel(m_selName)));
   }
   rebuildSingleRubber(m_selFid, QgsPointXY(0, 0));
 }
 
 void KaTrenchMoveTool::keyPressEvent(QKeyEvent* e) {
-  if (e && (e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace) && m_selFid >= 0) {
-    deleteTrench(m_selFid, m_selName);
+  if (e && (e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace) && deleteSelectedTrench()) {
     e->accept();
     return;
   }
   if (e && e->key() == Qt::Key_Escape) {
-    m_awaitDrop = false;
-    m_dragSingle = false;
-    if (m_rubber)
-      m_rubber->reset(Qgis::GeometryType::Polygon);
+    cancelDrag();
     clearSingleSelection();
     e->accept();
     return;
@@ -317,26 +283,16 @@ void KaTrenchMoveTool::keyPressEvent(QKeyEvent* e) {
 
 void KaTrenchMoveTool::activate() {
   QgsMapTool::activate();
-  m_awaitDrop = false;
-  m_dragging = false;
-  m_dragSingle = false;
-  if (m_mode == Mode::Single) {
-    setCursor(Qt::ArrowCursor);
-    emit statusMessage(QStringLiteral(
-        "개별 편집: 트렌치 클릭 = 선택, 끌기 = 이동, Delete·우클릭 = 삭제"));
-  } else {
-    setCursor(Qt::CrossCursor);
-    emit statusMessage(QStringLiteral(
-        "전체 이동: 격자를 끌어 옮기세요. 우클릭 = 개별 삭제"));
-  }
+  cancelDrag();
+  const bool single = m_mode == Mode::Single;
+  setCursor(single ? Qt::ArrowCursor : Qt::CrossCursor);
+  emit statusMessage(single
+      ? QStringLiteral("개별 편집: 트렌치 클릭 = 선택, 끌기 = 이동, Delete·우클릭 = 삭제 (Ctrl+Z로 되돌림)")
+      : QStringLiteral("전체 이동: 격자를 끌어 옮기세요. 우클릭 = 개별 삭제 (Ctrl+Z로 되돌림)"));
 }
 
 void KaTrenchMoveTool::deactivate() {
-  m_dragging = false;
-  m_awaitDrop = false;
-  m_dragSingle = false;
-  if (m_rubber)
-    m_rubber->reset(Qgis::GeometryType::Polygon);
+  cancelDrag();
   clearSingleSelection();
   QgsMapTool::deactivate();
 }

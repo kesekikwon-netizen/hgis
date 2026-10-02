@@ -39,17 +39,18 @@
 
 | 문서 | 용도 |
 | --- | --- |
+| [user/quick-start.md](user/quick-start.md) | **현장 첫 조사 안내**: 새 조사 → 배경 → 그리기 → 검수·제출, 단축키, 용어, 문제 해결 |
 | [user/gui-scenario-checklist.md](user/gui-scenario-checklist.md) | 화면 QA 서식 |
 | [user/layer-information.md](user/layer-information.md) | 레이어 목록 |
-| [user/job-cards/](user/job-cards/) | 작업 카드 01–07 |
 | [user/](user/) | 지적·지번·조판·참조지도 등 |
 
 ## 그 밖
 
-- [ux/](ux/) 와이어프레임·초심자 IA
-- [research/](research/) 조사 메모
+- [research/](research/) 조사 메모(현재 UI 아님, 문서 머리의 표기 참고)
+- [quality/line-limit-baseline.txt](quality/line-limit-baseline.txt) 300줄 넘는 C++ 파일 기준(`scripts/scorecard.ps1 -LineLimitOnly`)
 - [recovery/](recovery/) 장애 복구 기록
 - [superpowers/](superpowers/) 옛 스펙·플랜 (현행 계획이 아님)
 - [COMMIT_STATUS.md](COMMIT_STATUS.md) 훅이 갱신. 손으로 고치지 않는다.
 - [ERROR_REGRESSION.md](ERROR_REGRESSION.md) 회귀 메모
-- [archive/](archive/README.md) 폐기된 목표·세션 상세
+- [archive/](archive/README.md) 폐기된 목표·세션 상세, 옛 초심자 IA·와이어프레임·작업 카드(설계 기록, 현재 UI 아님)
+- [design/](design/) 2026-08-15 하늘색 3D 설계서는 **Superseded by Strata**(옛 기록). [ui/](ui/)·`ui-mockup-viewer.html` 은 목업

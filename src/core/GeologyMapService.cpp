@@ -1,11 +1,16 @@
 #include "KaSessionLog.h"
+#include "KaLogExcept.h"
 #include "GeologyMapService.h"
+#include "BasemapDsm.h"
 #include "LayerOps.h"
+#include "ReferenceKind.h"
+#include "ReferenceTiledFetch.h"
 
 #include <QDir>
 #include <QDomDocument>
 #include <QFile>
 #include <QImage>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
@@ -202,7 +207,9 @@ QHash<QString, QColor> sampleOfficialColors(const QgsRectangle& ext4326,
   netReq.setHeader(QNetworkRequest::UserAgentHeader,
                    QStringLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ka-hgis/0.3"));
   QByteArray imageData;
-  if (!ReferenceMapPreparation::download(netReq, &imageData, errorOut, feedback, download)) return out;
+  if (!ReferenceMapPreparation::download(netReq, &imageData, errorOut, feedback, download,
+                                         ReferenceMapPreparation::kLargeTransfer))
+    return out;
   const QImage img = QImage::fromData(imageData);
   if (img.isNull()) return out;
 
@@ -215,7 +222,55 @@ QHash<QString, QColor> sampleOfficialColors(const QgsRectangle& ext4326,
   return out;
 }
 
+// One bbox piece (lon/lat) of litho polygons. Partial or slow answers are
+// reported as splittable so the caller can fetch smaller quarters instead.
+ReferenceTiledFetch::Piece fetchLithoPiece(const QgsRectangle& extent4326, const QString& typeName,
+                                           QgsFeedback* feedback, const ReferenceDownload& download) {
+  using ReferenceTiledFetch::Outcome;
+  constexpr int kMaxFeatures = 100000;
+  const QString url =
+      QStringLiteral(
+          "%1?service=WFS&version=2.0.0&request=GetFeature&typeNames=%2"
+          "&outputFormat=application/json&srsName=EPSG:5186&count=%7"
+          "&bbox=%3,%4,%5,%6,urn:ogc:def:crs:EPSG::4326")
+          .arg(QLatin1String(kWfsUrl), typeName)
+          .arg(extent4326.yMinimum(), 0, 'f', 8)
+          .arg(extent4326.xMinimum(), 0, 'f', 8)
+          .arg(extent4326.yMaximum(), 0, 'f', 8)
+          .arg(extent4326.xMaximum(), 0, 'f', 8)
+          .arg(kMaxFeatures);
+  QNetworkRequest netReq{QUrl(url)};
+  netReq.setHeader(QNetworkRequest::UserAgentHeader,
+                   QStringLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ka-hgis/0.3"));
+  ReferenceTiledFetch::Piece piece;
+  ReferenceTransferFailure failure = ReferenceTransferFailure::None;
+  if (!ReferenceMapPreparation::download(netReq, &piece.body, &piece.error, feedback, download,
+                                         ReferenceMapPreparation::kLargeTransfer, &failure)) {
+    piece.outcome = failure == ReferenceTransferFailure::Cancelled ? Outcome::Cancelled
+        : failure == ReferenceTransferFailure::Timeout ? Outcome::Slow : Outcome::Transient;
+    return piece;
+  }
+  if (piece.body.isEmpty() || !piece.body.trimmed().startsWith('{') ||
+      !ReferenceMapPreparation::validateFeatureCollection(piece.body, &piece.error)) {
+    if (piece.error.isEmpty()) piece.error = QStringLiteral("서버가 GeoJSON 대신 다른 응답을 보냈습니다.");
+    piece.outcome = Outcome::Fatal;
+    return piece;
+  }
+  const qsizetype received =
+      QJsonDocument::fromJson(piece.body).object().value(QStringLiteral("features")).toArray().size();
+  if (!ReferenceMapPreparation::validateCompleteFeatureCollection(piece.body, &piece.error) ||
+      received >= kMaxFeatures) {
+    if (piece.error.isEmpty())
+      piece.error = QStringLiteral("지질도 전체를 읽지 못했습니다. 범위를 좁혀 다시 내려받으세요. 기존 지도는 유지됩니다.");
+    piece.outcome = Outcome::TooLarge;
+    return piece;
+  }
+  piece.outcome = Outcome::Complete;
+  return piece;
+}
+
 // 현재 화면 bbox(위경도)의 암상 GeoJSON을 임시 파일로 받아 경로를 돌려준다.
+// 큰 범위가 잘리거나 느리면 네 조각으로 나눠 받고, 끊긴 조각은 한 번 더 받는다.
 QString fetchLithoGeojson(const QgsRectangle& extent4326, const QString& typeName,
                           QString* errorOut, const QString& path, QgsFeedback* feedback,
                           const ReferenceDownload& download) {
@@ -223,28 +278,14 @@ QString fetchLithoGeojson(const QgsRectangle& extent4326, const QString& typeNam
     if (errorOut) *errorOut = QStringLiteral("암상 레이어 이름이 없습니다.");
     return {};
   }
-  const QString url =
-      QStringLiteral(
-          "%1?service=WFS&version=2.0.0&request=GetFeature&typeNames=%2"
-          "&outputFormat=application/json&srsName=EPSG:5186&count=100000"
-          "&bbox=%3,%4,%5,%6,urn:ogc:def:crs:EPSG::4326")
-          .arg(QLatin1String(kWfsUrl), typeName)
-          .arg(extent4326.yMinimum(), 0, 'f', 8)
-          .arg(extent4326.xMinimum(), 0, 'f', 8)
-          .arg(extent4326.yMaximum(), 0, 'f', 8)
-          .arg(extent4326.xMaximum(), 0, 'f', 8);
-
-  QNetworkRequest netReq{QUrl(url)};
-  netReq.setHeader(QNetworkRequest::UserAgentHeader,
-                   QStringLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ka-hgis/0.3"));
-  QByteArray body;
-  if (!ReferenceMapPreparation::download(netReq, &body, errorOut, feedback, download)) return {};
-  if (!ReferenceMapPreparation::validateCompleteFeatureCollection(body, errorOut)) return {};
-  if (body.isEmpty() || !body.trimmed().startsWith('{')) {
-    if (errorOut) *errorOut = QStringLiteral("서버가 GeoJSON 대신 다른 응답을 보냈습니다.");
+  const auto fetched = ReferenceTiledFetch::fetch(extent4326, [&](const QgsRectangle& piece) {
+    return fetchLithoPiece(piece, typeName, feedback, download);
+  }, feedback);
+  if (!fetched.ok) {
+    if (errorOut) *errorOut = fetched.error;
     return {};
   }
-  if (!ReferenceMapPreparation::writeResponse(path, body, errorOut)) return {};
+  if (!ReferenceMapPreparation::writeResponse(path, fetched.body, errorOut)) return {};
   return path;
 }
 
@@ -422,6 +463,9 @@ QString GeologyMapService::reliefLayerTitle() {
 
 QgsMapLayer* GeologyMapService::existingGeologyLayer(QgsProject* project) {
   if (!project) return nullptr;
+  // By identity first, so a renamed geology layer still answers (F035).
+  if (QgsMapLayer* ours = ReferenceKind::first(project, QString::fromLatin1(ReferenceKind::kGeology)))
+    return ours;
   const QString title = QString::fromUtf8(kLayerTitle);
   QgsMapLayer* prefixed = nullptr;
   for (QgsMapLayer* ml : project->mapLayers()) {
@@ -463,7 +507,7 @@ bool elevationCoversGeology(QgsRasterLayer* elev, QgsMapLayer* geology) {
       const QgsCoordinateTransform tr(geology->crs(), elev->crs(), QgsCoordinateTransformContext());
       ge = tr.transformBoundingBox(ge);
     } catch (...) {
-      KaSessionLog::line(QStringLiteral("[except] core/GeologyMapService.cpp:464"));
+      KA_LOG_EXCEPT();
       return false;
     }
   }
@@ -481,7 +525,8 @@ QgsRasterLayer* findElevationRaster(QgsProject* project, QgsMapLayer* geology) {
     const QString p = rl->providerType().toLower();
     if (p == QLatin1String("wms") || p == QLatin1String("xyz")) continue;
     if (!elevationCoversGeology(rl, geology)) continue;
-    if (rl->name() == QLatin1String("DEM")) named = rl;
+    // The DEM button's layer by identity: it may be titled 「지표모델(DSM) …」 or renamed.
+    if (BasemapDsm::isDemLayer(rl)) named = rl;
     if (!anySingle) anySingle = rl;
   }
   return named ? named : anySingle;
@@ -621,6 +666,15 @@ QString GeologyMapService::officialRasterWmsUri() {
       .arg(QLatin1String(kWmsRaster), enc);
 }
 
+// A geology layer this service added (tagged, from its GPKG table or the KIGAM raster),
+// whatever its legend title now is. A user layer tagged by title alone is not ours.
+static bool isDownloadedGeology(const QgsMapLayer* layer) {
+  if (ReferenceKind::of(layer) != QLatin1String(ReferenceKind::kGeology)) return false;
+  const QString source = layer->source();
+  return source.contains(QLatin1String("layername=geology_map")) ||
+         source.contains(QLatin1String("L_50K_Geology_Map"));
+}
+
 static void removeOldGeologyLayers(QgsProject* project, const QString& outGpkgPath,
                                     QgsMapLayer* keep = nullptr) {
   QStringList removeIds;
@@ -628,6 +682,7 @@ static void removeOldGeologyLayers(QgsProject* project, const QString& outGpkgPa
     if (!old || old == keep) continue;
     if (old->name() == QString::fromUtf8(kLayerTitle) ||
         old->name().startsWith(QString::fromUtf8(kLayerTitle) + QStringLiteral(" [")) ||
+        isDownloadedGeology(old) ||
         (!outGpkgPath.isEmpty() && old->source().contains(outGpkgPath)))
       removeIds.append(old->id());
   }
@@ -647,6 +702,7 @@ static QgsRasterLayer* addOfficialGeologyRaster(QgsProject* project, QgsMapCanva
   }
   rl->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")));
   LayerOps::markReferenceLayer(rl);
+  ReferenceKind::tag(rl, QString::fromLatin1(ReferenceKind::kGeology));
   LayerOps::applyLegendCrsLabel(rl);
   if (!project->addMapLayer(rl, true)) {
     delete rl;
@@ -686,7 +742,7 @@ PreparedReferenceMap GeologyMapService::prepare(const QgsRectangle& extent5186,
   if (fetch5186.isEmpty() || !fetch5186.isFinite() || fetch5186.width() > maxSpanMeters() ||
       fetch5186.height() > maxSpanMeters()) {
     result.error = QStringLiteral(
-          "범위가 너무 넓습니다. 지도를 조사지역(한 변 %1km 이하)으로 확대한 뒤 다시 "
+          "범위가 너무 넓습니다. 지도를 조사구역(한 변 %1km 이하)으로 확대한 뒤 다시 "
           "내려받으세요.")
           .arg(maxSpanMeters() / 1000.0, 0, 'f', 0);
     return result;
@@ -720,8 +776,10 @@ PreparedReferenceMap GeologyMapService::prepare(const QgsRectangle& extent5186,
     return result;
   }
 
+  // Each piece was already checked complete (and under the per-request cap);
+  // merged quarters may together hold more features than a single request.
   QgsVectorLayer src(jsonPath, QStringLiteral("part"), QStringLiteral("ogr"));
-  if (!src.isValid() || src.featureCount() >= 100000) {
+  if (!src.isValid()) {
     result.error = QStringLiteral("지질도 전체를 읽지 못했습니다. 범위를 좁혀 다시 내려받으세요. 기존 지도는 유지됩니다.");
     return result;
   }
@@ -876,6 +934,7 @@ QgsMapLayer* GeologyMapService::addPrepared(QgsProject* project, QgsMapCanvas* c
     return nullptr;
   }
   LayerOps::markReferenceLayer(layer);
+  ReferenceKind::tag(layer, QString::fromLatin1(ReferenceKind::kGeology));
   LayerOps::applyLegendCrsLabel(layer);
   if (!project->addMapLayer(layer, true)) {
     delete layer;

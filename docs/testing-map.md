@@ -26,6 +26,8 @@ ctest --test-dir build -C Release -R '<아래 이름>' --output-on-failure
 | E UX | `layer_information` | 작은 창 목록 ≥5행 |
 | E | `theme_qss` | Tab/Enter 새 조사→저장 |
 | E | `above_labels_200` | 200% 라벨 |
+| E | `ribbon_overflow` · `ribbon_pixels` | 리본은 접지 않고 창 너비에 맞는 가장 큰 크기(타일 56~20)로 모든 칩을 보인다, 글자·타일이 잘리지 않는다 |
+| E | `toolbar_fit` | 그리기 보조 줄은 » 없이 글자를 숨긴 뒤 아이콘을 20에서 16으로 줄인다 |
 | F 제출 | `checklist_engine` | 자기교차·빈 도형·0면적 차단 |
 | F | `export_survey_areas` | SHP+PDF 패키지 |
 | G 배포 | `theme_qss` 슬롯 `versionAndLaunchScripts_exist` | `VERSION`·바로가기·QGIS 핀 파일 |

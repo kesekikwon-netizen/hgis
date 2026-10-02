@@ -1,5 +1,6 @@
 #include "SoilMapService.h"
 #include "LayerOps.h"
+#include "ReferenceKind.h"
 
 #include <qgis.h>
 #include <qgsmaplayerlegend.h>
@@ -292,8 +293,9 @@ PreparedReferenceMap SoilMapService::prepare(const QgsRectangle& extent5186,
         }
       }
     }
+    // Polygon pages can be large: a progressing transfer is not cut at 15 seconds.
     if (!ReferenceMapPreparation::download(soilWfsRequest(wfsGetFeatureUrl(tableNo, extent4326, false)),
-          &body, &result.error, feedback, download) ||
+          &body, &result.error, feedback, download, ReferenceMapPreparation::kLargeTransfer) ||
         !ReferenceMapPreparation::validateCompleteFeatureCollection(body, &result.error)) {
       ReferenceMapPreparation::cancelled(result, feedback);
       return result;
@@ -354,10 +356,15 @@ QgsVectorLayer* SoilMapService::addPrepared(QgsProject* project, QgsMapCanvas* c
   }
   QStringList removeIds;
   for (QgsMapLayer* old : project->mapLayers()) {
+    // By title, or (renamed) by identity: tagged soil and read from our GPKG table.
+    // An imported soil SHP is tagged soil too but is never replaced here.
+    const bool renamedOurs = ReferenceKind::of(old) == QLatin1String(ReferenceKind::kSoil) &&
+                             old->source().contains(QLatin1String("layername=soil_map"));
     if (old && (old->name() == QString::fromUtf8(kLayerTitle) ||
         old->name().startsWith(QString::fromUtf8(kLayerTitle) + QStringLiteral(" [")) ||
         old->name() == QString::fromUtf8(kPictureTitle) ||
-        old->name().startsWith(QString::fromUtf8(kPictureTitle) + QStringLiteral(" ["))))
+        old->name().startsWith(QString::fromUtf8(kPictureTitle) + QStringLiteral(" [")) ||
+        renamedOurs))
       removeIds.append(old->id());
   }
   auto* layer = new QgsVectorLayer(prepared.gpkgPath + QStringLiteral("|layername=soil_map"),
@@ -373,6 +380,8 @@ QgsVectorLayer* SoilMapService::addPrepared(QgsProject* project, QgsMapCanvas* c
     return nullptr;
   }
   LayerOps::markReferenceLayer(layer);
+  // Toggles find the layer by kind, so renaming it in the legend keeps the button working.
+  ReferenceKind::tag(layer, QString::fromLatin1(ReferenceKind::kSoil));
   LayerOps::applyLegendCrsLabel(layer);
 
   if (!project->addMapLayer(layer, true)) {

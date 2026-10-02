@@ -10,6 +10,8 @@
 #include <QtTest>
 #include <QWidget>
 
+#include <cmath>
+
 namespace {
 
 // Saves a frame for visual QA when KA_STARTUP_QA_OUTPUT_DIR is set.
@@ -22,6 +24,21 @@ void saveFrame(QWidget& widget, const QString& name) {
 
 QImage grabArea(QWidget& widget, const QRectF& area) {
   return widget.grab(area.toAlignedRect()).toImage();
+}
+
+double luminance(const QColor& c) {
+  const auto lin = [](double v) { return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+  return 0.2126 * lin(c.redF()) + 0.7152 * lin(c.greenF()) + 0.0722 * lin(c.blueF());
+}
+
+// Contrast of ink (with its alpha) painted over an opaque background.
+double inkContrast(const QColor& ink, const QColor& background) {
+  const double a = ink.alphaF();
+  const QColor text = QColor::fromRgbF(float(ink.redF() * a + background.redF() * (1 - a)),
+                                       float(ink.greenF() * a + background.greenF() * (1 - a)),
+                                       float(ink.blueF() * a + background.blueF() * (1 - a)));
+  const double x = luminance(text), y = luminance(background);
+  return (qMax(x, y) + 0.05) / (qMin(x, y) + 0.05);
 }
 
 }  // namespace
@@ -136,6 +153,27 @@ private slots:
     saveFrame(splash, QStringLiteral("startup-motion.png"));
     QCOMPARE(grabArea(splash, art), artBefore);  // the artwork never moves
     QVERIFY(grabArea(splash, dots) != dotsBefore);  // the dots flow
+  }
+
+  // The licence notice is the smallest text, so it must keep 4.5:1 over every
+  // pixel of the card behind it (blue gradient, contour lines, foot shade).
+  void noticesKeepReadableContrast() {
+    KaStartupSplash splash(nullptr, 1500);
+    const QImage backdrop = splash.backdropImage();
+    const QRect area = splash.noticesRect().toAlignedRect().intersected(backdrop.rect());
+    QVERIFY(!area.isEmpty());
+    double copyright = 99.0;
+    double data = 99.0;
+    for (int y = area.top(); y <= area.bottom(); ++y) {
+      for (int x = area.left(); x <= area.right(); x += 2) {
+        const QColor background = backdrop.pixelColor(x, y);
+        QCOMPARE(background.alpha(), 255);
+        copyright = qMin(copyright, inkContrast(KaSplashCredits::copyrightInk(), background));
+        data = qMin(data, inkContrast(KaSplashCredits::dataInk(), background));
+      }
+    }
+    QVERIFY2(copyright >= 4.5, qPrintable(QStringLiteral("copyright line %1:1").arg(copyright)));
+    QVERIFY2(data >= 4.5, qPrintable(QStringLiteral("data line %1:1").arg(data)));
   }
 
   void clickNeverClosesTheNotice() {

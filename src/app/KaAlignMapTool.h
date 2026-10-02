@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/GeorefService.h"
+#include "core/GeorefBackup.h"
 #include <qgsmaptool.h>
 #include <qgsmapmouseevent.h>
 #include <qgspointxy.h>
@@ -23,14 +24,21 @@ public:
   ~KaAlignPickTool() override;
   void canvasPressEvent(QgsMapMouseEvent* e) override;
   void canvasMoveEvent(QgsMapMouseEvent* e) override;
+  void canvasReleaseEvent(QgsMapMouseEvent* e) override;
   void deactivate() override;
+  // Already picked source points; pressing on one drags it instead of picking anew.
+  void setDragPoints(const QVector<QgsPointXY>& pts) { m_dragPoints = pts; }
 signals:
   void picked(const QgsPointXY& pt);
+  void pointDragged(int index, const QgsPointXY& pt);
 
 private:
   QgsPointXY snapPoint(QgsMapMouseEvent* e, bool* snapped);
   void updateSnapMark(const QgsPointXY& pt, bool snapped);
   QgsVertexMarker* m_snapMark = nullptr;
+  QVector<QgsPointXY> m_dragPoints;
+  int m_dragIndex = -1;
+  QPoint m_dragPress;
 };
 
 class KaAlignMapTool : public QgsMapTool {
@@ -56,18 +64,27 @@ public:
   bool fitToDisplay();
   bool removeLastPair();
   bool removePairAt(int index);
-  bool restoreOriginals();
+  // Clears the points and puts the target back as it was when the session began. A raster
+  // is restored from the backup taken before its first world-file write; *message says
+  // honestly what happened (restored, nothing written yet, or failed).
+  bool restoreOriginals(QString* message = nullptr);
   bool applyMove(QString* errorOut = nullptr);
   bool saveAligned(QString* savedPath, QString* errorOut);
+  // Fine-tune an existing pair by dragging its left (source) point.
+  bool movePairSource(int index, double sx, double sy);
+
+  // Folder that receives the raster backup (survey folder/정합백업). Set before beginLayer.
+  void setBackupRoot(const QString& root) { m_backupRoot = root; }
+  QString backupFolder() const { return m_rasterBackup.valid ? m_rasterBackup.folder : QString(); }
 
   int pairCount() const { return m_pairs.size(); }
-  double rmsMeters() const { return m_affine.rmsMeters; }
   QString statusText() const;
   bool isRasterSession() const { return m_raster; }
 
   Flags flags() const override;
   void canvasPressEvent(QgsMapMouseEvent* e) override;
   void canvasMoveEvent(QgsMapMouseEvent* e) override;
+  void canvasReleaseEvent(QgsMapMouseEvent* e) override;
   void keyPressEvent(QKeyEvent* e) override;
   void deactivate() override;
 
@@ -87,6 +104,9 @@ private:
   bool mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, bool* snapped);
   void updateSnapMark(const QgsPointXY& pt, bool snapped);
   QgsCoordinateReferenceSystem workCrs() const;
+  bool ensureRasterBackup(QString* errorOut);
+  int pairMarkAt(const QPoint& screen) const;
+  bool beginPairDrag(QgsMapMouseEvent* e);
 
   QPointer<QgsMapLayer> m_layer;
   QPointer<QgsVectorLayer> m_hiddenSource;
@@ -110,4 +130,10 @@ private:
   QgsRubberBand* m_rubber = nullptr;
   QgsVertexMarker* m_snapMark = nullptr;
   QVector<QgsVertexMarker*> m_marks;
+  QString m_backupRoot;
+  GeorefBackup::RasterBackup m_rasterBackup;
+  QgsCoordinateReferenceSystem m_originalRasterCrs;
+  QString m_savedVectorPath;
+  int m_dragIndex = -1;
+  QPoint m_dragPress;
 };

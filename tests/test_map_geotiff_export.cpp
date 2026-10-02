@@ -216,6 +216,45 @@ private slots:
     QCOMPARE(readFile(path), original);
   }
 
+  // The canvas leaves survey shapes drawn above labels out of its own layer list.
+  // The GeoTIFF must add them on top once, like the screen overlay does.
+  void aboveLabelsLayersAreDrawnOnceOnTop() {
+    QTemporaryDir temp;
+    const QString rasterPath = temp.filePath(QStringLiteral("blue.tif"));
+    QVERIFY(createRaster(rasterPath));
+    QgsRasterLayer raster(rasterPath, QStringLiteral("배경"), QStringLiteral("gdal"));
+    QVERIFY(raster.isValid());
+    auto red = polygon(QStringLiteral("255,0,0,255"));
+    const auto sample = [](const QString& path) {
+      using Dataset = std::unique_ptr<void, decltype(&GDALClose)>;
+      Dataset result(GDALOpen(path.toUtf8().constData(), GA_ReadOnly), GDALClose);
+      unsigned char pixel[3] = {};
+      int bands[] = {1, 2, 3};
+      if (result)
+        GDALDatasetRasterIO(result.get(), GF_Read, 16, 32, 1, 1, pixel, 1, 1, GDT_Byte, 3, bands, 3, 3, 1);
+      return QList<int>{pixel[0], pixel[1], pixel[2]};
+    };
+    QString error;
+    const QString withOverlay = temp.filePath(QStringLiteral("overlay.tif"));
+    QVERIFY2(MapGeoTiffExport::write(settingsFor(&raster), withOverlay, &error, {}, {red.get()}), qPrintable(error));
+    QCOMPARE(sample(withOverlay), (QList<int>{255, 0, 0}));
+    // Only overlay layers and no base list still make a picture.
+    const QString overlayOnly = temp.filePath(QStringLiteral("overlay-only.tif"));
+    QgsMapSettings empty = settingsFor(&raster);
+    empty.setLayers({});
+    QVERIFY2(MapGeoTiffExport::write(empty, overlayOnly, &error, {}, {red.get()}), qPrintable(error));
+    QCOMPARE(sample(overlayOnly), (QList<int>{255, 0, 0}));
+    // A half-transparent layer already in the snapshot is not painted a second time.
+    red->setOpacity(0.5);
+    QgsMapSettings both = settingsFor(&raster);
+    both.setLayers({red.get(), &raster});
+    const QString once = temp.filePath(QStringLiteral("once.tif"));
+    QVERIFY2(MapGeoTiffExport::write(both, once, &error, {}, {red.get()}), qPrintable(error));
+    const QList<int> pixel = sample(once);
+    QVERIFY2(std::abs(pixel[0] - 128) <= 2 && std::abs(pixel[2] - 127) <= 2,
+             qPrintable(QStringLiteral("%1,%2,%3").arg(pixel[0]).arg(pixel[1]).arg(pixel[2])));
+  }
+
   void visibleSelectionColorIsPreserved() {
     QTemporaryDir temp;
     auto red = polygon(QStringLiteral("255,0,0,255"));

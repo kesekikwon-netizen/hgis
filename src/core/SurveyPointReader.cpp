@@ -1,6 +1,6 @@
 #include "SurveyPointReader.h"
 
-#include "SurveyContourMath.h"
+#include "SurveyPointArrange.h"
 #include "SurveyPointSchema.h"
 #include "LayerOps.h"
 
@@ -24,13 +24,49 @@ size_t qHash(const Cell& cell, size_t seed = 0) {
   return ::qHash(cell.x, seed) ^ ::qHash(cell.y, seed + 1);
 }
 
+// OGRGeometry::toPoint() is an unchecked cast, so the type is tested first.
 OGRPoint* asPoint(OGRGeometry* geometry) {
   if (!geometry) return nullptr;
-  if (OGRPoint* point = geometry->toPoint()) return point;
-  if (wkbFlatten(geometry->getGeometryType()) == wkbMultiPoint &&
-      geometry->toGeometryCollection()->getNumGeometries() > 0)
-    return geometry->toGeometryCollection()->getGeometryRef(0)->toPoint();
+  const OGRwkbGeometryType kind = wkbFlatten(geometry->getGeometryType());
+  if (kind == wkbPoint) return geometry->toPoint();
+  if (kind == wkbMultiPoint && geometry->toGeometryCollection()->getNumGeometries() > 0) {
+    OGRGeometry* first = geometry->toGeometryCollection()->getGeometryRef(0);
+    return first && wkbFlatten(first->getGeometryType()) == wkbPoint ? first->toPoint() : nullptr;
+  }
   return nullptr;
+}
+
+QString cadLayer(OGRFeature* feature) {
+  const int index = feature->GetFieldIndex("Layer");
+  return index >= 0 ? QString::fromUtf8(feature->GetFieldAsString(index)) : QString();
+}
+
+// Keeps lines whose every vertex has a height; those can steer the surface as breaklines.
+bool collectLine(OGRGeometry* geometry, SurveyReadReport* report) {
+  if (!geometry) return false;
+  const OGRwkbGeometryType kind = wkbFlatten(geometry->getGeometryType());
+  if (kind == wkbMultiLineString) {
+    OGRGeometryCollection* parts = geometry->toGeometryCollection();
+    for (int i = 0; i < parts->getNumGeometries(); ++i) collectLine(parts->getGeometryRef(i), report);
+    return true;
+  }
+  if (kind != wkbLineString) return false;
+  OGRLineString* line = geometry->toLineString();
+  SurveyPolyline vertices;
+  bool allElevated = line->getNumPoints() >= 2;
+  for (int i = 0; i < line->getNumPoints(); ++i) {
+    SurveyPoint vertex;
+    vertex.x = line->getX(i);
+    vertex.y = line->getY(i);
+    vertex.z = line->getZ(i);
+    vertex.row = -1;
+    if (!std::isfinite(vertex.x) || !std::isfinite(vertex.y) || !std::isfinite(vertex.z) || vertex.z == 0.0)
+      allElevated = false;
+    vertices.push_back(vertex);
+  }
+  if (allElevated) report->breaklines.push_back(vertices);
+  else ++report->flatLineCount;
+  return true;
 }
 
 }  // namespace
@@ -49,9 +85,8 @@ SurveySourceInfo SurveyPointReader::inspect(const QString& path) {
       layer->ResetReading();
       while (OGRFeature* feature = layer->GetNextFeature()) {
         if (surveyIsPoint(feature->GetGeometryRef())) {
-          const int index = feature->GetFieldIndex("Layer");
-          const QString name = index >= 0 ? QString::fromUtf8(feature->GetFieldAsString(index))
-                                          : QString::fromUtf8(layer->GetName());
+          const QString name = feature->GetFieldIndex("Layer") >= 0 ? cadLayer(feature)
+                                                                     : QString::fromUtf8(layer->GetName());
           if (!name.isEmpty()) layers.insert(name);
         }
         OGRFeature::DestroyFeature(feature);
@@ -73,6 +108,7 @@ SurveySourceInfo SurveyPointReader::inspect(const QString& path) {
 
 SurveyReadReport SurveyPointReader::read(const SurveyReadOptions& options) {
   SurveyReadReport report;
+  report.crsAuthId = options.crsAuthId;
   SurveyDataset data;
   if (!data.open(options.path)) {
     report.fatal = QStringLiteral("파일을 열지 못했습니다. 다른 프로그램이 파일을 열고 있는지 확인하세요.");
@@ -112,57 +148,57 @@ SurveyReadReport SurveyPointReader::read(const SurveyReadOptions& options) {
     report.fatal = QStringLiteral("X·Y·표고 칸을 찾지 못했습니다. 칸을 직접 지정하세요.");
     return report;
   }
-  if (!dxf && surveyAxesNamedNorthEast(definition, columns)) report.swapSuggested = true;
+  if (!dxf && surveyAxesNamedNorthEast(definition, columns)) {
+    report.swapSuggested = true;
+    report.swapReason = QStringLiteral("열 이름에 북·동 표시가 있음");
+  }
+  auto note = [&report](const QString& text) {
+    if (report.issues.size() < kMaxIssues) report.issues << text;
+    else ++report.issuesOmitted;
+  };
 
+  // Only point entities decide which CAD layers carry heights; line-only layers are not "dropped".
   QHash<QString, bool> cadHasElevation;
   if (dxf && options.layer.isEmpty()) {
     layer->ResetReading();
     while (OGRFeature* feature = layer->GetNextFeature()) {
-      const int layerField = feature->GetFieldIndex("Layer");
-      const QString cad = layerField >= 0 ? QString::fromUtf8(feature->GetFieldAsString(layerField)) : QString();
-      OGRPoint* geometry = asPoint(feature->GetGeometryRef());
-      const bool elevated = geometry && std::isfinite(geometry->getZ()) && geometry->getZ() != 0.0;
-      cadHasElevation.insert(cad, cadHasElevation.value(cad) || elevated);
+      if (OGRPoint* geometry = asPoint(feature->GetGeometryRef())) {
+        const bool elevated = std::isfinite(geometry->getZ()) && geometry->getZ() != 0.0;
+        const QString cad = cadLayer(feature);
+        cadHasElevation.insert(cad, cadHasElevation.value(cad) || elevated);
+      }
       OGRFeature::DestroyFeature(feature);
     }
   }
   bool someLayerHasElevation = false;
   for (bool elevated : cadHasElevation) someLayerHasElevation = someLayerHasElevation || elevated;
+  const QgsRectangle fileKorea = LayerOps::koreaExtentForCrs(
+      options.sourceCrsAuthId.isEmpty() ? options.crsAuthId : options.sourceCrsAuthId);
 
   struct Bucket { double zSum = 0; int count = 0; SurveyPoint point; bool zDiffers = false; };
   QHash<Cell, Bucket> buckets;
-  int nonPoints = 0;
   layer->ResetReading();
   for (int index = 1; OGRFeature* feature = layer->GetNextFeature(); ++index) {
     const int row = data.headerless || dxf ? index : index + 1;
-    if (dxf && !options.layer.isEmpty()) {
-      const int layerField = feature->GetFieldIndex("Layer");
-      const QString cad = layerField >= 0 ? QString::fromUtf8(feature->GetFieldAsString(layerField)) : QString();
-      if (cad != options.layer) {
-        OGRFeature::DestroyFeature(feature);
-        continue;
-      }
+    if (dxf && !surveyIsPoint(feature->GetGeometryRef())) {
+      // Lines are kept from every CAD layer: breaklines usually sit on a layer of their own.
+      if (!collectLine(feature->GetGeometryRef(), &report)) ++report.nonPointCount;
+      OGRFeature::DestroyFeature(feature);
+      continue;
     }
-    if (dxf && options.layer.isEmpty() && someLayerHasElevation) {
-      const int layerField = feature->GetFieldIndex("Layer");
-      const QString cad = layerField >= 0 ? QString::fromUtf8(feature->GetFieldAsString(layerField)) : QString();
-      if (!cadHasElevation.value(cad)) {
-        OGRFeature::DestroyFeature(feature);
-        continue;
-      }
+    const QString cad = dxf ? cadLayer(feature) : QString();
+    if ((dxf && !options.layer.isEmpty() && cad != options.layer) ||
+        (dxf && options.layer.isEmpty() && someLayerHasElevation && !cadHasElevation.value(cad))) {
+      OGRFeature::DestroyFeature(feature);
+      continue;
     }
     double fileX = 0, fileY = 0, z = 0;
     QString name;
     if (dxf) {
-      if (!surveyIsPoint(feature->GetGeometryRef())) {
-        ++nonPoints;
-        OGRFeature::DestroyFeature(feature);
-        continue;
-      }
       OGRPoint* geometry = asPoint(feature->GetGeometryRef());
       if (!geometry || !std::isfinite(geometry->getX()) || !std::isfinite(geometry->getZ())) {
         ++report.skipped;
-        report.issues << QStringLiteral("%1행: 점 좌표가 없습니다.").arg(row);
+        note(QStringLiteral("%1행: 점 좌표가 없습니다.").arg(row));
         OGRFeature::DestroyFeature(feature);
         continue;
       }
@@ -174,40 +210,34 @@ SurveyReadReport SurveyPointReader::read(const SurveyReadOptions& options) {
       const QString xs = surveyFieldText(feature, columns.x);
       const QString ys = surveyFieldText(feature, columns.y);
       const QString zs = surveyFieldText(feature, columns.z);
-      if (xs.isEmpty() && ys.isEmpty() && zs.isEmpty()) {
+      QString problem;
+      if (xs.isEmpty() && ys.isEmpty() && zs.isEmpty()) problem = QStringLiteral("%1행: 빈 행");
+      else if (!surveyParseNumber(xs, &fileX) || !surveyParseNumber(ys, &fileY))
+        problem = QStringLiteral("%1행: X·Y가 숫자가 아닙니다.");
+      else if (!surveyParseNumber(zs, &z)) problem = QStringLiteral("%1행: 표고가 숫자가 아닙니다.");
+      if (!problem.isEmpty()) {
         ++report.skipped;
-        report.issues << QStringLiteral("%1행: 빈 행").arg(row);
-        OGRFeature::DestroyFeature(feature);
-        continue;
-      }
-      if (!surveyParseNumber(xs, &fileX) || !surveyParseNumber(ys, &fileY)) {
-        ++report.skipped;
-        report.issues << QStringLiteral("%1행: X·Y가 숫자가 아닙니다.").arg(row);
-        OGRFeature::DestroyFeature(feature);
-        continue;
-      }
-      if (!surveyParseNumber(zs, &z)) {
-        ++report.skipped;
-        report.issues << QStringLiteral("%1행: 표고가 숫자가 아닙니다.").arg(row);
+        note(problem.arg(row));
         OGRFeature::DestroyFeature(feature);
         continue;
       }
       name = surveyFieldText(feature, columns.id);
     }
     OGRFeature::DestroyFeature(feature);
+    // File order: x is the first coordinate column. SurveyPointArrange puts it in map order.
     SurveyPoint point;
-    point.x = options.swapAxes ? fileY : fileX;
-    point.y = options.swapAxes ? fileX : fileY;
+    point.x = fileX;
+    point.y = fileY;
     point.z = z;
     point.name = name;
     point.row = row;
     point.suspicious = z == 0.0 || std::abs(z) >= 999.0;
-    if (report.rawCount == 0) {
-      const QgsRectangle korea = LayerOps::koreaExtentForCrs(options.crsAuthId);
-      if (!korea.isEmpty() && korea.isFinite()) {
-        const bool swapped = korea.contains(QgsPointXY(fileY, fileX));
-        const bool xIsNorthing = std::abs(fileX - 200000.0) > std::abs(fileY - 200000.0) + 50000.0;
-        if (swapped && xIsNorthing) report.swapSuggested = true;
+    if (report.rawCount == 0 && !report.swapSuggested && !fileKorea.isEmpty() && fileKorea.isFinite()) {
+      const bool swapped = fileKorea.contains(QgsPointXY(fileY, fileX));
+      const bool xIsNorthing = std::abs(fileX - 200000.0) > std::abs(fileY - 200000.0) + 50000.0;
+      if (swapped && xIsNorthing) {
+        report.swapSuggested = true;
+        report.swapReason = QStringLiteral("첫 행을 바꿔 읽으면 한국 범위에 맞음");
       }
     }
     ++report.rawCount;
@@ -218,38 +248,31 @@ SurveyReadReport SurveyPointReader::read(const SurveyReadOptions& options) {
     bucket.zSum += z;
     ++bucket.count;
   }
-  if (nonPoints > 0)
-    report.issues << QStringLiteral("점이 아닌 도형 %1개는 건너뛰었습니다.").arg(nonPoints);
+  if (report.nonPointCount > 0)
+    report.issues << QStringLiteral("점이 아닌 도형 %1개는 건너뛰었습니다.").arg(report.nonPointCount);
   if (someLayerHasElevation) {
     QStringList dropped;
     for (auto it = cadHasElevation.cbegin(); it != cadHasElevation.cend(); ++it)
       if (!it.value() && !it.key().isEmpty()) dropped << it.key();
+    report.droppedLayers = dropped;
     if (!dropped.isEmpty())
-      report.issues << QStringLiteral("높이가 없는 점 이름 레이어는 빼었습니다: %1").arg(dropped.join(QStringLiteral(", ")));
+      report.issues << QStringLiteral("높이가 없는 점 레이어는 뺐습니다: %1").arg(dropped.join(QStringLiteral(", ")));
   }
   for (auto it = buckets.cbegin(); it != buckets.cend(); ++it) {
     SurveyPoint point = it.value().point;
     point.z = it.value().zSum / it.value().count;
     if (it.value().count > 1 && it.value().zDiffers) {
       ++report.duplicateGroups;
-      report.issues << QStringLiteral("같은 좌표(%1, %2)의 표고 %3개를 평균했습니다.")
-                           .arg(point.x, 0, 'f', 3)
-                           .arg(point.y, 0, 'f', 3)
-                           .arg(it.value().count);
+      note(QStringLiteral("같은 좌표(%1, %2)의 표고 %3개를 평균했습니다.")
+               .arg(point.x, 0, 'f', 3)
+               .arg(point.y, 0, 'f', 3)
+               .arg(it.value().count));
     }
     report.points.push_back(point);
   }
-  if (!report.points.isEmpty()) {
-    report.minCm = surveyMetersToCm(report.points.first().z);
-    report.maxCm = report.minCm;
-    const QgsRectangle korea = LayerOps::koreaExtentForCrs(options.crsAuthId);
-    for (const SurveyPoint& point : report.points) {
-      const int cm = surveyMetersToCm(point.z);
-      report.minCm = std::min(report.minCm, cm);
-      report.maxCm = std::max(report.maxCm, cm);
-      if (!korea.isEmpty() && !korea.contains(QgsPointXY(point.x, point.y)))
-        report.outsideKorea = true;
-    }
-  }
-  return report;
+  SurveyArrangeOptions arrange;
+  arrange.swapAxes = options.swapAxes;
+  arrange.sourceCrsAuthId = options.sourceCrsAuthId;
+  arrange.targetCrsAuthId = options.crsAuthId;
+  return SurveyPointArrange::arrange(report, arrange);
 }

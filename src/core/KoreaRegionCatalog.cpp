@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -10,7 +11,7 @@
 
 namespace {
 
-const QVector<KoreaSido>& table() {
+const QVector<KoreaSido>& builtInTable() {
   static const QVector<KoreaSido> k = {
       {QStringLiteral("서울특별시"), QStringLiteral("서울"),
        {QStringLiteral("종로구"), QStringLiteral("중구"), QStringLiteral("용산구"),
@@ -115,7 +116,76 @@ const QVector<KoreaSido>& table() {
   return k;
 }
 
+struct CatalogData {
+  QVector<KoreaSido> sido;
+  QHash<QString, QString> aliases;
+  QString source;
+};
+
+// Same search as data/korea_dongs.json: working directory, then next to the app.
+QStringList dataCandidates(const QString& name) {
+  const QDir app(QCoreApplication::applicationDirPath());
+  return {QDir::current().filePath(QStringLiteral("data/") + name),
+          app.filePath(QStringLiteral("data/") + name), app.filePath(QStringLiteral("../data/") + name)};
+}
+
+CatalogData loadCatalog() {
+  for (const QString& p : dataCandidates(QStringLiteral("korea_regions.json"))) {
+    QFile f(p);
+    if (!f.open(QIODevice::ReadOnly)) continue;
+    CatalogData data;
+    QString error;
+    data.sido = KoreaRegionCatalog::parseTable(f.readAll(), &data.aliases, &error);
+    if (data.sido.isEmpty()) {
+      qWarning("korea_regions.json ignored: %s", qUtf8Printable(error));
+      break;
+    }
+    data.source = QFileInfo(p).absoluteFilePath();
+    return data;
+  }
+  return {builtInTable(), {}, QStringLiteral("built-in")};
+}
+
+// Loaded once (thread-safe static init). Read from worker threads too.
+const CatalogData& catalog() {
+  static const CatalogData data = loadCatalog();
+  return data;
+}
+
+const QVector<KoreaSido>& table() { return catalog().sido; }
+
 }  // namespace
+
+QVector<KoreaSido> KoreaRegionCatalog::parseTable(const QByteArray& json,
+                                                  QHash<QString, QString>* aliases,
+                                                  QString* error) {
+  auto fail = [error](const QString& why) { if (error) *error = why; return QVector<KoreaSido>(); };
+  const QJsonArray list = QJsonDocument::fromJson(json).object().value(QStringLiteral("sido")).toArray();
+  if (list.isEmpty()) return fail(QStringLiteral("no sido entries"));
+  QVector<KoreaSido> out;
+  QHash<QString, QString> spelled;
+  for (const QJsonValue& value : list) {
+    const QJsonObject o = value.toObject();
+    KoreaSido sido;
+    sido.name = o.value(QStringLiteral("name")).toString().trimmed();
+    sido.shortName = o.value(QStringLiteral("short")).toString().trimmed();
+    for (const QJsonValue& c : o.value(QStringLiteral("cities")).toArray())
+      if (const QString city = c.toString().trimmed(); !city.isEmpty() && !sido.cities.contains(city))
+        sido.cities.append(city);
+    // One bad entry rejects the whole file: a half table would hide real 시·군.
+    if (sido.name.isEmpty() || sido.cities.isEmpty())
+      return fail(QStringLiteral("entry without name or cities"));
+    if (sido.shortName.isEmpty()) sido.shortName = sido.name;
+    for (const QJsonValue& a : o.value(QStringLiteral("aliases")).toArray())
+      if (const QString alias = a.toString().trimmed(); !alias.isEmpty()) spelled.insert(alias, sido.name);
+    out.append(sido);
+  }
+  if (aliases) *aliases = spelled;
+  if (error) error->clear();
+  return out;
+}
+
+QString KoreaRegionCatalog::tableSource() { return catalog().source; }
 
 QVector<KoreaSido> KoreaRegionCatalog::allSido() { return table(); }
 
@@ -134,6 +204,8 @@ QString KoreaRegionCatalog::canonicalSido(const QString& name) {
     return QStringLiteral("전북특별자치도");
   if (t == QLatin1String("제주") || t == QStringLiteral("제주도"))
     return QStringLiteral("제주특별자치도");
+  if (const auto alias = catalog().aliases.constFind(t); alias != catalog().aliases.cend())
+    return alias.value();
   for (const KoreaSido& s : table()) {
     if (s.name == t || s.shortName == t) return s.name;
   }
@@ -177,12 +249,7 @@ const QHash<QString, QStringList>& dongTable() {
   static bool loaded = false;
   if (loaded) return map;
   loaded = true;
-  const QStringList paths = {
-      QDir::current().filePath(QStringLiteral("data/korea_dongs.json")),
-      QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("data/korea_dongs.json")),
-      QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../data/korea_dongs.json")),
-  };
-  for (const QString& p : paths) {
+  for (const QString& p : dataCandidates(QStringLiteral("korea_dongs.json"))) {
     QFile f(p);
     if (!f.open(QIODevice::ReadOnly)) continue;
     const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());

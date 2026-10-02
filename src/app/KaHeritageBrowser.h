@@ -9,6 +9,7 @@
 #include <QStringList>
 #include <QVector>
 
+#include "core/HeritageFetchPlan.h"
 #include "core/HeritageFormParser.h"
 #include "core/HeritageHttpClient.h"
 #include "core/HeritageIntranetFlow.h"
@@ -42,9 +43,15 @@ public:
   ~KaHeritageBrowser() override;
 
   void setDownloadRoot(const QString& directory);
-  // 받을 대상. 시/군 하나와 자료 종류들.
+  // 받을 대상. 시/군 하나와 자료 종류들. 새로 받기를 시작할 때마다 부른다(이전 계획은 지운다).
   void setTarget(const QString& sido, const QString& city,
                  const QVector<HeritageDataset>& datasets);
+  // setTarget 다음에 부른다. 확인창에서 고른 이웃 시·군(F120)을 첫 시·군이 끝난 뒤 하나씩
+  // 차례로 받고, 최근 받은 자료 다시 쓰기(F174)를 적용한다. allFinished 는 마지막 시·군 뒤에 한 번.
+  void setFetchPlan(const HeritageFetchPlan& plan);
+  // 여러 시·군을 이어 받을 때만 지금 시·군 이름("예천군"). 한 시·군이면 빈 값.
+  // HeritageImport::loadDataset 의 regionLabel 로 넘겨 레이어 이름을 구분한다.
+  QString regionLabelForImport() const;
   // 아직 받기를 시작하지 않았을 때 창에 상태만 보여 준다(시·군 판정 중 등).
   void showWaiting(const QString& message);
   void start();
@@ -71,6 +78,12 @@ signals:
 
 private:
   friend class HeritageDownloadRetryTest;
+  // 이 시·군의 자료를 모두 마쳤다. 다음 이웃 시·군이 있으면 이어 받고, 없으면 allFinished.
+  void finishTarget(const QString& message);
+  // 최근 받은 자료를 먼저 다시 쓴다. 이 시·군 자료가 모두 해결되면 true.
+  bool reuseRecentDatasets();
+  QString targetPrefix() const;
+  void updateNotice();
   void scheduleDownloadRetry(const QString& reason, bool responseOnly = false);
   void reopenDownloadSession();
   void closeDownloadPopups(bool includeFormPages);
@@ -124,6 +137,10 @@ private:
   QWebEngineView* m_mainView = nullptr;
   QLabel* m_stageLabel = nullptr;
   QLabel* m_detailLabel = nullptr;
+  // 오래 남겨 둘 안내(서약 요지 F169, 계속 재시도 중 F174). 단계 글이 덮어쓰지 않는다.
+  QLabel* m_noticeLabel = nullptr;
+  QString m_pledgeNote;
+  QString m_retryNote;
   QProgressBar* m_progress = nullptr;
   QPlainTextEdit* m_outline = nullptr;
   QPushButton* m_stopButton = nullptr;
@@ -134,6 +151,15 @@ private:
   QString m_city;
   QVector<HeritageDataset> m_datasets;
   int m_datasetIndex = 0;
+  // 여러 시·군 받기(F120). 요청 단위는 여전히 시·군 하나씩이다.
+  QVector<HeritageDataset> m_planDatasets;
+  QList<HeritageCity> m_followUps;
+  int m_targetIndex = 0;
+  int m_targetCount = 1;
+  bool m_pendingNext = false;
+  bool m_reuseRecent = false;
+  bool m_reuseProbe = false;
+  bool m_reuseRejected = false;
   QString m_downloadRoot;
   QString m_lastOutline;
   QString m_lastAlert;  // 사이트가 마지막으로 띄운 알림 글

@@ -5,6 +5,7 @@
 #include "core/LayerOps.h"
 #include "core/LayoutService.h"
 #include "core/SectionLayoutService.h"
+#include "core/StandardScales.h"
 
 #include <QBrush>
 #include <QCheckBox>
@@ -133,6 +134,11 @@ KaSectionDrawingStudio::KaSectionDrawingStudio(QgsProject* project, QWidget* par
     : QWidget(parent)
     , m_project(project)
 {
+    // Spin boxes and typed scales fire on every step; rebuild once they settle.
+    m_rebuildTimer = new QTimer(this);
+    m_rebuildTimer->setSingleShot(true);
+    m_rebuildTimer->setInterval(300);
+    connect(m_rebuildTimer, &QTimer::timeout, this, [this]() { rebuildSheet(false); });
     buildUi();
     syncCrsComboFromProject();
     rebuildSheet(false);
@@ -371,8 +377,12 @@ QWidget* KaSectionDrawingStudio::buildRightPanel()
     auto [sheetCard, sheetForm] = makeCard(QStringLiteral("도면"));
     m_paperCombo = new QComboBox(sheetCard);
     m_paperCombo->setObjectName(QStringLiteral("paperCombo"));
+    // Item order matches SectionLayoutOptions::Paper (A3, A4, A2, A1).
     m_paperCombo->addItem(QStringLiteral("A3"));
     m_paperCombo->addItem(QStringLiteral("A4"));
+    m_paperCombo->addItem(QStringLiteral("A2"));
+    m_paperCombo->addItem(QStringLiteral("A1"));
+    m_paperCombo->setToolTip(QStringLiteral("긴 단면이 지정 축척으로 들어가지 않으면 A2·A1을 고르세요."));
     sheetForm->addRow(QStringLiteral("용지"), m_paperCombo);
 
     m_titleEdit = new QLineEdit(sheetCard);
@@ -385,15 +395,33 @@ QWidget* KaSectionDrawingStudio::buildRightPanel()
     m_scaleCombo->setObjectName(QStringLiteral("scaleCombo"));
     m_scaleCombo->setEditable(true);
     m_scaleCombo->addItem(QStringLiteral("자동 맞춤"));
-    m_scaleCombo->addItem(QStringLiteral("1:10"));
-    m_scaleCombo->addItem(QStringLiteral("1:20"));
-    m_scaleCombo->addItem(QStringLiteral("1:25"));
-    m_scaleCombo->addItem(QStringLiteral("1:40"));
-    m_scaleCombo->addItem(QStringLiteral("1:50"));
-    m_scaleCombo->addItem(QStringLiteral("1:100"));
-    m_scaleCombo->addItem(QStringLiteral("1:200"));
-    m_scaleCombo->addItem(QStringLiteral("1:250"));
+    // Section scales come from the one standard table (1:10 … 1:250, incl. 1:30·1:60).
+    for (int denominator : StandardScales::denominators(StandardScales::Section))
+        m_scaleCombo->addItem(QStringLiteral("1:%1").arg(denominator));
     sheetForm->addRow(QStringLiteral("축척"), m_scaleCombo);
+
+    // A requested scale that does not fit is not changed silently: say so and
+    // offer the smallest standard scale that fits this paper.
+    auto* scaleNoteRow = new QWidget(sheetCard);
+    auto* scaleNoteLay = new QHBoxLayout(scaleNoteRow);
+    scaleNoteLay->setContentsMargins(0, 0, 0, 0);
+    scaleNoteLay->setSpacing(6);
+    m_scaleNote = new QLabel(scaleNoteRow);
+    m_scaleNote->setObjectName(QStringLiteral("sectionScaleNote"));
+    m_scaleNote->setWordWrap(true);
+    m_scaleSuggestBtn = new QToolButton(scaleNoteRow);
+    m_scaleSuggestBtn->setObjectName(QStringLiteral("sectionScaleSuggest"));
+    m_scaleSuggestBtn->setCursor(Qt::PointingHandCursor);
+    scaleNoteLay->addWidget(m_scaleNote, 1);
+    scaleNoteLay->addWidget(m_scaleSuggestBtn, 0, Qt::AlignTop);
+    scaleNoteRow->setVisible(false);
+    sheetForm->addRow(QString(), scaleNoteRow);
+
+    m_noteEdit = new QLineEdit(sheetCard);
+    m_noteEdit->setObjectName(QStringLiteral("noteEdit"));
+    m_noteEdit->setPlaceholderText(QStringLiteral("예: A–A′ 단면 · 북벽"));
+    m_noteEdit->setToolTip(QStringLiteral("용지의 단면 위쪽에 한 줄로 적습니다. 비우면 넣지 않습니다."));
+    sheetForm->addRow(QStringLiteral("주기"), m_noteEdit);
 
     m_crsCombo = new QComboBox(sheetCard);
     m_crsCombo->setObjectName(QStringLiteral("crsCombo"));
@@ -437,6 +465,18 @@ QWidget* KaSectionDrawingStudio::buildRightPanel()
     m_distManualSpin->setEnabled(false);
     m_distManualSpin->setVisible(false);
     tickForm->addRow(QString(), m_distManualSpin);
+
+    m_tickSizeCombo = new QComboBox(tickCard);
+    m_tickSizeCombo->setObjectName(QStringLiteral("tickLabelSizeCombo"));
+    for (int pt : {5, 6, 7, 8})
+        m_tickSizeCombo->addItem(QStringLiteral("%1pt").arg(pt), double(pt));
+    m_tickSizeCombo->setToolTip(QStringLiteral("표고·거리 눈금 숫자 크기입니다. 기본은 5pt입니다."));
+    tickForm->addRow(QStringLiteral("글자 크기"), m_tickSizeCombo);
+
+    m_elevPrefixCheck = new QCheckBox(QStringLiteral("EL. 붙이기"), tickCard);
+    m_elevPrefixCheck->setObjectName(QStringLiteral("elevationPrefixCheck"));
+    m_elevPrefixCheck->setToolTip(QStringLiteral("표고 눈금을 EL. 100.20처럼 적습니다."));
+    tickForm->addRow(QStringLiteral("표고 표기"), m_elevPrefixCheck);
 
     // ---- 기준선 ----
     auto [lineCard, lineForm] = makeCard(QStringLiteral("기준선"));
@@ -540,8 +580,25 @@ QWidget* KaSectionDrawingStudio::buildRightPanel()
             this, &KaSectionDrawingStudio::onCrsChanged);
     connect(m_distAutoCheck, &QCheckBox::toggled,
             this, &KaSectionDrawingStudio::onDistanceAutoToggled);
+    // Geometry options: rebuild when they settle (skipped when nothing changed).
+    connect(m_scaleCombo, &QComboBox::currentTextChanged,
+            this, [this](const QString&) { scheduleRebuild(); });
+    connect(m_elevOffsetSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double) { scheduleRebuild(); });
+    connect(m_elevIntervalSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double) { scheduleRebuild(); });
+    connect(m_distManualSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double) { scheduleRebuild(); });
+    // Look-only options: change the existing sheet in place, keep user moves.
     connect(m_refWidthSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, [this](double) { rebuildSheet(false); });
+            this, [this](double) { applyDecorations(); });
+    connect(m_refLineCheck, &QCheckBox::toggled, this, [this](bool) { applyDecorations(); });
+    connect(m_titleEdit, &QLineEdit::textChanged, this, [this](const QString&) { applyDecorations(); });
+    connect(m_noteEdit, &QLineEdit::textChanged, this, [this](const QString&) { applyDecorations(); });
+    connect(m_tickSizeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) { applyDecorations(); });
+    connect(m_elevPrefixCheck, &QCheckBox::toggled, this, [this](bool) { applyDecorations(); });
+    connect(m_scaleSuggestBtn, &QToolButton::clicked, this, &KaSectionDrawingStudio::applySuggestedScale);
     connect(m_refColorBtn, &QPushButton::clicked,
             this, &KaSectionDrawingStudio::onReferenceColorClicked);
     connect(m_buildBtn, &QPushButton::clicked,
@@ -590,24 +647,31 @@ void KaSectionDrawingStudio::showEvent(QShowEvent* event)
 SectionLayoutOptions KaSectionDrawingStudio::collectOptions() const
 {
     SectionLayoutOptions opts;
-    opts.paper = (m_paperCombo && m_paperCombo->currentIndex() == 0)
-                 ? SectionLayoutOptions::Paper::A3
-                 : SectionLayoutOptions::Paper::A4;
+    static const SectionLayoutOptions::Paper kPapers[] = {
+        SectionLayoutOptions::Paper::A3, SectionLayoutOptions::Paper::A4,
+        SectionLayoutOptions::Paper::A2, SectionLayoutOptions::Paper::A1};
+    const int paperIdx = m_paperCombo ? m_paperCombo->currentIndex() : 0;
+    opts.paper = (paperIdx >= 0 && paperIdx < 4) ? kPapers[paperIdx] : SectionLayoutOptions::Paper::A3;
     opts.titleKo = (m_titleEdit && !m_titleEdit->text().isEmpty())
                    ? m_titleEdit->text() : QStringLiteral("단면도");
 
     if (m_scaleCombo) {
-        const int scIdx = m_scaleCombo->currentIndex();
-        if (scIdx == 0) {
-            opts.scaleDenominator = 0.0;
-        } else {
-            const QString txt = m_scaleCombo->currentText();
-            const int colon = txt.indexOf(QLatin1Char(':'));
-            opts.scaleDenominator = (colon >= 0)
-                ? txt.mid(colon + 1).toDouble()
-                : txt.toDouble();
-        }
+        // "자동 맞춤" is not a number (0 = fit); any picked or typed "1:N"
+        // (commas allowed) is the requested scale.
+        QString txt = m_scaleCombo->currentText().trimmed();
+        txt.remove(QLatin1Char(','));
+        const int colon = txt.indexOf(QLatin1Char(':'));
+        bool ok = false;
+        const double typed = (colon >= 0 ? txt.mid(colon + 1) : txt).trimmed().toDouble(&ok);
+        opts.scaleDenominator = (ok && typed > 0.0) ? typed : 0.0;
     }
+    if (m_tickSizeCombo)
+        opts.tickLabelPt = m_tickSizeCombo->currentData().toDouble() > 0.0
+                           ? m_tickSizeCombo->currentData().toDouble() : 5.0;
+    if (m_elevPrefixCheck)
+        opts.elevationPrefix = m_elevPrefixCheck->isChecked();
+    if (m_noteEdit)
+        opts.noteText = m_noteEdit->text().trimmed();
     if (m_elevOffsetSpin)
         opts.elevationOffsetM = m_elevOffsetSpin->value();
     if (m_elevIntervalSpin)
@@ -631,14 +695,29 @@ SectionLayoutOptions KaSectionDrawingStudio::collectOptions() const
 void KaSectionDrawingStudio::rebuildSheet(bool interactive)
 {
     if (m_rebuilding || !m_project) return;
+    if (m_rebuildTimer) m_rebuildTimer->stop();
+    const QList<QgsMapLayer*> layers = checkedLayersInOrder();
+    const SectionLayoutOptions options = collectOptions();
+    const QByteArray signature = SectionLayoutService::inputSignature(layers, options);
+    // Same layers, file versions and geometry options: keep the sheet (and
+    // what the user moved on it). Only look-only options are applied.
+    if (!interactive && signature == m_lastSignature && currentLayout()) {
+        SectionLayoutService::applyDecorationOptions(m_project, options);
+        return;
+    }
+    // 「단면도 만들기」 starts fresh; automatic rebuilds keep dragged chrome.
+    const QHash<QString, QPointF> moved = interactive
+        ? QHash<QString, QPointF>() : SectionLayoutService::userMovedItems(m_project);
     m_rebuilding = true;
     detachLayoutFromView();
-    const auto result = SectionLayoutService::buildSectionLayout(
-        m_project, checkedLayersInOrder(), collectOptions());
+    const auto result = SectionLayoutService::buildSectionLayout(m_project, layers, options);
+    if (result.errorKo.isEmpty())
+        SectionLayoutService::restoreUserMovedItems(m_project, moved);
     attachLayoutToView();
     m_rebuilding = false;
 
     if (!result.errorKo.isEmpty()) {
+        m_lastSignature.clear();
         if (interactive) {
             QMessageBox::warning(this, QStringLiteral("단면도 만들기 오류"),
                                  result.errorKo);
@@ -646,17 +725,67 @@ void KaSectionDrawingStudio::rebuildSheet(bool interactive)
         setStatus(QStringLiteral("오류: ") + result.errorKo);
         return;
     }
+    m_lastSignature = signature;
+    updateScaleNote(result);
 
-    const bool hasRaster = !checkedLayersInOrder().isEmpty();
+    const bool hasRaster = !layers.isEmpty();
     if (m_pdfBtn)
         m_pdfBtn->setEnabled(hasRaster);
-    if (hasRaster) {
+    if (!result.warningKo.isEmpty()) {
+        setStatus(result.warningKo);
+    } else if (hasRaster) {
         setStatus(QStringLiteral("단면도 완성. 축척 1:%1")
                       .arg(qRound(result.appliedScaleDenominator)));
     } else {
         setStatus(QStringLiteral("용지 눈금 준비. GeoTIFF를 추가하면 표고·거리에 맞춥니다."));
     }
     fitPaperInView();
+}
+
+void KaSectionDrawingStudio::scheduleRebuild()
+{
+    if (m_rebuildTimer) m_rebuildTimer->start();
+}
+
+void KaSectionDrawingStudio::applyDecorations()
+{
+    if (!m_project || m_rebuilding) return;
+    if (!SectionLayoutService::applyDecorationOptions(m_project, collectOptions()))
+        scheduleRebuild();
+}
+
+void KaSectionDrawingStudio::updateScaleNote(const SectionLayoutResult& result)
+{
+    if (!m_scaleNote || !m_scaleSuggestBtn) return;
+    m_suggestedScale = result.suggestedScaleDenominator;
+    QString text = result.warningKo;
+    if (text.isEmpty() && m_suggestedScale > 0.0) {
+        // Auto-fill or a typed value: either way the applied scale is not standard.
+        text = QStringLiteral("적용한 축척(%1)은 표준 축척이 아닙니다.")
+                   .arg(StandardScales::label(result.appliedScaleDenominator));
+    }
+    m_scaleSuggestBtn->setVisible(m_suggestedScale > 0.0);
+    if (m_suggestedScale > 0.0) {
+        m_scaleSuggestBtn->setText(QStringLiteral("1:%1 적용").arg(qRound(m_suggestedScale)));
+        m_scaleSuggestBtn->setToolTip(QStringLiteral("용지에 들어가는 가장 작은 표준 축척으로 바꿉니다."));
+    }
+    m_scaleNote->setText(text);
+    if (QWidget* row = m_scaleNote->parentWidget())
+        row->setVisible(!text.isEmpty());
+}
+
+void KaSectionDrawingStudio::applySuggestedScale()
+{
+    if (!m_scaleCombo || !(m_suggestedScale > 0.0)) return;
+    // Plain "1:N" so collectOptions() reads the same number back.
+    const QString text = QStringLiteral("1:%1").arg(qRound(m_suggestedScale));
+    int index = m_scaleCombo->findText(text);
+    if (index < 0) {
+        m_scaleCombo->addItem(text);
+        index = m_scaleCombo->count() - 1;
+    }
+    m_scaleCombo->setCurrentIndex(index);
+    rebuildSheet(false);
 }
 
 // ============================================================
@@ -869,6 +998,7 @@ void KaSectionDrawingStudio::onDistanceAutoToggled(bool checked)
         m_distManualSpin->setEnabled(!checked);
         m_distManualSpin->setVisible(!checked);
     }
+    scheduleRebuild();
 }
 
 void KaSectionDrawingStudio::onReferenceColorClicked()
@@ -884,7 +1014,7 @@ void KaSectionDrawingStudio::onReferenceColorClicked()
     m_refColorBtn->setProperty("lineColor", hex);
     m_refColorBtn->setText(hex);
     m_refColorBtn->setIcon(colorSwatchIcon(picked));
-    rebuildSheet(false);
+    applyDecorations();
 }
 
 void KaSectionDrawingStudio::onLayersAdded(const QList<QgsMapLayer*>& layers)

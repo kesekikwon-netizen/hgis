@@ -1,4 +1,5 @@
 #include "KaGdalErrorLog.h"
+#include "core/KaLogExcept.h"
 
 #include "KaCrashGuard.h"
 
@@ -41,7 +42,7 @@ void CPL_STDCALL handleGdalError(CPLErr level, CPLErrorNum code, const char* mes
     else
       CPLCallPreviousHandler(level, code, message);
   } catch (...) {
-    KaCrashGuard::logLine(QStringLiteral("[except] app/KaGdalErrorLog.cpp:43"));
+    KA_LOG_EXCEPT();
   }
   inHandler = false;
 }

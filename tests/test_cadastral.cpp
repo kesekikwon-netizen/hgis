@@ -30,6 +30,7 @@
 #include <qgsvectorfilewriter.h>
 #include <qgsvectorlayer.h>
 #include <qgsvectorlayerlabeling.h>
+#include "core/CadastralEncoding.h"
 #include "core/CadastralImport.h"
 #include "core/CadastralPortal.h"
 #include "core/LayerOps.h"
@@ -444,6 +445,69 @@ private slots:
     QVERIFY(QDir(output.path()).entryList({QStringLiteral("*.gpkg")}, QDir::Files).isEmpty());
   }
 
+  // F123: a portal SHP without .cpg keeps CP949 jibun text (산 23-1) readable, like the
+  // soil import fallback. A UTF-8 DBF is not forced to CP949.
+  void shapefileWithoutCpgKeepsKoreanJibun() {
+    const QByteArray cp949San("\xBB\xEA", 2);  // 「산」 in CP949
+    QCOMPARE(CadastralEncoding::detectDbfEncoding(cp949San + QByteArray(" 23-1    ")),
+             QStringLiteral("CP949"));
+    QCOMPARE(CadastralEncoding::detectDbfEncoding(
+                 QStringLiteral("산 23-1   산 24   답 3   대 5").toUtf8()),
+             QStringLiteral("UTF-8"));
+    QCOMPARE(CadastralEncoding::detectDbfEncoding(QByteArray("1-2 3-4 5")), QStringLiteral("CP949"));
+
+    QTemporaryDir input;
+    QTemporaryDir output;
+    QVERIFY(input.isValid() && output.isValid());
+    QgsVectorLayer layer(QStringLiteral("Polygon?field=PNU:string(19)&field=JIBUN:string(40)&crs=EPSG:5186"),
+                         QStringLiteral("cp949 parcels"), QStringLiteral("memory"));
+    QVERIFY(layer.isValid() && layer.startEditing());
+    QgsFeature feature(layer.fields());
+    feature.setAttribute(QStringLiteral("PNU"), pnu(7));
+    feature.setAttribute(QStringLiteral("JIBUN"), QStringLiteral("XX 23-1"));
+    feature.setGeometry(box(200000., 550000., 10., 10.));
+    QVERIFY(layer.addFeature(feature));
+    QVERIFY(layer.commitChanges());
+    QgsVectorFileWriter::SaveVectorOptions options;
+    options.driverName = QStringLiteral("ESRI Shapefile");
+    options.fileEncoding = QStringLiteral("UTF-8");
+    const QString shp = input.filePath(QStringLiteral("LSMD_CONT_LDREG_fixture.shp"));
+    QCOMPARE(QgsVectorFileWriter::writeAsVectorFormatV3(&layer, shp, {}, options),
+             QgsVectorFileWriter::NoError);
+    // Turn it into a portal-like file: CP949 bytes in the DBF and no .cpg next to it.
+    const QString dbfPath = input.filePath(QStringLiteral("LSMD_CONT_LDREG_fixture.dbf"));
+    QFile dbf(dbfPath);
+    QVERIFY(dbf.open(QIODevice::ReadOnly));
+    QByteArray bytes = dbf.readAll();
+    dbf.close();
+    const qsizetype at = bytes.indexOf("XX 23-1");
+    QVERIFY(at > 0);
+    bytes.replace(at, 2, cp949San);
+    QVERIFY(dbf.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QCOMPARE(dbf.write(bytes), bytes.size());
+    dbf.close();
+    QFile::remove(input.filePath(QStringLiteral("LSMD_CONT_LDREG_fixture.cpg")));
+    QVERIFY(!QFileInfo::exists(input.filePath(QStringLiteral("LSMD_CONT_LDREG_fixture.cpg"))));
+    QCOMPARE(CadastralEncoding::fallbackFor(shp), QStringLiteral("CP949"));
+
+    const auto prepared = CadastralImport::prepare({shp}, box(199900., 549900., 400., 400.),
+                                                 sourceCrs(), {}, output.path());
+    QVERIFY2(prepared.isReady(), qPrintable(prepared.error));
+    QgsVectorLayer result(prepared.gpkgPath + QStringLiteral("|layername=cadastral"),
+                          QStringLiteral("result"), QStringLiteral("ogr"));
+    QVERIFY(result.isValid());
+    QgsFeature kept;
+    QVERIFY(result.getFeatures().nextFeature(kept));
+    QCOMPARE(kept.attribute(QStringLiteral("JIBUN")).toString(), QStringLiteral("산 23-1"));
+    // A .cpg is honoured as it is: no forced encoding.
+    QFile cpg(input.filePath(QStringLiteral("LSMD_CONT_LDREG_fixture.cpg")));
+    QVERIFY(cpg.open(QIODevice::WriteOnly));
+    cpg.write("CP949");
+    cpg.close();
+    QVERIFY(CadastralEncoding::fallbackFor(shp).isEmpty());
+    QVERIFY(CadastralEncoding::fallbackFor(input.filePath(QStringLiteral("other.gpkg"))).isEmpty());
+  }
+
   void referenceLayerHasOutlineAndOptionalJibunLabels() {
     QTemporaryDir input;
     QTemporaryDir output;
@@ -465,11 +529,16 @@ private slots:
     QCOMPARE(project.mapLayers().size(), 2);
     QCOMPARE(project.mapLayer(surveyId), survey);
     QCOMPARE(project.crs().authid(), QStringLiteral("EPSG:5187"));
-    // c4f21f4: downloaded cadastral is not a generic reference (snap/edit), but stays under 참조 지도.
+    // Downloaded cadastral is not a generic reference (snap/edit). User rule (AGENTS.md):
+    // it stays a root row of the layer tree, outside 참조 지도, and is never bundled
+    // into a 지적도 group with the VWorld cadastral picture.
     QVERIFY(LayerOps::isCadastralLayer(layer));
     QVERIFY(!LayerOps::isReferenceLayer(layer));
+    auto* cadastralNode = project.layerTreeRoot()->findLayer(layer->id());
+    QVERIFY(cadastralNode && cadastralNode->parent() == project.layerTreeRoot());
     auto* references = project.layerTreeRoot()->findGroup(QStringLiteral("참조 지도"));
-    QVERIFY(references && references->findLayer(layer->id()));
+    QVERIFY(!references || !references->findLayer(layer->id()));
+    QVERIFY(!project.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral)));
     auto* renderer = dynamic_cast<QgsSingleSymbolRenderer*>(layer->renderer());
     QVERIFY(renderer && renderer->symbol());
     auto* fill = dynamic_cast<QgsSimpleFillSymbolLayer*>(renderer->symbol()->symbolLayer(0));
@@ -500,8 +569,11 @@ private slots:
     QVERIFY(!restored->labelsEnabled());
     QVERIFY(restored->labeling());
     QCOMPARE(restored->labeling()->settings().fieldName, QStringLiteral("JIBUN"));
+    auto* restoredNode = reopened.layerTreeRoot()->findLayer(savedLayerId);
+    QVERIFY(restoredNode && restoredNode->parent() == reopened.layerTreeRoot());
     auto* restoredGroup = reopened.layerTreeRoot()->findGroup(QStringLiteral("참조 지도"));
-    QVERIFY(restoredGroup && restoredGroup->findLayer(savedLayerId));
+    QVERIFY(!restoredGroup || !restoredGroup->findLayer(savedLayerId));
+    QVERIFY(!reopened.layerTreeRoot()->findGroup(QString::fromUtf8(LayerOps::kGroupCadastral)));
     renderer = dynamic_cast<QgsSingleSymbolRenderer*>(restored->renderer());
     QVERIFY(renderer && renderer->symbol());
     fill = dynamic_cast<QgsSimpleFillSymbolLayer*>(renderer->symbol()->symbolLayer(0));

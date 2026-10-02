@@ -21,11 +21,17 @@ public:
     Qt::PenStyle penStyle = Qt::DashLine;
     double lineWidth = 1.2;
     int fontPt = 8;
-    // 0 = auto from scale; otherwise metres.
+    // 0 = auto from scale; otherwise metres (0.1 m and up for excavation grids).
     double stepMeters = 20.0;
-    // Clockwise from CRS +X (east), degrees.
+    // Clockwise from CRS +X (east), degrees, about the grid origin. Same sense as trench azimuths.
     double rotationDeg = 0.0;
+    // A grid line passes through this map point; (0, 0) is the CRS origin.
+    double originX = 0.0;
+    double originY = 0.0;
   };
+
+  // More lines than this per direction are thinned to every n-th line, with a note on the map.
+  static constexpr int kMaxLines = 80;
 
   explicit KaCanvasGridOverlay(QgsMapCanvas* canvas);
   void setConfig(const Config& c);

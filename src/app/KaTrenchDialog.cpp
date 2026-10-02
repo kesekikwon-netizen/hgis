@@ -9,10 +9,16 @@
 #include <QLineEdit>
 #include <QLocale>
 #include <QPushButton>
-#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStyle>
+#include <QThreadPool>
+#include <QTimer>
 #include <QVBoxLayout>
+
+namespace {
+// Spin-box steps and typing settle before the 10%/2% search runs.
+constexpr int kPlanSettleMs = 200;
+}  // namespace
 
 KaTrenchDialog::KaTrenchDialog(QWidget* parent) : QDialog(parent) {
   setWindowTitle(QStringLiteral("시굴격자 속성"));
@@ -73,7 +79,7 @@ KaTrenchDialog::KaTrenchDialog(QWidget* parent) : QDialog(parent) {
   m_az->setValue(0);
   m_az->setSingleStep(1.0);
   m_az->setSuffix(QStringLiteral(" °"));
-  m_az->setToolTip(QStringLiteral("격자 회전(북 기준 시계 방향). 「적용」을 누르면 회전된 격자로 다시 배치합니다."));
+  m_az->setToolTip(QStringLiteral("격자 회전(북 기준 시계 방향). 「구역에 깔기」를 누르면 회전된 격자로 다시 배치합니다."));
   form->addRow(QStringLiteral("회전(방위)"), m_az);
 
   m_prefix = new QLineEdit(QStringLiteral("Tr-"), this);
@@ -100,7 +106,7 @@ KaTrenchDialog::KaTrenchDialog(QWidget* parent) : QDialog(parent) {
   auto* editOne = new QPushButton(QStringLiteral("개별 편집"), m_afterPlace);
   editOne->setToolTip(QStringLiteral("그래픽처럼 트렌치를 하나씩 선택·이동·삭제합니다."));
   auto* move = new QPushButton(QStringLiteral("전체 이동"), m_afterPlace);
-  move->setToolTip(QStringLiteral("모서리를 찍고 놓을 곳을 찍어 격자 전체를 옮깁니다."));
+  move->setToolTip(QStringLiteral("격자를 끌어다 놓아 전체를 옮깁니다. Ctrl+Z로 되돌립니다."));
   afterRow->addWidget(editOne);
   afterRow->addWidget(move);
   afterRow->addStretch(1);
@@ -127,21 +133,37 @@ KaTrenchDialog::KaTrenchDialog(QWidget* parent) : QDialog(parent) {
   connect(move, &QPushButton::clicked, this, &KaTrenchDialog::moveRequested);
   connect(close, &QPushButton::clicked, this, &QDialog::hide);
 
+  // One background search at a time; a newer request makes older answers stale.
+  m_planPool = new QThreadPool(this);
+  m_planPool->setMaxThreadCount(1);
+  m_planTimer = new QTimer(this);
+  m_planTimer->setSingleShot(true);
+  m_planTimer->setInterval(kPlanSettleMs);
+  connect(m_planTimer, &QTimer::timeout, this, &KaTrenchDialog::refreshPlan);
+
   connect(m_size, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-          [this](int) { refreshPlan(); });
+          [this](int) { schedulePlan(); });
   connect(m_balk, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-          [this](double) { refreshPlan(); });
+          [this](double) { schedulePlan(); });
   connect(m_az, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-          [this](double) { refreshPlan(); });
+          [this](double) { schedulePlan(); });
   connect(m_rows, QOverload<int>::of(&QSpinBox::valueChanged), this,
-          [this](int) { refreshPlan(); });
+          [this](int) { schedulePlan(); });
   connect(m_cols, QOverload<int>::of(&QSpinBox::valueChanged), this,
-          [this](int) { refreshPlan(); });
-  connect(m_auto, &QCheckBox::toggled, this, [this](bool) { refreshPlan(); });
+          [this](int) { schedulePlan(); });
+  connect(m_auto, &QCheckBox::toggled, this, [this](bool) { schedulePlan(); });
   connect(m_kind, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-          [this](int) { refreshPlan(); });
-  connect(m_terrain, &QCheckBox::toggled, this, [this](bool) { refreshPlan(); });
+          [this](int) { schedulePlan(); });
+  connect(m_terrain, &QCheckBox::toggled, this, [this](bool) { schedulePlan(); });
   refreshPlan();
+}
+
+KaTrenchDialog::~KaTrenchDialog() {
+  // A search still running posts its answer to this dialog: let it finish first.
+  if (m_planPool) {
+    m_planPool->clear();
+    m_planPool->waitForDone();
+  }
 }
 
 void KaTrenchDialog::setArea(const QByteArray& wkb, double areaM2) {
@@ -158,7 +180,7 @@ void KaTrenchDialog::setArea(const QByteArray& wkb, double areaM2) {
                          ? QStringLiteral(
                                "조사구역이 여러 개면 선택한 곳만, 선택이 없으면 마지막에 그린 곳만 깝니다.")
                          : QStringLiteral("조사구역을 먼저 그리면 그 구역 안에 자동 배치를 쓸 수 있습니다."));
-  refreshPlan();
+  schedulePlan();
 }
 
 KaTrenchDialog::SurveyKind KaTrenchDialog::surveyKind() const {
@@ -192,7 +214,7 @@ void KaTrenchDialog::setTerrainAspect(const TrenchGridGenerator::SlopeAspect& as
                                .arg(QLocale().toString(aspect.azimuthDeg, 'f', 0))
                                .arg(QLocale().toString(aspect.slopePct, 'f', 1)));
   }
-  refreshPlan();
+  schedulePlan();
 }
 
 double KaTrenchDialog::effectiveAzimuth() const {
@@ -229,62 +251,4 @@ void KaTrenchDialog::setSummaryTone(const char* tone) {
   m_ratio->style()->polish(m_ratio);
 }
 
-void KaTrenchDialog::refreshPlan() {
-  const bool fill = autoFill();
-  const bool ratioMode = fill && surveyKind() != SurveyKind::Manual;
-  // 지금 쓰지 않는 칸은 회색으로 두지 않고 숨긴다. 자동 배치에서 행·열 「2」가 보이면
-  // 트렌치 22개와 어긋나 보였다. 비율 모드의 길이·둑은 아래 결과 칸에 적힌다.
-  if (auto* form = qobject_cast<QFormLayout*>(layout())) {
-    form->setRowVisible(m_rows, !fill);
-    form->setRowVisible(m_cols, !fill);
-    form->setRowVisible(m_size, !ratioMode);
-    form->setRowVisible(m_balk, !ratioMode);
-  }
-  m_az->setEnabled(!useTerrainAzimuth());
-  if (ratioMode) {
-    const double az = effectiveAzimuth();
-    const auto plan =
-        TrenchGridGenerator::buildForTargetRatio(m_areaWkb, targetPct(), 2.0, az);
-    if (plan.cells.empty()) {
-      setSummaryTone("warn");
-      m_ratio->setText(plan.error);
-      return;
-    }
-    {
-      const QSignalBlocker b1(m_balk);
-      m_balk->setValue(plan.balk);
-    }
-    setSummaryTone("ok");
-    m_ratio->setText(
-        QStringLiteral("%1 · 트렌치 %2개 · 폭 2 m · 최대 길이 %3 m · 둑 %4 m · 총 %5㎡ · 비율 %6% (목표 %7%) · 방위 %8°")
-            .arg(surveyKind() == SurveyKind::Trial ? QStringLiteral("시굴조사")
-                                                   : QStringLiteral("표본조사"))
-            .arg(plan.cells.size())
-            .arg(QLocale().toString(plan.length, 'f', 2))
-            .arg(QLocale().toString(plan.balk, 'f', 0))
-            .arg(QLocale().toString(TrenchGridGenerator::totalArea(plan.cells), 'f', 2))
-            .arg(QLocale().toString(plan.ratioPct, 'f', 1))
-            .arg(QLocale().toString(targetPct(), 'f', 0))
-            .arg(QLocale().toString(az, 'f', 0)));
-    return;
-  }
-  if (!fill) {
-    const TrenchGridGenerator::Spec sp = spec();
-    const double t = sp.rows * sp.cols * sp.trenchWidth * sp.trenchLength;
-    setSummaryTone("plain");
-    m_ratio->setText(QStringLiteral("수동 배치: %1개 · 총 %2㎡ — 「맵에 찍기」로 맵에서 위치를 정하세요.")
-                         .arg(sp.rows * sp.cols)
-                         .arg(QLocale().toString(t, 'f', 0)));
-    return;
-  }
-  const auto cells = TrenchGridGenerator::buildInArea(spec(), m_areaWkb);
-  const double t = TrenchGridGenerator::totalArea(cells);
-  const double pct = m_areaM2 > 0.0 ? t / m_areaM2 * 100.0 : 0.0;
-  const bool over = pct > 10.0;
-  setSummaryTone(over ? "warn" : "ok");
-  m_ratio->setText(QStringLiteral("트렌치 %1개 · 총 %2㎡ · 시굴 비율 %3% (기준: 시굴 10% · 표본 2%)%4")
-                       .arg(cells.size())
-                       .arg(QLocale().toString(t, 'f', 0))
-                       .arg(QLocale().toString(pct, 'f', 1))
-                       .arg(over ? QStringLiteral(" — 간격을 키우세요") : QString()));
-}
+// The preview (schedulePlan / refreshPlan) lives in KaTrenchDialogPlan.cpp.

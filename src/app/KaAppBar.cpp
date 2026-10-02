@@ -15,13 +15,14 @@ KaAppBar::KaAppBar(QWidget* parent) : QWidget(parent) {
   // Maximum 은 sizeHint 를 넘기지 않는다. https://doc.qt.io/qt-6/qsizepolicy.html
   setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
   auto* row = new QHBoxLayout(this);
-  row->setContentsMargins(12, 0, 8, 0);
+  row->setContentsMargins(8, 0, 8, 0);  // 12 -> 8: part of the 1920 ribbon budget (see the search field below)
   row->setSpacing(8);
 
   m_region = new QToolButton(this);
   m_region->setObjectName(QStringLiteral("appBarRegion"));
   m_region->setText(QStringLiteral("지역"));
   m_region->setToolTip(QStringLiteral("시·도를 고른 뒤 시·군·동과 지번으로 찾아갑니다"));
+  m_region->setAccessibleName(QStringLiteral("지역 고르기"));
   m_region->setPopupMode(QToolButton::InstantPopup);
   m_region->setToolButtonStyle(Qt::ToolButtonTextOnly);
   m_region->hide();  // shown once the province chips are handed over
@@ -32,9 +33,15 @@ KaAppBar::KaAppBar(QWidget* parent) : QWidget(parent) {
   m_search->setPlaceholderText(
       QStringLiteral("도로명·지번 (예: 하회종가길 40, 광령리 1615)  Ctrl+F"));
   m_search->setClearButtonEnabled(true);
-  // 150 (was 220): at 1920 the ribbon then gets ~1650 px, above the 1643 px all
-  // groups need, so the one-button 정합·기타 groups stop folding into 「더 많은 작업」.
-  m_search->setMinimumWidth(150);
+  // The placeholder vanishes once typing starts; the name stays for screen readers.
+  m_search->setAccessibleName(QStringLiteral("주소·지번 찾기"));
+  // 116 (was 220, then 150): the eight groups need 1641 px (session log "[ribbon] 접힘",
+  // 2026-09-30: 27 chips x 60 px outside plus group edges and row spacing). A 1920 window
+  // that is not maximised has a 1904 px client, and with IBM Plex the 「지역」 button and
+  // this placeholder grew 8 px, so at 150 the ribbon got 1642 - 2 = 1640 and 정합·기타
+  // folded by one pixel. 116 plus the 8 px left margin gives ~17 px of slack; the field
+  // still expands into any wider window.
+  m_search->setMinimumWidth(116);
   m_search->setMaximumWidth(320);
   m_search->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   connect(m_search, &QLineEdit::returnPressed, this, [this]() {

@@ -2,6 +2,7 @@
 #include "SurveyContourWrite.h"
 
 #include "SurveyContourMath.h"
+#include "SurveyContourTin.h"
 
 #include <QDir>
 #include <QFile>
@@ -87,7 +88,7 @@ SurveyContourResult writeSurveyContourFiles(const QVector<SurveyPoint>& points, 
                                                  : SurveyContourBuilder::autoBandIntervalCm(minCm, maxCm);
   const int nx = std::max(2, static_cast<int>(std::ceil((maxX - minX) / cell)));
   const int ny = std::max(2, static_cast<int>(std::ceil((maxY - minY) / cell)));
-  if (static_cast<qint64>(nx) * ny > 4000000) {
+  if (static_cast<qint64>(nx) * ny > SurveyContourBuilder::kMaxCells) {
     result.error = QStringLiteral("격자 칸이 너무 많습니다. 격자 크기를 키우세요.");
     return result;
   }
@@ -103,27 +104,14 @@ SurveyContourResult writeSurveyContourFiles(const QVector<SurveyPoint>& points, 
   std::vector<float> grid(static_cast<size_t>(nx) * static_cast<size_t>(ny), static_cast<float>(kNoData));
   Tick step{&cancel, &progress, 0.0, 0.45};
   CPLErrorReset();
-  CPLErr gridErr = CE_Failure;
-  if (job.idw) {
-    GDALGridInverseDistanceToAPowerOptions options{};
-    options.nSizeOfStructure = sizeof(options);
-    options.dfPower = 2;
-    options.dfRadius1 = std::max(cell * 4.0, 1.0);
-    options.dfRadius2 = options.dfRadius1;
-    options.nMinPoints = 1;
-    options.dfNoDataValue = kNoData;
-    gridErr = GDALGridCreate(GGA_InverseDistanceToAPower, &options, static_cast<GUInt32>(points.size()),
-                             xs.data(), ys.data(), zs.data(), minX, maxX, minY, maxY, static_cast<GUInt32>(nx),
-                             static_cast<GUInt32>(ny), GDT_Float32, grid.data(), tick, &step);
-  } else {
-    GDALGridLinearOptions options{};
-    options.nSizeOfStructure = sizeof(options);
-    options.dfRadius = 0;
-    options.dfNoDataValue = kNoData;
-    gridErr = GDALGridCreate(GGA_Linear, &options, static_cast<GUInt32>(points.size()), xs.data(), ys.data(),
-                             zs.data(), minX, maxX, minY, maxY, static_cast<GUInt32>(nx),
-                             static_cast<GUInt32>(ny), GDT_Float32, grid.data(), tick, &step);
-  }
+  // Linear TIN with radius 0: cells outside the point hull stay NoData.
+  GDALGridLinearOptions options{};
+  options.nSizeOfStructure = sizeof(options);
+  options.dfRadius = 0;
+  options.dfNoDataValue = kNoData;
+  const CPLErr gridErr = GDALGridCreate(GGA_Linear, &options, static_cast<GUInt32>(points.size()), xs.data(),
+                                        ys.data(), zs.data(), minX, maxX, minY, maxY, static_cast<GUInt32>(nx),
+                                        static_cast<GUInt32>(ny), GDT_Float32, grid.data(), tick, &step);
   if (stopped(cancel)) {
     result.canceled = true;
     result.error = QStringLiteral("등고선 만들기를 취소했습니다.");
@@ -133,6 +121,9 @@ SurveyContourResult writeSurveyContourFiles(const QVector<SurveyPoint>& points, 
     result.error = gdalError(QStringLiteral("표고 격자를 만들지 못했습니다."));
     return result;
   }
+  if (job.maxEdgeM > 0)
+    result.maskedTriangles = maskLongSurveyTriangles(grid, nx, ny, minX, minY, cell, xs, ys, job.maxEdgeM,
+                                                     static_cast<float>(kNoData));
   flipGridNorthUp(grid, nx, ny);
 
   const QString tifPath = QDir(job.outputDir).filePath(QStringLiteral("surface.tif"));
@@ -176,6 +167,7 @@ SurveyContourResult writeSurveyContourFiles(const QVector<SurveyPoint>& points, 
   addField(pointLayer, "elev", OFTReal);
   addField(pointLayer, "elev_cm", OFTInteger);
   for (const SurveyPoint& point : points) {
+    if (point.row < 0) continue;  // breakline nodes shape the surface but are not surveyed points
     OGRFeature* feature = OGRFeature::CreateFeature(pointLayer->GetLayerDefn());
     OGRPoint geometry(point.x, point.y, point.z);
     feature->SetGeometry(&geometry);
@@ -185,8 +177,8 @@ SurveyContourResult writeSurveyContourFiles(const QVector<SurveyPoint>& points, 
     feature->SetField("elev_cm", cm);
     pointLayer->CreateFeature(feature);
     OGRFeature::DestroyFeature(feature);
+    ++result.pointCount;
   }
-  result.pointCount = points.size();
 
   OGRLayer* lines = vectors->CreateLayer("contour_lines", &srs, wkbLineString, nullptr);
   addField(lines, "id", OFTInteger);
@@ -280,17 +272,18 @@ SurveyContourResult writeSurveyContourFiles(const QVector<SurveyPoint>& points, 
       ++result.bandCount;
     }
   }
+  result.linesBeforeClip = result.lineCount;
   if (!job.clipWkt.isEmpty()) {
-    result.lineCount = clipSurveyLayerToWkt(lines, job.clipWkt);
-    if (bands) result.bandCount = clipSurveyLayerToWkt(bands, job.clipWkt);
+    bool linesCut = false, bandsCut = true;
+    result.lineCount = clipSurveyLayerToWkt(lines, job.clipWkt, &linesCut);
+    if (bands) result.bandCount = clipSurveyLayerToWkt(bands, job.clipWkt, &bandsCut);
+    result.clipped = linesCut && bandsCut;
   }
+  // SurveyContourStyle::reapply reads these back when a replaced result must be shown again.
+  vectors->SetMetadataItem("KA_HGIS_MIN_CM", QByteArray::number(minCm).constData());
+  vectors->SetMetadataItem("KA_HGIS_MAX_CM", QByteArray::number(maxCm).constData());
+  vectors->SetMetadataItem("KA_HGIS_BAND_CM", QByteArray::number(result.bandIntervalCm).constData());
   GDALClose(vectors);
-  if (result.lineCount == 0)
-    result.warning = QStringLiteral("높이차가 등고선 간격보다 작아 선이 없습니다.");
-  else if (!job.clipWkt.isEmpty())
-    result.warning = QStringLiteral("조사구역 안에만 표시합니다.");
-  else if (result.warning.isEmpty())
-    result.warning = QStringLiteral("조사구역이 없어 측량점 범위까지 그렸습니다.");
   result.ok = true;
   if (progress) progress(100);
   return result;

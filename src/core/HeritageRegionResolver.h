@@ -9,10 +9,12 @@
 #include <QUrl>
 #include <memory>
 
+#include <qgsgeometry.h>
 #include <qgspointxy.h>
 
+#include "HeritageFetchPlan.h"
+
 class QNetworkReply;
-class QgsGeometry;
 class QgsCoordinateReferenceSystem;
 class QgsProject;
 
@@ -24,6 +26,11 @@ struct HeritageRegion {
   QString source;
   // 시도 개략 경계 안에 점이 들어가는지 확인했는가. 아니면 사용자가 꼭 확인해야 한다.
   bool insideSidoBounds = false;
+  // 조사구역 주변 5km가 걸치는 다른 시/군(판정한 시/군 제외). 확인창이 체크 목록으로 보여 준다.
+  // 요청 단위는 그대로 시/군 하나씩이다.
+  QList<HeritageCity> nearby;
+  // 이웃 시/군을 확인하지 못했거나 일부만 확인했을 때의 설명. 비어 있으면 확인을 마쳤다.
+  QString nearbyNote;
 
   bool ok() const { return !sido.isEmpty() && !city.isEmpty(); }
   QString display() const;  // "경상북도 안동시"
@@ -65,6 +72,10 @@ signals:
   void failed(const QString& message);
 
 private:
+  // 판정한 시/군에 주변 5km 이웃 시/군을 붙여 resolved 를 낸다.
+  void finishResolved(const HeritageRegion& region, bool allowNetwork);
+  void emitWithNearby(HeritageRegion region, const QList<HeritageCity>& found, const QString& note);
+
   std::unique_ptr<QNetworkAccessManager> m_nam;
   QPointer<QNetworkReply> m_reply;
   QTimer m_deadline;
@@ -72,4 +83,7 @@ private:
   bool m_pending = false;
   QPointer<QgsProject> m_fallbackProject;
   QgsPointXY m_lastPoint;
+  QgsGeometry m_scope;  // 조사구역 + 5km, EPSG:4326
+  HeritageRegion m_primary;
+  bool m_nearbyPhase = false;
 };

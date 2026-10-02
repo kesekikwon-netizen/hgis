@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <algorithm>
 #include <cmath>
 #include <QComboBox>
 #include <QCheckBox>
@@ -47,6 +48,7 @@
 #include "app/KaPrintDialog.h"
 #include "app/KaTheme.h"
 #include "app/KaBeginnerRibbon.h"
+#include "ribbon_label_ink.h"
 #include <QPdfDocument>
 #include "app/KaRegionLocator.h"
 #include "app/KaSurveyAreaDialog.h"
@@ -67,6 +69,8 @@
 #include "core/HeritageStyle.h"
 #include "core/HeritageLayoutNumbers.h"
 #include "core/ExportService.h"
+#include "core/ChecklistEngine.h"
+#include "core/ProjectStateBuilder.h"
 #include "core/LayoutService.h"
 #include <qgsapplication.h>
 #include <qgscategorizedsymbolrenderer.h>
@@ -217,8 +221,17 @@ private:
     return found.isEmpty() ? nullptr : found.first();
   }
   static void disableRendering(MainWindow& window) {
-    window.setRestoreLastSurveyEnabled(false);
     if (auto* canvas = window.findChild<QgsMapCanvas*>()) canvas->setRenderFlag(false);
+  }
+  // [v3] F073: satellite and cadastral join the project from the event loop right after an
+  // explicit open (scheduleDefaultBasemaps -> loadBootBasemaps). Drain that turn before a test
+  // takes a layer or row baseline, otherwise the pair lands inside the first nested loop.
+  static bool openSettled(MainWindow& window, const QString& path) {
+    if (!window.openSurveyGpkg(path)) return false;
+    QElapsedTimer clock;
+    clock.start();
+    while (window.basemapBootPending() && clock.elapsed() < 5000) QTest::qWait(10);
+    return !window.basemapBootPending();
   }
   static QByteArray contents(const QString& path) {
     QFile file(path);
@@ -412,9 +425,11 @@ private:
     return reference;
   }
   static bool hasNoAutosaveTimer(MainWindow& window) {
+    // layerWatchTimer and shellSyncTimer (300 ms badge/chip merge, MainWindowChrome.cpp) write no file.
     for (auto* timer : window.findChildren<QTimer*>(QString(), Qt::FindDirectChildrenOnly))
       if (timer->isActive() && timer->objectName() != QLatin1String("layerWatchTimer") &&
-          timer->interval() > 0 && timer->interval() <= 60000)
+          timer->objectName() != QLatin1String("shellSyncTimer") && timer->interval() > 0 &&
+          timer->interval() <= 60000)
         return false;
     return true;
   }
@@ -917,7 +932,7 @@ private slots:
     QVERIFY2(!sub->isVisible(), "복원한 창 배치가 빈 그리기 도구 줄을 다시 띄웠습니다.");
   }
   void narrowWindowKeepsSearchOnTheRibbonRow() {
-    for (const QSize size : {QSize(1024, 768), QSize(1280, 720)}) {
+    for (const QSize size : {QSize(1024, 768), QSize(1280, 720), QSize(1904, 1000)}) {
       MainWindow window;
       disableRendering(window);
       window.resize(size);
@@ -925,10 +940,14 @@ private slots:
       QCoreApplication::processEvents();
       auto* mainTb = window.findChild<QToolBar*>(QStringLiteral("mainToolbar"));
       auto* appBar = window.findChild<QWidget*>(QStringLiteral("appBar"));
-      auto* overflow = window.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
-      QVERIFY(mainTb && appBar && overflow);
-      auto* ribbon = overflow->parentWidget();
-      QVERIFY(ribbon && ribbon->parentWidget() == mainTb);
+      auto* ribbon = window.findChild<KaBeginnerRibbon*>(QStringLiteral("beginnerRibbon"));
+      QVERIFY(mainTb && appBar && ribbon);
+      // The toolbar grows and shrinks with the ribbon's size, so no chip is cut off at the bottom.
+      QTRY_VERIFY2(ribbon->height() >= ribbon->sizeHint().height() && mainTb->height() >= ribbon->height(),
+                   qPrintable(QStringLiteral("%1 폭: 리본 높이 %2 필요 %3 줄 높이 %4")
+                                  .arg(size.width()).arg(ribbon->height()).arg(ribbon->sizeHint().height()).arg(mainTb->height())));
+      QVERIFY2(!window.findChild<QToolButton*>(QStringLiteral("ribbonOverflow")), "더 많은 작업 단추는 없다");
+      QVERIFY(ribbon->parentWidget() == mainTb);
       QCOMPARE(appBar->parentWidget(), mainTb);
       const QRect ribbonBox = ribbon->geometry();
       const QRect searchBox = appBar->geometry();
@@ -939,9 +958,13 @@ private slots:
                               .arg(ribbonBox.width())
                               .arg(appBar->isVisible())));
       QVERIFY(qAbs(ribbonBox.center().y() - searchBox.center().y()) < ribbonBox.height());
-      if (ribbon->sizeHint().width() > ribbon->width())
-        QVERIFY2(overflow->isVisible(),
-                 qPrintable(QStringLiteral("%1 폭에서 더 많은 작업으로 접히지 않았다").arg(size.width())));
+      // 접지 않는다: 어느 폭에서도 모든 칩이 리본 안에 보인다.
+      for (QToolButton* chip : ribbon->tabButtons()) {
+        const QRect box(chip->mapTo(ribbon, QPoint()), chip->size());
+        QVERIFY2(chip->isVisible() && ribbon->rect().contains(box),
+                 qPrintable(QStringLiteral("%1 폭(리본 %2)에서 「%3」가 리본에 다 보이지 않는다")
+                                .arg(size.width()).arg(ribbon->width()).arg(chip->text())));
+      }
       QgsProject::instance()->setDirty(false);
     }
   }
@@ -1031,11 +1054,139 @@ private slots:
       MainWindow maximized;
       disableRendering(maximized);
       maximized.showMaximized();
-      QCoreApplication::processEvents();
+      QTest::qWait(150);  // the ribbon picks its size and the toolbar its height over a few layout rounds
       QVERIFY(QDir().mkpath(output));
       QVERIFY(maximized.grab().save(QDir(output).filePath(QStringLiteral("ribbon-maximized.png"))));
       QgsProject::instance()->setDirty(false);
     }
+  }
+  // 그리기 보조 줄(#subToolbar)도 리본처럼 접지 않는다: » 펼침 단추가 나오지 않는다. 1904 창에서 그리기를 시작하면
+  // 단추 글자가 보이고, 줄이 모자라면 글자를 숨긴 뒤 아이콘을 20에서 16으로 줄인다. 한 점을 찍으면 완료·되돌리기·취소가
+  // 줄에 더해져 길어지므로(1904 창에서는 글자가 안 들어간다) 줄은 20 px 아이콘만 남긴다. 이 모양은 받아들인 것이고(도구
+  // 여섯 개의 아이콘과 자석 설정을 줄이는 일은 뒤 과제), 그때까지 20 px가 16 px로 줄거나 »가 돌아오면 안 된다.
+  void subToolbarFitsAt1904WhileSketching() {
+    const QString path = makeSurvey(QStringLiteral("그리기줄글자"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    auto* sub = window.findChild<QToolBar*>(QStringLiteral("subToolbar"));
+    auto* draw = window.findChild<QToolButton*>(QStringLiteral("btnDraw"));
+    QVERIFY(canvas && sub && draw);
+    window.resize(1904, 1000);
+    window.show();
+    QApplication::setActiveWindow(&window);
+    QTRY_VERIFY(draw->isEnabled());
+    draw->click();
+    QTRY_VERIFY(sub->isVisible());
+    QVERIFY(QMetaObject::invokeMethod(&window, "startEditFeaturePoly", Qt::DirectConnection));
+
+    const auto extShown = [&] {
+      auto* ext = sub->findChild<QToolButton*>(QStringLiteral("qt_toolbar_ext_button"));
+      return ext && ext->isVisible();
+    };
+    QStringList hidden;
+    const auto allShown = [&] {  // every action that is on the row has a visible button
+      hidden.clear();
+      for (QAction* action : sub->actions()) {
+        QWidget* button = sub->widgetForAction(action);
+        if (action->isVisible() && !action->isSeparator() && (!button || !button->isVisible())) hidden << action->text();
+      }
+      return hidden.isEmpty();
+    };
+    const auto where = [&] {
+      return QStringLiteral("창 %1 · 줄 %2 · 필요 %3 · 글자 %4 · 아이콘 %5 · 펼침 %6 · 안 보임 [%7]")
+          .arg(window.width()).arg(sub->width()).arg(sub->sizeHint().width())
+          .arg(sub->toolButtonStyle()).arg(sub->iconSize().width()).arg(extShown())
+          .arg(hidden.join(QLatin1Char(' ')));
+    };
+    // The tools are on the row, nothing is being drawn yet: labels beside the 20 px icons, nothing folded.
+    QTRY_VERIFY2(allShown() && !extShown(), qPrintable(where()));
+    QVERIFY2(sub->toolButtonStyle() != Qt::ToolButtonIconOnly && sub->iconSize() == QSize(20, 20), qPrintable(where()));
+    qInfo().noquote() << "sub toolbar at 1904, nothing drawn yet:" << where();
+
+    // One vertex placed: 완료·되돌리기·취소 join the row.
+    canvas->setExtent(QgsRectangle(189950, 559950, 190150, 560150));
+    QApplication::processEvents();
+    const QgsPointXY pixel = canvas->getCoordinateTransform()->transform(QgsPointXY(190050, 560050));
+    QTest::mouseClick(canvas->viewport(), Qt::LeftButton, Qt::NoModifier, QPoint(qRound(pixel.x()), qRound(pixel.y())));
+    auto* capture = window.findChild<KaCaptureMapTool*>();
+    QVERIFY(capture);
+    QTRY_VERIFY2(capture->hasSketch(), "fixture: the click placed a vertex");
+    QAction* finish = nullptr;
+    for (QAction* action : sub->actions())
+      if (action->property("kaSketch").toString() == QLatin1String("finish")) finish = action;
+    QVERIFY2(finish && finish->isVisible(), "fixture: 완료 shows while a shape is being drawn");
+    QTRY_VERIFY2(allShown() && !extShown(), qPrintable(where()));
+    QVERIFY2(sub->toolButtonStyle() == Qt::ToolButtonIconOnly && sub->iconSize() == QSize(20, 20), qPrintable(where()));
+    qInfo().noquote() << "sub toolbar at 1904, one vertex placed:" << where();
+
+    // What each stage needs on this row (the bar's own sizes, measured by trying them; the fit follows).
+    const auto need = [&](Qt::ToolButtonStyle style, int icon) {
+      sub->setToolButtonStyle(style);
+      sub->setIconSize(QSize(icon, icon));
+      sub->layout()->invalidate();
+      return sub->sizeHint().width();
+    };
+    const int needIcons = need(Qt::ToolButtonIconOnly, 20);
+    const int needSmall = need(Qt::ToolButtonIconOnly, 16);
+    const int needText = need(Qt::ToolButtonTextBesideIcon, 20);
+    QVERIFY2(needText > needIcons + 100 && needIcons > needSmall + 10, qPrintable(QStringLiteral("%1 %2 %3").arg(needText).arg(needIcons).arg(needSmall)));
+    window.resize(needIcons + 25, 1000);  // too narrow for the labels, room for 20 px icons
+    QTRY_VERIFY2(allShown() && !extShown(), qPrintable(where()));
+    QVERIFY2(sub->toolButtonStyle() == Qt::ToolButtonIconOnly && sub->iconSize() == QSize(20, 20), qPrintable(where()));
+    window.resize(needSmall + 5, 1000);  // not even room for those: the icons shrink
+    QTRY_VERIFY2(allShown() && !extShown(), qPrintable(where()));
+    QVERIFY2(sub->toolButtonStyle() == Qt::ToolButtonIconOnly && sub->iconSize() == QSize(16, 16), qPrintable(where()));
+    qInfo().noquote() << "sub toolbar at the smallest stage:" << where();
+    window.resize(1904, 1000);  // room again: back to what 1904 showed, icons only at 20 px
+    QTRY_VERIFY2(allShown() && !extShown() && sub->iconSize() == QSize(20, 20), qPrintable(where()));
+    QVERIFY2(sub->toolButtonStyle() == Qt::ToolButtonIconOnly, qPrintable(where()));
+
+    // 1024 (the window itself stops at about 1082): the row has text-only tools and the snap settings, about
+    // 1360 px even as bare icons, so the smallest stage is as far as it can go there and the » may show.
+    window.resize(1024, 768);
+    QTRY_VERIFY2(sub->toolButtonStyle() == Qt::ToolButtonIconOnly && sub->iconSize() == QSize(16, 16), qPrintable(where()));
+    qInfo().noquote() << "sub toolbar at 1024:" << where();
+    QgsProject::instance()->setDirty(false);
+  }
+  // 저장 안 됨(스펙 「아이콘 체계」 표): 「저장」 칩은 파란 타일·주황 점에 더해 라벨이 굵어지고,
+  // 저장하면 보통 굵기로 돌아온다. 굵기는 창이 칩에 붙이는 `unsaved` 속성을 QSS 가 읽어 정한다.
+  void unsavedSaveChipLabelTurnsBoldAndBack() {
+    MainWindow window;
+    disableRendering(window);
+    window.resize(1904, 1000);  // the labels show from about 1500 px up; narrower windows keep only the icons
+    window.show();
+    const QString path = makeSurvey(QStringLiteral("굵은저장"));
+    QVERIFY(!path.isEmpty());
+    QVERIFY(openSettled(window, path));
+    QgsProject::instance()->setDirty(false);
+    QTest::qWait(450);  // the 300 ms chip merge (shellSyncTimer) settles on the clean state
+    auto* save = window.findChild<QToolButton*>(QStringLiteral("ribbonSave"));
+    QVERIFY(save && save->isVisible());
+    QVERIFY(!save->property("unsaved").toBool());
+    const RibbonLabelInk::Measure plain = RibbonLabelInk::measure(save);
+    QVERIFY2(plain.pixels > 0, "the 「저장」 label has ink");
+
+    QgsProject::instance()->setDirty(true);
+    QTRY_VERIFY(save->property("unsaved").toBool());
+    QApplication::processEvents();
+    const RibbonLabelInk::Measure bold = RibbonLabelInk::measure(save);
+    qInfo() << "저장 label ink" << plain.pixels << "->" << bold.pixels << "columns" << bold.left << ".." << bold.right
+            << "in a" << save->width() << "px chip";
+    QVERIFY2(bold.pixels > plain.pixels * 1.15,
+             qPrintable(QStringLiteral("unsaved label ink %1 vs saved %2").arg(bold.pixels).arg(plain.pixels)));
+    // The chip must not clip the bold label: ink stays inside its 2 px of border and padding.
+    QVERIFY2(bold.left >= 2 && bold.right <= save->width() - 3,
+             qPrintable(QStringLiteral("bold label spans %1..%2 in a %3 px chip").arg(bold.left).arg(bold.right).arg(save->width())));
+
+    QVERIFY(saveNow(window));
+    QTRY_VERIFY(!save->property("unsaved").toBool());
+    QApplication::processEvents();
+    QVERIFY2(RibbonLabelInk::measure(save).pixels <= plain.pixels * 1.05, "saved again: the label is regular");
+    QgsProject::instance()->setDirty(false);
   }
   void recordToolsWaitForASurvey() {
     MainWindow window;
@@ -1068,14 +1219,13 @@ private slots:
   void ribbonButtonsAllHaveDifferentIcons() {
     MainWindow window;
     disableRendering(window);
-    auto* overflow = window.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
-    QVERIFY(overflow && overflow->parentWidget());
+    auto* ribbon = window.findChild<KaBeginnerRibbon*>(QStringLiteral("beginnerRibbon"));
+    QVERIFY(ribbon);
     QHash<QByteArray, QString> seen;
     int compared = 0;
-    const auto buttons = overflow->parentWidget()->findChildren<QToolButton*>();
+    const auto buttons = ribbon->findChildren<QToolButton*>();
     for (QToolButton* button : buttons) {
-      if (button == overflow || button->toolButtonStyle() != Qt::ToolButtonTextUnderIcon || button->icon().isNull())
-        continue;
+      if (button->icon().isNull()) continue;  // chips keep their icon whether the labels show or not
       const QImage image =
           button->icon().pixmap(QSize(64, 64), 1.0).toImage().convertToFormat(QImage::Format_ARGB32);
       const QByteArray key = QCryptographicHash::hash(
@@ -1154,7 +1304,6 @@ private slots:
     }
     QVERIFY(!records.isEmpty());
     MainWindow window;
-    window.setRestoreLastSurveyEnabled(false);
     QString path=makeSurvey(QStringLiteral("topographic-stability")); QVERIFY(!path.isEmpty());
     const auto surveySource=qEnvironmentVariable("KA_HGIS_QA_TOPOGRAPHIC_SURVEY");
     QByteArray originalSurvey;
@@ -2240,7 +2389,7 @@ private slots:
     tree->expandAll();
     tree->setCurrentLayer(layer);
     QApplication::processEvents();
-    const QModelIndex index = tree->layerTreeModel()->node2index(
+    const QModelIndex index = tree->node2index(
         QgsProject::instance()->layerTreeRoot()->findLayer(layer));
     QVERIFY(index.isValid());
     tree->scrollTo(index);
@@ -2273,6 +2422,17 @@ private slots:
         QStringLiteral("layer.opacity"), QStringLiteral("layer.zoom"), QStringLiteral("layer.fullExtent")})
       QVERIFY2(ids.contains(common), qPrintable(common));
     if (!domain) QVERIFY(!ids.contains(QStringLiteral("layer.clear")));
+    // [pkg E1] F019: the shape group is reachable again (no dead menu rows).
+    if (domain) {
+      QVERIFY(ids.contains(QStringLiteral("layer.draw")));
+      QVERIFY(ids.contains(QStringLiteral("layer.export")));
+      if (kind != QLatin1String("control_points")) QVERIFY(ids.contains(QStringLiteral("layer.vertices")));
+      if (kind == QLatin1String("survey_area") || kind == QLatin1String("feature_poly") ||
+          kind == QLatin1String("trial_trench"))
+        QVERIFY(ids.contains(QStringLiteral("layer.area")));
+    } else if (!qobject_cast<QgsVectorLayer*>(layer)) {
+      QVERIFY(!ids.contains(QStringLiteral("layer.draw")) && !ids.contains(QStringLiteral("layer.area")));
+    }
     if (auto* vector = qobject_cast<QgsVectorLayer*>(layer)) {
       // Removal keeps the live layer and edit buffer in undo history.
       QVERIFY(vector->startEditing());
@@ -2299,7 +2459,7 @@ private slots:
     QVERIFY(!path.isEmpty());
     MainWindow window;
     disableRendering(window);
-    QVERIFY(window.openSurveyGpkg(path));
+    QVERIFY(openSettled(window, path));
     auto* project = QgsProject::instance();
     auto* layer = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
     auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
@@ -2337,7 +2497,7 @@ private slots:
       }
       menu->close();
     });
-    const QModelIndex index = tree->layerTreeModel()->node2index(project->layerTreeRoot()->findLayer(layer));
+    const QModelIndex index = tree->node2index(project->layerTreeRoot()->findLayer(layer));
     window.showLayerTreeContextMenu(tree, tree->visualRect(index).center());
     QVERIFY(changed);
     QVERIFY(areaChecked);
@@ -2615,7 +2775,7 @@ private slots:
     QVERIFY(node);
     window.show();
     tree->expandAll();
-    const QModelIndex index = tree->layerTreeModel()->node2index(node);
+    const QModelIndex index = tree->node2index(node);
     QVERIFY(index.isValid());
     tree->scrollTo(index);
     const LayerMenuState menu = inspectLayerMenu(window, tree, tree->visualRect(index).center());
@@ -2711,7 +2871,7 @@ private slots:
     QVERIFY(!path.isEmpty());
     MainWindow window;
     disableRendering(window);
-    QVERIFY(window.openSurveyGpkg(path));
+    QVERIFY(openSettled(window, path));
     disableRendering(window);
     auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
     QVERIFY(tree);
@@ -2738,7 +2898,7 @@ private slots:
     QVERIFY(!path.isEmpty());
     MainWindow window;
     disableRendering(window);
-    QVERIFY(window.openSurveyGpkg(path));
+    QVERIFY(openSettled(window, path));
     disableRendering(window);
     auto* layer = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"));
     auto* canvas = window.findChild<QgsMapCanvas*>();
@@ -3220,12 +3380,145 @@ private slots:
              "작은 도형 바깥을 찍었는데 큰 도형이 잡히지 않았습니다.");
   }
 
+  // 「폴리곤 나누기」에서 A로 도형선택으로 빠져나온 뒤 그린 면은 나누기 선이 아니라 도형으로 들어간다.
+  // 도형선택(A)으로 두 도형을 고르면 그리기 줄을 열지 않아도 우클릭에서 「겹친 곳 지우기」를 고를 수 있고,
+  // 리본 「선택」 단추는 도형선택이 켜져 있는 동안 눌린 모양이다.
+  void selectTool_rightClickErasesAndKeyAEndsSplitMode() {
+    const QString path = makeSurvey(QStringLiteral("select_menu_erase"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* project = QgsProject::instance();
+    auto* area = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
+    QVERIFY(area && canvas && tree);
+    const QgsFeatureId outer = *area->allFeatureIds().constBegin();
+    window.resize(1280, 900);
+    window.show();
+    QApplication::setActiveWindow(&window);
+    canvas->setFocus();
+    canvas->setExtent(QgsRectangle(189950, 559950, 190150, 560150));
+    QApplication::processEvents();
+
+    tree->setCurrentLayer(area);
+    QVERIFY(QMetaObject::invokeMethod(&window, "startSplitPolygonTool", Qt::DirectConnection));
+    auto* capture = window.findChild<KaCaptureMapTool*>();
+    QVERIFY2(capture && canvas->mapTool() == capture, "fixture: 폴리곤 나누기 is drawing its line");
+    QTest::keyClick(canvas, Qt::Key_A);
+    auto* select = window.findChild<KaFeatureSelectTool*>();
+    QVERIFY(select && canvas->mapTool() == select);
+    QAction* selectAct = nullptr;
+    for (QAction* action : window.findChildren<QAction*>())
+      if (action->shortcut() == QKeySequence(QStringLiteral("Ctrl+1"))) selectAct = action;
+    QVERIFY2(selectAct && selectAct->isChecked(), "도형선택이 켜졌는데 「선택」 단추가 눌린 모양이 아닙니다.");
+    QVERIFY(QMetaObject::invokeMethod(&window, "startEditFeaturePoly", Qt::DirectConnection));
+    auto* poly = LayerOps::findByLayerKey(project, QStringLiteral("feature_poly"));
+    QVERIFY(poly);
+    captureAndDismissForm(capture, QgsGeometry::fromRect(QgsRectangle(190070, 560010, 190090, 560030)));
+    QVERIFY2(poly->featureCount() == 1, "나누기에서 빠져나온 뒤 그린 면이 나누기 선으로 버려졌습니다.");
+
+    QVERIFY(area->isEditable() || area->startEditing());
+    QgsFeature inner(area->fields());
+    inner.setGeometry(QgsGeometry::fromRect(QgsRectangle(190040, 560040, 190060, 560060)));
+    QVERIFY(area->addFeature(inner));
+    QVERIFY(QMetaObject::invokeMethod(&window, "startSelectTool", Qt::DirectConnection));
+    QVERIFY(canvas->mapTool() == select);
+    area->selectByIds({outer, inner.id()});
+    bool offered = false;
+    QTimer answer;
+    connect(&answer, &QTimer::timeout, [&offered] {
+      if (auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget())) {
+        for (QAction* action : menu->actions()) {
+          if (action->objectName() != QLatin1String("actSelectEraseOverlap") || !action->isEnabled()) continue;
+          offered = true;
+          action->trigger();
+        }
+        menu->close();
+      }
+    });
+    answer.start(20);
+    const QgsPointXY pixel = canvas->getCoordinateTransform()->transform(QgsPointXY(190020, 560080));
+    QTest::mouseClick(canvas->viewport(), Qt::RightButton, Qt::NoModifier, QPoint(qRound(pixel.x()), qRound(pixel.y())));
+    QApplication::processEvents();
+    answer.stop();
+    QVERIFY2(offered, "두 도형을 고르고 우클릭했는데 「겹친 곳 지우기」가 없습니다.");
+    QCOMPARE(area->featureCount(), 1);
+    QVERIFY(qAbs(area->getFeature(outer).geometry().area() - 9600.0) < 1e-3);
+  }
+
+  // 참고 자료(유적 경계 같은 참조 지도, 지적)의 도형은 도형선택으로 골라 볼 수는 있어도 고칠 수 없다.
+  // 「폴리곤 나누기」·「폴리곤 묶기」가 그 파일에 바로 쓰면 Ctrl+Z로도 되돌릴 수 없었다.
+  void polygonCommands_leaveReferenceAndCadastralShapesAlone() {
+    const QString path = makeSurvey(QStringLiteral("reference_read_only"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* project = QgsProject::instance();
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
+    QVERIFY(tree);
+    const auto memoryLayer = [project](const QString& name, const QStringList& shapes) {
+      auto* layer = new QgsVectorLayer(QStringLiteral("MultiPolygon?crs=EPSG:5187"), name, QStringLiteral("memory"));
+      layer->startEditing();
+      for (const QString& wkt : shapes) {
+        QgsFeature feature(layer->fields());
+        feature.setGeometry(QgsGeometry::fromWkt(wkt));
+        layer->addFeature(feature);
+      }
+      layer->commitChanges();
+      project->addMapLayer(layer);
+      return layer;
+    };
+    auto* heritage = memoryLayer(QStringLiteral("유적 경계"),
+        {QStringLiteral("MultiPolygon(((190050 560050,190200 560050,190200 560200,190050 560200,190050 560050)))"),
+         QStringLiteral("MultiPolygon(((190150 560150,190300 560150,190300 560300,190150 560300,190150 560150)))")});
+    auto* parcels = memoryLayer(QStringLiteral("지적"),
+        {QStringLiteral("MultiPolygon(((190000 559800,190050 559800,190050 559850,190000 559850,190000 559800)),"
+                        "((190100 559800,190150 559800,190150 559850,190100 559850,190100 559800)))")});
+    LayerOps::markReferenceLayer(heritage);
+    LayerOps::markCadastralLayer(parcels);
+    QVERIFY(heritage->featureCount() == 2 && parcels->featureCount() == 1);
+    int refusals = 0;
+    QTimer dismiss;
+    connect(&dismiss, &QTimer::timeout, [&refusals] {
+      for (auto* widget : QApplication::topLevelWidgets())
+        if (auto* message = qobject_cast<QMessageBox*>(widget); message && message->isVisible()) {
+          ++refusals;
+          message->accept();
+        }
+    });
+    dismiss.start(20);
+
+    heritage->selectByIds(heritage->allFeatureIds());
+    QVERIFY(QMetaObject::invokeMethod(&window, "startSplitPolygonTool", Qt::DirectConnection));
+    QVERIFY2(!heritage->isEditable() && heritage->featureCount() == 2,
+             "참조 지도 도형 두 개를 고르고 「폴리곤 나누기」를 눌렀더니 참조 파일에 겹친 조각이 써졌습니다.");
+    QVERIFY(QMetaObject::invokeMethod(&window, "mergeFeaturePolygons", Qt::DirectConnection));
+    QVERIFY2(!heritage->isEditable() && heritage->featureCount() == 2,
+             "참조 지도 도형을 「폴리곤 묶기」로 하나로 합쳤습니다(Ctrl+Z로 되돌릴 수 없음).");
+    heritage->removeSelection();
+    parcels->selectByIds(parcels->allFeatureIds());
+    QVERIFY(QMetaObject::invokeMethod(&window, "startSplitPolygonTool", Qt::DirectConnection));
+    QVERIFY2(!parcels->isEditable() && parcels->featureCount() == 1,
+             "여러 조각인 지적 도형을 「폴리곤 나누기」가 지적 레이어 안에서 조각냈습니다.");
+    parcels->removeSelection();
+    tree->setCurrentLayer(heritage);
+    QVERIFY(QMetaObject::invokeMethod(&window, "startSplitPolygonTool", Qt::DirectConnection));
+    QVERIFY2(!heritage->isEditable(), "좌측 목록에서 참조 지도를 고르고 「폴리곤 나누기」를 누르면 편집이 열립니다.");
+    dismiss.stop();
+    QVERIFY2(refusals == 4, qPrintable(QStringLiteral("고칠 수 없다는 안내가 %1번 나왔습니다(4번이어야 함).").arg(refusals)));
+  }
+
   void layerContextMenu_usesClickedRowAndLeavesSourceIntact() {
     const QString path = makeSurvey(QStringLiteral("menu_target"));
     QVERIFY(!path.isEmpty());
     MainWindow window;
     disableRendering(window);
-    QVERIFY(window.openSurveyGpkg(path));
+    QVERIFY(openSettled(window, path));
     disableRendering(window);
     auto* project = QgsProject::instance();
     auto* survey = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
@@ -3257,7 +3550,7 @@ private slots:
     }
     tree->expandAll();
     tree->setCurrentLayer(survey);
-    const QModelIndex clicked = tree->layerTreeModel()->node2index(project->layerTreeRoot()->findLayer(external));
+    const QModelIndex clicked = tree->node2index(project->layerTreeRoot()->findLayer(external));
     QVERIFY(clicked.isValid());
     tree->scrollTo(clicked);
     const LayerMenuState clickedMenu = inspectLayerMenu(window, tree,
@@ -3270,7 +3563,7 @@ private slots:
     QCOMPARE(contents(externalPath), originalShp);
     // Removing a survey legend entry must likewise preserve its saved features.
     tree->setCurrentLayer(survey);
-    const QModelIndex surveyIndex = tree->layerTreeModel()->node2index(project->layerTreeRoot()->findLayer(survey));
+    const QModelIndex surveyIndex = tree->node2index(project->layerTreeRoot()->findLayer(survey));
     tree->scrollTo(surveyIndex);
     const LayerMenuState surveyMenu = inspectLayerMenu(window, tree,
         tree->visualRect(surveyIndex).center(), QStringLiteral("layer.remove"));
@@ -3287,7 +3580,7 @@ private slots:
     QVERIFY(!path.isEmpty());
     MainWindow window;
     disableRendering(window);
-    QVERIFY(window.openSurveyGpkg(path));
+    QVERIFY(openSettled(window, path));
     disableRendering(window);
     auto* project = QgsProject::instance();
     project->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
@@ -3318,7 +3611,7 @@ private slots:
     tree->expandAll();
     tree->setCurrentLayer(dem);
     QApplication::processEvents();
-    const QModelIndex index = tree->layerTreeModel()->node2index(originalNode);
+    const QModelIndex index = tree->node2index(originalNode);
     QVERIFY(index.isValid());
     tree->scrollTo(index);
     const LayerMenuState menu = inspectLayerMenu(window, tree, tree->visualRect(index).center(),
@@ -3859,14 +4152,227 @@ private slots:
     QgsProject::instance()->setDirty(false);
   }
 
+  // Copies every file under `from` into `to` without overwriting files that are already there.
+  // Entries whose name starts with one of `skip` are left out.
+  static bool mergeDirectory(const QString& from, const QString& to, const QStringList& skip = {}) {
+    if (!QDir().mkpath(to)) return false;
+    for (const QFileInfo& entry : QDir(from).entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot)) {
+      if (std::any_of(skip.cbegin(), skip.cend(),
+                      [&entry](const QString& prefix) { return entry.fileName().startsWith(prefix); }))
+        continue;
+      const QString target = QDir(to).filePath(entry.fileName());
+      if (entry.isDir()) {
+        if (!mergeDirectory(entry.absoluteFilePath(), target, skip)) return false;
+      } else if (!QFileInfo::exists(target) && !QFile::copy(entry.absoluteFilePath(), target)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Rebuilds the 2026-09-22 compat survey when its binary (.gpkg) is not in the checkout.
+  //
+  // The original sample was saved by the 2026-09-22 app (3ddca7a) but its .gpkg/.qgz were
+  // swallowed by .gitignore (*.gpkg, *.qgz) and could not be recovered, so a fresh clone,
+  // CI or another PC failed on the first openSurveyGpkg. This writes the same survey the way
+  // that version stored it (3ddca7a SurveyStorage.cpp: persistWorkspace, absorbExternalVectors,
+  // writeEmbedded; LayerOps.cpp: placeCadastralLayer):
+  //  - the workspace is embedded in the survey GPKG (qgis_projects, projectName=survey) with
+  //    absolute paths into the folder of the PC that saved it, and no ka_hgis survey_dir entry;
+  //  - absorbed memory layers (주변 500m, 지적도 본번) still point at the generation copy
+  //    (.ka-survey-gen-*/survey.gpkg) that was deleted after the save;
+  //  - cadastral layers sit in the old 「지적도」 group, heritage in 참조 지도 › 지정유산;
+  //  - 국가지정유산 lived in that PC's AppData, so it does not travel with the survey folder.
+  // The saving PC's folder is deleted at the end, so the survey opens like a moved folder.
+  static bool writeLegacySurvey20260922(const QString& targetSurveyDir, const QString& surveyFile, QString* why) {
+    const auto fail = [why](const QString& text) {
+      if (why) *why = text;
+      return false;
+    };
+    const QString name = QFileInfo(surveyFile).completeBaseName();
+    if (name.isEmpty()) return fail(QStringLiteral("manifest.ini 에 survey= 가 없습니다"));
+    QTemporaryDir otherPc;
+    if (!otherPc.isValid()) return fail(QStringLiteral("저장한 PC 를 흉내 낼 임시 폴더를 만들지 못했습니다"));
+    const QString oldSurveyDir = otherPc.filePath(QStringLiteral("Users/옛조사원/Documents/") + name);
+    QString error;
+    const QString gpkg =
+        SurveyProjectFactory::createNewSurvey(oldSurveyDir, name, &error, QStringLiteral("EPSG:5187"));
+    if (gpkg.isEmpty()) return fail(QStringLiteral("조사 파일을 만들지 못했습니다: ") + error);
+    const QgsCoordinateReferenceSystem crs(QStringLiteral("EPSG:5187"));
+    const QgsRectangle areaRect(190000, 560000, 190100, 560100);
+    {
+      QgsVectorLayer area(gpkg + QStringLiteral("|layername=survey_area"), name, QStringLiteral("ogr"));
+      if (!area.isValid() || !area.startEditing()) return fail(QStringLiteral("survey_area 를 열지 못했습니다"));
+      QgsFeature feature(area.fields());
+      feature.setAttribute(QStringLiteral("survey_name"), name);
+      feature.setGeometry(QgsGeometry::fromRect(areaRect));
+      if (!area.addFeature(feature) || !area.commitChanges()) return fail(QStringLiteral("조사구역을 쓰지 못했습니다"));
+    }
+    // That version saved into a generation copy, absorbed memory layers there and then
+    // replaced the survey file with it.
+    const QString generationDir = QDir(oldSurveyDir).filePath(QStringLiteral(".ka-survey-gen-0922aB"));
+    const QString generation = QDir(generationDir).filePath(QStringLiteral("survey.gpkg"));
+    // A GeoPackage edited through QGIS may still keep committed pages in its WAL.
+    const auto copySqlite = [](const QString& from, const QString& to) {
+      for (const QString& suffix : {QString(), QStringLiteral("-wal")}) {
+        if (!suffix.isEmpty() && !QFileInfo::exists(from + suffix)) continue;
+        QFile::remove(to + suffix);
+        if (!QFile::copy(from + suffix, to + suffix)) return false;
+      }
+      return true;
+    };
+    QgsOgrProviderUtils::invalidateCachedDatasets(QFileInfo(gpkg).absoluteFilePath());
+    if (!QDir().mkpath(generationDir) || !copySqlite(gpkg, generation))
+      return fail(QStringLiteral("세대 사본을 만들지 못했습니다"));
+    const auto writeTable = [&](const QString& file, const QString& table, const QString& uri,
+                                const QgsGeometry& shape) {
+      QgsVectorLayer memory(uri, table, QStringLiteral("memory"));
+      if (!memory.isValid() || !memory.startEditing()) return false;
+      QgsFeature feature(memory.fields());
+      feature.setAttribute(0, table);
+      feature.setGeometry(shape);
+      if (!memory.addFeature(feature) || !memory.commitChanges()) return false;
+      QgsVectorFileWriter::SaveVectorOptions options;
+      options.driverName = QStringLiteral("GPKG");
+      options.layerName = table;
+      options.fileEncoding = QStringLiteral("UTF-8");
+      options.actionOnExistingFile = QFileInfo::exists(file) ? QgsVectorFileWriter::CreateOrOverwriteLayer
+                                                             : QgsVectorFileWriter::CreateOrOverwriteFile;
+      QString detail;
+      return QgsVectorFileWriter::writeAsVectorFormatV3(&memory, file, QgsCoordinateTransformContext(), options,
+                                                        &detail) == QgsVectorFileWriter::NoError;
+    };
+    const QString polygonUri = QStringLiteral("Polygon?crs=EPSG:5187&field=nm:string(40)");
+    if (!writeTable(generation, QStringLiteral("주변_500m"), polygonUri,
+                    QgsGeometry::fromRect(QgsRectangle(189500, 559500, 190600, 560600))) ||
+        !writeTable(generation, QStringLiteral("지적도_본번"), polygonUri,
+                    QgsGeometry::fromRect(QgsRectangle(189950, 559950, 190050, 560050))))
+      return fail(QStringLiteral("흡수한 레이어를 세대 사본에 쓰지 못했습니다"));
+    const QString heritageFile =
+        otherPc.filePath(QStringLiteral("Users/옛조사원/AppData/Local/ka-hgis/ka-hgis/주변유적/heritage-0922.gpkg"));
+    if (!QDir().mkpath(QFileInfo(heritageFile).absolutePath()) ||
+        !writeTable(heritageFile, QStringLiteral("국가지정유산"), QStringLiteral("Point?crs=EPSG:5187&field=nm:string(40)"),
+                    QgsGeometry::fromPointXY(QgsPointXY(190050, 560050))))
+      return fail(QStringLiteral("조사 폴더 밖 유산 자료를 만들지 못했습니다"));
+    // The relief raster is the one committed next to the manifest; recreate it if absent.
+    const QString reliefDir = QDir(oldSurveyDir).filePath(QStringLiteral("ka-hgis-reference-T"));
+    const QString shippedRelief = QDir(targetSurveyDir).filePath(QStringLiteral("ka-hgis-reference-T"));
+    if (QFileInfo::exists(QDir(shippedRelief).filePath(QStringLiteral("relief.png")))) {
+      if (!mergeDirectory(shippedRelief, reliefDir)) return fail(QStringLiteral("지형 음영 표본을 옮기지 못했습니다"));
+    } else {
+      QImage relief(8, 8, QImage::Format_RGB32);
+      relief.fill(QColor(0, 128, 0));
+      QFile world(QDir(reliefDir).filePath(QStringLiteral("relief.pgw")));
+      if (!QDir().mkpath(reliefDir) || !relief.save(QDir(reliefDir).filePath(QStringLiteral("relief.png"))) ||
+          !world.open(QIODevice::WriteOnly) || world.write("10\n0\n0\n-10\n190000.5\n560079.5\n") <= 0)
+        return fail(QStringLiteral("지형 음영 래스터를 만들지 못했습니다"));
+    }
+    {
+      QgsProject legacy;
+      legacy.setCrs(crs);
+      legacy.setTitle(name);
+      QgsLayerTree* tree = legacy.layerTreeRoot();
+      QgsLayerTreeGroup* surveyGroup = tree->addGroup(QStringLiteral("조사 데이터"));
+      QgsLayerTreeGroup* cadastralGroup = tree->addGroup(QStringLiteral("지적도"));
+      QgsLayerTreeGroup* referenceGroup = tree->addGroup(QStringLiteral("참조 지도"));
+      QgsLayerTreeGroup* designatedGroup = referenceGroup->addGroup(QStringLiteral("지정유산"));
+      QString broken;
+      const auto place = [&](QgsMapLayer* layer, QgsLayerTreeGroup* group, const QString& role) -> QgsMapLayer* {
+        if (!layer->isValid()) {
+          broken += layer->name() + QLatin1Char(' ');
+          delete layer;
+          return nullptr;
+        }
+        if (!role.isEmpty()) layer->setCustomProperty(QStringLiteral("ka_hgis/layer_role"), role);
+        legacy.addMapLayer(layer, false);
+        group->addLayer(layer);
+        return layer;
+      };
+      const auto web = [](const QString& host, const QString& title) {
+        return new QgsRasterLayer(
+            QStringLiteral("type=xyz&url=https://%1.invalid/{z}/{x}/{y}.png&zmin=0&zmax=19").arg(host), title,
+            QStringLiteral("wms"));
+      };
+      auto* area = new QgsVectorLayer(gpkg + QStringLiteral("|layername=survey_area"), name, QStringLiteral("ogr"));
+      area->setCustomProperty(QStringLiteral("ka_hgis/layer_key"), QStringLiteral("survey_area"));
+      QgsMapLayer* areaLayer = place(area, surveyGroup, QString());
+      place(new QgsVectorLayer(generation + QStringLiteral("|layername=주변_500m"), QStringLiteral("주변 500m"),
+                               QStringLiteral("ogr")),
+            surveyGroup, QString());
+      auto* cadastral = new QgsVectorLayer(generation + QStringLiteral("|layername=지적도_본번"),
+                                           QStringLiteral("지적도 본번"), QStringLiteral("ogr"));
+      cadastral->setCustomProperty(QStringLiteral("ka_hgis/cadastral"), true);
+      place(cadastral, cadastralGroup, QStringLiteral("cadastral"));
+      place(web(QStringLiteral("compat-cadastral-main"), QStringLiteral("지적 본번")), cadastralGroup, QString());
+      place(web(QStringLiteral("compat-cadastral-sub"), QStringLiteral("지적 부번")), cadastralGroup, QString());
+      place(new QgsVectorLayer(heritageFile + QStringLiteral("|layername=국가지정유산"), QStringLiteral("국가지정유산"),
+                               QStringLiteral("ogr")),
+            designatedGroup, QStringLiteral("reference"));
+      auto* relief = new QgsRasterLayer(QDir(reliefDir).filePath(QStringLiteral("relief.png")),
+                                        QStringLiteral("지형 음영"), QStringLiteral("gdal"));
+      relief->setCrs(crs);
+      place(relief, referenceGroup, QStringLiteral("reference"));
+      place(web(QStringLiteral("compat-satellite"), QStringLiteral("위성")), referenceGroup, QStringLiteral("reference"));
+      if (!broken.isEmpty() || !areaLayer) return fail(QStringLiteral("표본 레이어를 열지 못했습니다: ") + broken);
+      // One drawing, made like that version's LayoutService::createBlankSheet.
+      auto* layout = new QgsPrintLayout(&legacy);
+      layout->initializeDefaults();
+      layout->setName(QStringLiteral("user_sheet"));
+      layout->setUnits(Qgis::LayoutUnit::Millimeters);
+      layout->setCustomProperty(QStringLiteral("ka_hgis/auto_template"), false);
+      layout->setCustomProperty(QStringLiteral("ka_hgis/user_composed"), false);
+      auto* map = new QgsLayoutItemMap(layout);
+      map->setId(QStringLiteral("ka_map"));
+      map->attemptSetSceneRect(QRectF(20.0, 20.0, 200.0, 150.0));
+      map->setCrs(crs);
+      map->setKeepLayerSet(true);
+      map->setLayers(QList<QgsMapLayer*>{areaLayer});
+      map->zoomToExtent(areaRect);
+      layout->addLayoutItem(map);
+      if (!legacy.layoutManager()->addLayout(layout)) return fail(QStringLiteral("도면을 넣지 못했습니다"));
+      // 3ddca7a writeEmbedded: file name = generation copy, home = survey folder, absolute paths.
+      legacy.setFileName(QFileInfo(generation).absoluteFilePath());
+      legacy.setPresetHomePath(QFileInfo(oldSurveyDir).absoluteFilePath());
+      legacy.setFilePathStorage(Qgis::FilePathType::Absolute);
+      if (!legacy.write(QStringLiteral("geopackage:%1?projectName=survey").arg(QFileInfo(generation).absoluteFilePath())))
+        return fail(QStringLiteral("작업공간을 조사 파일 안에 쓰지 못했습니다: ") + legacy.error());
+      LayerOps::saveGpkgDefaultStyles(&legacy, QFileInfo(generation).absoluteFilePath());
+      legacy.clear();
+    }
+    for (const QString& file : {gpkg, generation, heritageFile})
+      QgsOgrProviderUtils::invalidateCachedDatasets(QFileInfo(file).absoluteFilePath());
+    // That version then published the generation over the survey file, so the survey file that
+    // travels holds the generation's bytes. Copy them (plus a WAL SQLite may still keep beside
+    // them) rather than replacing a file another handle might hold open.
+    if (QFileInfo(surveyFile).fileName() != QFileInfo(gpkg).fileName())
+      return fail(QStringLiteral("조사 파일 이름이 manifest 와 다릅니다: ") + QFileInfo(gpkg).fileName());
+    if (!QDir().mkpath(targetSurveyDir)) return fail(QStringLiteral("표본 조사 폴더를 만들지 못했습니다"));
+    const QString targetGpkg = QDir(targetSurveyDir).filePath(QFileInfo(gpkg).fileName());
+    if (!copySqlite(generation, targetGpkg)) return fail(QStringLiteral("세대 사본을 조사 파일로 옮기지 못했습니다"));
+    // Everything else in the survey folder travels as is: the companion .qgz and the relief
+    // raster. The pre-publish survey file, its journals and the generation folder do not.
+    if (!mergeDirectory(oldSurveyDir, targetSurveyDir,
+                        {QFileInfo(gpkg).fileName(), QStringLiteral(".ka-survey-gen-")}))
+      return fail(QStringLiteral("만든 조사를 표본 폴더로 옮기지 못했습니다"));
+    // The saving PC is gone: absolute paths into it must not resolve any more.
+    if (!otherPc.remove())
+      qWarning().noquote() << "compat: could not delete the simulated saving PC folder" << otherPc.path();
+    return true;
+  }
+
   // 예전 판 앱이 저장한 조사가 지금 판에서 열려야 한다. tests/data/compat/<판 날짜>/ 는 그 판의
   // 앱 코드로 저장한 합성 조사다(실제 유적 자료 없음). manifest.ini 에 그 판이 저장한 레이어·
   // 조사구역 도형 수·도면 수를 적어 두었다. 앱을 고쳐 이 시험이 깨지면, 포터블을 새 판으로
   // 바꿨을 때 예전 작업이 안 열리게 된 것이다. KA_COMPAT_DIR 로 다른 표본 폴더를 줄 수 있다.
+  // 표본 조사 파일(.gpkg)이 저장소에 없으면(2026-09-22 표본은 .gitignore 에 걸려 잃었다) 그 판의
+  // 저장 모양대로 다시 만든다(writeLegacySurvey20260922). 다시 만들 방법이 없는 판이면 원인을 적고 실패한다.
   void oldVersionSurveysStillOpen() {
-    const QString rootPath = qEnvironmentVariableIsEmpty("KA_COMPAT_DIR")
-                                 ? QStringLiteral("tests/data/compat")
-                                 : qEnvironmentVariable("KA_COMPAT_DIR");
+    QString rootPath = qEnvironmentVariableIsEmpty("KA_COMPAT_DIR")
+                           ? QStringLiteral("tests/data/compat")
+                           : qEnvironmentVariable("KA_COMPAT_DIR");
+    // ctest runs from the source root; a direct run from the build folder finds the data next to this file.
+    if (qEnvironmentVariableIsEmpty("KA_COMPAT_DIR") && !QDir(rootPath).exists())
+      rootPath = QFINDTESTDATA("data/compat");
     const QDir root(rootPath);
     QVERIFY2(root.exists(), qPrintable(QStringLiteral("호환 표본 폴더가 없습니다: ") + root.absolutePath()));
     const QStringList versions = root.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
@@ -3879,6 +4385,17 @@ private slots:
       QSettings manifest(QDir(work.path()).filePath(QStringLiteral("manifest.ini")), QSettings::IniFormat);
       const QString survey = QDir(work.path()).filePath(QStringLiteral("survey/") +
                                                         manifest.value(QStringLiteral("survey")).toString());
+      if (!QFileInfo::exists(survey)) {
+        QVERIFY2(version == QLatin1String("2026-09-22"),
+                 qPrintable(version + QStringLiteral(": 표본 조사 파일이 저장소에 없습니다(") + survey +
+                            QStringLiteral("). .gitignore 의 tests/data/compat 예외와 커밋을 확인하세요.")));
+        QString why;
+        QVERIFY2(writeLegacySurvey20260922(QDir(work.path()).filePath(QStringLiteral("survey")), survey, &why),
+                 qPrintable(version + QStringLiteral(": 표본 조사 파일이 없고 그 판의 저장 모양으로 다시 만들지도 "
+                                                     "못했습니다: ") + why));
+        QVERIFY2(QFileInfo::exists(survey), qPrintable(version + QStringLiteral(": 다시 만든 조사 파일이 없습니다")));
+        qInfo().noquote() << version << "compat survey regenerated in the 2026-09-22 storage layout";
+      }
       const qint64 areaCount = manifest.value(QStringLiteral("survey_area")).toLongLong();
       const int layouts = manifest.value(QStringLiteral("layouts")).toInt();
       const QStringList layers = manifest.value(QStringLiteral("layers")).toStringList();
@@ -3925,6 +4442,72 @@ private slots:
       QCoreApplication::processEvents();
       check(QStringLiteral("새 판 저장 뒤 다시 열기"));
       if (QTest::currentTestFailed()) return;
+      QgsProject::instance()->setDirty(false);
+    }
+  }
+
+  // F141: samples/ holds practice surveys a new user opens by hand (never at startup). They
+  // must open like any survey, in EPSG:5186, with the documented contents, and the bad sample
+  // must really fail the submit checklist (samples/*/README.md).
+  void samplesOpenAsSurveys() {
+    QString samples = QStringLiteral("samples");
+    if (!QDir(samples).exists()) samples = QFINDTESTDATA("../samples");
+    QVERIFY2(QDir(samples).exists(), "samples 폴더가 없습니다");
+    QString rules = QStringLiteral("data/rules/drawing_checklist.v1.json");
+    if (!QFileInfo::exists(rules)) rules = QFINDTESTDATA("../data/rules/drawing_checklist.v1.json");
+    struct Expect {
+      QString file;
+      QList<QPair<QString, qint64>> counts;
+      QStringList mustPass;
+      QStringList mustFail;
+    };
+    const QList<Expect> expects{
+        {QStringLiteral("demo_survey/demo.gpkg"),
+         {{QStringLiteral("survey_area"), 1}, {QStringLiteral("feature_poly"), 2}, {QStringLiteral("feature_line"), 1},
+          {QStringLiteral("section_line"), 1}, {QStringLiteral("control_points"), 2},
+          {QStringLiteral("artifact_point"), 1}, {QStringLiteral("trial_trench"), 1}},
+         {QStringLiteral("GCP_MIN_TWO"), QStringLiteral("GCP_DATUM_META"), QStringLiteral("GCP_ELLIPSOID_META"),
+          QStringLiteral("GCP_PROJECTION_META"), QStringLiteral("FEATURE_LEGEND_FIELDS"),
+          QStringLiteral("GEOMETRY_VALID"), QStringLiteral("SURVEY_POLYGON_ONLY")},
+         {}},
+        {QStringLiteral("bad_survey/bad.gpkg"),
+         {{QStringLiteral("survey_area"), 1}, {QStringLiteral("feature_poly"), 1}, {QStringLiteral("control_points"), 0}},
+         {QStringLiteral("GEOMETRY_VALID")},
+         {QStringLiteral("GCP_MIN_TWO"), QStringLiteral("FEATURE_LEGEND_FIELDS")}},
+    };
+    ChecklistEngine engine;
+    QVERIFY2(engine.loadRules(rules), qPrintable(rules));
+    for (const Expect& expect : expects) {
+      // Work on a copy: opening and closing may touch the file, the sample must stay as shipped.
+      QTemporaryDir work;
+      QVERIFY(work.isValid());
+      const QString copy = work.filePath(QFileInfo(expect.file).fileName());
+      QVERIFY2(QFile::copy(QDir(samples).filePath(expect.file), copy), qPrintable(expect.file));
+      QFile::setPermissions(copy, QFile::permissions(copy) | QFileDevice::WriteOwner);
+      MainWindow window;
+      disableRendering(window);
+      QVERIFY2(window.openSurveyGpkg(copy), qPrintable(expect.file + QStringLiteral(": 조사로 열리지 않습니다")));
+      QCoreApplication::processEvents();
+      for (const auto& [key, count] : expect.counts) {
+        auto* layer = LayerOps::findByLayerKey(QgsProject::instance(), key);
+        if (count == 0) {
+          QVERIFY2(!layer || layer->featureCount() == 0, qPrintable(expect.file + QStringLiteral(" ") + key));
+          continue;
+        }
+        QVERIFY2(layer && layer->isValid(), qPrintable(expect.file + QStringLiteral(": ") + key + QStringLiteral(" 없음")));
+        QCOMPARE(layer->featureCount(), count);
+        QCOMPARE(layer->crs().authid(), QStringLiteral("EPSG:5186"));
+      }
+      const QVector<CheckResult> results = engine.evaluate(ProjectStateBuilder::fromProject(QgsProject::instance()));
+      const auto passed = [&results](const QString& id) {
+        for (const CheckResult& result : results)
+          if (result.id == id) return result.passed;
+        return false;
+      };
+      for (const QString& id : expect.mustPass)
+        QVERIFY2(passed(id), qPrintable(expect.file + QStringLiteral(": ") + id + QStringLiteral(" 가 통과해야 합니다")));
+      for (const QString& id : expect.mustFail)
+        QVERIFY2(!passed(id), qPrintable(expect.file + QStringLiteral(": ") + id + QStringLiteral(" 가 막아야 합니다")));
       QgsProject::instance()->setDirty(false);
     }
   }
@@ -4838,7 +5421,7 @@ private slots:
     QVERIFY(!path.isEmpty());
     MainWindow window;
     disableRendering(window);
-    QVERIFY(window.openSurveyGpkg(path));
+    QVERIFY(openSettled(window, path));
     auto* project = QgsProject::instance();
     auto* layer = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
     QVERIFY(layer && layer->startEditing());
@@ -4914,7 +5497,7 @@ private slots:
     QVERIFY(!path.isEmpty());
     MainWindow window;
     disableRendering(window);
-    QVERIFY(window.openSurveyGpkg(path));
+    QVERIFY(openSettled(window, path));
     auto* project = QgsProject::instance();
     auto* reference = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5186&field=note:string"),
                                         QStringLiteral("현장참고점"), QStringLiteral("memory"));
@@ -4941,7 +5524,7 @@ private slots:
     const bool closed = window.close();
     choose.stop();
     QVERIFY(prompted && closed);
-    QVERIFY(window.openSurveyGpkg(path));
+    QVERIFY(openSettled(window, path));
     reference = qobject_cast<QgsVectorLayer*>(project->mapLayer(referenceId));
     QVERIFY(reference && reference->isValid());
     QVERIFY(LayerOps::isReferenceLayer(reference));

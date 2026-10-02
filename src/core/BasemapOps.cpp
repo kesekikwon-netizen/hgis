@@ -1,6 +1,11 @@
 #include "KaSessionLog.h"
+#include "KaLogExcept.h"
 #include "LayerOps.h"
 #include "LayerOpsInternal.h"
+#include "ReferenceKind.h"
+#include "BasemapPolicy.h"
+#include "BasemapDsm.h"
+#include "BasemapExtentCache.h"
 #include "LayerLabelControls.h"
 #include "DemPresentation.h"
 #include "DemColorRampLegend.h"
@@ -109,9 +114,10 @@ static void applyKaNetworkHeaders(QNetworkRequest* req) {
   if (!req) return;
   req->setHeader(QNetworkRequest::UserAgentHeader,
                  QStringLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ka-hgis/0.3 QGIS"));
-  const QString host = req->url().host();
-  if (host.contains(QLatin1String("vworld.kr"), Qt::CaseInsensitive))
-    req->setRawHeader("Referer", "https://localhost");
+  // VWorld authenticates keys by Referer; no other provider is sent one (F059).
+  const QString referer = BasemapPolicy::refererForUrl(req->url().toString());
+  if (!referer.isEmpty())
+    req->setRawHeader("Referer", referer.toLatin1());
   const QUrl fixed = SoilMapService::rewriteArcGisCacheUrl(req->url());
   if (fixed != req->url())
     req->setUrl(fixed);
@@ -204,6 +210,32 @@ void LayerOps::knockOutProjectRasterPaper(QgsProject* project) {
     knockOutRasterPaper(qobject_cast<QgsRasterLayer*>(ml));
 }
 
+// Our own satellite background (F035), by the same identity rule every lookup uses:
+// a layer tagged satellite, or — in a project saved before tagging — an untagged
+// reference/background layer that ReferenceKind accepts by its old title ("위성",
+// "VWorld 위성", "Google 위성"; a folded "…위성…" only for live tiles). A user raster such as
+// "위성사진_판독" is neither, so it is never pruned, replaced or re-stacked with ours.
+static bool isSatelliteBackground(const QgsMapLayer* l) {
+  if (!l) return false;
+  const QString kind = ReferenceKind::of(l);
+  if (!kind.isEmpty()) return kind == QLatin1String(ReferenceKind::kSatellite);
+  if (!LayerOps::isReferenceOrBasemapLayer(l)) return false;
+  // An offline pack saved before tagging ("VWorld 위성 (오프라인)") is a copy, not a duplicate.
+  if (l->source().contains(QLatin1String(".mbtiles"), Qt::CaseInsensitive)) return false;
+  return ReferenceKind::matchesLegacy(l, QString::fromLatin1(ReferenceKind::kSatellite));
+}
+
+// Satellite background or its offline copy: both stay at the bottom and stay shown in the
+// surface-survey view. A user layer that merely has 위성 in its title is neither.
+static bool isSatelliteImagery(const QgsMapLayer* l) {
+  if (isSatelliteBackground(l)) return true;
+  if (!l || !l->name().contains(QStringLiteral("위성"))) return false;
+  const QString kind = ReferenceKind::of(l);
+  if (!kind.isEmpty()) return kind == QLatin1String(ReferenceKind::kTilePack);
+  return LayerOps::isReferenceOrBasemapLayer(l) &&
+         l->source().contains(QLatin1String(".mbtiles"), Qt::CaseInsensitive);
+}
+
 void LayerOps::pruneDuplicateSatelliteLayers(QgsProject* project) {
   if (!project) return;
   static bool inPrune = false;
@@ -217,23 +249,26 @@ void LayerOps::pruneDuplicateSatelliteLayers(QgsProject* project) {
   // 1. 프로젝트 맵 레이어 중 "위성" 배경지도 목록 수집.
   //    이름만 보고 지우면 사용자가 들여온 "위성사진_판독" 같은 조사 레이어까지
   //    같이 지워졌다. 여기서 지워도 되는 것은 우리가 올린 참조/배경 레이어뿐이다.
+  //    An offline tile pack (tile_pack) is a separate copy and is never pruned. Only what
+  //    isSatelliteBackground identifies as ours is removed; a layer that merely has 위성
+  //    in its title (the user's data, F035) stays.
   QList<QgsMapLayer*> satLayers;
   for (QgsMapLayer* l : project->mapLayers()) {
-    if (!l) continue;
-    if (!isReferenceOrBasemapLayer(l)) continue;
-    const QString n = l->name();
-    if (n.contains(QStringLiteral("위성")) ||
-        n.contains(QStringLiteral("Satellite"), Qt::CaseInsensitive)) {
-      satLayers.append(l);
-    }
+    if (isSatelliteBackground(l)) satLayers.append(l);
   }
 
-  // 2. 위성 레이어가 2개 이상이면 유효한 1개(keep)만 남기고 나머지 project에서 안전하게 제거
+  // 2. 위성 레이어가 2개 이상이면 유효한 1개(keep)만 남기고 나머지 project에서 안전하게 제거.
+  //    Keep the one shown in the legend (a title lookup reported every satellite as shown).
+  QgsLayerTree* treeRoot = project->layerTreeRoot();
+  const auto shown = [treeRoot](const QgsMapLayer* l) {
+    const QgsLayerTreeLayer* node = treeRoot ? treeRoot->findLayer(l->id()) : nullptr;
+    return node && node->isVisible();
+  };
   QgsMapLayer* keep = nullptr;
   if (!satLayers.isEmpty()) {
     for (QgsMapLayer* l : satLayers) {
       if (l && l->isValid()) {
-        if (!keep || isLayerVisible(project, l->name())) {
+        if (!keep || shown(l)) {
           keep = l;
         }
       }
@@ -316,6 +351,7 @@ void LayerOps::ensureSatelliteAtBottom(QgsProject* project) {
   pruneDuplicateSatelliteLayers(project);
   QgsLayerTree* root = project->layerTreeRoot();
   if (!root) return;
+  // Satellite background and its offline pack sink to the bottom; a user layer does not.
   auto moveSatellites = [](QgsLayerTreeGroup* group) {
     QStringList backgroundIds;
     for (QgsLayerTreeNode* child : group->children()) {
@@ -331,7 +367,7 @@ void LayerOps::ensureSatelliteAtBottom(QgsProject* project) {
     QStringList ids;
     for (QgsLayerTreeNode* child : group->children()) {
       auto* node = qobject_cast<QgsLayerTreeLayer*>(child);
-      if (node && node->layer() && node->name().contains(QStringLiteral("위성")))
+      if (node && isSatelliteImagery(node->layer()))
         ids.append(node->layerId());
     }
     for (const QString& id : ids) {
@@ -550,7 +586,7 @@ bool LayerOps::zoomToLayerMax(QgsMapCanvas* canvas, QgsMapLayer* layer) {
       xf.setBallparkTransformsAreAppropriate(true);
       ext = xf.transformBoundingBox(ext);
     } catch (...) {
-      KaSessionLog::line(QStringLiteral("[except] core/LayerOps.cpp:3122"));
+      KA_LOG_EXCEPT();
       if (qobject_cast<QgsRasterLayer*>(layer)) {
         zoomCanvasToWorkingScale(canvas, mapAuth, 50000.0);
         refreshCanvasIfIdle(canvas);
@@ -632,7 +668,7 @@ bool LayerOps::zoomToProjectDataLayers(QgsMapCanvas* canvas, QgsProject* project
         xf.setBallparkTransformsAreAppropriate(true);
         ext = xf.transformBoundingBox(ext);
       } catch (...) {
-        KaSessionLog::line(QStringLiteral("[except] core/LayerOps.cpp:3196"));
+        KA_LOG_EXCEPT();
         continue;
       }
     }
@@ -713,6 +749,7 @@ QgsVectorLayer* LayerOps::upsertAdminEmdMask(QgsProject* project, const QgsGeome
       return nullptr;
     }
     markReferenceLayer(layer);
+    ReferenceKind::tag(layer, QString::fromLatin1(ReferenceKind::kAdminMask));
     layer->setCustomProperty(QStringLiteral("ka_hgis/admin_emd"), true);
     project->addMapLayer(layer, true);
   } else if (!titleKo.isEmpty()) {
@@ -747,21 +784,17 @@ QgsVectorLayer* LayerOps::upsertAdminEmdMask(QgsProject* project, const QgsGeome
   return layer;
 }
 
-static bool isSatelliteLegendLayer(const QgsMapLayer* layer) {
-  if (!layer) return false;
-  return layer->name().contains(QStringLiteral("위성"));
-}
-
 bool LayerOps::isolateSurfaceSurveyView(QgsProject* project, QgsMapCanvas* canvas,
                                         QgsMapLayer* siteLayer) {
   if (!project) return false;
   QgsLayerTree* root = project->layerTreeRoot();
   if (!root) return false;
+  // Our satellite (and its offline copy) by identity, not every title with 위성 (F035).
   for (QgsMapLayer* l : project->mapLayers()) {
     if (!l) continue;
     QgsLayerTreeLayer* n = root->findLayer(l->id());
     if (!n) continue;
-    const bool show = isSatelliteLegendLayer(l) || isAdminEmdLayer(l) || l == siteLayer ||
+    const bool show = isSatelliteImagery(l) || isAdminEmdLayer(l) || l == siteLayer ||
                       (siteLayer == nullptr && isImportedSiteLayer(l));
     n->setItemVisibilityChecked(show);
   }
@@ -795,7 +828,7 @@ static QString friendlyBasemapError(const QString& raw) {
   if (isFatalVworldAuthError(r) ||
       r.contains(QStringLiteral("InvalidParameterValue"), Qt::CaseInsensitive)) {
     return QStringLiteral(
-        "등록되지 않은 VWorld 키입니다. 도움말 → VWorld API 키 설정에서 확인하세요.");
+        "등록되지 않은 VWorld 키입니다. 리본의 더보기 → API 키 입력에서 키를 확인하세요.");
   }
   return r;
 }
@@ -815,13 +848,30 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
     return false;
   }
   LayerOps::ensureTileNetworkIdentity();
+  const bool cadastralPicture = name.contains(QStringLiteral("지적"));
+  // Logical identity of the new layer (F035). 본번/부번 pictures share a kind but stay
+  // separate layers, so for them the title still has to match.
+  const QString kind = cadastralPicture ? QString::fromLatin1(ReferenceKind::kCadastralPicture)
+                                        : ReferenceKind::forTitle(name);
 
   {
+    // Replace only our own previous copy: the same kind (even if the user renamed it), or
+    // an untagged tile/VWorld layer of the same title from an older project. A user layer
+    // with a similar name ("위성사진_판독", downloaded 지적도) is left alone.
     QStringList removeIds;
     for (QgsMapLayer* old : project->mapLayers()) {
       if (!old) continue;
-      const QString n = old->name();
-      if (legendTitlesMatch(n, name))
+      const QString oldKind = ReferenceKind::of(old);
+      const bool sameTitle = legendTitlesMatch(old->name(), name);
+      bool ours = false;
+      if (!oldKind.isEmpty())
+        ours = !kind.isEmpty() && oldKind == kind && (!cadastralPicture || sameTitle);
+      else
+        ours = sameTitle && LayerOps::layerKeyOf(old).isEmpty() &&
+               !old->source().contains(QLatin1String(".mbtiles"), Qt::CaseInsensitive) &&
+               (LayerOps::isBasemapLayer(old) ||  // live tiles, or our GDAL_WMS cadastral XML
+                old->source().contains(QLatin1String("vworld-cadastral"), Qt::CaseInsensitive));
+      if (ours)
         removeIds.append(old->id());
     }
     for (const QString& id : removeIds)
@@ -839,11 +889,11 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
     return false;
   }
   tuneBasemapLayer(rl, crispText);
-  const bool cadastralPicture = name.contains(QStringLiteral("지적"));
   if (cadastralPicture)
     LayerOps::markCadastralLayer(rl);
   else
     LayerOps::markReferenceLayer(rl);
+  ReferenceKind::tag(rl, kind);
   QgsMapLayer* added = project->addMapLayer(rl, false);
   if (!added) {
     if (errorOut)
@@ -947,9 +997,22 @@ static bool requireVworldKey(const QString& apiKey, QString* errorOut) {
   if (!apiKey.trimmed().isEmpty()) return true;
   if (errorOut) {
     *errorOut = QStringLiteral(
-        "VWorld API 키가 없습니다. 도움말 → VWorld API 키 설정에서 키를 입력하세요.");
+        "VWorld API 키가 없습니다. 리본의 더보기 → API 키 입력에서 키를 넣으세요.");
   }
   return false;
+}
+
+// Moves the layer just added under `title` into 참조 지도, by its reference kind so a user
+// layer with a similar title stays where it is (F035).
+static void placeKindInReferenceGroup(QgsProject* project, const QString& title) {
+  if (!project) return;
+  const QString kind = ReferenceKind::forTitle(title);
+  const auto layers = project->mapLayers();
+  for (QgsMapLayer* l : layers) {
+    const bool ours = kind.isEmpty() ? (l && legendTitlesMatchDirect(l->name(), title))
+                                     : ReferenceKind::is(l, kind);
+    if (ours) LayerOps::placeInLegendGroup(project, l, QStringLiteral("참조 지도"));
+  }
 }
 
 static bool addBasemapWithFallbacks(QgsProject* project, QgsMapCanvas* canvas,
@@ -1063,7 +1126,8 @@ bool LayerOps::addVworldSatelliteMap(QgsProject* project, QgsMapCanvas* canvas, 
   if (!project) return false;
   pruneDuplicateSatelliteLayers(project);
   for (QgsMapLayer* l : project->mapLayers()) {
-    if (l && l->isValid() && l->name().contains(QStringLiteral("위성"))) {
+    // Only our satellite counts as "already there"; a user raster named 위성… does not.
+    if (l && l->isValid() && isSatelliteBackground(l)) {
       ensureSatelliteAtBottom(project);
       if (canvas) {
         const QString workAuth = project->crs().isValid()
@@ -1222,6 +1286,7 @@ static bool addGdalVworldCadastral(QgsProject* project, QgsMapCanvas* canvas, co
   // OTF only works if the layer CRS is the server CRS (3857), not the work CRS.
   rl->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:3857")));
   LayerOps::markCadastralLayer(rl);
+  ReferenceKind::tag(rl, QString::fromLatin1(ReferenceKind::kCadastralPicture));
   rl->setOpacity(1.0);
   QgsMapLayer* added = project->addMapLayer(rl, false);
   if (!added) {
@@ -1287,9 +1352,13 @@ bool LayerOps::addVworldCadastralMap(QgsProject* project, QgsMapCanvas* canvas, 
     for (QgsMapLayer* l : project->mapLayers()) {
       if (!l) continue;
       const QString n = l->name();
-      const bool vworldCad = (n.contains(QStringLiteral("VWorld")) && n.contains(QStringLiteral("지적"))) ||
-                             n == QLatin1String("지적") || n.startsWith(QLatin1String("지적 본번")) ||
-                             n.startsWith(QLatin1String("지적 부번")) || n.startsWith(QLatin1String("지적("));
+      // VWorld pictures by identity (F035): a downloaded 지적도 titled "지적" keeps its own CRS.
+      // (The former QLatin1String("지적…") title checks compared UTF-8 bytes as Latin-1 and
+      // never matched.) Untagged pictures from older projects still carry "VWorld" in the title.
+      const QString kind = ReferenceKind::of(l);
+      const bool vworldCad = kind == QLatin1String(ReferenceKind::kCadastralPicture) ||
+                             (kind.isEmpty() && n.contains(QStringLiteral("VWorld")) &&
+                              n.contains(QStringLiteral("지적")));
       if (vworldCad)
         l->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:3857")));
     }
@@ -1437,10 +1506,7 @@ bool LayerOps::addHistoryGisMap1919(QgsProject* project, QgsMapCanvas* canvas, c
   };
   if (!addBasemapWithFallbacks(project, canvas, uris, name, errorOut))
     return false;
-  for (QgsMapLayer* l : project->mapLayers()) {
-    if (l && legendTitlesMatch(l->name(), name))
-      LayerOps::placeInLegendGroup(project, l, QStringLiteral("참조 지도"));
-  }
+  placeKindInReferenceGroup(project, name);
   return true;
 }
 
@@ -1470,10 +1536,7 @@ bool LayerOps::addDaedongyeojidoMap(QgsProject* project, QgsMapCanvas* canvas, Q
   };
   if (!addBasemapWithFallbacks(project, canvas, uris, name, errorOut))
     return false;
-  for (QgsMapLayer* l : project->mapLayers()) {
-    if (l && legendTitlesMatch(l->name(), name))
-      LayerOps::placeInLegendGroup(project, l, QStringLiteral("참조 지도"));
-  }
+  placeKindInReferenceGroup(project, name);
   return true;
 }
 
@@ -1493,18 +1556,35 @@ bool LayerOps::addElevationHillshadeMap(QgsProject* project, QgsMapCanvas* canva
   };
   if (!addBasemapWithFallbacks(project, canvas, uris, name, errorOut))
     return false;
-  for (QgsMapLayer* l : project->mapLayers()) {
-    if (l && legendTitlesMatch(l->name(), name))
-      LayerOps::placeInLegendGroup(project, l, QStringLiteral("참조 지도"));
-  }
+  placeKindInReferenceGroup(project, name);
   return true;
 }
 
-static void removeLayersNamed(QgsProject* project, const QString& name) {
+// An earlier copy of the same offline pack: the same file, or the same title compared
+// directly, so the online satellite ("위성") is never taken for the pack (F035).
+static void removeTilePackCopies(QgsProject* project, const QString& path, const QString& name) {
   if (!project) return;
+  const QString file = QFileInfo(path).absoluteFilePath();
   QStringList ids;
   for (QgsMapLayer* old : project->mapLayers()) {
-    if (old && legendTitlesMatch(old->name(), name))
+    if (!old) continue;
+    const bool sameFile = old->providerType() == QLatin1String("gdal") &&
+                          QFileInfo(old->source()).absoluteFilePath().compare(file, Qt::CaseInsensitive) == 0;
+    if (sameFile || legendTitlesMatchDirect(old->name(), name))
+      ids.append(old->id());
+  }
+  for (const QString& id : ids)
+    project->removeMapLayer(id);
+}
+
+// Our previous layer of `kind`, even when the user renamed it; an untagged layer of the
+// kind's old title for projects saved before tagging.
+static void removeReferenceKind(QgsProject* project, const char* kind) {
+  if (!project) return;
+  const QString wanted = QString::fromLatin1(kind);
+  QStringList ids;
+  for (QgsMapLayer* old : project->mapLayers()) {
+    if (old && ReferenceKind::is(old, wanted))
       ids.append(old->id());
   }
   for (const QString& id : ids)
@@ -1550,7 +1630,7 @@ static bool tryAddCopernicusViewDem(QgsProject* project, QgsMapCanvas* canvas, Q
         const QgsCoordinateTransform tr(canvasCrs, wgs, QgsCoordinateTransformContext());
         wgsExt = tr.transformBoundingBox(ext);
       } catch (...) {
-        KaSessionLog::line(QStringLiteral("[except] core/LayerOps.cpp:4076"));
+        KA_LOG_EXCEPT();
         return false;
       }
     }
@@ -1652,14 +1732,16 @@ static bool tryAddCopernicusViewDem(QgsProject* project, QgsMapCanvas* canvas, Q
         const QgsCoordinateTransform tr(canvasCrs, rl->crs(), QgsCoordinateTransformContext());
         statsExt = tr.transformBoundingBox(ext);
       } catch (...) {
-        KaSessionLog::line(QStringLiteral("[except] core/LayerOps.cpp:4177"));
+        KA_LOG_EXCEPT();
       }
     } else if (rl->crs() == canvasCrs) {
       statsExt = ext;
     }
     LayerOps::applyDemElevationStyle(rl, statsExt);
     LayerOps::markReferenceLayer(rl);
-    removeLayersNamed(project, QStringLiteral("DEM"));
+    // Copernicus GLO-30 is a surface model: say so in the legend and tooltip (F062).
+    BasemapDsm::labelCopernicus(rl);
+    removeReferenceKind(project, ReferenceKind::kDem);
     if (!project->addMapLayer(rl, true)) {
       delete rl;
       return false;
@@ -1668,7 +1750,7 @@ static bool tryAddCopernicusViewDem(QgsProject* project, QgsMapCanvas* canvas, Q
     LayerOps::ensureDemRelief(project, rl);
     return true;
   } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/LayerOps.cpp:4192"));
+    KA_LOG_EXCEPT();
     if (errorOut) *errorOut = QStringLiteral("원격 DEM 접근 중 예외가 발생했습니다.");
     return false;
   }
@@ -1677,11 +1759,10 @@ static bool tryAddCopernicusViewDem(QgsProject* project, QgsMapCanvas* canvas, Q
 bool LayerOps::demCoversCanvas(QgsProject* project, QgsMapCanvas* canvas) {
   if (!project || !canvas) return false;
   QgsRasterLayer* dem = nullptr;
-  for (QgsMapLayer* ml : project->mapLayers()) {
-    if (ml && ml->name() == QLatin1String("DEM")) {
-      dem = qobject_cast<QgsRasterLayer*>(ml);
-      if (dem) break;
-    }
+  // By identity, not title: the DSM layer is titled 「지표모델(DSM) …」 and may be renamed.
+  for (QgsMapLayer* ml : ReferenceKind::find(project, QString::fromLatin1(ReferenceKind::kDem))) {
+    dem = qobject_cast<QgsRasterLayer*>(ml);
+    if (dem) break;
   }
   if (!dem) return false;
   const QString cover = dem->customProperty(QString::fromLatin1(kDemCoverProp)).toString();
@@ -1706,7 +1787,7 @@ bool LayerOps::demCoversCanvas(QgsProject* project, QgsMapCanvas* canvas) {
       const QgsCoordinateTransform tr(canvasCrs, wgs, QgsCoordinateTransformContext());
       ext = tr.transformBoundingBox(ext);
     } catch (...) {
-      KaSessionLog::line(QStringLiteral("[except] core/LayerOps.cpp:4229"));
+      KA_LOG_EXCEPT();
       return true;
     }
   }
@@ -1850,7 +1931,7 @@ bool LayerOps::addTilePackBasemap(QgsProject* project, QgsMapCanvas* canvas, con
     if (errorOut) *errorOut = QStringLiteral("타일팩 파일이 없습니다: %1").arg(path);
     return false;
   }
-  removeLayersNamed(project, name);
+  removeTilePackCopies(project, path, name);
   auto* rl = new QgsRasterLayer(path, name, QStringLiteral("gdal"));
   if (!rl->isValid()) {
     if (errorOut)
@@ -1859,6 +1940,8 @@ bool LayerOps::addTilePackBasemap(QgsProject* project, QgsMapCanvas* canvas, con
     return false;
   }
   markReferenceLayer(rl);
+  // An offline copy is its own layer, never a duplicate satellite to prune (F035).
+  ReferenceKind::tag(rl, QString::fromLatin1(ReferenceKind::kTilePack));
   QgsMapLayer* added = project->addMapLayer(rl, true);
   if (!added) {
     if (errorOut) *errorOut = QStringLiteral("타일팩 레이어를 넣지 못했습니다.");
@@ -1898,7 +1981,8 @@ bool LayerOps::addDemElevationRaster(QgsProject* project, QgsMapCanvas* canvas, 
   LayerOps::applyDemElevationStyle(rl);
   LayerOps::markReferenceLayer(rl);
   LayerOps::applyLegendCrsLabel(rl);
-  removeLayersNamed(project, QStringLiteral("DEM"));
+  ReferenceKind::tag(rl, QString::fromLatin1(ReferenceKind::kDem));
+  removeReferenceKind(project, ReferenceKind::kDem);
   if (!project->addMapLayer(rl, true)) {
     delete rl;
     if (errorOut) *errorOut = QStringLiteral("DEM 레이어를 넣지 못했습니다.");
@@ -1927,7 +2011,7 @@ QgsRasterLayer* LayerOps::ensureDemRelief(QgsProject* project, QgsRasterLayer* d
   }
   const QString title = QStringLiteral("지형 음영");
   QgsRasterLayer* shade = nullptr;
-  for (auto* candidate : project->mapLayersByName(title)) {
+  for (auto* candidate : ReferenceKind::find(project, QString::fromLatin1(ReferenceKind::kDemRelief))) {
     if (auto* raster = qobject_cast<QgsRasterLayer*>(candidate)) { shade = raster; break; }
   }
   const bool enabled = demLayer->customProperty(QStringLiteral("ka_hgis/dem_relief_enabled"), true).toBool();
@@ -1968,6 +2052,7 @@ QgsRasterLayer* LayerOps::ensureDemRelief(QgsProject* project, QgsRasterLayer* d
   shade->setOpacity(std::clamp(strength, 0., .80));
   shade->setCustomProperty(QStringLiteral("ka_hgis/omit_sheet_legend"), true);
   markReferenceLayer(shade);
+  ReferenceKind::tag(shade, QString::fromLatin1(ReferenceKind::kDemRelief));
   if (created && !project->addMapLayer(shade, false)) { delete shade; return nullptr; }
   auto* root = project->layerTreeRoot();
   auto* demNode = root->findLayer(demLayer->id());
@@ -2025,10 +2110,7 @@ bool LayerOps::addDemColorReliefMap(QgsProject* project, QgsMapCanvas* canvas, Q
   };
   if (!addBasemapWithFallbacks(project, canvas, uris, name, errorOut))
     return false;
-  for (QgsMapLayer* l : project->mapLayers()) {
-    if (l && legendTitlesMatch(l->name(), name))
-      LayerOps::placeInLegendGroup(project, l, QStringLiteral("참조 지도"));
-  }
+  placeKindInReferenceGroup(project, name);
   return true;
 }
 
@@ -2126,6 +2208,7 @@ QgsVectorLayer* LayerOps::addSoilShapefile(QgsProject* project, QgsMapCanvas* ca
   applySoilCategoryStyle(layer, categoryField.trimmed());
 
   LayerOps::markReferenceLayer(layer);
+  ReferenceKind::tag(layer, QString::fromLatin1(ReferenceKind::kSoil));
   LayerOps::applyLegendCrsLabel(layer);
   if (!project->addMapLayer(layer, true)) {
     delete layer;
@@ -2144,13 +2227,26 @@ QgsVectorLayer* LayerOps::addSoilShapefile(QgsProject* project, QgsMapCanvas* ca
   return layer;
 }
 
+// Layers a ribbon/menu title refers to (F035).
+// - Titles of our reference layers ("DEM", "지형맵", "VWorld 위성", "지질도(KIGAM 1:5만)" …)
+//   resolve to ka_hgis/reference_kind: a renamed layer still answers, and a user layer with
+//   a similar title ("위성사진_판독") never does. Untagged layers from older projects are
+//   found by the kind's old title (ReferenceKind::find).
+// - Any other title is an exact legend title (apart from the " [EPSG:…]" suffix). Only when
+//   no layer has it, the folded short title ("지적" for "VWorld 지적 본번") is tried, and
+//   then only on reference/background layers, never on survey or imported user layers.
 static QList<QgsMapLayer*> layersMatchingBaseName(QgsProject* project, const QString& name) {
   QList<QgsMapLayer*> out;
   if (!project) return out;
-  for (QgsMapLayer* l : project->mapLayers()) {
-    if (!l) continue;
-    const QString n = l->name();
-    if (legendTitlesMatch(n, name))
+  const QString kind = ReferenceKind::forTitle(name);
+  if (!kind.isEmpty()) return ReferenceKind::find(project, kind);
+  const auto layers = project->mapLayers();
+  for (QgsMapLayer* l : layers) {
+    if (l && legendTitlesMatchDirect(l->name(), name)) out.append(l);
+  }
+  if (!out.isEmpty()) return out;
+  for (QgsMapLayer* l : layers) {
+    if (l && LayerOps::isReferenceOrBasemapLayer(l) && legendTitlesMatch(l->name(), name))
       out.append(l);
   }
   return out;
@@ -2168,17 +2264,6 @@ bool LayerOps::setLayerOpacity(QgsProject* project, QgsMapCanvas* canvas, const 
     }
   }
   refreshCanvasIfIdle(canvas);
-  return true;
-}
-
-bool LayerOps::setMapLayerOpacity(QgsMapLayer* layer, double opacity, QgsMapCanvas* canvas) {
-  if (!layer || !isReferenceOrBasemapLayer(layer)) return false;
-  const double op = qBound(0.0, opacity, 1.0);
-  layer->setOpacity(op);
-  layer->triggerRepaint();
-  if (canvas) {
-    refreshCanvasIfIdle(canvas);
-  }
   return true;
 }
 
@@ -2284,7 +2369,7 @@ bool LayerOps::addKoreaBasemap(QgsProject* project, QgsMapCanvas* canvas, KoreaB
   }
 }
 
-QgsRectangle LayerOps::koreaExtentForCrs(const QString& epsgAuthId) {
+static QgsRectangle computeKoreaExtentForCrs(const QString& epsgAuthId) {
   const QgsCoordinateReferenceSystem wgs(QStringLiteral("EPSG:4326"));
   const QgsCoordinateReferenceSystem dest(epsgAuthId);
   const QgsRectangle krWgs(124.5, 33.0, 132.0, 39.5);
@@ -2293,12 +2378,18 @@ QgsRectangle LayerOps::koreaExtentForCrs(const QString& epsgAuthId) {
     const QgsCoordinateTransform xf(wgs, dest, QgsCoordinateTransformContext());
     return xf.transformBoundingBox(krWgs);
   } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/LayerOps.cpp:4861"));
+    KA_LOG_EXCEPT();
     return QgsRectangle();
   }
 }
 
-QgsRectangle LayerOps::satelliteFillExtentForCrs(const QString& epsgAuthId) {
+// Cached per destination CRS: clampCanvasToKorea asks on every pan and wheel zoom (F205).
+QgsRectangle LayerOps::koreaExtentForCrs(const QString& epsgAuthId) {
+  return BasemapExtentCache::get(BasemapExtentCache::Table::Korea, epsgAuthId,
+                                 [&epsgAuthId] { return computeKoreaExtentForCrs(epsgAuthId); });
+}
+
+static QgsRectangle computeSatelliteFillExtentForCrs(const QString& epsgAuthId) {
   const QgsCoordinateReferenceSystem wgs(QStringLiteral("EPSG:4326"));
   const QgsCoordinateReferenceSystem merc(QStringLiteral("EPSG:3857"));
   const QgsCoordinateReferenceSystem dest(epsgAuthId);
@@ -2326,9 +2417,14 @@ QgsRectangle LayerOps::satelliteFillExtentForCrs(const QString& epsgAuthId) {
       return toDest.transformBoundingBox(mercRect);
     return QgsRectangle(xMin, yMin, xMax, yMax);
   } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/LayerOps.cpp:4893"));
-    return koreaExtentForCrs(epsgAuthId);
+    KA_LOG_EXCEPT();
+    return LayerOps::koreaExtentForCrs(epsgAuthId);
   }
+}
+
+QgsRectangle LayerOps::satelliteFillExtentForCrs(const QString& epsgAuthId) {
+  return BasemapExtentCache::get(BasemapExtentCache::Table::SatelliteFill, epsgAuthId,
+                                 [&epsgAuthId] { return computeSatelliteFillExtentForCrs(epsgAuthId); });
 }
 
 void LayerOps::applyKoreaMapLimits(QgsProject* project, QgsMapCanvas* canvas) {
@@ -2441,7 +2537,7 @@ void LayerOps::zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId, bool
                                         destCrs, QgsCoordinateTransformContext());
         ext = xf.transformBoundingBox(ext);
       } catch (...) {
-        KaSessionLog::line(QStringLiteral("[except] core/LayerOps.cpp:5007"));
+        KA_LOG_EXCEPT();
       }
     }
   }

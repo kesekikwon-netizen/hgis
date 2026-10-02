@@ -1,25 +1,53 @@
 #include "FeaturePresets.h"
 
-#include <QFile>
-#include <QDir>
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QJsonArray>
-#include <QColor>
 
-#include <qgis.h>
-#include <qgsvectorlayer.h>
-#include <qgsfeature.h>
-#include <qgsfields.h>
-#include <qgssymbol.h>
-#include <qgsfillsymbol.h>
-#include <qgslinesymbol.h>
-#include <qgsmarkersymbol.h>
-#include <qgssymbollayer.h>
-#include <qgsproperty.h>
-#include <qgscategorizedsymbolrenderer.h>
-#include <qgsrenderer.h>
+namespace {
+struct BuiltInKind {
+  const char* id;
+  const char* label;
+  const char* pattern;
+  const char* line;
+  const char* marker;
+};
+// Same values as data/styles/feature_presets.json (tests/test_presets.cpp compares them).
+constexpr BuiltInKind kBuiltInKinds[] = {
+    {"house", "주거지", "none", "solid", "square"},
+    {"pit", "수혈", "bdiagonal", "0.6;1.2", "circle"},
+    {"ditch", "구", "horizontal", "3;1.5", "diamond"},
+    {"gully", "도랑", "vertical", "3;1.2;0.6;1.2", "cross_fill"},
+    {"tomb", "분묘", "fdiagonal", "3;1.2;0.6;1.2;0.6;1.2", "triangle"},
+    {"kiln", "가마", "cross", "7;1.5", "star"},
+    {"artifact", "유물", "diagcross", "1.5;1.5", "pentagon"},
+    {"other", "기타", "dots", "7;1.2;0.6;1.2", "hexagon"},
+};
+
+struct BuiltInPeriod {
+  const char* id;
+  const char* label;
+  const char* color;
+};
+// Oldest first. Lightness rises monotonically (dark brown -> pale green), so periods stay
+// apart in black-and-white print and under protan/deutan/tritan simulation, and the
+// colours keep away from the survey default and heritage colours.
+constexpr BuiltInPeriod kBuiltInPeriods[] = {
+    {"paleolithic", "구석기", "#53291B"},    {"neolithic", "신석기", "#674028"},
+    {"bronze", "청동기", "#7A5737"},         {"early_iron", "초기철기", "#8B7048"},
+    {"proto_three", "원삼국", "#9C8A5B"},    {"three_kingdoms", "삼국", "#ABA571"},
+    {"unified_silla", "통일신라", "#BAC08A"}, {"goryeo", "고려", "#C7DCA6"},
+    {"joseon", "조선", "#D3F8C4"},           {"unknown", "미정", "none"},
+};
+
+QString validColor(const QString& text) {
+  const QString t = text.trimmed();
+  return QColor(t).isValid() ? t : QStringLiteral("none");
+}
+}  // namespace
 
 FeaturePresets& FeaturePresets::instance() {
   static FeaturePresets s;
@@ -32,44 +60,78 @@ bool FeaturePresets::load(const QString& jsonPath) {
   const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
   if (!doc.isObject()) return false;
   const QJsonObject root = doc.object();
-  m_kinds.clear();
-  m_periods.clear();
+  QVector<Kind> kinds;
+  QVector<Period> periods;
   for (const QJsonValue& v : root.value(QStringLiteral("kinds")).toArray()) {
     const QJsonObject o = v.toObject();
     Kind k;
     k.id = o.value(QStringLiteral("id")).toString();
-    k.label = o.value(QStringLiteral("label")).toString();
-    k.pattern = o.value(QStringLiteral("pattern")).toString(QStringLiteral("solid"));
+    k.label = o.value(QStringLiteral("label")).toString().trimmed();
+    k.pattern = o.value(QStringLiteral("pattern")).toString(QStringLiteral("none"));
+    k.line = o.value(QStringLiteral("line")).toString(QStringLiteral("solid"));
     k.marker = o.value(QStringLiteral("marker")).toString(QStringLiteral("circle"));
-    if (!k.label.isEmpty()) m_kinds.append(k);
+    if (!k.label.isEmpty()) kinds.append(k);
   }
   for (const QJsonValue& v : root.value(QStringLiteral("periods")).toArray()) {
     const QJsonObject o = v.toObject();
     Period p;
     p.id = o.value(QStringLiteral("id")).toString();
-    p.label = o.value(QStringLiteral("label")).toString();
-    p.color = o.value(QStringLiteral("color")).toString(QStringLiteral("#64748B"));
-    if (!p.label.isEmpty()) m_periods.append(p);
+    p.label = o.value(QStringLiteral("label")).toString().trimmed();
+    p.color = validColor(o.value(QStringLiteral("color")).toString());
+    if (!p.label.isEmpty()) periods.append(p);
   }
-  return isLoaded();
+  if (kinds.isEmpty() || periods.isEmpty()) return false;
+  m_kinds = kinds;
+  m_periods = periods;
+  return true;
+}
+
+QVector<FeaturePresets::Kind> FeaturePresets::builtInKinds() {
+  QVector<Kind> out;
+  for (const BuiltInKind& k : kBuiltInKinds)
+    out.append({QString::fromUtf8(k.id), QString::fromUtf8(k.label), QString::fromUtf8(k.pattern),
+                QString::fromUtf8(k.line), QString::fromUtf8(k.marker)});
+  return out;
+}
+
+QVector<FeaturePresets::Period> FeaturePresets::builtInPeriods() {
+  QVector<Period> out;
+  for (const BuiltInPeriod& p : kBuiltInPeriods)
+    out.append({QString::fromUtf8(p.id), QString::fromUtf8(p.label), QString::fromUtf8(p.color)});
+  return out;
+}
+
+void FeaturePresets::loadBuiltIn() {
+  m_kinds = builtInKinds();
+  m_periods = builtInPeriods();
 }
 
 bool FeaturePresets::ensureLoaded() {
   if (isLoaded()) return true;
-  if (m_tried && !isLoaded()) return false;
-  m_tried = true;
-  const QStringList candidates = {
-      QDir(QCoreApplication::applicationDirPath())
-          .filePath(QStringLiteral("data/styles/feature_presets.json")),
-      QDir(QCoreApplication::applicationDirPath())
-          .filePath(QStringLiteral("../data/styles/feature_presets.json")),
-      QDir::current().filePath(QStringLiteral("data/styles/feature_presets.json")),
-      QStringLiteral("D:/qgis/data/styles/feature_presets.json"),
-  };
-  for (const QString& p : candidates) {
-    if (QFile::exists(p) && load(p)) return true;
+  if (!m_tried) {
+    m_tried = true;
+    const QDir app(QCoreApplication::applicationDirPath());
+    const QString rel = QStringLiteral("data/styles/feature_presets.json");
+    const QStringList candidates = {app.filePath(rel), app.filePath(QStringLiteral("../") + rel),
+                                    app.filePath(QStringLiteral("../../") + rel), QDir::current().filePath(rel)};
+    for (const QString& p : candidates) {
+      if (QFile::exists(p) && load(p)) return true;
+    }
   }
-  return false;
+  loadBuiltIn();
+  return isLoaded();
+}
+
+QStringList FeaturePresets::kindLabels() const {
+  QStringList out;
+  for (const Kind& k : m_kinds) out << k.label;
+  return out;
+}
+
+QStringList FeaturePresets::periodLabels() const {
+  QStringList out;
+  for (const Period& p : m_periods) out << p.label;
+  return out;
 }
 
 QString FeaturePresets::defaultKindLabel() const {
@@ -79,121 +141,50 @@ QString FeaturePresets::defaultKindLabel() const {
   return m_kinds.isEmpty() ? QStringLiteral("기타") : m_kinds.last().label;
 }
 
-QString FeaturePresets::defaultPeriodLabel() const {
-  for (const Period& p : m_periods) {
-    if (p.id == QLatin1String("unknown")) return p.label;
-  }
-  return m_periods.isEmpty() ? QStringLiteral("미정") : m_periods.last().label;
+QString FeaturePresets::kindKeyExpression() {
+  return QStringLiteral("replace(trim(coalesce(to_string(\"kind\"),'')),' ','')");
 }
 
-QString FeaturePresets::periodColorExpression(int alpha) const {
-  QString expr = QStringLiteral("CASE");
-  for (const Period& p : m_periods) {
-    const QColor c(p.color);
-    expr += QStringLiteral(" WHEN \"period\" = '%1' THEN color_rgba(%2,%3,%4,%5)")
-                .arg(p.label)
-                .arg(c.red())
-                .arg(c.green())
-                .arg(c.blue())
-                .arg(alpha);
-  }
-  expr += QStringLiteral(" ELSE color_rgba(100,116,139,%1) END").arg(alpha);
-  return expr;
+QString FeaturePresets::periodKeyExpression() {
+  return QStringLiteral("regexp_replace(replace(trim(coalesce(to_string(\"period\"),'')),' ',''),'시대$','')");
 }
 
-bool FeaturePresets::applyAttributes(QgsFeature* feature, const QString& kindLabel,
-                                     const QString& periodLabel) {
-  if (!feature) return false;
-  const QgsFields fields = feature->fields();
-  bool any = false;
-  const int ik = fields.indexOf(QStringLiteral("kind"));
-  if (ik >= 0) {
-    feature->setAttribute(ik, kindLabel);
-    any = true;
-  }
-  const int ip = fields.indexOf(QStringLiteral("period"));
-  if (ip >= 0) {
-    feature->setAttribute(ip, periodLabel);
-    any = true;
-  }
-  return any;
+QString FeaturePresets::kindKey(const QString& text) {
+  QString key = text.trimmed();
+  key.remove(QLatin1Char(' '));
+  return key;
 }
 
-void FeaturePresets::applyPeriodColor(QgsSymbol* symbol, int geomType) const {
-  if (!symbol || symbol->symbolLayerCount() <= 0) return;
-  QgsSymbolLayer* sl = symbol->symbolLayer(0);
-  if (!sl) return;
-  const QString fillExpr = periodColorExpression(geomType == static_cast<int>(Qgis::GeometryType::Polygon) ? 150 : 230);
-  const QString strokeExpr = periodColorExpression(255);
-  if (geomType == static_cast<int>(Qgis::GeometryType::Line)) {
-    sl->setDataDefinedProperty(QgsSymbolLayer::Property::StrokeColor,
-                               QgsProperty::fromExpression(strokeExpr));
-  } else {
-    sl->setDataDefinedProperty(QgsSymbolLayer::Property::FillColor,
-                               QgsProperty::fromExpression(fillExpr));
-    sl->setDataDefinedProperty(QgsSymbolLayer::Property::StrokeColor,
-                               QgsProperty::fromExpression(strokeExpr));
-  }
+QString FeaturePresets::periodKey(const QString& text) {
+  QString key = kindKey(text);
+  if (key.endsWith(QStringLiteral("시대"))) key.chop(2);
+  return key;
 }
 
-QgsSymbol* FeaturePresets::symbolFor(int geomType, const Kind& kind) const {
-  if (geomType == static_cast<int>(Qgis::GeometryType::Polygon)) {
-    auto fs = QgsFillSymbol::createSimple({
-        {QStringLiteral("color"), QStringLiteral("#64748B80")},
-        {QStringLiteral("style"), kind.pattern},
-        {QStringLiteral("outline_color"), QStringLiteral("#334155")},
-        {QStringLiteral("outline_width"), QStringLiteral("1.1")},
-        {QStringLiteral("outline_width_unit"), QStringLiteral("MM")},
-    });
-    return fs.release();
-  }
-  if (geomType == static_cast<int>(Qgis::GeometryType::Line)) {
-    QString pen = QStringLiteral("solid");
-    if (kind.pattern == QLatin1String("horizontal") || kind.pattern == QLatin1String("vertical"))
-      pen = QStringLiteral("dash");
-    else if (kind.pattern == QLatin1String("dense6") || kind.pattern == QLatin1String("bdiagonal"))
-      pen = QStringLiteral("dot");
-    auto ls = QgsLineSymbol::createSimple({
-        {QStringLiteral("line_color"), QStringLiteral("#334155")},
-        {QStringLiteral("line_width"), QStringLiteral("1.6")},
-        {QStringLiteral("line_width_unit"), QStringLiteral("MM")},
-        {QStringLiteral("line_style"), pen},
-    });
-    return ls.release();
-  }
-  QString marker = kind.marker;
-  if (marker == QLatin1String("line")) marker = QStringLiteral("line");
-  auto ms = QgsMarkerSymbol::createSimple({
-      {QStringLiteral("name"), marker},
-      {QStringLiteral("color"), QStringLiteral("#64748B")},
-      {QStringLiteral("outline_color"), QStringLiteral("#1E293B")},
-      {QStringLiteral("outline_width"), QStringLiteral("0.5")},
-      {QStringLiteral("size"), QStringLiteral("3.6")},
-      {QStringLiteral("size_unit"), QStringLiteral("MM")},
-  });
-  return ms.release();
-}
-
-bool FeaturePresets::applyRenderer(QgsVectorLayer* layer) {
-  if (!layer || !layer->isValid()) return false;
-  if (!ensureLoaded()) return false;
-  if (layer->fields().indexOf(QStringLiteral("kind")) < 0) return false;
-  const int gt = static_cast<int>(layer->geometryType());
-  if (gt != static_cast<int>(Qgis::GeometryType::Polygon)
-      && gt != static_cast<int>(Qgis::GeometryType::Line)
-      && gt != static_cast<int>(Qgis::GeometryType::Point))
-    return false;
-
-  QgsCategoryList cats;
+const FeaturePresets::Kind* FeaturePresets::matchKind(const QString& text) const {
+  const QString key = kindKey(text);
+  if (key.isEmpty()) return nullptr;
   for (const Kind& k : m_kinds) {
-    QgsSymbol* sym = symbolFor(gt, k);
-    if (!sym) continue;
-    applyPeriodColor(sym, gt);
-    cats.append(QgsRendererCategory(k.label, sym, k.label));
+    if (kindKey(k.label) == key || k.id.compare(key, Qt::CaseInsensitive) == 0) return &k;
   }
-  if (cats.isEmpty()) return false;
-  auto* renderer = new QgsCategorizedSymbolRenderer(QStringLiteral("kind"), cats);
-  layer->setRenderer(renderer);
-  layer->triggerRepaint();
-  return true;
+  return nullptr;
+}
+
+const FeaturePresets::Period* FeaturePresets::matchPeriod(const QString& text) const {
+  const QString key = periodKey(text);
+  if (key.isEmpty()) return nullptr;
+  for (const Period& p : m_periods) {
+    if (periodKey(p.label) == key || p.id.compare(key, Qt::CaseInsensitive) == 0) return &p;
+  }
+  return nullptr;
+}
+
+QColor FeaturePresets::periodColor(const QString& text) const {
+  const Period* p = matchPeriod(text);
+  return p && p->color != QLatin1String("none") ? QColor(p->color) : QColor();
+}
+
+int FeaturePresets::periodOrder(const QString& text) const {
+  const Period* p = matchPeriod(text);
+  return p ? static_cast<int>(p - m_periods.constData()) : static_cast<int>(m_periods.size());
 }

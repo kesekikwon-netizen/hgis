@@ -298,7 +298,9 @@ void TestSurveyContour::twentyThousandPointsFinishWithinBudget() {
   const qint64 elapsed = timer.elapsed();
   qWarning("survey contour 20000 points %lld ms", static_cast<long long>(elapsed));
   QVERIFY2(built.ok, qPrintable(built.error));
-  QVERIFY2(elapsed < 56000, qPrintable(QString::number(elapsed)));
+  // 2026-09-29 field PC, quiet machine: 76.5 s here and the same wall time for the b7e2916
+  // binary, so 56 s was a faster reference PC. Budget = measured x 1.3 (TEST_INFRA.md).
+  QVERIFY2(elapsed < 100000, qPrintable(QString::number(elapsed)));
 }
 
 int runSurveyContourClipTests(int argc, char** argv);
@@ -313,7 +315,22 @@ int main(int argc, char** argv) {
   QgsApplication::setPluginPath(prefix + QStringLiteral("/plugins"));
   QgsApplication::initQgis();
   TestSurveyContour test;
-  const int code = QTest::qExec(&test, argc, argv) | runSurveyContourClipTests(argc, argv);
+  // The ctest wrapper passes "-o <log>,txt". A second qExec with the same file truncates the
+  // first suite's report (and stdout of these exes is empty, TEST_INFRA.md), so the clip suite
+  // writes "<log>.clip.txt"; run_qtest.cmake prints "<log>.*.txt" next to the main log.
+  QVector<QByteArray> clipStorage;
+  QVector<char*> clipArgs;
+  for (int i = 0; i < argc; ++i) {
+    clipStorage.append(QByteArray(argv[i]));
+    if (qstrcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+      const QByteArray spec(argv[++i]);
+      const int comma = spec.lastIndexOf(',');
+      clipStorage.append((comma < 0 ? spec : spec.left(comma)) + ".clip.txt,txt");
+    }
+  }
+  for (QByteArray& arg : clipStorage) clipArgs.append(arg.data());
+  int clipArgc = clipArgs.size();
+  const int code = QTest::qExec(&test, argc, argv) | runSurveyContourClipTests(clipArgc, clipArgs.data());
   QgsApplication::exitQgis();
   return code;
 }

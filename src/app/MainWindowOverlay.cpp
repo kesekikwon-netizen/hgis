@@ -17,7 +17,6 @@
 #include "KaTerrain3dStudio.h"
 #include "KaTerrain3dLayoutStudio.h"
 #include "KaStartPage.h"
-#include "KaCoordPointMapTool.h"
 #include "KaMeasureMapTool.h"
 #include "core/DemAnalyzer.h"
 #include "core/TilePackService.h"
@@ -26,7 +25,6 @@
 #include "KaCanvasGridOverlay.h"
 #include "KaTrenchMoveTool.h"
 #include "KaFeatureSelectTool.h"
-#include "KaFoundLocationMark.h"
 #include "KaStatusBar.h"
 #include "KaBeginnerRibbon.h"
 #include "KaSnapSettingsWidget.h"
@@ -64,6 +62,9 @@
 #include "core/PaleoLandformService.h"
 #include "core/GeologyMapService.h"
 #include "core/RiverMapService.h"
+#include "core/BasemapDsm.h"
+#include "core/ReferenceKind.h"
+#include "core/ReferenceStorage.h"
 #include "core/VworldSettings.h"
 #include "core/LocationSearch.h"
 #include "core/CadastralImport.h"
@@ -270,7 +271,9 @@ void MainWindow::editDemElevationClasses() {
 #if KA_HGIS_HAS_QGIS
   QgsRasterLayer* dem = nullptr;
   if (QgsProject* proj = QgsProject::instance()) {
-    const QList<QgsMapLayer*> found = proj->mapLayersByName(QStringLiteral("DEM"));
+    // By identity, not title: the Copernicus layer is 「지표모델(DSM) …」 and may be renamed.
+    const QList<QgsMapLayer*> found =
+        ReferenceKind::find(proj, QString::fromLatin1(ReferenceKind::kDem));
     for (QgsMapLayer* l : found) {
       auto* rl = qobject_cast<QgsRasterLayer*>(l);
       if (rl && rl->isValid() &&
@@ -299,13 +302,8 @@ void MainWindow::toggleDemMap() {
   if (!m_canvas)
     return;
   QgsProject* proj = QgsProject::instance();
-  QgsRasterLayer* dem = nullptr;
-  for (QgsMapLayer* ml : proj->mapLayers()) {
-    if (ml && ml->name() == QLatin1String("DEM")) {
-      dem = qobject_cast<QgsRasterLayer*>(ml);
-      if (dem) break;
-    }
-  }
+  // Tagged dem, or an untagged 「DEM」 from an older project; the title may have changed.
+  QgsRasterLayer* dem = BasemapDsm::findDem(proj);
 
   if (dem) {
     const bool wasVisible = LayerOps::isLayerVisible(proj, QStringLiteral("DEM"));
@@ -349,7 +347,7 @@ void MainWindow::startPaleoLandform() {
   if (m_surveyPath.isEmpty()) {
     QMessageBox::information(this, QStringLiteral("고지형"),
                              QStringLiteral("먼저 「새 조사」로 저장 위치를 만드세요.\n"
-                                            "그다음 조사지역으로 확대한 뒤 다시 「고지형」을 누르면 "
+                                            "그다음 조사구역으로 확대한 뒤 다시 「고지형」을 누르면 "
                                             "흙토람 분포지형이 깔립니다."));
     return;
   }
@@ -376,7 +374,7 @@ void MainWindow::startPaleoLandform() {
         ext.height() > SoilMapService::maxSpanMeters()) {
       QMessageBox::information(
           this, QStringLiteral("고지형"),
-          QStringLiteral("지금 화면이 너무 넓습니다. 조사지역(한 변 %1km 이하)으로 확대한 뒤 "
+          QStringLiteral("지금 화면이 너무 넓습니다. 조사구역(한 변 %1km 이하)으로 확대한 뒤 "
                          "다시 「고지형」을 누르세요.\n"
                          "전국·시도 화면에는 분포지형을 깔지 않습니다.")
               .arg(SoilMapService::maxSpanMeters() / 1000.0, 0, 'f', 0));
@@ -452,6 +450,10 @@ void MainWindow::downloadSoilTerrain() {
       return;
     }
   }
+  // 조사 GPKG 옆에 저장해 다음에도(오프라인 포함) 다시 쓸 수 있게 한다.
+  // 조사 폴더가 없으면 임시 폴더에 받지 않고 조사부터 만들도록 안내한다.
+  const QString dir = referenceDownloadFolder(QStringLiteral("토양도"));
+  if (dir.isEmpty()) return;
   if (LayerOps::clampCanvasToThematicScale(m_canvas))
     statusBar()->showMessage(QStringLiteral("축척을 1:100000으로 맞춘 뒤 토양도를 받습니다."), 4000);
 
@@ -471,15 +473,12 @@ void MainWindow::downloadSoilTerrain() {
   if (ext.width() > SoilMapService::maxSpanMeters() ||
       ext.height() > SoilMapService::maxSpanMeters()) {
     notify(Notice::Warning, QStringLiteral("토양도"),
-           QStringLiteral("범위가 너무 넓습니다. 지도를 조사지역(한 변 %1km 이하)으로 "
+           QStringLiteral("범위가 너무 넓습니다. 지도를 조사구역(한 변 %1km 이하)으로 "
                           "확대한 뒤 다시 내려받으세요.")
                .arg(SoilMapService::maxSpanMeters() / 1000.0, 0, 'f', 0));
     return;
   }
 
-  // 조사 GPKG 옆에 저장해 다음에도(오프라인 포함) 다시 쓸 수 있게 한다.
-  const QString dir = m_surveyPath.isEmpty() ? QDir::tempPath()
-                                             : QFileInfo(m_surveyPath).absolutePath();
   const QString outGpkg = QDir(dir).filePath(QStringLiteral("토양도_흙토람.gpkg"));
 
   startReferenceDownload(ReferenceMapKind::Soil, ext, outGpkg);
@@ -508,6 +507,11 @@ void MainWindow::downloadGeologyMap() {
                                     GeologyMapService::reliefLayerTitle(), on);
     return;
   }
+  const QString dir = referenceDownloadFolder(QStringLiteral("지질도"));
+  if (dir.isEmpty()) {
+    if (m_actGeology) m_actGeology->setChecked(false);
+    return;
+  }
   if (LayerOps::clampCanvasToThematicScale(m_canvas))
     statusBar()->showMessage(QStringLiteral("축척을 1:100000으로 맞춘 뒤 지질도를 받습니다."), 4000);
 
@@ -527,14 +531,12 @@ void MainWindow::downloadGeologyMap() {
   if (ext.width() > GeologyMapService::maxSpanMeters() ||
       ext.height() > GeologyMapService::maxSpanMeters()) {
     notify(Notice::Warning, QStringLiteral("지질도"),
-           QStringLiteral("범위가 너무 넓습니다. 지도를 조사지역(한 변 %1km 이하)으로 "
+           QStringLiteral("범위가 너무 넓습니다. 지도를 조사구역(한 변 %1km 이하)으로 "
                           "확대한 뒤 다시 내려받으세요.")
                .arg(GeologyMapService::maxSpanMeters() / 1000.0, 0, 'f', 0));
     return;
   }
 
-  const QString dir = m_surveyPath.isEmpty() ? QDir::tempPath()
-                                             : QFileInfo(m_surveyPath).absolutePath();
   const QString outGpkg = QDir(dir).filePath(QStringLiteral("지질도_KIGAM.gpkg"));
 
   startReferenceDownload(ReferenceMapKind::Geology, ext, outGpkg);
@@ -552,6 +554,11 @@ void MainWindow::downloadRiverMap() {
   if (toggleExistingOverlay(QgsProject::instance(), m_canvas, QStringLiteral("수계도(하천망)"),
                             m_actRiver, statusBar()))
     return;
+  const QString dir = referenceDownloadFolder(QStringLiteral("수계도"));
+  if (dir.isEmpty()) {
+    if (m_actRiver) m_actRiver->setChecked(false);
+    return;
+  }
   if (LayerOps::clampCanvasToThematicScale(m_canvas))
     statusBar()->showMessage(QStringLiteral("축척을 1:100000으로 맞춘 뒤 수계도를 받습니다."), 4000);
 
@@ -579,14 +586,12 @@ void MainWindow::downloadRiverMap() {
   if (ext.width() > RiverMapService::maxSpanMeters() ||
       ext.height() > RiverMapService::maxSpanMeters()) {
     notify(Notice::Warning, QStringLiteral("수계도"),
-           QStringLiteral("범위가 너무 넓습니다. 지도를 조사지역(한 변 %1km 이하)으로 "
+           QStringLiteral("범위가 너무 넓습니다. 지도를 조사구역(한 변 %1km 이하)으로 "
                           "확대한 뒤 다시 내려받으세요.")
                .arg(RiverMapService::maxSpanMeters() / 1000.0, 0, 'f', 0));
     return;
   }
 
-  const QString dir = m_surveyPath.isEmpty() ? QDir::tempPath()
-                                             : QFileInfo(m_surveyPath).absolutePath();
   const QString outGpkg = QDir(dir).filePath(QStringLiteral("수계도_VWorld.gpkg"));
 
   startReferenceDownload(ReferenceMapKind::River, ext, outGpkg, key);
@@ -639,6 +644,7 @@ void MainWindow::startReferenceDownload(ReferenceMapKind kind, const QgsRectangl
     try {
       QString error;
       QgsMapLayer* layer = nullptr;
+      const auto foldersBefore = ReferenceStorage::referencedFolderNames(QgsProject::instance());
       switch (kind) {
         case ReferenceMapKind::Soil:
         case ReferenceMapKind::PaleoSoil:
@@ -654,6 +660,10 @@ void MainWindow::startReferenceDownload(ReferenceMapKind kind, const QgsRectangl
             ? QStringLiteral("받은 지도를 열지 못했습니다. 기존 지도는 유지됩니다. 다시 내려받으세요.") : error);
         return;
       }
+      // The replaced download folder is removed only at the next save point.
+      auto& ledger = ReferenceStorage::sessionLedger();
+      if (result.storage) ledger.adopt(result.storage->path(), window->m_surveyPath);
+      ledger.supersede(foldersBefore, ReferenceStorage::referencedFolderNames(QgsProject::instance()));
       if (window->m_layerTree) window->m_layerTree->setCurrentLayer(layer);
       if ((kind == ReferenceMapKind::Soil || kind == ReferenceMapKind::PaleoSoil) && window->m_btnSoil)
         window->m_btnSoil->setChecked(true);

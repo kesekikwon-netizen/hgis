@@ -11,30 +11,16 @@ namespace KaDownloadUi {
 void configure(QDialog* dialog, QVBoxLayout* layout, const QString& title, const QString& subtitle) {
   dialog->setProperty("kaDownloadWindow", true);
   dialog->setWindowTitle(title);
-  dialog->setStyleSheet(QStringLiteral(
-      "QDialog[kaDownloadWindow=\"true\"] { background: #eef5fa; }"
-      "QLabel { color: #263f54; }"
-      "QFrame#downloadHeader { border: 1px solid #256c9e; border-radius: 14px;"
-      " background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #438fbe,stop:0.48 #2676ad,stop:1 #185c91); }"
-      "QLabel#downloadTitle { background: transparent; color: white; font-size: 20px; font-weight: 600; border: none; }"
-      "QLabel#downloadSubtitle { background: transparent; color: #f0f8ff; border: none; }"
-      "QFrame#downloadStatusCard { background: white; border: 1px solid #cedeea; border-radius: 12px; }"
-      "QFrame#downloadStatusCard QLabel { background: transparent; color: #263f54; border: none; }"
-      "QProgressBar[downloadProgress=\"true\"] { background: #e5eef6; border: 1px solid #c7d9e8;"
-      " border-radius: 7px; min-height: 22px; text-align: center; color: #173b59; }"
-      "QProgressBar[downloadProgress=\"true\"]::chunk { border-radius: 6px;"
-      " background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #9dd2f2,stop:1 #69add8); }"
-      "QPushButton { min-height: 30px; padding: 2px 14px; color: #263f54; border: 1px solid #b5cddd;"
-      " border-radius: 6px; background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 white,stop:1 #dbeaf5); }"
-      "QPushButton:hover { background: #d9edf9; border-color: #5696c1; }"
-      "QPushButton:pressed { background: #bdd9eb; }"
-      "QPushButton:disabled { color: #687b89; background: #e7eef3; border-color: #cbd9e3; }"));
+  // Colours come from ka-hgis.qss (kaDownloadWindow, downloadHeader, downloadStatusCard,
+  // downloadProgress): one flat Strata palette instead of the old sky gradient island.
   layout->setContentsMargins(20, 20, 20, 20); layout->setSpacing(14);
   auto* header = new QFrame(dialog); header->setObjectName(QStringLiteral("downloadHeader"));
   header->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
   auto* content = new QVBoxLayout(header); content->setContentsMargins(20, 17, 20, 17); content->setSpacing(7);
   auto* name = new QLabel(title, header); name->setObjectName(QStringLiteral("downloadTitle")); name->setWordWrap(true);
   auto* hint = new QLabel(subtitle, header); hint->setObjectName(QStringLiteral("downloadSubtitle")); hint->setWordWrap(true);
+  header->setAccessibleName(title);
+  header->setAccessibleDescription(subtitle);
   content->addWidget(name); content->addWidget(hint); layout->addWidget(header);
 }
 QFrame* statusCard(QWidget* parent) {
@@ -42,7 +28,11 @@ QFrame* statusCard(QWidget* parent) {
   auto* layout = new QVBoxLayout(card); layout->setContentsMargins(16, 16, 16, 16); layout->setSpacing(10);
   return card;
 }
-void styleProgress(QProgressBar* progress) { progress->setProperty("downloadProgress", true); progress->setTextVisible(true); }
+void styleProgress(QProgressBar* progress) {
+  progress->setProperty("downloadProgress", true);
+  progress->setTextVisible(true);
+  if (progress->accessibleName().isEmpty()) progress->setAccessibleName(QStringLiteral("받기 진행률"));
+}
 }
 
 KaDownloadProgressDialog::KaDownloadProgressDialog(const QString& title, const QString& subtitle, QWidget* parent)

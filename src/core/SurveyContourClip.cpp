@@ -23,16 +23,30 @@ void collectParts(OGRGeometry* geometry, QVector<OGRGeometry*>* parts) {
   if (OGRGeometry* clone = geometry->clone()) parts->push_back(clone);
 }
 
-}  // namespace
-
-int clipSurveyLayerToWkt(OGRLayer* layer, const QString& wkt) {
-  if (!layer || wkt.isEmpty()) return layer ? static_cast<int>(layer->GetFeatureCount(TRUE)) : 0;
+// A hand-drawn survey area can self-intersect; GEOS then refuses every intersection.
+OGRGeometry* readMask(const QString& wkt) {
   const QByteArray bytes = wkt.toUtf8();
   const char* text = bytes.constData();
   OGRGeometry* mask = nullptr;
-  if (OGRGeometryFactory::createFromWkt(&text, nullptr, &mask) != OGRERR_NONE || !mask)
-    return static_cast<int>(layer->GetFeatureCount(TRUE));
+  if (OGRGeometryFactory::createFromWkt(&text, nullptr, &mask) != OGRERR_NONE || !mask) return nullptr;
+  if (!mask->IsValid()) {
+    if (OGRGeometry* fixed = mask->MakeValid()) {
+      OGRGeometryFactory::destroyGeometry(mask);
+      mask = fixed;
+    }
+  }
+  return mask;
+}
 
+}  // namespace
+
+int clipSurveyLayerToWkt(OGRLayer* layer, const QString& wkt, bool* applied) {
+  if (applied) *applied = false;
+  if (!layer || wkt.isEmpty()) return layer ? static_cast<int>(layer->GetFeatureCount(TRUE)) : 0;
+  OGRGeometry* mask = readMask(wkt);
+  if (!mask) return static_cast<int>(layer->GetFeatureCount(TRUE));
+
+  bool allCut = true;
   QVector<GIntBig> drop;
   QVector<QPair<GIntBig, QVector<OGRGeometry*>>> keep;
   layer->ResetReading();
@@ -41,9 +55,10 @@ int clipSurveyLayerToWkt(OGRLayer* layer, const QString& wkt) {
     OGRGeometry* cut = geometry ? geometry->Intersection(mask) : nullptr;
     QVector<OGRGeometry*> parts;
     collectParts(cut, &parts);
-    if (cut) OGRGeometryFactory::destroyGeometry(cut);
-    if (parts.isEmpty()) drop.push_back(feature->GetFID());
+    if (geometry && !cut) allCut = false;  // GEOS failed: keep the feature rather than lose it silently
+    else if (parts.isEmpty()) drop.push_back(feature->GetFID());
     else keep.push_back({feature->GetFID(), parts});
+    if (cut) OGRGeometryFactory::destroyGeometry(cut);
     OGRFeature::DestroyFeature(feature);
   }
   for (GIntBig fid : drop) layer->DeleteFeature(fid);
@@ -67,5 +82,6 @@ int clipSurveyLayerToWkt(OGRLayer* layer, const QString& wkt) {
   }
   OGRGeometryFactory::destroyGeometry(mask);
   layer->SyncToDisk();
+  if (applied) *applied = allCut;
   return static_cast<int>(layer->GetFeatureCount(TRUE));
 }

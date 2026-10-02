@@ -1,1 +1,19 @@
-﻿{"survey_name":"demo","crs":"EPSG:5179","layers":["survey_area","feature_poly","feature_line","section_line","control_points"],"fixture":"happy"}
+﻿{
+  "survey_name": "데모 조사",
+  "survey_file": "demo.gpkg",
+  "crs": "EPSG:5186",
+  "submit_crs": "EPSG:5179",
+  "layers": {
+    "survey_area": 1,
+    "feature_poly": 2,
+    "feature_line": 1,
+    "section_line": 1,
+    "control_points": 2,
+    "artifact_point": 1,
+    "trial_trench": 1
+  },
+  "expected_data_errors": [],
+  "drawing_rules": "REQ_DRAWING_* depend on the drawings the user makes; not part of this sample",
+  "fixture": "happy",
+  "note": "Metadata for samples/demo_survey/demo.gpkg. The app opens the .gpkg, not this JSON."
+}

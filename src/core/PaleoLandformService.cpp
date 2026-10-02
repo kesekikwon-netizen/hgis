@@ -4,8 +4,11 @@
 
 #include <QColor>
 #include <QFileInfo>
+#include <QSet>
 #include <algorithm>
 #include <cmath>
+
+#include <qgsfeaturerequest.h>
 
 #include <qgscategorizedsymbolrenderer.h>
 #include <qgssinglesymbolrenderer.h>
@@ -272,11 +275,30 @@ bool PaleoLandformService::applyInterpretationStyle(QgsVectorLayer* layer) {
     layer->triggerRepaint();
     return true;
   }
+  // Every entry is a hypothesis. Kinds seeded automatically from soil terrain
+  // (note "자동:") say so in the legend, because the sheet legend copies these
+  // labels and an automatic inner-buffer split is not a landform finding.
+  QSet<QString> automaticKinds;
+  const int kindIdx = layer->fields().indexOf(QStringLiteral("kind"));
+  const int noteIdx = layer->fields().indexOf(QStringLiteral("note"));
+  if (noteIdx >= 0) {
+    QgsFeatureRequest request;
+    request.setFlags(Qgis::FeatureRequestFlag::NoGeometry);
+    request.setSubsetOfAttributes(QgsAttributeList{kindIdx, noteIdx});
+    QgsFeatureIterator it = layer->getFeatures(request);
+    QgsFeature feature;
+    while (it.nextFeature(feature)) {
+      if (feature.attribute(noteIdx).toString().startsWith(QStringLiteral("자동:")))
+        automaticKinds.insert(feature.attribute(kindIdx).toString());
+    }
+  }
   QgsCategoryList cats;
   for (const KindStyle& k : kKinds) {
+    const QString kind = QString::fromUtf8(k.kind);
+    const QString label = automaticKinds.contains(kind) ? QStringLiteral("%1 · 자동 가설").arg(kind)
+                                                        : QStringLiteral("%1 · 가설").arg(kind);
     if (QgsSymbol* sym = fillAt(k.r, k.g, k.b, k.a, 0.35))
-      cats.append(QgsRendererCategory(QVariant(QString::fromUtf8(k.kind)), sym,
-                                      QString::fromUtf8(k.kind)));
+      cats.append(QgsRendererCategory(QVariant(kind), sym, label));
   }
   layer->setRenderer(new QgsCategorizedSymbolRenderer(QStringLiteral("kind"), cats));
   layer->triggerRepaint();

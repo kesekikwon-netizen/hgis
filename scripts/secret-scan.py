@@ -3,11 +3,15 @@
 
 Looks for:
   - GUID-shaped VWorld keys near key/vworld usage
-  - password= / password_portable= with a credential-like value
+  - password= / password_portable= / password_dpapi= with a credential-like value
+    (a DPAPI blob only opens for one Windows user, but it still is that user's password)
   - Authorization: Bearer <token>
+  - account/key files that must never be tracked (config/*-local.ini, *-account.ini,
+    secrets.ini, ka-hgis-vworld.ini), whatever their content
 
 Allowlisted test fakes: 11111111-2222-..., AAAAAAAA-BBBB-..., and a few other
-fixture GUIDs used in workflow tests.
+fixture GUIDs used in workflow tests, plus the secretvalueN tokens the log-masking
+tests feed in on purpose.
 """
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ ALLOW_GUIDS = {
     "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
     "00000000-1111-2222-3333-444455556666",
     "11112222-3333-4444-5555-666677778888",
+    "0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9",  # tests/test_log_session.cpp masking fixture
 }
 
 GUID_RE = re.compile(
@@ -27,8 +32,14 @@ GUID_RE = re.compile(
 )
 # Config-style assignment only (no space before '='). Value must look like a secret.
 PASSWORD_RE = re.compile(
-    r"(?i)(?<![\w])password(?:_portable)?=([A-Za-z0-9_./+\-]{4,})"
+    r"(?i)(?<![\w])password(?:_portable|_dpapi)?=([A-Za-z0-9_./+=\-]{4,})"
 )
+# Files that only ever hold accounts or keys. Tracking one is a leak even when empty now.
+SECRET_FILE_RE = re.compile(
+    r"(?i)(^|/)(secrets\.ini|ka-hgis-vworld\.ini|[^/]*-account\.ini|config/[^/]*-local\.ini)$"
+)
+# Fake values the log-masking tests write on purpose (tests/test_log_session.cpp).
+FAKE_SECRET_RE = re.compile(r"(?i)^secretvalue\d+$")
 BEARER_RE = re.compile(r"(?i)Authorization\s*:\s*Bearer\s+(\S+)")
 
 SKIP_SUFFIX = {
@@ -45,6 +56,9 @@ for raw in files:
         continue
     path = raw.decode("utf-8", "surrogateescape")
     lower = path.lower()
+    if SECRET_FILE_RE.search(lower):
+        hits.append(f"{path}: account/key file is tracked (add it to .gitignore and untrack it)")
+        continue
     if any(lower.endswith(s) for s in SKIP_SUFFIX):
         continue
     try:
@@ -80,6 +94,8 @@ for raw in files:
             if re.match(r"(?i)(form|document|new|null|undefined|true|false)\b", val):
                 continue
             if re.search(r"(?i)\b(const|let|var|auto)\s+\*?password\s*=", line):
+                continue
+            if FAKE_SECRET_RE.match(val):
                 continue
             # Test code that asserts the token is absent.
             if "contains" in ctx and "password" in ctx:

@@ -1,7 +1,9 @@
 #include "HeritageLayoutNumbers.h"
+#include "LayoutBadgePlacer.h"
 #include "LayoutService.h"
 #include "HeritageImport.h"
 #include "HeritageStyle.h"
+#include "PdfExportSettings.h"
 
 #include <cmath>
 
@@ -68,7 +70,24 @@
 #include <QTimer>
 
 namespace {
+struct DatasetKey {
+  HeritageDataset dataset;
+  const char* key;
+};
+// ASCII keys stored in the project file. Never reuse a key for another dataset.
+constexpr DatasetKey kDatasetKeys[] = {
+    {HeritageDataset::DesignatedHeritage, "designated_heritage"},
+    {HeritageDataset::AlterationStandard, "alteration_standard"},
+    {HeritageDataset::BuriedHeritageArea, "buried_heritage_area"},
+    {HeritageDataset::HeritageDistributionMap, "heritage_distribution_map"},
+    {HeritageDataset::SurfaceSurveyArea, "surface_survey_area"},
+    {HeritageDataset::ExcavationSurveyArea, "excavation_survey_area"},
+};
+
 std::optional<HeritageDataset> datasetFor(QgsVectorLayer* layer) {
+  // The logical tag wins; group and layer titles are only a fallback for
+  // layers loaded before the tag existed.
+  if (auto tagged = HeritageLayoutNumbers::taggedDataset(layer)) return tagged;
   if (layer->project()) {
     for (QgsLayerTreeNode* node = layer->project()->layerTreeRoot()->findLayer(layer->id());
          node; node = node->parent()) {
@@ -151,52 +170,10 @@ QVariant classAttributeValue(QgsVectorLayer* layer, const QString& attribute, co
 }
 
 // A one-digit badge is about 3 mm and a three-digit badge about 4.2 mm.
-// A 2.4 mm step left those circles on top of each other, and anything past
-// two rings fell back onto the same point. Move a badge when another is
-// close enough to cover it, and keep going until the circles clear.
+// Badge centres stay this far apart on paper; LayoutBadgePlacer moves a badge
+// to a free ring slot inside the visible frame and off the legend card.
 // https://docs.qgis.org/3.44/en/docs/user_manual/style_library/label_settings.html
 constexpr double kNumberClearMm = 4.6;
-constexpr int kNumberOffsetRings = 6;
-
-int slotsOnRing(int ring) {
-  const double half = std::min(0.999, 1.0 / (2.0 * double(ring)));
-  const double count = 3.14159265358979323846 / std::asin(half);
-  return std::max(4, static_cast<int>(std::floor(count + 1e-6)));
-}
-
-QVector<QgsPointXY> stackedPins(const QgsPointXY& origin, const QVector<QgsPointXY>& origins,
-                                const QVector<QgsPointXY>& placed, double stackSep) {
-  QVector<QgsPointXY> pins;
-  pins.reserve(origins.size());
-  for (int i = 0; i < origins.size(); ++i) {
-    if (origin.distance(origins.at(i)) < stackSep)
-      pins.append(placed.at(i));
-  }
-  return pins;
-}
-
-QgsPointXY offsetHeritageNumber(const QgsPointXY& origin, const QVector<QgsPointXY>& clusterPins,
-                                double stepSep) {
-  auto free = [&](const QgsPointXY& candidate) {
-    for (const auto& other : clusterPins) {
-      if (candidate.distance(other) < stepSep * 0.96) return false;
-    }
-    return true;
-  };
-  if (free(origin)) return origin;
-  constexpr double kPi = 3.14159265358979323846;
-  for (int ring = 1; ring <= kNumberOffsetRings; ++ring) {
-    const int count = slotsOnRing(ring);
-    const double radius = stepSep * ring;
-    for (int slot = 0; slot < count; ++slot) {
-      const double angle = slot * (2.0 * kPi / double(count));
-      const QgsPointXY candidate(origin.x() + std::cos(angle) * radius,
-                                 origin.y() + std::sin(angle) * radius);
-      if (free(candidate)) return candidate;
-    }
-  }
-  return QgsPointXY(origin.x(), origin.y() + stepSep * (kNumberOffsetRings + 1));
-}
 
 void applyHeritageNumberCallout(QgsPalLayerSettings& labels) {
   labels.geometryGeneratorEnabled = true;
@@ -253,11 +230,6 @@ QPainterPath visibleMapOnPaper(QgsLayoutItemMap* map, bool exporting) {
   QPainterPath frame;
   frame.addPolygon(map->mapToScene(map->rect()));
   return paper.intersected(frame);
-}
-
-double visibleMapPaperArea(QgsLayoutItemMap* map, bool exporting) {
-  const QRectF box = visibleMapOnPaper(map, exporting).boundingRect();
-  return (box.isValid() && box.width() > 0. && box.height() > 0.) ? box.width() * box.height() : 0.;
 }
 
 // Geographic footprint of the map that actually sits on the exported page.
@@ -353,6 +325,29 @@ QString HeritageLayoutNumbers::entryKey(const QString& layerId, int number) {
   return layerId + QLatin1Char(':') + QString::number(number);
 }
 
+QString HeritageLayoutNumbers::datasetPropertyKey() {
+  return QStringLiteral("ka_hgis/heritage_dataset");
+}
+
+void HeritageLayoutNumbers::tagDataset(QgsMapLayer* layer, HeritageDataset dataset) {
+  if (!layer) return;
+  for (const auto& entry : kDatasetKeys) {
+    if (entry.dataset == dataset) {
+      layer->setCustomProperty(datasetPropertyKey(), QString::fromLatin1(entry.key));
+      return;
+    }
+  }
+}
+
+std::optional<HeritageDataset> HeritageLayoutNumbers::taggedDataset(const QgsMapLayer* layer) {
+  if (!layer) return std::nullopt;
+  const QString key = layer->customProperty(datasetPropertyKey()).toString();
+  if (key.isEmpty()) return std::nullopt;
+  for (const auto& entry : kDatasetKeys)
+    if (key == QLatin1String(entry.key)) return entry.dataset;
+  return std::nullopt;
+}
+
 QSet<QString> HeritageLayoutNumbers::legendKeys() const {
   if (m_tracking) return m_visibleKeys;
   QSet<QString> keys;
@@ -428,131 +423,14 @@ QSet<QString> HeritageLayoutNumbers::placedKeys(QgsLayoutItemMap* map, const Qgs
 }
 
 bool HeritageLayoutNumbers::acceptRenderedLabels(QgsLayoutItemMap* map, const QgsLabelingResults* results) {
-  if (m_restorePending && !m_exporting) return false;
   const auto keys = placedKeys(map, results);
   // Numbers come from the paper footprint in update(). PAL must not drop or
-  // renumber them; overlap is allowed so every on-page site stays visible.
+  // renumber them; update() already placed every badge clear of the others,
+  // inside the frame and off the legend, so every on-page site stays visible.
   if (keys.isEmpty() && !m_exporting) return false;
   if (keys != m_visibleKeys) return false;
   if (!m_legendPending) return false;
   m_legendPending = false;
-  return true;
-}
-
-bool HeritageLayoutNumbers::shouldRestoreCandidates(QgsLayoutItemMap* map) const {
-  if (!m_compacted || !map || !map->layout()) return false;
-  const double area = visibleMapPaperArea(map, m_exporting);
-  if (area > m_pinnedPaperArea * 1.02) return true;
-  if (area < m_pinnedPaperArea * 0.98) return false;
-  return m_pinnedSignature != renderSignature(map, false);
-}
-
-void HeritageLayoutNumbers::restoreCandidates(QgsLayoutItemMap* map) {
-  if (!m_compacted) return;
-  m_entries = m_candidateEntries;
-  m_overrides = m_candidateOverrides;
-  m_visibleKeys.clear();
-  m_compacted = false;
-  m_restorePending = true;
-  m_restoreSkips = 0;
-  m_legendPending = true;
-  ++m_placementRevision;
-  const QScopedValueRollback<bool> applying(m_applying, true);
-  applyBaseStyleOverrides(map);
-  map->invalidateCache();
-  raiseAboveGeometries(map);
-}
-
-bool HeritageLayoutNumbers::compactRenderedNumbers(QgsLayoutItemMap* map, const QgsLabelingResults* results,
-                                                    const QSet<QString>& keys) {
-  if (!map || !results) return false;
-  QVector<Entry> numbered = m_entries;
-  QMap<QString, int> counters;
-  bool needsRewrite = false;
-  for (auto& entry : numbered) {
-    const bool visible = entry.number > 0 && keys.contains(entryKey(entry.layerId, entry.number));
-    const int next = visible ? ++counters[entry.dataset] : 0;
-    if (entry.number != next) needsRewrite = true;
-    entry.number = next;
-  }
-  if (!needsRewrite || keys.isEmpty()) return false;
-
-  // Keep the already collision-tested placement. Hidden siblings stay hidden
-  // so map numbers and legend numbers stay the same consecutive series.
-  QHash<QString, QHash<qint64, int>> indices;
-  for (int i = 0; i < m_entries.size(); ++i)
-    for (auto id : m_entries[i].featureIds) indices[m_entries[i].layerId].insert(id, i);
-  QHash<QString, QMap<qint64, QPointF>> anchors;
-  const QPainterPath onPaper = visibleMapOnPaper(map, m_exporting);
-  const QTransform toPaper = map->layoutToMapCoordsTransform().inverted();
-  for (const auto& label : results->allLabels()) {
-    if (label.isUnplaced || label.isDiagram || label.cornerPoints.size() < 2) continue;
-    const auto layer = indices.constFind(label.layerID);
-    if (layer == indices.cend()) continue;
-    const int index = layer->value(label.featureId, -1);
-    if (index < 0 || !numbered[index].number || label.labelText != QString::number(m_entries[index].number)) continue;
-    QPolygonF polygon;
-    for (const auto& corner : label.cornerPoints) polygon.append(toPaper.map(QPointF(corner.x(), corner.y())));
-    QPainterPath text;
-    text.addPolygon(polygon);
-    if (!onPaper.intersects(text)) continue;
-    const auto& a = label.cornerPoints[0];
-    const auto& b = label.cornerPoints[1];
-    anchors[label.layerID].insert(label.featureId, QPointF((a.x() + b.x()) / 2., (a.y() + b.y()) / 2.));
-  }
-  auto overrides = m_overrides;
-  try {
-    for (auto it = indices.cbegin(); it != indices.cend(); ++it) {
-      const auto drawing = m_drawingSources.value(it.key()).layer;
-      if (!drawing || !drawing->labeling()) continue;
-      QgsPalLayerSettings labels = drawing->labeling()->settings();
-      QString numberCase = QStringLiteral("CASE");
-      QString xCase = QStringLiteral("CASE");
-      QString yCase = QStringLiteral("CASE");
-      QString sizeCase = QStringLiteral("CASE");
-      const auto positions = anchors.value(it.key());
-      const QgsCoordinateTransform toSource(map->crs(), drawing->crs(), map->layout()->project()->transformContext());
-      for (auto pos = positions.cbegin(); pos != positions.cend(); ++pos) {
-        const int number = numbered[it->value(pos.key())].number;
-        const QgsPointXY source = toSource.transform(QgsPointXY(pos.value()));
-        const QString condition = QStringLiteral(" WHEN $id = %1 THEN ").arg(pos.key());
-        numberCase += condition + QString::number(number);
-        xCase += condition + QString::number(source.x(), 'g', 17);
-        yCase += condition + QString::number(source.y(), 'g', 17);
-        sizeCase += condition + QString::number(circleSize(number));
-      }
-      labels.fieldName = positions.isEmpty() ? QStringLiteral("NULL") : numberCase + QStringLiteral(" ELSE NULL END");
-      if (!positions.isEmpty()) {
-        auto& properties = labels.dataDefinedProperties();
-        properties.setProperty(QgsPalLayerSettings::Property::PositionX, QgsProperty::fromExpression(xCase + QStringLiteral(" END")));
-        properties.setProperty(QgsPalLayerSettings::Property::PositionY, QgsProperty::fromExpression(yCase + QStringLiteral(" END")));
-        properties.setProperty(QgsPalLayerSettings::Property::Hali, QgsProperty::fromValue(QStringLiteral("Center")));
-        properties.setProperty(QgsPalLayerSettings::Property::Vali, QgsProperty::fromValue(QStringLiteral("Bottom")));
-        properties.setProperty(QgsPalLayerSettings::Property::ShapeSizeX, QgsProperty::fromExpression(sizeCase + QStringLiteral(" END")));
-        properties.setProperty(QgsPalLayerSettings::Property::ShapeSizeY, QgsProperty::fromExpression(sizeCase + QStringLiteral(" END")));
-      }
-      drawing->setLabeling(new QgsVectorLayerSimpleLabeling(labels));
-      QgsMapLayerStyle style;
-      style.readFromLayer(drawing.get());
-      overrides.insert(it.key(), style.xmlData());
-    }
-  } catch (const QgsCsException& exception) {
-    m_error = QStringLiteral("연번 위치를 변환하지 못했습니다: %1").arg(exception.what());
-    return false;
-  }
-  m_entries = std::move(numbered);
-  m_overrides = std::move(overrides);
-  m_visibleKeys.clear();
-  for (const auto& entry : m_entries)
-    if (entry.number > 0) m_visibleKeys.insert(entryKey(entry.layerId, entry.number));
-  m_compacted = true;
-  m_pinnedSignature = renderSignature(map, false);
-  m_pinnedPaperArea = visibleMapPaperArea(map, m_exporting);
-  const QScopedValueRollback<bool> applying(m_applying, true);
-  applyBaseStyleOverrides(map);
-  map->invalidateCache();
-  map->update();
-  raiseAboveGeometries(map);
   return true;
 }
 
@@ -586,7 +464,6 @@ void HeritageLayoutNumbers::followRenderedLabels(QgsLayoutItemMap* map) {
   m_renderConnections.append(connect(map, &QgsLayoutItem::backgroundTaskCountChanged, this, [this, map](int count) {
     if (count <= 0) return;
     const bool interacting = map->property("ka_interacting").toBool();
-    if (!interacting && shouldRestoreCandidates(map)) restoreCandidates(map);
     m_previewBusy = true;
     m_previewDirty = m_exporting || interacting;
     m_previewSignature = renderSignature(map);
@@ -604,11 +481,6 @@ void HeritageLayoutNumbers::followRenderedLabels(QgsLayoutItemMap* map) {
     if (map->property("ka_interacting").toBool() || m_exporting) { timer->start(); return; }
     map->invalidateCache();
     map->update();
-    if (m_restorePending && m_restoreSkips++ < 4) {
-      timer->start();
-      return;
-    }
-    m_restorePending = false;
     acceptRenderedLabels(map, numberPreviewResults(map));
   }));
   auto paperChanged = [this, map, changed, timer]() {
@@ -617,10 +489,7 @@ void HeritageLayoutNumbers::followRenderedLabels(QgsLayoutItemMap* map) {
       timer->start();
       return;
     }
-    if (shouldRestoreCandidates(map))
-      restoreCandidates(map);
-    else
-      update(map);
+    update(map);
     timer->start();
   };
   m_renderConnections.append(connect(map, &QgsLayoutItem::sizePositionChanged, this, paperChanged));
@@ -642,15 +511,13 @@ void HeritageLayoutNumbers::followRenderedLabels(QgsLayoutItemMap* map) {
 }
 
 bool HeritageLayoutNumbers::exportPdf(QgsLayoutItemMap* map, QgsLayoutItemLegend* legend,
-                                     const QString& path, double dpi, QString* error, bool forceVectorOutput) {
+                                     const QString& path, double dpi, QString* error) {
   auto fail = [error](const QString& message) { if (error) *error = message; return false; };
   if (!map || !map->layout()) return fail(QStringLiteral("출력할 도면이 없습니다."));
   followRenderedLabels(map);
   const QScopedValueRollback<bool> exporting(m_exporting, true);
-  // Print-DPI placement must start from the full footprint candidates, not
-  // from the subset pinned by a screen preview at a different resolution.
-  restoreCandidates(map);
   auto* layout = map->layout();
+  KaPdfExport::prepareLayout(layout);
   const double previousDpi = layout->renderContext().dpi();
   struct RestoreDpi {
     QgsLayout* layout;
@@ -666,47 +533,47 @@ bool HeritageLayoutNumbers::exportPdf(QgsLayoutItemMap* map, QgsLayoutItemLegend
   QTemporaryDir temporary;
   if (!temporary.isValid()) return fail(QStringLiteral("PDF 임시 폴더를 만들지 못했습니다."));
   const QString draft = temporary.filePath(QStringLiteral("drawing.pdf"));
-  QByteArray signature = renderSignature(map);
   auto syncLegend = [&]() {
     if (!legend) return;
     LayoutService::tuneSheetLegend(legend);
     applyLegend(legend);
     m_legendPending = false;
   };
+  const QRectF legendBefore = legend ? legend->sceneBoundingRect() : QRectF();
   syncLegend();
-  // The exporter owns actual print-DPI PAL results only after a PDF pass.
-  // Normally the second pass verifies pinned consecutive numbers. One bounded
-  // retry also handles a placement rejected by QGIS after fixing its anchor.
-  for (int pass = 0; pass < 3; ++pass) {
-    LayoutService::settleSheetLegendsForExport(layout);
-    QgsLayoutExporter exporter(layout);
-    QgsLayoutExporter::PdfExportSettings settings;
-    settings.dpi = dpi;
-    settings.forceVectorOutput = forceVectorOutput;
-    if (exporter.exportToPdf(draft, settings) != QgsLayoutExporter::Success)
-      return fail(QStringLiteral("PDF 임시 출력에 실패했습니다."));
-    if (signature != renderSignature(map))
-      return fail(QStringLiteral("출력 중 도면이 변경되었습니다. 다시 내보내세요."));
-    const auto* results = numberExportResults(map, exporter);
-    if (!results && !m_entries.isEmpty())
-      return fail(QStringLiteral("PDF 번호 배치 결과를 확인하지 못했습니다."));
-    const auto printedKeys = placedKeys(map, results);
-    acceptRenderedLabels(map, results);
-    if (!m_error.isEmpty()) return fail(m_error);
-    Q_UNUSED(printedKeys);
-    QFile source(draft);
-    QSaveFile destination(path);
-    if (!source.open(QIODevice::ReadOnly) || !destination.open(QIODevice::WriteOnly))
-      return fail(QStringLiteral("PDF 저장 파일을 열지 못했습니다."));
-    while (!source.atEnd()) {
-      const QByteArray bytes = source.read(1024 * 1024);
-      if (source.error() != QFileDevice::NoError || destination.write(bytes) != bytes.size())
-        return fail(QStringLiteral("PDF 파일을 저장하지 못했습니다."));
-    }
-    if (!destination.commit()) return fail(QStringLiteral("PDF 파일을 확정하지 못했습니다."));
-    return true;
+  // Badges keep off a legend card that overlaps the map. Taking its final rows
+  // can resize the card, so place the badges once more against the final card.
+  // Entries do not change here, so the legend keeps that size afterwards.
+  if (legend && legend->sceneBoundingRect() != legendBefore &&
+      legend->sceneBoundingRect().intersects(map->sceneBoundingRect())) {
+    if (!update(map, true)) return fail(m_error);
+    syncLegend();
   }
-  return fail(QStringLiteral("PDF를 저장하지 못했습니다. 다시 내보내세요."));
+  LayoutService::settleSheetLegendsForExport(layout);
+  const QByteArray signature = renderSignature(map);
+  // One pass: numbers are pins placed in update(), not PAL labels that the
+  // exporter may drop, so there is nothing to retry.
+  QgsLayoutExporter exporter(layout);
+  if (exporter.exportToPdf(draft, KaPdfExport::sheetSettings(dpi)) != QgsLayoutExporter::Success)
+    return fail(QStringLiteral("PDF 임시 출력에 실패했습니다."));
+  if (signature != renderSignature(map))
+    return fail(QStringLiteral("출력 중 도면이 변경되었습니다. 다시 내보내세요."));
+  const auto* results = numberExportResults(map, exporter);
+  if (!results && !m_entries.isEmpty())
+    return fail(QStringLiteral("PDF 번호 배치 결과를 확인하지 못했습니다."));
+  acceptRenderedLabels(map, results);
+  if (!m_error.isEmpty()) return fail(m_error);
+  QFile source(draft);
+  QSaveFile destination(path);
+  if (!source.open(QIODevice::ReadOnly) || !destination.open(QIODevice::WriteOnly))
+    return fail(QStringLiteral("PDF 저장 파일을 열지 못했습니다."));
+  while (!source.atEnd()) {
+    const QByteArray bytes = source.read(1024 * 1024);
+    if (source.error() != QFileDevice::NoError || destination.write(bytes) != bytes.size())
+      return fail(QStringLiteral("PDF 파일을 저장하지 못했습니다."));
+  }
+  if (!destination.commit()) return fail(QStringLiteral("PDF 파일을 확정하지 못했습니다."));
+  return true;
 }
 
 bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
@@ -727,6 +594,18 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
          << map->crs().authid() << whole(map->scale())
          << whole(paperBox.xMinimum()) << whole(paperBox.yMinimum())
          << whole(paperBox.xMaximum()) << whole(paperBox.yMaximum());
+  // Badges keep off a legend card that overlaps the map, so its place on the
+  // map is part of the placement input (0.1 mm steps).
+  const QVector<QPolygonF> legendBlocks = LayoutBadgePlacer::legendBlocks(map, m_exporting);
+  if (!legendBlocks.isEmpty()) {
+    auto tenth = [](double value) { return std::isfinite(value) ? std::llround(value * 10.) : 0LL; };
+    const QRectF frame = map->sceneBoundingRect();
+    stream << tenth(frame.left()) << tenth(frame.top()) << tenth(frame.width()) << tenth(frame.height());
+    for (const QPolygonF& block : legendBlocks) {
+      const QRectF r = block.boundingRect();
+      stream << tenth(r.left()) << tenth(r.top()) << tenth(r.width()) << tenth(r.height());
+    }
+  }
   // Do not serialize thousands of symbols merely to discover a cache hit.
   // Track source changes with lifetime-bound connections, including in-place
   // renderer check state changes (repaintRequested) and uncommitted edits.
@@ -746,7 +625,7 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
         // A page move invalidates the layout preview and can emit
         // repaintRequested on the source. Membership is rebuilt from the
         // paper footprint in update() via sizePositionChanged, not here.
-        if (!m_applying && !m_compacted) ++m_layerRevisions[id];
+        if (!m_applying) ++m_layerRevisions[id];
       });
       connect(layer, &QObject::destroyed, this, [this, id]() {
         m_layerRevisions.remove(id);
@@ -763,7 +642,8 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
       }
     }
     stream << id << m_layerRevisions.value(id) << layer->name()
-           << layer->customProperty(QStringLiteral("ka_hgis/layout_numbers_visible"), true).toBool();
+           << layer->customProperty(QStringLiteral("ka_hgis/layout_numbers_visible"), true).toBool()
+           << layer->customProperty(datasetPropertyKey()).toString();
   }
   // Number assignment follows project tree order, not paint order alone.
   for (auto* node : project->layerTreeRoot()->findLayers()) {
@@ -774,13 +654,6 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
   }
   const QString digest = QString::fromLatin1(QCryptographicHash::hash(signature, QCryptographicHash::Sha256).toHex());
   if (!force && digest == m_signature) return m_error.isEmpty();
-  QByteArray content;
-  QDataStream contentStream(&content, QIODevice::WriteOnly);
-  contentStream << map->crs().toWkt() << map->scale();
-  for (auto* layer : layers)
-    contentStream << layer->id() << m_layerRevisions.value(layer->id())
-                  << layer->customProperty(QStringLiteral("ka_hgis/layout_numbers_visible"), true).toBool();
-  if (!force && m_compacted && content == m_contentSignature) return m_error.isEmpty();
   m_error.clear();
   QVector<Entry> entries;
   QVector<NumberPin> pins;
@@ -793,8 +666,16 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
       overrides.remove(layer->id());
   }
   QMap<QString, int> counters;
-  QVector<QgsPointXY> siteOrigins;
-  QVector<QgsPointXY> placedMap;
+  // One placer for the whole sheet: badges of different layers never cover
+  // each other, and all stay on the visible map paper and off the legend card.
+  const double badgeStep = (kNumberClearMm / 1000.0) * (map->scale() > 0. ? map->scale() : 5000.);
+  bool invertible = false;
+  const QTransform mapToScene = map->layoutToMapCoordsTransform().inverted(&invertible);
+  LayoutBadgePlacer placer(
+      invertible ? mapToScene : QTransform(),
+      invertible ? LayoutBadgePlacer::withoutBlocks(visibleMapOnPaper(map, m_exporting), legendBlocks)
+                 : QPainterPath(),
+      badgeStep);
   // Project tree order is stable and agrees with the user's layer panel.
   for (QgsLayerTreeLayer* treeLayer : project->layerTreeRoot()->findLayers()) {
     auto* layer = qobject_cast<QgsVectorLayer*>(treeLayer->layer());
@@ -920,23 +801,18 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
     {
       QgsCoordinateTransform toMap(layer->crs(), map->crs(), project->transformContext());
       QgsCoordinateTransform toLayer(map->crs(), layer->crs(), project->transformContext());
-      const double scale = map->scale() > 0. ? map->scale() : 5000.;
-      const double stackSep = (kNumberClearMm / 1000.0) * scale;
-      const double stepSep = (kNumberClearMm / 1000.0) * scale;
+      // Numbers below follow this same site order, so the badge size is known here.
+      int number = counters.value(datasetName);
       for (auto it = sites.begin(); it != sites.end(); ++it) {
+        ++number;
         if (it->labelId.isEmpty()) continue;
         try {
           const QgsPointXY origin = toMap.transform(QgsPointXY(it->labelX, it->labelY));
-          const QVector<QgsPointXY> cluster = stackedPins(origin, siteOrigins, placedMap, stackSep);
-          const QgsPointXY nudged = cluster.isEmpty()
-                                        ? origin
-                                        : offsetHeritageNumber(origin, cluster, stepSep);
+          const QgsPointXY nudged = placer.place(origin, circleSize(number));
           it->originX = origin.x();
           it->originY = origin.y();
           it->mapX = nudged.x();
           it->mapY = nudged.y();
-          siteOrigins.append(origin);
-          placedMap.append(nudged);
           const QgsPointXY layerPos = toLayer.transform(nudged);
           it->labelX = layerPos.x();
           it->labelY = layerPos.y();
@@ -945,8 +821,7 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
           it->originY = it->labelY;
           it->mapX = it->labelX;
           it->mapY = it->labelY;
-          siteOrigins.append(QgsPointXY(it->labelX, it->labelY));
-          placedMap.append(QgsPointXY(it->labelX, it->labelY));
+          placer.occupy(QgsPointXY(it->labelX, it->labelY));
         }
       }
     }
@@ -1030,12 +905,8 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
   }
   m_entries = std::move(entries);
   m_overrides = std::move(overrides);
-  m_candidateEntries = m_entries;
-  m_candidateOverrides = m_overrides;
-  m_compacted = false;
   m_legendPending = false;
   m_signature = digest;
-  m_contentSignature = content;
   ++m_revision;
   m_visibleKeys.clear();
   for (const auto& entry : m_entries) {

@@ -24,12 +24,19 @@ inline QString kaFriendlyLegendName(const QString& name) {
   return base;
 }
 
-inline bool legendTitlesMatch(const QString& a, const QString& b) {
+// Same title apart from the " [EPSG:…]" legend suffix (and 토양도 sheets). No 지적/위성 folding:
+// use this where a user layer with a similar name must not be caught (F035).
+inline bool legendTitlesMatchDirect(const QString& a, const QString& b) {
   if (a == b) return true;
   if (a.startsWith(b + QLatin1String(" [")) || b.startsWith(a + QLatin1String(" [")))
     return true;
   const QString soil = QStringLiteral("토양도(흙토람)");
-  if (a.startsWith(soil) && b.startsWith(soil))
-    return true;
+  return a.startsWith(soil) && b.startsWith(soil);
+}
+
+// Direct match, or both titles fold to the same friendly name ("VWorld 위성" == "위성").
+// Folding is for our own reference layers and legacy (untagged) projects only.
+inline bool legendTitlesMatch(const QString& a, const QString& b) {
+  if (legendTitlesMatchDirect(a, b)) return true;
   return kaFriendlyLegendName(a) == kaFriendlyLegendName(b);
 }

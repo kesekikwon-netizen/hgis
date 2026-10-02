@@ -1,0 +1,7 @@
+{
+  "_comment": "Example per-PC-class perf budget file. Copy it outside the repo, adjust, and point KA_PERF_BUDGETS at it. Values are milliseconds; 'scale' multiplies every reference budget; 'calibration_ref_ms' is the reference PC's calibration median (printed by perf_engine as calibration_1000_polygons median_ms) and scales budgets by this PC's calibration / reference. A per-gate number wins over scale. See TEST_INFRA.md.",
+  "scale": 1.3,
+  "calibration_ref_ms": 0,
+  "startup_home": 120,
+  "a3_pdf_export": 40
+}

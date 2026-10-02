@@ -1,0 +1,52 @@
+<RCC>
+  <!-- Lucide 1.49.0 (ISC, see lucide/LICENSE-lucide.txt) and three Strata drawings in the same grid. -->
+  <qresource prefix="/ka-hgis/icons">
+    <file alias="lucide/amphora.svg">lucide/amphora.svg</file>
+    <file alias="lucide/box.svg">lucide/box.svg</file>
+    <file alias="lucide/chart-line.svg">lucide/chart-line.svg</file>
+    <file alias="lucide/check.svg">lucide/check.svg</file>
+    <file alias="lucide/chevron-left.svg">lucide/chevron-left.svg</file>
+    <file alias="lucide/chevron-right.svg">lucide/chevron-right.svg</file>
+    <file alias="lucide/circle-dot-dashed.svg">lucide/circle-dot-dashed.svg</file>
+    <file alias="lucide/clipboard-list.svg">lucide/clipboard-list.svg</file>
+    <file alias="lucide/download.svg">lucide/download.svg</file>
+    <file alias="lucide/ellipsis.svg">lucide/ellipsis.svg</file>
+    <file alias="lucide/file-plus.svg">lucide/file-plus.svg</file>
+    <file alias="lucide/file-text.svg">lucide/file-text.svg</file>
+    <file alias="lucide/folder.svg">lucide/folder.svg</file>
+    <file alias="lucide/grid-3x3.svg">lucide/grid-3x3.svg</file>
+    <file alias="lucide/house.svg">lucide/house.svg</file>
+    <file alias="lucide/image.svg">lucide/image.svg</file>
+    <file alias="lucide/layers.svg">lucide/layers.svg</file>
+    <file alias="lucide/locate-fixed.svg">lucide/locate-fixed.svg</file>
+    <file alias="lucide/magnet.svg">lucide/magnet.svg</file>
+    <file alias="lucide/map-pin.svg">lucide/map-pin.svg</file>
+    <file alias="lucide/map.svg">lucide/map.svg</file>
+    <file alias="lucide/maximize.svg">lucide/maximize.svg</file>
+    <file alias="lucide/minus.svg">lucide/minus.svg</file>
+    <file alias="lucide/mountain-snow.svg">lucide/mountain-snow.svg</file>
+    <file alias="lucide/mountain.svg">lucide/mountain.svg</file>
+    <file alias="lucide/mouse-pointer-2.svg">lucide/mouse-pointer-2.svg</file>
+    <file alias="lucide/move.svg">lucide/move.svg</file>
+    <file alias="lucide/pen-line.svg">lucide/pen-line.svg</file>
+    <file alias="lucide/pencil.svg">lucide/pencil.svg</file>
+    <file alias="lucide/plus.svg">lucide/plus.svg</file>
+    <file alias="lucide/printer.svg">lucide/printer.svg</file>
+    <file alias="lucide/redo-2.svg">lucide/redo-2.svg</file>
+    <file alias="lucide/rotate-ccw-clock.svg">lucide/rotate-ccw-clock.svg</file>
+    <file alias="lucide/satellite.svg">lucide/satellite.svg</file>
+    <file alias="lucide/save-pen.svg">lucide/save-pen.svg</file>
+    <file alias="lucide/save.svg">lucide/save.svg</file>
+    <file alias="lucide/search.svg">lucide/search.svg</file>
+    <file alias="lucide/square-dashed.svg">lucide/square-dashed.svg</file>
+    <file alias="lucide/target.svg">lucide/target.svg</file>
+    <file alias="lucide/triangle-alert.svg">lucide/triangle-alert.svg</file>
+    <file alias="lucide/undo-2.svg">lucide/undo-2.svg</file>
+    <file alias="lucide/vector-polygon.svg">lucide/vector-polygon.svg</file>
+    <file alias="lucide/waves-horizontal.svg">lucide/waves-horizontal.svg</file>
+    <file alias="lucide/x.svg">lucide/x.svg</file>
+    <file alias="ka/ka-cadastral.svg">ka/ka-cadastral.svg</file>
+    <file alias="ka/ka-geology.svg">ka/ka-geology.svg</file>
+    <file alias="ka/ka-ruler-horizontal.svg">ka/ka-ruler-horizontal.svg</file>
+  </qresource>
+</RCC>

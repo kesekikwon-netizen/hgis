@@ -6,6 +6,7 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QSpinBox>
@@ -20,7 +21,8 @@ KaDemClassDialog::KaDemClassDialog(QgsRasterLayer* layer, QWidget* parent, QgsMa
   setModal(false);
   setMinimumWidth(380);
   auto* form = new QFormLayout(this);
-  auto* hint = new QLabel(QStringLiteral("표고에 따라 색이 부드럽게 이어집니다. 색띠의 눈금은 선택한 표현과 함께 바뀝니다."), this);
+  auto* hint = new QLabel(QStringLiteral("표고에 따라 색이 부드럽게 이어집니다. 유적처럼 높이차가 작은 곳은 "
+                                         "「현재 화면에 색 맞추기」로 화면 안의 높이만으로 색을 나누세요."), this);
   hint->setWordWrap(true);
   form->addRow(hint);
   m_preset = new QComboBox(this);
@@ -30,7 +32,15 @@ KaDemClassDialog::KaDemClassDialog(QgsRasterLayer* layer, QWidget* parent, QgsMa
   m_preset->addItem(QStringLiteral("현재 화면 맞춤"), QStringLiteral("viewport"));
   const int selected = layer ? m_preset->findData(layer->customProperty(QStringLiteral("ka_hgis/dem_preset"), QStringLiteral("national"))) : 0;
   m_preset->setCurrentIndex(qMax(0, selected));
-  form->addRow(QStringLiteral("색 표현"), m_preset);
+  auto* fit = new QPushButton(QStringLiteral("현재 화면에 색 맞추기"), this);
+  fit->setObjectName(QStringLiteral("demFitView"));
+  fit->setToolTip(QStringLiteral("지금 지도 화면에 보이는 가장 낮은 곳과 높은 곳으로 색띠를 다시 나눕니다. "
+                                 "지도를 옮기면 따라 바뀝니다."));
+  fit->setEnabled(canvas != nullptr);
+  auto* presetRow = new QHBoxLayout();
+  presetRow->addWidget(m_preset, 1);
+  presetRow->addWidget(fit);
+  form->addRow(QStringLiteral("색 표현"), presetRow);
   m_relief = new QCheckBox(QStringLiteral("지형 음영 합성"), this);
   m_relief->setObjectName(QStringLiteral("demReliefEnabled"));
   m_relief->setChecked(!layer || layer->customProperty(QStringLiteral("ka_hgis/dem_relief_enabled"), true).toBool());
@@ -49,16 +59,50 @@ KaDemClassDialog::KaDemClassDialog(QgsRasterLayer* layer, QWidget* parent, QgsMa
   m_strength->setValue(layer ? qRound(layer->customProperty(QStringLiteral("ka_hgis/dem_relief_strength"), .30).toDouble() * 100.) : 30);
   form->addRow(QStringLiteral("음영 세기"), m_strength);
   m_status = new QLabel(this);
+  m_status->setObjectName(QStringLiteral("demStatus"));
   m_status->setWordWrap(true);
   form->addRow(m_status);
   auto* buttons = new QDialogButtonBox(QDialogButtonBox::Apply | QDialogButtonBox::Close, this);
   buttons->button(QDialogButtonBox::Apply)->setText(QStringLiteral("적용"));
   buttons->button(QDialogButtonBox::Close)->setText(QStringLiteral("닫기"));
   connect(buttons->button(QDialogButtonBox::Apply), &QPushButton::clicked, this, &KaDemClassDialog::applyStyle);
+  connect(fit, &QPushButton::clicked, this, &KaDemClassDialog::fitToView);
   connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::close);
   form->addRow(buttons);
   if (layer) connect(layer, &QObject::destroyed, this, &QDialog::reject);
   DemPresentation::followCanvas(layer, canvas);
+  suggestViewport();
+}
+
+bool KaDemClassDialog::canvasExtentInLayerCrs(QgsRectangle* extent) const {
+  if (!m_canvas || !m_layer || !extent) return false;
+  try {
+    const QgsCoordinateTransform transform(m_canvas->mapSettings().destinationCrs(), m_layer->crs(), m_canvas->mapSettings().transformContext());
+    *extent = transform.transformBoundingBox(m_canvas->extent());
+  } catch (const QgsCsException&) {
+    return false;
+  }
+  return true;
+}
+
+void KaDemClassDialog::fitToView() {
+  m_preset->setCurrentIndex(m_preset->findData(QStringLiteral("viewport")));
+  applyStyle();
+}
+
+// The national 0–2000 m ramp stays the default; a flat site only gets a pointer to the view fit.
+void KaDemClassDialog::suggestViewport() {
+  if (!m_layer || m_preset->currentData().toString() == QLatin1String("viewport")) return;
+  // Opening the dialog must not wait on the network for a hint.
+  const QString source = m_layer->source();
+  if (source.contains(QLatin1String("vsicurl")) || source.startsWith(QLatin1String("http"), Qt::CaseInsensitive)) return;
+  QgsRectangle extent;
+  double low = 0., high = 0.;
+  if (!canvasExtentInLayerCrs(&extent) || !DemPresentation::sampleRange(m_layer, extent, &low, &high)) return;
+  if (high - low >= 100.) return;
+  m_status->setText(QStringLiteral("지금 화면의 높이차는 약 %1 m뿐이라 이 색 표현으로는 거의 한 색으로 보입니다. "
+                                   "「현재 화면에 색 맞추기」를 누르면 화면 안의 높이로 색을 나눕니다.")
+                        .arg(qMax(1, qRound(high - low))));
 }
 
 void KaDemClassDialog::applyStyle() {
@@ -67,10 +111,7 @@ void KaDemClassDialog::applyStyle() {
   QgsRectangle extent;
   if (preset == QLatin1String("viewport")) {
     if (!m_canvas) { m_status->setText(QStringLiteral("지도 화면에서 DEM 표현을 다시 열어 주세요.")); return; }
-    try {
-      const QgsCoordinateTransform transform(m_canvas->mapSettings().destinationCrs(), m_layer->crs(), m_canvas->mapSettings().transformContext());
-      extent = transform.transformBoundingBox(m_canvas->extent());
-    } catch (const QgsCsException&) {
+    if (!canvasExtentInLayerCrs(&extent)) {
       m_status->setText(QStringLiteral("화면 좌표를 변환하지 못했습니다. 작업 좌표계를 확인하세요.")); return;
     }
   }

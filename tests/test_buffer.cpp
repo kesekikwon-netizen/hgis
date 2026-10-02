@@ -1,9 +1,12 @@
 #include <QtTest>
 #include <QFile>
+#include <QTemporaryDir>
 #include <cmath>
 
 #include "core/BufferAnalysis.h"
 #include "core/LayerOps.h"
+#include "core/SurveyProjectFactory.h"
+#include "core/SurveyStorage.h"
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
@@ -19,6 +22,8 @@ class TestBuffer : public QObject {
 private slots:
   void ringHasGapAndLabel();
   void offsetIs500mFromSource();
+  void multiPartSurveyArea_ringsEveryPart();
+  void ringLayers_bakeIntoSurveyOnlyOnSave();
   void moveFeatureVertex_updatesPolygonCorner();
   void setLabelsVisible_togglesPolygonLabels();
   void clipLayerByBoundary_clipsIntersectingFeatures();
@@ -110,6 +115,85 @@ void TestBuffer::offsetIs500mFromSource() {
     if (d > maxD) maxD = d;
   }
   QVERIFY2(maxD >= 500.0 && maxD < 720.0, qPrintable(QStringLiteral("maxD=%1").arg(maxD)));
+}
+
+static QgsVectorLayer* bufferLayer(QgsProject& proj, const QString& key) {
+  for (QgsMapLayer* l : proj.mapLayers()) {
+    if (LayerOps::layerKeyOf(l) == key) return qobject_cast<QgsVectorLayer*>(l);
+  }
+  return nullptr;
+}
+
+void TestBuffer::multiPartSurveyArea_ringsEveryPart() {
+  // 조사구역이 여러 조각이면 가장 큰 면만 쓰지 않고 모든 조각을 두른다.
+  // A·C 는 1 km 안이라 한 윤곽으로 합쳐지고, 3 km 떨어진 B 는 따로 두른다.
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+  auto* src = new QgsVectorLayer(QStringLiteral("MultiPolygon?crs=EPSG:5187"),
+                                 QStringLiteral("site"), QStringLiteral("memory"));
+  QVERIFY(src->isValid());
+  auto rect = [](double x0) {
+    return QgsGeometry::fromRect(QgsRectangle(x0, 450000, x0 + 50, 450050));
+  };
+  const QgsGeometry a = rect(200000), b = rect(203000), c = rect(200350);
+  QVERIFY(src->startEditing());
+  QgsFeature f1(src->fields()), f2(src->fields());
+  f1.setGeometry(QgsGeometry::collectGeometry(QVector<QgsGeometry>{a, b}));
+  f2.setGeometry(QgsGeometry::collectGeometry(QVector<QgsGeometry>{c}));
+  QVERIFY(src->addFeature(f1));
+  QVERIFY(src->addFeature(f2));
+  QVERIFY(src->commitChanges());
+  proj.addMapLayer(src);
+
+  QString err;
+  QVERIFY2(BufferAnalysis::addDistanceRing(&proj, nullptr, src, 500.0, &err), qPrintable(err));
+  QgsVectorLayer* ring = bufferLayer(proj, QStringLiteral("user:buffer_ring_500"));
+  QgsVectorLayer* lab = bufferLayer(proj, QStringLiteral("user:buffer_label_500"));
+  QVERIFY(ring && lab);
+  QCOMPARE(int(ring->featureCount()), 2);
+  QCOMPARE(int(lab->featureCount()), 8);
+  QVector<QgsGeometry> lines;
+  QgsFeature rf;
+  QgsFeatureIterator it = ring->getFeatures();
+  while (it.nextFeature(rf)) lines << rf.geometry();
+  const QgsGeometry allRings = QgsGeometry::collectGeometry(lines);
+  for (const QgsGeometry& part : {a, b, c}) {
+    const double d = part.distance(allRings);
+    QVERIFY2(d > 490.0 && d < 510.0, qPrintable(QStringLiteral("part ring distance=%1").arg(d)));
+  }
+}
+
+void TestBuffer::ringLayers_bakeIntoSurveyOnlyOnSave() {
+  // 주변 경계는 그 자리에서 파일을 쓰지 않는다. 조사 저장이 메모리 레이어를
+  // 조사 GPKG 로 구울 때 함께 들어가 다시 열어도 남는다.
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  QString err;
+  const QString gpkg = SurveyProjectFactory::createNewSurvey(dir.path(), QStringLiteral("buf"), &err);
+  QVERIFY2(!gpkg.isEmpty(), qPrintable(err));
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+  auto* src = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("site"),
+                                 QStringLiteral("memory"));
+  QVERIFY(src->startEditing());
+  QgsFeature f(src->fields());
+  f.setGeometry(QgsGeometry::fromRect(QgsRectangle(200000, 450000, 200040, 450040)));
+  QVERIFY(src->addFeature(f));
+  QVERIFY(src->commitChanges());
+  proj.addMapLayer(src);
+  QVERIFY2(BufferAnalysis::addDistanceRing(&proj, nullptr, src, 500.0, &err), qPrintable(err));
+  QgsVectorLayer* ring = bufferLayer(proj, QStringLiteral("user:buffer_ring_500"));
+  QVERIFY(ring);
+  QCOMPARE(ring->providerType(), QStringLiteral("memory"));
+
+  const SurveyStorage::AbsorbResult r = SurveyStorage::absorbExternalVectors(&proj, gpkg);
+  QVERIFY2(r.imported.contains(QStringLiteral("주변 500m")), qPrintable(r.imported.join(',')));
+  QVERIFY2(r.imported.contains(QStringLiteral("주변 500m 거리")), qPrintable(r.imported.join(',')));
+  QCOMPARE(ring->providerType(), QStringLiteral("ogr"));
+  QCOMPARE(LayerOps::layerKeyOf(ring), QStringLiteral("user:buffer_ring_500"));
+  QgsVectorLayer stored(ring->source(), QStringLiteral("stored"), QStringLiteral("ogr"));
+  QVERIFY(stored.isValid());
+  QCOMPARE(int(stored.featureCount()), 1);
 }
 
 void TestBuffer::moveFeatureVertex_updatesPolygonCorner() {

@@ -4,18 +4,15 @@
 #include "KaCaptureMapTool.h"
 #include "KaDrawingStudio.h"
 #include "KaFeatureSelectTool.h"
-#include "KaFoundLocationMark.h"
 #include "KaMeasureMapTool.h"
 #include "core/GeorefService.h"
+#include "core/KaLogExcept.h"
 #include "core/LayerOps.h"
 #include "core/LayerLabelControls.h"
 #include "core/MeasureOps.h"
 
 #include <QAction>
 #include <QApplication>
-#include <QLabel>
-#include <QPushButton>
-#include <QWidgetAction>
 #include <QClipboard>
 #include <QFileInfo>
 #include <QItemSelectionModel>
@@ -60,8 +57,8 @@ LayerMenuKind menuKind(QgsMapLayer* layer) {
       (layer->providerType() == QLatin1String("ogr") &&
        GeorefService::isCadPath(layer->source().section(QLatin1Char('|'), 0, 0))))
     return qobject_cast<QgsVectorLayer*>(layer) ? LayerMenuKind::ExternalVector : LayerMenuKind::ExternalRaster;
-  if (layer->customProperty(QStringLiteral("ka_hgis/layer_role")).toString() == QLatin1String("reference") ||
-      LayerOps::isBasemapLayer(layer)) return LayerMenuKind::Reference;
+  // Same role decision as edit/snap (LayerRole): stored role first, legacy titles last.
+  if (LayerOps::isReferenceLayer(layer) || LayerOps::isBasemapLayer(layer)) return LayerMenuKind::Reference;
   return qobject_cast<QgsVectorLayer*>(layer) ? LayerMenuKind::ExternalVector : LayerMenuKind::ExternalRaster;
 }
 
@@ -161,11 +158,6 @@ void MainWindow::populateMapContextMenu(QMenu* menu, const QPoint& pos) {
       .arg(m_canvas->mapSettings().destinationCrs().authid());
   addMenuAction(menu, "map.copyCoordinates", QStringLiteral("이 위치 좌표 복사"), {},
       [coordinates]() { QApplication::clipboard()->setText(coordinates); }, coordinates);
-  if (m_locationMark) {
-    menu->addSeparator();
-    addMenuAction(menu, "map.clearLocation", QStringLiteral("찾은 위치 표식 지우기"), {},
-        [this]() { clearFoundLocationMark(); });
-  }
 }
 
 void MainWindow::onMapContextMenu(const QPoint& pos) {
@@ -254,33 +246,17 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
     }, help);
   };
   const auto zoom = [&]() {
-    const QString reason = vector ? emptyReason : invalidReason;
-    auto* zoomButton = new QPushButton(QStringLiteral("이 레이어로 이동"), &menu);
-    zoomButton->setObjectName(QStringLiteral("layer.zoom"));
-    zoomButton->setFlat(true);
-    zoomButton->setCursor(Qt::PointingHandCursor);
-    zoomButton->setEnabled(reason.isEmpty());
-    zoomButton->setToolTip(reason);
-    zoomButton->setStyleSheet(reason.isEmpty()
-                                  ? QStringLiteral("QPushButton { color: #c62828; text-align: left; border: none;"
-                                                   " background: transparent; padding: 4px 28px; }")
-                                  : QStringLiteral("QPushButton { color: #e8b4b4; text-align: left; border: none;"
-                                                   " background: transparent; padding: 4px 28px; }"));
-    QObject::connect(zoomButton, &QPushButton::clicked, &menu, [this, layer, &menu]() {
-      menu.close();
-      if (!layer || m_closingWindow) return;
-      if (m_layerTree) m_layerTree->setCurrentLayer(layer);
-      if (!LayerOps::zoomToLayerMax(m_canvas, layer)) {
-        statusBar()->showMessage(QStringLiteral("표시할 범위가 없습니다. 도형이나 자료 범위를 확인하세요."), 6000);
-        return;
-      }
-      if (m_drawingStudio) m_drawingStudio->centerOnMapCanvas();
-    });
-    auto* zoomAction = new QWidgetAction(&menu);
-    zoomAction->setObjectName(QStringLiteral("layer.zoom"));
-    zoomAction->setEnabled(reason.isEmpty());
-    zoomAction->setDefaultWidget(zoomButton);
-    menu.addAction(zoomAction);
+    // A plain menu row like the others (keyboard, hover, disabled tooltip).
+    add(&menu, "layer.zoom", QStringLiteral("이 레이어로 이동"), vector ? emptyReason : invalidReason,
+        [this, layer]() {
+          if (!LayerOps::zoomToLayerMax(m_canvas, layer)) {
+            statusBar()->showMessage(QStringLiteral("표시할 범위가 없습니다. 도형이나 자료 범위를 확인하세요."), 6000);
+            return;
+          }
+          // Satellite and cadastral tiles for the new extent (as 「이 레이어로 이동」 on the ribbon).
+          LayerOps::refreshXyzBasemapTiles(m_canvas);
+          if (m_drawingStudio) m_drawingStudio->centerOnMapCanvas();
+        });
   };
   const auto draw = [&]() { add(&menu, "layer.draw", QStringLiteral("그리기·편집 시작"), drawReason,
       [this, vector]() { if (vector) beginEdit(vector); }); };
@@ -365,7 +341,7 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
             }
             applyLabelStackOrder(); refreshViews();
           }});
-      action->setCheckable(true); action->setChecked(qFuzzyCompare(size, LayerOps::labelFontSize(vector, 5.0)));
+      action->setCheckable(true); action->setChecked(qFuzzyCompare(size, LayerOps::labelFontSize(vector, LayerOps::kDefaultLabelSizePt)));
     }
     if (vector->source().section(QLatin1Char('|'), 0, 0).endsWith(QLatin1String(".shp"), Qt::CaseInsensitive)) {
       QMenu* encoding = addSubmenu(display, "layer.encoding", QStringLiteral("깨진 한글 바로잡기"));
@@ -380,23 +356,34 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
   };
   const auto exportSurvey = [&]() {
     menu.addSeparator();
-    const QString reason = busy ? busyReason : m_surveyPath.isEmpty() ? QStringLiteral("먼저 조사 파일을 열어 주세요.") : emptyReason;
-    add(&menu, "layer.export", QStringLiteral("제출 파일 만들기…"), reason, [this]() { exportShpPackage(); },
-        QStringLiteral("현재 조사 전체를 검수한 뒤 SHP·PDF·MANIFEST 제출 꾸러미를 만듭니다."));
+    // The package covers the whole survey, so an empty layer does not block it.
+    const QString reason = busy ? busyReason : m_surveyPath.isEmpty() ? QStringLiteral("먼저 조사 파일을 열어 주세요.") : QString();
+    add(&menu, "layer.export", QStringLiteral("제출 꾸러미 만들기…"), reason, [this]() { exportShpPackage(); },
+        QStringLiteral("현재 조사 전체를 검수한 뒤 5179 SHP·조사도면.pdf·MANIFEST 제출 꾸러미를 만듭니다. 오류가 있으면 「검수·제출」 목록을 엽니다."));
   };
 
   add(&menu, "layer.import", QStringLiteral("레이어 불러오기 (SHP·DXF·GPKG)"), busyReason, [this]() { addUserLayer(); });
   menu.addSeparator();
   appearance();
   QMenu* opacity = addSubmenu(&menu, "layer.opacity", QStringLiteral("투명도"));
-  opacity->menuAction()->setEnabled(valid);
-  opacity->menuAction()->setToolTip(invalidReason);
+  // Display only: survey polygons and imported SHP can be see-through too.
+  const QString opacityReason = LayerOps::opacityUnavailableReason(layer);
+  opacity->menuAction()->setEnabled(opacityReason.isEmpty());
+  opacity->menuAction()->setToolTip(opacityReason.isEmpty()
+      ? QStringLiteral("지도에서만 흐리게 보입니다. 자료와 색은 바뀌지 않습니다.") : opacityReason);
   const double opacityNow = LayerOps::mapLayerOpacity(layer);
   for (int transparency : {0, 20, 40, 50, 60, 80}) {
-    QAction* action = add(opacity, "layer.opacityValue", QStringLiteral("%1% 투명하게").arg(transparency), {},
+    QAction* action = add(opacity, "layer.opacityValue", QStringLiteral("%1% 투명하게").arg(transparency), opacityReason,
         [this, layer, transparency, refreshViews]() {
-          LayerOps::setMapLayerOpacity(layer, 1.0 - transparency / 100.0, m_canvas);
-          updateLayerOpacityControl(); refreshViews();
+          if (!LayerOps::applyLayerOpacity(layer, 1.0 - transparency / 100.0, m_canvas)) {
+            statusBar()->showMessage(QStringLiteral("투명도를 바꾸지 못했습니다: %1")
+                .arg(LayerOps::opacityUnavailableReason(layer)), 8000);
+            return;
+          }
+          updateLayerOpacityControl();
+          // A see-through survey layer moves from the above-labels pass to the map.
+          if (!LayerOps::isReferenceOrBasemapLayer(layer)) refreshMapCanvasNow();
+          refreshViews();
         });
     action->setCheckable(true);
     action->setChecked(qAbs(opacityNow * 100.0 - (100 - transparency)) < 1.0);
@@ -416,9 +403,20 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
         parent->removeChildNode(item);
         refreshViews();
       });
-  add(&menu, "layer.merge", QStringLiteral("폴리곤 묶기"),
-      vector && vector->geometryType() == Qgis::GeometryType::Polygon ? vertexReason : QStringLiteral("조사에서 그린 면 도형을 선택하세요."),
-      [this]() { mergeFeaturePolygons(); });
+  // Shape group: only the rows that apply to this layer; temporary blocks stay
+  // visible but disabled with the reason as tooltip.
+  const bool polygon = vector && vector->geometryType() == Qgis::GeometryType::Polygon;
+  const bool editableKind = vector && kind != LayerMenuKind::Reference &&
+                            !LayerOps::isReferenceLayer(vector) && !LayerOps::isCadastralLayer(vector);
+  if (editableKind || polygon || kind == LayerMenuKind::Area) menu.addSeparator();
+  if (editableKind) {
+    draw();
+    vertices();
+  }
+  if (editableKind && polygon)
+    add(&menu, "layer.merge", QStringLiteral("폴리곤 묶기"), vertexReason, [this]() { mergeFeaturePolygons(); },
+        QStringLiteral("지도에서 고른 면 2개 이상을 하나로 묶습니다. Ctrl+Z로 되돌릴 수 있습니다."));
+  if (polygon) area();
   if (kind == LayerMenuKind::Area) {
     QMenu* trench = addSubmenu(&menu, "layer.trenchCreate", QStringLiteral("시굴격자"));
     const QString reason = !drawReason.isEmpty() ? drawReason : emptyReason;
@@ -430,6 +428,7 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
   }
   if (layer->providerType() == QLatin1String("wms") && layer->source().contains(QLatin1String("type=xyz")))
     add(&menu, "layer.offline", QStringLiteral("오프라인 저장 — 지금 화면 범위"), invalidReason, [this]() { saveOfflineTilePack(); });
+  if (domain) exportSurvey();
   menu.addSeparator();
   if (domain) {
     const QString reason = busy ? busyReason : !ownSurvey ? QStringLiteral("이 자료가 저장된 조사 파일을 먼저 열어 주세요.") : emptyReason;
@@ -473,7 +472,7 @@ void MainWindow::showLayerAreaSummary(QgsVectorLayer* layer, bool showRatio) {
     }
     QMessageBox::information(this, QStringLiteral("면적 확인"), text);
   } catch (...) {
-    KaCrashGuard::logLine(QStringLiteral("[except] app/MainWindowContextMenus.cpp:425"));
+    KaCrashGuard::logLine(KaLogExceptDetail::exceptLine(__FILE__, __LINE__));
     notify(Notice::Warning, QStringLiteral("면적 확인"), QStringLiteral("면적을 계산하지 못했습니다. 도형과 좌표계를 검수한 뒤 다시 실행하세요."));
   }
 }

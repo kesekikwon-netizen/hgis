@@ -2,6 +2,7 @@
 // KaSectionDrawingStudio: 단면도 작성 전용 3열 독립 QWidget
 // 좌: 단면 GeoTIFF 목록 | 중: QgsLayoutView 용지+눈금 | 우: 단면 속성창
 
+#include <QByteArray>
 #include <QPointer>
 #include <QSet>
 #include <QString>
@@ -18,6 +19,7 @@ class QLineEdit;
 class QPushButton;
 class QScrollArea;
 class QShowEvent;
+class QTimer;
 class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -66,7 +68,14 @@ private:
     QWidget*   buildLeftPanel();
     QWidget*   buildCenterPanel();
     QWidget*   buildRightPanel();
+    // Rebuilds only when the geometry inputs changed (inputSignature); an
+    // automatic rebuild keeps the chrome items the user moved.
     void       rebuildSheet(bool interactive);
+    void       scheduleRebuild();
+    // Title, reference line, tick labels and note change in place.
+    void       applyDecorations();
+    void       updateScaleNote(const SectionLayoutResult& result);
+    void       applySuggestedScale();
     SectionLayoutOptions collectOptions() const;
     void       attachLayoutToView();
     void       detachLayoutFromView();
@@ -98,6 +107,14 @@ private:
     QPushButton*             m_buildBtn   = nullptr;
     QPushButton*             m_pdfBtn     = nullptr;
     QLabel*                  m_statusLabel = nullptr;
+    QComboBox*               m_tickSizeCombo   = nullptr;
+    QCheckBox*               m_elevPrefixCheck = nullptr;
+    QLineEdit*               m_noteEdit        = nullptr;
+    QLabel*                  m_scaleNote       = nullptr;
+    QToolButton*             m_scaleSuggestBtn = nullptr;
+    QTimer*                  m_rebuildTimer    = nullptr;
+    QByteArray               m_lastSignature;
+    double                   m_suggestedScale  = 0.0;
     QSet<QString>            m_hiddenLayerIds;
     bool                     m_suppressTreeSignal = false;
     bool                     m_rebuilding         = false;

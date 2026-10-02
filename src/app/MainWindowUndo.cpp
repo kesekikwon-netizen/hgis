@@ -3,7 +3,10 @@
 #include "KaCaptureMapTool.h"
 #include "KaDrawingStudio.h"
 #include "KaFeatureSelectTool.h"
+#include "KaLayerTreeUndo.h"  // [pkg E1] F186 layer list order/checks undo
 #include "KaTerrain3dLayoutStudio.h"
+#include "KaTrenchMoveTool.h"  // [pkg B2] F003 Delete removes the picked trench
+#include "core/EditHistory.h"
 #include "core/LayerOps.h"
 
 #include <QAbstractSpinBox>
@@ -70,14 +73,22 @@ void MainWindow::removeSelectedLayers() {
 }
 
 void MainWindow::watchUndoFeatureIds(QgsVectorLayer* layer) {
+  if (layer) editHistory()->watch(layer);
   if (!layer || m_undoObservedLayers.contains(layer->id())) return;
   m_undoObservedLayers.insert(layer->id());
   const QPointer<QgsVectorLayer> guarded(layer);
   auto pending = std::make_shared<QgsFeatureList>();
-  connect(layer, &QgsVectorLayer::beforeCommitChanges, this, [guarded, pending](bool) {
+  connect(layer, &QgsVectorLayer::beforeCommitChanges, this, [this, guarded, pending](bool) {
     pending->clear();
-    if (guarded && guarded->editBuffer())
-      *pending = guarded->editBuffer()->addedFeatures().values();
+    if (!guarded) return;
+    editHistory()->commitApplied(guarded);  // what the commit writes keeps its post-save fallback
+    if (guarded->editBuffer()) *pending = guarded->editBuffer()->addedFeatures().values();
+  });
+  // 저장 writes the buffer into the next survey generation and then drops it with rollBack
+  // (persistSurveyWork holds m_isOpeningSurvey meanwhile). A rollBack outside that window is
+  // a real discard: those commands never reached the file and their fallbacks must go.
+  connect(layer, &QgsVectorLayer::beforeRollBack, this, [this, guarded]() {
+    if (guarded && m_isOpeningSurvey) editHistory()->commitApplied(guarded);
   });
   connect(layer, &QgsVectorLayer::committedFeaturesAdded, this,
       [this, guarded, pending](const QString& id, const QgsFeatureList& committed) {
@@ -201,7 +212,10 @@ void MainWindow::removeLayersFromTree(QgsLayerTreeView* tree) {
     auto* node = qobject_cast<QgsLayerTreeLayer*>(entry.node.get());
     QgsMapLayer* layer = node ? project->mapLayer(node->layerId()) : nullptr;
     if (!layer) continue;
-    if (m_editLayer == layer) stopCaptureTool();
+    if (m_editLayer == layer) {
+      stopCaptureTool();
+      m_editLayer = nullptr;  // the layer may be released with this history entry
+    }
     if (auto* vector = qobject_cast<QgsVectorLayer*>(layer)) vector->removeSelection();
     const QString layerId = layer->id();
     // takeMapLayer는 등록만 뺀다. 레이어 창 노드는 이름(글자)을 남긴 채 도형만 사라진다.
@@ -247,10 +261,12 @@ void MainWindow::removeLayersFromTree(QgsLayerTreeView* tree) {
   }
   if (removedBackground)
     LayerOps::rememberUserRemovedCadastral(project);
+  // These rows leave the list through this undo step alone; the list recorder
+  // (KaLayerTreeUndo) skips a change that adds or removes rows, groups included.
   KaUndoAction action;
   action.type = KaUndoAction::LayersRemoved;
   action.removedLayers = std::move(removed);
-  m_undoActions.append(action);
+  pushUndoAction(std::move(action));
   if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
   project->setDirty(true);
   refreshLayerEmptyState();
@@ -264,13 +280,11 @@ void MainWindow::removeLayersFromTree(QgsLayerTreeView* tree) {
 }
 
 void MainWindow::updateUndoRedoActions() {
-  QgsVectorLayer* preferred = preferredMapLayer(this, m_layerTree, m_editLayer);
   const bool captureVertex = m_captureTool && m_canvas && m_canvas->mapTool() == m_captureTool &&
                              m_captureTool->pointCount() > 0;
-  const bool canUndo = captureVertex ||
-                       LayerOps::preferredUndoLayer(QgsProject::instance(), preferred) ||
-                       !m_undoActions.isEmpty();
-  const bool canRedo = LayerOps::preferredRedoLayer(QgsProject::instance(), preferred);
+  pruneUndoActions();
+  const bool canUndo = captureVertex || newestUndoLayer() || newestFallbackUndoIndex() >= 0;
+  const bool canRedo = newestRedoLayer();
   if (m_actUndo) m_actUndo->setEnabled(canUndo);
   if (m_actRedo) m_actRedo->setEnabled(canRedo);
 }
@@ -300,7 +314,10 @@ void MainWindow::redoLastAction() {
 
 void MainWindow::undoMapAction() {
   if (editingText() || m_isOpeningSurvey || m_closingWindow) return;
-  if (m_captureTool && m_canvas && m_canvas->mapTool() == m_captureTool && m_captureTool->undoLastVertex()) {
+  // A sketch kept while another tab is open is not touched from that tab.
+  const bool onMapTab = !m_viewTabs || !m_mapPage || m_viewTabs->currentWidget() == m_mapPage;
+  if (onMapTab && m_captureTool && m_canvas && m_canvas->mapTool() == m_captureTool &&
+      m_captureTool->undoLastVertex()) {
     statusBar()->showMessage(QStringLiteral("꼭짓점 하나를 되돌렸습니다."), 4000);
     return;
   }
@@ -309,22 +326,34 @@ void MainWindow::undoMapAction() {
     return;
   }
   auto* project = QgsProject::instance();
-  if (auto* layer = LayerOps::preferredUndoLayer(project, preferredMapLayer(this, m_layerTree, m_editLayer))) {
-    if (undoLinkedEdit(layer) || LayerOps::undoLayerEdits(layer)) {
+  // One time line: whichever happened last goes first — a shape edit on any layer's
+  // stack, or an action kept here (layer removal, fallbacks that outlive 저장).
+  pruneUndoActions();
+  const int fallback = newestFallbackUndoIndex();
+  QgsVectorLayer* stackLayer = newestUndoLayer();
+  const quint64 stackTime = stackLayer ? editHistory()->undoTop(stackLayer).recent : 0;
+  quint64 fallbackTime = 0;
+  if (fallback >= 0) {
+    const KaUndoAction& entry = m_undoActions.at(fallback);
+    fallbackTime = std::max(entry.seq, editHistory()->lastRecent(entry.commandId));
+  }
+  if (stackLayer && (fallback < 0 || stackTime >= fallbackTime)) {
+    // An edit that changed several layers at once (겹친 곳 지우기) goes back as one step.
+    if (undoLinkedEdit(stackLayer) || LayerOps::undoLayerEdits(stackLayer)) {
       project->setDirty(true);
       if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
       if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
       if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
-      refreshWorkPanel();
+      updateUndoRedoActions();
       statusBar()->showMessage(QStringLiteral("이전 상태로 되돌렸습니다."), 4000);
       return;
     }
   }
-  if (m_undoActions.isEmpty()) {
+  if (fallback < 0) {
     statusBar()->showMessage(QStringLiteral("되돌릴 것이 없습니다."), 4000);
     return;
   }
-  const KaUndoAction action = m_undoActions.last();
+  const KaUndoAction action = m_undoActions.at(fallback);
   QString error;
   bool applied = false;
   if (action.type == KaUndoAction::LayersRemoved && action.removedLayers) {
@@ -349,8 +378,15 @@ void MainWindow::undoMapAction() {
       if (m_layerTree) m_layerTree->setCurrentLayer(layer);
     }
     applied = error.isEmpty();
+  } else if (action.type == KaUndoAction::LayerTreeChanged && action.treeBefore) {
+    // [pkg E1] F186: the user's drag order and check marks of the layer list.
+    applied = m_layerTreeUndo && m_layerTreeUndo->restore(*action.treeBefore, &error);
   } else if (action.type == KaUndoAction::LayerAdded) {
-    if (project->mapLayer(action.layerId)) {
+    if (QgsMapLayer* added = project->mapLayer(action.layerId)) {
+      if (m_editLayer == added) {
+        stopCaptureTool();
+        m_editLayer = nullptr;
+      }
       project->removeMapLayer(action.layerId);
       applied = true;
     }
@@ -374,7 +410,7 @@ void MainWindow::undoMapAction() {
     // Restore one user operation (possibly several selected shapes), not one
     // arbitrary feature per key press. Successfully restored entries are removed
     // from the pending command so a failed layer can be retried without duplicates.
-    auto& pending = m_undoActions.last().deletedFeatures;
+    auto& pending = m_undoActions[fallback].deletedFeatures;
     while (!pending.isEmpty()) {
       const QString id = pending.first().first;
       auto* layer = qobject_cast<QgsVectorLayer*>(project->mapLayer(id));
@@ -410,12 +446,12 @@ void MainWindow::undoMapAction() {
         ? QStringLiteral("이전 작업의 레이어나 도형을 찾지 못했습니다. 레이어를 복원한 뒤 다시 실행하세요.") : error);
     return;
   }
-  m_undoActions.removeLast();
+  m_undoActions.removeAt(fallback);
   project->setDirty(true);
   if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
   if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
   if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
-  refreshWorkPanel();
+  updateUndoRedoActions();
   if (!error.isEmpty()) notify(Notice::Warning, QStringLiteral("되돌리기 저장 확인"), error);
   else statusBar()->showMessage(QStringLiteral("이전 상태로 되돌렸습니다."), 4000);
 }
@@ -423,13 +459,13 @@ void MainWindow::undoMapAction() {
 void MainWindow::redoMapAction() {
   if (editingText() || m_isOpeningSurvey || m_closingWindow) return;
   auto* project = QgsProject::instance();
-  if (auto* layer = LayerOps::preferredRedoLayer(project, preferredMapLayer(this, m_layerTree, m_editLayer))) {
+  if (auto* layer = newestRedoLayer()) {
     if (redoLinkedEdit(layer) || LayerOps::redoLayerEdits(layer)) {
       project->setDirty(true);
       if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
       if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
       if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
-      refreshWorkPanel();
+      updateUndoRedoActions();
       statusBar()->showMessage(QStringLiteral("다시 실행했습니다."), 4000);
       return;
     }
@@ -439,6 +475,22 @@ void MainWindow::redoMapAction() {
 
 void MainWindow::deleteFeaturesOrSelectedReferenceLayers() {
   if (editingText()) return;
+  // While drawing, Delete takes back the last point like Backspace; it never removes
+  // shapes or layers (the window shortcut fires before the canvas sees the key).
+  if (m_captureTool && m_canvas && m_canvas->mapTool() == m_captureTool) {
+    const bool onMapTab = !m_viewTabs || !m_mapPage || m_viewTabs->currentWidget() == m_mapPage;
+    if (onMapTab && m_captureTool->undoLastVertex())
+      statusBar()->showMessage(QStringLiteral("꼭짓점 하나를 되돌렸습니다."), 4000);
+    return;
+  }
+  // A picked vertex or inner piece (clicked in 도형선택) is what Delete removes, not the whole shape.
+  if (m_featureSelectTool && m_canvas && m_canvas->mapTool() == m_featureSelectTool &&
+      m_featureSelectTool->deleteActivePick())
+    return;
+  // [pkg B2] F003: in the trench tool, Delete removes the picked trench (one Ctrl+Z step).
+  if (m_trenchMoveTool && m_canvas && m_canvas->mapTool() == m_trenchMoveTool &&
+      m_trenchMoveTool->deleteSelectedTrench())
+    return;
   const auto selected = KaFeatureSelectTool::allSelectedFeatures(m_canvas);
   for (const auto& item : selected) {
     if (item.layer && !LayerOps::isReferenceOrBasemapLayer(item.layer.data())) {
@@ -507,7 +559,6 @@ void MainWindow::deleteSelectedFeatures() {
     QgsProject::instance()->setDirty(true);
     if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
     if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
-    refreshWorkPanel();
     statusBar()->showMessage(QStringLiteral("도형 %1개를 지웠습니다. Ctrl+Z로 복원할 수 있습니다.").arg(deleted), 6000);
   }
   if (!errors.isEmpty()) notify(Notice::Warning, QStringLiteral("도형 삭제 확인"), errors.join(QLatin1Char('\n')));

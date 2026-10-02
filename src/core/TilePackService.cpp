@@ -1,4 +1,5 @@
 #include "KaSessionLog.h"
+#include "KaLogExcept.h"
 #include "TilePackService.h"
 
 #include <cmath>
@@ -119,7 +120,7 @@ bool build(const Options& opt, double minX, double minY, double maxX, double max
               std::clamp(fraction, 0.0, 1.0) * progress->span);
         return TRUE;
       } catch (...) {
-        KaSessionLog::line(QStringLiteral("[except] core/TilePackService.cpp:120"));
+        KA_LOG_EXCEPT();
         return FALSE;
       }
     }
@@ -143,7 +144,7 @@ bool build(const Options& opt, double minX, double minY, double maxX, double max
   if (!std::isfinite(width) || !std::isfinite(height) ||
       width > std::numeric_limits<int>::max() - 1.0 ||
       height > std::numeric_limits<int>::max() - 1.0)
-    return fail(QStringLiteral("내려받을 지도 범위가 너무 큽니다. 조사지역으로 확대하고 다시 시도하세요."));
+    return fail(QStringLiteral("내려받을 지도 범위가 너무 큽니다. 조사구역으로 확대하고 다시 시도하세요."));
   const int outW = qMax(1, static_cast<int>(std::lround(width)));
   const int outH = qMax(1, static_cast<int>(std::lround(height)));
 

@@ -1,5 +1,6 @@
 #include "HeritageImport.h"
 
+#include "HeritagePledge.h"
 #include "HeritageSiteLegend.h"
 #include "LayerOps.h"
 #include "SurveyScopeClip.h"
@@ -157,7 +158,8 @@ QString HeritageImport::chooseNameField(const QgsVectorLayer* layer) {
 
 HeritageImport::Result HeritageImport::loadDataset(QgsProject* project, HeritageDataset dataset,
                                                    const QStringList& downloadedFiles,
-                                                   const QString& archiveRoot) {
+                                                   const QString& archiveRoot,
+                                                   const QString& regionLabel) {
   Result out;
   if (!project) {
     out.error = QStringLiteral("프로젝트가 없어 자료를 올리지 못했습니다.");
@@ -214,6 +216,7 @@ HeritageImport::Result HeritageImport::loadDataset(QgsProject* project, Heritage
 
   const QString datasetName = HeritageStyle::layerName(dataset);
   QList<QgsVectorLayer*> loaded;
+  int clippedAway = 0;  // 도형은 있었지만 조사구역 주변 5km 밖이라 모두 빠진 SHP 수
   for (const QString& shp : shapefiles) {
     const QFileInfo shapeInfo(shp);
     const QString base = shapeInfo.dir().filePath(shapeInfo.completeBaseName());
@@ -232,18 +235,22 @@ HeritageImport::Result HeritageImport::loadDataset(QgsProject* project, Heritage
     // 전부 한 이름으로 올리면 레이어창에서 구분이 안 된다.
     // **이름은 파일 이름 그대로, 색과 범례는 그 종류의 것**을 쓴다.
     const QString baseName = QFileInfo(shp).completeBaseName();
-    const QString layerName = baseName.isEmpty() ? datasetName : baseName;
+    QString layerName = baseName.isEmpty() ? datasetName : baseName;
+    if (!regionLabel.trimmed().isEmpty())
+      layerName += QStringLiteral(" · ") + regionLabel.trimmed();
     auto* layer = utf8WorkingLayer(shp, layerName, archiveRoot, project, out.error);
     if (!layer) {
       qDeleteAll(loaded);
       return out;
     }
+    const long long before = layer->featureCount();
     if (!SurveyScopeClip::keepIntersectingIfSurvey(project, layer, &out.error)) {
       delete layer;
       qDeleteAll(loaded);
       return out;
     }
     if (layer->featureCount() == 0) {
+      if (before > 0) ++clippedAway;
       delete layer;
       continue;
     }
@@ -264,11 +271,22 @@ HeritageImport::Result HeritageImport::loadDataset(QgsProject* project, Heritage
     // 참조 자료다. 조사 데이터와 섞이지 않게 한다.
     layer->setProperty("readOnly", true);
     LayerOps::markReferenceLayer(layer);
+    HeritagePledge::markIntranetLayer(layer, dataset, regionLabel.trimmed());
     out.featureCount += static_cast<int>(layer->featureCount());
     loaded.append(layer);
   }
 
   if (loaded.isEmpty()) {
+    if (clippedAway > 0) {
+      // 받은 자료는 정상이다. 이 시·군의 이 종류가 조사 주변 5km 밖에만 있을 뿐이다.
+      out.emptyInScope = true;
+      out.messages << QStringLiteral("%1%2: 조사구역 주변 5km 안에 든 자료가 없습니다.")
+                          .arg(datasetName,
+                               regionLabel.trimmed().isEmpty()
+                                   ? QString()
+                                   : QStringLiteral(" (%1)").arg(regionLabel.trimmed()));
+      return out;
+    }
     out.error = QStringLiteral("%1 자료를 지도에 올리지 못했습니다.").arg(datasetName);
     return out;
   }

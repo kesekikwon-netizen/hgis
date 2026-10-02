@@ -1,7 +1,11 @@
 #pragma once
 // SectionLayoutService: 단면도 조판 눈금 계산 및 QGIS 레이아웃 생성
 
+#include <QByteArray>
+#include <QHash>
 #include <QList>
+#include <QPointF>
+#include <QSizeF>
 #include <QString>
 #include <QVector>
 
@@ -18,7 +22,8 @@ struct AxisTickResult {
 
 /// buildSectionLayout() 입력 옵션
 struct SectionLayoutOptions {
-    enum class Paper { A3, A4 };
+    /// 가로 용지. 긴 트렌치 단면은 A2/A1에서 지정 축척 그대로 들어간다.
+    enum class Paper { A3, A4, A2, A1 };
 
     Paper   paper                   = Paper::A3;
     QString titleKo;                             ///< 도면명. 비어 있으면 "단면도" 사용.
@@ -36,6 +41,12 @@ struct SectionLayoutOptions {
     QString mapCrsAuthId;
     /// Double Box / Single Box / Line Ticks Up. 샘플은 용지가 아니라 스튜디오 스트립.
     QString scaleBarStyle = QStringLiteral("Double Box");
+    /// 표고·거리 눈금 글자 크기(pt). 기본 5pt는 예전 도면과 같다.
+    double  tickLabelPt = 5.0;
+    /// 표고 눈금 앞에 "EL." 을 붙인다(예: EL. 100.20).
+    bool    elevationPrefix = false;
+    /// 선택 주기 한 줄(예: A–A′ 단면 · 북벽). 비어 있으면 용지에 넣지 않는다.
+    QString noteText;
 };
 
 /// buildSectionLayout() 반환 결과
@@ -44,6 +55,10 @@ struct SectionLayoutResult {
     double       appliedScaleDenominator = 0.0;   ///< 적용된 축척 분모
     QgsRectangle appliedExtent;                   ///< 지도 항목에 설정된 범위
     QString      errorKo;                         ///< 오류 메시지 (한국어). 성공 시 isEmpty().
+    /// 적용 축척이 표준 축척이 아닐 때, 용지에 들어가는 가장 작은 표준 축척. 아니면 0.
+    double       suggestedScaleDenominator = 0.0;
+    /// 지정 축척이 용지에 들어가지 않아 올렸을 때의 안내. 아니면 비어 있음.
+    QString      warningKo;
 };
 
 /// 단면도 눈금 계산 및 QGIS 조판 생성 서비스
@@ -81,11 +96,31 @@ public:
         const SectionLayoutOptions& options = SectionLayoutOptions{});
 
     /// "section_sheet" 조판을 벡터 PDF로 내보낸다.
-    /// 300 DPI, forceVectorOutput=true, rasterizeWholeImage=false,
-    /// textRenderFormat=AlwaysText. 화면 DPI는 내보내기 후 복원한다.
+    /// 도면 PDF와 같은 KaPdfExport::sheetSettings()(300 DPI, 벡터, 글자는 가능한 한 글자).
+    /// 화면 DPI는 내보내기 후 복원한다.
     /// 성공 시 pdfPath, 실패 시 빈 문자열 (errorOut에 한국어 오류 설정).
     static QString exportSectionPdf(
         QgsProject*    project,
         const QString& pdfPath,
         QString*       errorOut = nullptr);
+
+    // ── 조판 유지: 재생성 건너뛰기와 제자리 반영 (SectionSheetDecor.cpp) ──
+
+    /// 가로 용지 크기(mm).
+    static QSizeF paperSizeMm(SectionLayoutOptions::Paper paper);
+    /// 용지 모양을 바꾸는 입력(레이어·파일 버전·용지·축척·표고·거리·좌표계)의 지문.
+    /// 같으면 조판을 다시 만들 필요가 없다. 도면명·기준선·눈금 글자·주기는 넣지 않는다.
+    static QByteArray inputSignature(const QList<QgsMapLayer*>& layers,
+                                     const SectionLayoutOptions& options);
+    /// 도면명·기준선·축척자 모양·눈금 글자·주기를 조판을 지우지 않고 반영한다.
+    /// 사용자가 옮긴 항목은 그 자리에 둔다. section_sheet가 없으면 false.
+    static bool applyDecorationOptions(QgsProject* project, const SectionLayoutOptions& options);
+    /// 사용자가 만들어진 자리에서 옮긴 표제·축척·좌표계·주기 항목의 현재 위치(mm).
+    static QHash<QString, QPointF> userMovedItems(QgsProject* project);
+    /// 다시 만든 조판에 userMovedItems() 위치를 되돌려 놓는다.
+    static void restoreUserMovedItems(QgsProject* project, const QHash<QString, QPointF>& moved);
+    /// 표시 래스터는 조판이 가지며 조사 파일에 저장되지 않는다. 다시 연 조사에서
+    /// 조판에 남긴 평면값과 원본 GeoTIFF로 다시 만든다(사진 전체 검사 없음).
+    /// 이미 모두 있거나 원본이 없으면 아무것도 하지 않고 false.
+    static bool restoreDisplayLayers(QgsProject* project);
 };

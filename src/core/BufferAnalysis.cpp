@@ -1,4 +1,5 @@
 #include "KaSessionLog.h"
+#include "KaLogExcept.h"
 #include "BufferAnalysis.h"
 #include "LayerOps.h"
 
@@ -7,6 +8,7 @@
 #include <QVector>
 #include <cmath>
 #include <memory>
+#include <vector>
 
 #include <qgis.h>
 #include <qgsproject.h>
@@ -62,7 +64,7 @@ QgsGeometry unionInCrs(QgsVectorLayer* source, const QgsCoordinateReferenceSyste
   }
   QgsFeatureIterator it = source->getFeatures();
   QgsFeature f;
-  int n = 0;
+  QVector<QgsGeometry> parts;
   while (it.nextFeature(f)) {
     QgsGeometry g = f.geometry();
     if (g.isEmpty()) continue;
@@ -70,37 +72,40 @@ QgsGeometry unionInCrs(QgsVectorLayer* source, const QgsCoordinateReferenceSyste
       try {
         if (g.transform(xf) != Qgis::GeometryOperationResult::Success) continue;
       } catch (...) {
-        KaSessionLog::line(QStringLiteral("[except] core/BufferAnalysis.cpp:71"));
+        KA_LOG_EXCEPT();
         continue;
       }
     }
-    if (acc.isEmpty())
-      acc = g;
-    else
-      acc = acc.combine(g);
-    ++n;
+    parts << g;
   }
-  if (n <= 0 || acc.isEmpty()) {
+  // One GEOS union of every feature instead of pairwise combine().
+  if (!parts.isEmpty()) acc = QgsGeometry::unaryUnion(parts);
+  if (parts.isEmpty() || acc.isEmpty()) {
     if (errorOut) *errorOut = QStringLiteral("선택한 레이어에 도형이 없습니다");
     return {};
   }
   return acc;
 }
 
-QgsGeometry largestPolygon(const QgsGeometry& g) {
-  if (g.isEmpty()) return {};
-  if (!g.isMultipart() && g.type() == Qgis::GeometryType::Polygon) return g;
-  QgsGeometry best;
-  double bestA = -1;
+// All polygon parts of g (a (multi)polygon or a mixed collection) as one geometry.
+QgsGeometry polygonsOnly(const QgsGeometry& g) {
+  if (g.isEmpty() || g.type() == Qgis::GeometryType::Polygon) return g;
+  QVector<QgsGeometry> polys;
   for (const QgsGeometry& part : g.asGeometryCollection()) {
-    if (part.type() != Qgis::GeometryType::Polygon) continue;
-    const double a = part.area();
-    if (a > bestA) {
-      bestA = a;
-      best = part;
-    }
+    if (part.type() == Qgis::GeometryType::Polygon) polys << part;
   }
-  return best;
+  return polys.isEmpty() ? QgsGeometry() : QgsGeometry::collectGeometry(polys);
+}
+
+std::unique_ptr<QgsLineString> exteriorLine(const QgsGeometry& polygonPart) {
+  const QgsPolygon* pg = qgsgeometry_cast<const QgsPolygon*>(polygonPart.constGet());
+  if (!pg || !pg->exteriorRing()) return {};
+  std::unique_ptr<QgsCurve> cloned(pg->exteriorRing()->clone());
+  if (QgsLineString* asLs = qgsgeometry_cast<QgsLineString*>(cloned.get())) {
+    cloned.release();
+    return std::unique_ptr<QgsLineString>(asLs);
+  }
+  return std::unique_ptr<QgsLineString>(cloned ? cloned->curveToLine() : nullptr);
 }
 
 void applyRingStyle(QgsVectorLayer* layer) {
@@ -190,9 +195,9 @@ bool addDistanceRing(QgsProject* project, QgsMapCanvas* canvas, QgsVectorLayer* 
   const QgsGeometry src = unionInCrs(source, dest, errorOut);
   if (src.isEmpty()) return false;
 
-  QgsGeometry poly = largestPolygon(src);
-  if (poly.isEmpty() && src.type() == Qgis::GeometryType::Polygon)
-    poly = src;
+  // Every part of the survey area counts. Parts farther apart than twice the distance
+  // keep their own outline; closer parts merge into one.
+  QgsGeometry poly = polygonsOnly(src);
   if (poly.isEmpty()) {
     if (errorOut) {
       *errorOut = (source->geometryType() != Qgis::GeometryType::Polygon)
@@ -203,51 +208,27 @@ bool addDistanceRing(QgsProject* project, QgsMapCanvas* canvas, QgsVectorLayer* 
   }
   poly.removeDuplicateNodes(0.05);
   {
-    const QgsGeometry valid = poly.makeValid();
-    if (!valid.isEmpty()) {
-      const QgsGeometry biggest = largestPolygon(valid);
-      poly = biggest.isEmpty() ? valid : biggest;
-    }
+    const QgsGeometry valid = polygonsOnly(poly.makeValid());
+    if (!valid.isEmpty()) poly = valid;
   }
 
   // Parallel offset of the site outline. Do not simplify — that collapsed small
   // sites into a diamond. Dash/gaps are style, not geometry.
-  QgsGeometry buf = poly.buffer(meters, 16, Qgis::EndCapStyle::Flat, Qgis::JoinStyle::Miter, 5.0);
+  const QgsGeometry buf =
+      poly.buffer(meters, 16, Qgis::EndCapStyle::Flat, Qgis::JoinStyle::Miter, 5.0);
   if (buf.isEmpty()) {
     if (errorOut) *errorOut = QStringLiteral("주변 범위를 만들지 못했습니다");
     return false;
   }
-  buf = largestPolygon(buf);
-  if (buf.isEmpty()) {
-    if (errorOut) *errorOut = QStringLiteral("주변 범위를 만들지 못했습니다");
+  std::vector<std::unique_ptr<QgsLineString>> rings;
+  for (const QgsGeometry& part : buf.asGeometryCollection()) {
+    std::unique_ptr<QgsLineString> ls = exteriorLine(part);
+    if (ls && ls->length() >= 20) rings.push_back(std::move(ls));
+  }
+  if (rings.empty()) {
+    if (errorOut) *errorOut = QStringLiteral("범위가 너무 작거나 외곽선을 얻지 못했습니다");
     return false;
   }
-
-  const QgsPolygon* pg = qgsgeometry_cast<const QgsPolygon*>(buf.constGet());
-  if (!pg || !pg->exteriorRing()) {
-    if (errorOut) *errorOut = QStringLiteral("외곽선을 얻지 못했습니다");
-    return false;
-  }
-  std::unique_ptr<QgsCurve> cloned(pg->exteriorRing()->clone());
-  std::unique_ptr<QgsLineString> ls;
-  if (QgsLineString* asLs = qgsgeometry_cast<QgsLineString*>(cloned.get())) {
-    cloned.release();
-    ls.reset(asLs);
-  } else if (cloned) {
-    ls.reset(cloned->curveToLine());
-  }
-  if (!ls) {
-    if (errorOut) *errorOut = QStringLiteral("외곽선을 선으로 바꾸지 못했습니다");
-    return false;
-  }
-  const double len = ls->length();
-  if (len < 20) {
-    if (errorOut) *errorOut = QStringLiteral("범위가 너무 작습니다");
-    return false;
-  }
-
-  QVector<double> uniq = labelDistances(ls.get());
-  if (uniq.isEmpty()) uniq.append(len * 0.25);
 
   removeOld(project, ringKey(meters));
   removeOld(project, labelKey(meters));
@@ -262,11 +243,13 @@ bool addDistanceRing(QgsProject* project, QgsMapCanvas* canvas, QgsVectorLayer* 
   }
   ringLayer->dataProvider()->addAttributes({QgsField(QStringLiteral("note"), QMetaType::Type::QString)});
   ringLayer->updateFields();
-  QgsFeature rf(ringLayer->fields());
-  rf.setGeometry(QgsGeometry(ls->clone()));
-  rf.setAttribute(0, title);
   QgsFeatureList ringFeats;
-  ringFeats << rf;
+  for (const auto& ls : rings) {
+    QgsFeature rf(ringLayer->fields());
+    rf.setGeometry(QgsGeometry(ls->clone()));
+    rf.setAttribute(0, title);
+    ringFeats << rf;
+  }
   ringLayer->dataProvider()->addFeatures(ringFeats);
   applyRingStyle(ringLayer);
   LayerOps::markSurveyLayer(ringLayer, ringKey(meters));
@@ -285,13 +268,17 @@ bool addDistanceRing(QgsProject* project, QgsMapCanvas* canvas, QgsVectorLayer* 
   labLayer->updateFields();
   const QString labTxt = QStringLiteral("%1m").arg(qRound(meters));
   QgsFeatureList labFeats;
-  for (double d : uniq) {
-    std::unique_ptr<QgsPoint> pt(ls->interpolatePoint(d));
-    if (!pt) continue;
-    QgsFeature lf(labLayer->fields());
-    lf.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(pt->x(), pt->y())));
-    lf.setAttribute(0, labTxt);
-    labFeats << lf;
+  for (const auto& ls : rings) {
+    QVector<double> cuts = labelDistances(ls.get());
+    if (cuts.isEmpty()) cuts.append(ls->length() * 0.25);
+    for (double d : cuts) {
+      std::unique_ptr<QgsPoint> pt(ls->interpolatePoint(d));
+      if (!pt) continue;
+      QgsFeature lf(labLayer->fields());
+      lf.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(pt->x(), pt->y())));
+      lf.setAttribute(0, labTxt);
+      labFeats << lf;
+    }
   }
   if (labFeats.isEmpty()) {
     delete labLayer;

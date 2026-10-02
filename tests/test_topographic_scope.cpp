@@ -142,7 +142,7 @@ private slots:
     QCOMPARE(count->toolTip(),sheets);
     QCOMPARE(statusChanged.size(),0);
   }
-  void fixedTenKilometresIgnoresPreviousTwentyKilometreSettings() {
+  void fixedFiveKilometresIgnoresPreviousTwentyKilometreSettings() {
     QSettings().setValue(QStringLiteral("topographic/radiusKm"), 20.);
     QTemporaryDir cache;
     QWidget evidenceHost;
@@ -263,6 +263,11 @@ private slots:
       QVERIFY(processing.first().at(0).toBool());
       QTRY_VERIFY_WITH_TIMEOUT(!finished.isEmpty(),20000);
       QVERIFY(finished.last().at(0).toBool());
+      // The completion status restates the same 5 km sheet radius as the panel.
+      auto* scopeStatus=panel.findChild<QLabel*>(QStringLiteral("topographicScopeStatus"));
+      QVERIFY(scopeStatus);
+      QVERIFY2(scopeStatus->text().contains(QStringLiteral("반경 5km")),qPrintable(scopeStatus->text()));
+      QVERIFY(!scopeStatus->text().contains(QStringLiteral("10km")));
       QTRY_COMPARE_WITH_TIMEOUT(processing.size(),2,10000);
       QVERIFY(!processing.last().at(0).toBool());
       QVERIFY(attention.isEmpty());
@@ -296,13 +301,21 @@ private slots:
       QgsProject::instance()->clear();
     }
     // Reopening the explicit command reuses the verified local sheet offline.
+    // The clean first preparation left a size/time snapshot beside its index,
+    // so the kept sheet is neither re-hashed nor re-converted (F202).
+    QCOMPARE(QDir(library.filePath(QStringLiteral("index"))).entryList({QStringLiteral("*.snapshot")},QDir::Files).size(),1);
     canvas.setDestinationCrs(workCrs);
     QgsProject::instance()->setCrs(workCrs);
     canvas.setExtent(QgsRectangle(center.x()-500.,center.y()-500.,center.x()+500.,center.y()+500.));
     {
       KaTopographicScopePanel reopened(&canvas,nullptr,&importer,nullptr,library.path());
+      QSignalSpy reopenedPhases(&reopened,&KaTopographicScopePanel::preparationProgressChanged);
       QTRY_COMPARE_WITH_TIMEOUT(QgsProject::instance()->mapLayers().size(),1,10000);
       QVERIFY(!importer.isVisible());
+      for (const auto& event:reopenedPhases) {
+        QVERIFY(event.at(0).toString()!=QStringLiteral("좌표계 확인"));
+        QVERIFY(event.at(0).toString()!=QStringLiteral("SHP 변환"));
+      }
       QgsProject::instance()->clear();
     }
   }

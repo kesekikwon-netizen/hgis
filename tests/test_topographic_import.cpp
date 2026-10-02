@@ -5,7 +5,9 @@
 #include <QSettings>
 #include <QTableWidget>
 #include <QTemporaryDir>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QCryptographicHash>
 #include <QFontDatabase>
 #include <QLabel>
@@ -854,6 +856,43 @@ private slots:
     QCOMPARE(loading.size(), 0);
     QCOMPARE(topographic()->id(), id);
     canvas.stopRendering(); canvas.setLayers({}); QgsProject::instance()->clear();
+  }
+  void mergedSheetsStayInSurveyFolderAndAppendNewSheets() {
+    QTemporaryDir first, second, cache, survey;
+    QVERIFY(fixture(first.filePath(QStringLiteral("A0010000_1.shp")), true, 200000.));
+    QVERIFY(fixture(first.filePath(QStringLiteral("A0010000_2.shp")), true, 200050.));
+    QVERIFY(fixture(second.filePath(QStringLiteral("A0010000_3.shp")), true, 200100.));
+    auto records = TopographicCatalog::scan(first.path(), nullptr, cache.path()).records;
+    auto later = TopographicCatalog::scan(second.path(), nullptr, cache.path()).records;
+    QCOMPARE(records.size(), 2); QCOMPARE(later.size(), 1);
+    for (auto& record : records) record.sourceSheet = QStringLiteral("37701");
+    later[0].sourceSheet = QStringLiteral("37702");
+    const QgsCoordinateReferenceSystem crs(records.first().crsWkt);
+    auto* project = QgsProject::instance(); project->setCrs(crs);
+    QgsMapCanvas canvas; canvas.setDestinationCrs(crs);
+    canvas.setExtent(QgsRectangle(199900., 449900., 200300., 450300.));
+    KaTopographicImportDialog dialog(&canvas);
+    const QString mergeFolder = QDir(survey.path()).filePath(QStringLiteral("지형도/합침"));
+    dialog.setMergeDirectory(mergeFolder);
+    QVERIFY(dialog.importVerified(records));
+    QTRY_VERIFY_WITH_TIMEOUT(!dialog.isAutomaticLoading() && topographic(), 10000);
+    auto* merged = qobject_cast<QgsVectorLayer*>(topographic()); QVERIFY(merged);
+    const QString mergedFile = merged->source().section(QLatin1Char('|'), 0, 0);
+    // Never the process working directory or a source folder: the survey's own folder.
+    QCOMPARE(QFileInfo(mergedFile).absolutePath(), QDir(mergeFolder).absolutePath());
+    QCOMPARE(merged->featureCount(), 2);
+    const QString id = merged->id();
+    const QByteArray firstDigest = digest(first.filePath(QStringLiteral("A0010000_1.shp")));
+    // A newly received sheet is appended to the same published file.
+    QVERIFY(dialog.importVerified(later));
+    QTRY_VERIFY_WITH_TIMEOUT(!dialog.isAutomaticLoading() && topographic() &&
+                             qobject_cast<QgsVectorLayer*>(topographic())->featureCount() == 3, 10000);
+    QCOMPARE(topographic()->id(), id);
+    QCOMPARE(topographic()->source().section(QLatin1Char('|'), 0, 0), mergedFile);
+    QCOMPARE(project->mapLayers().size(), 1);
+    QCOMPARE(topographic()->customProperty(QStringLiteral("ka_hgis/topographic_source_keys")).toStringList().size(), 3);
+    QCOMPARE(digest(first.filePath(QStringLiteral("A0010000_1.shp"))), firstDigest);  // originals untouched
+    canvas.stopRendering(); canvas.setLayers({}); project->clear();
   }
   void destroyedDuringScanDoesNotAddLayers() {
     QTemporaryDir dir;

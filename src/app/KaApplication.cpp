@@ -5,9 +5,12 @@
 #include <qgis.h>
 #include "KaGdalErrorLog.h"
 #include "KaTheme.h"
+#include "KaThemeOptions.h"
 #include "KaUserError.h"
 #include "KaIcons.h"
 #include "KaStartupSplash.h"
+#include "KaShellStartup.h"
+#include "KaSnapSettingsWidget.h"
 #include "MainWindow.h"
 #include <QElapsedTimer>
 #include <QApplication>
@@ -30,6 +33,7 @@
 #include <QDockWidget>
 #include <QAction>
 #include <QTreeView>
+#include <QCheckBox>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -70,10 +74,12 @@
 #include <qgssettings.h>
 #include <qgslayertreeview.h>
 #include <qgsmapcanvas.h>
+#include <qgsmaptool.h>
 #include <qgsmessagelog.h>
 #include <qgsproject.h>
 #include <qgsmaplayer.h>
 #include <QNetworkRequest>
+#include "core/BasemapPolicy.h"
 #endif
 
 #ifdef Q_OS_WIN
@@ -177,6 +183,7 @@ static void applyBundledRuntime() {
     // 「zlib.dll이 없어 코드 실행을 진행할 수 없습니다」로 죽는다.
     // 앱이 스스로 채워 두면 어떤 방법으로 실행하든 자식이 DLL 을 찾는다.
     KaPortableRuntime::prependOsgeoPath();
+    KaPortableRuntime::isolateUserState(paths);  // no-op unless KA_HGIS_SETTINGS_DIR (QA runs) asks for it
     return;
   }
   // 한글 폴더(복사본·바탕 화면)에서도 proj.db를 찾도록 UTF-8 + Wide env.
@@ -371,11 +378,15 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
       }
     }
   }
-  all = step(QStringLiteral("menus_present"), menuTexts.size() >= 10,
-             menuTexts.join(QLatin1Char('|'))) && all;
+  // [F191] The one-row ribbon replaced the menu bar (buildMenus hides it and adds no menus);
+  // the old 「10 menu items」 expectation checked UI that no longer exists.
+  const bool menuBarHidden = !w->menuBar() || w->menuBar()->isHidden();
+  all = step(QStringLiteral("menubar_hidden_ribbon_only"), menuBarHidden,
+             menuTexts.isEmpty() ? QStringLiteral("ok") : menuTexts.join(QLatin1Char('|'))) && all;
 
+  // [F191] The file box is a list (KaFileListView), not a tree view.
   all = step(QStringLiteral("fileBrowser"),
-             w->findChild<QTreeView*>(QStringLiteral("fileBrowser")) != nullptr) && all;
+             w->findChild<QWidget*>(QStringLiteral("fileBrowser")) != nullptr) && all;
   all = step(QStringLiteral("btnBrowseDocs"),
              w->findChild<QWidget*>(QStringLiteral("btnBrowseDocs")) != nullptr) && all;
   all = step(QStringLiteral("btnBrowseFolder"),
@@ -518,8 +529,9 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
     all = step(QStringLiteral("toolbar_draw_toggle"), hasText(QStringLiteral("그리기"))) && all;
     all = step(QStringLiteral("toolbar_basemap_toggle"), hasText(QStringLiteral("배경"))) && all;
     all = step(QStringLiteral("toolbar_submit_toggle"), hasText(QStringLiteral("도면"))) && all;
+    // [F191] The measure chip is labelled 측거.
     all = step(QStringLiteral("toolbar_measure_tape"),
-               hasText(QStringLiteral("거리"))) && all;
+               hasText(QStringLiteral("측거"))) && all;
     all = step(QStringLiteral("toolbar_dem"), hasText(QStringLiteral("DEM"))) && all;
     bool demClasses = false;
     if (auto* btnDem = w->findChild<QToolButton*>(QStringLiteral("btnDem"))) {
@@ -534,32 +546,58 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
     }
     all = step(QStringLiteral("toolbar_dem_classes"), demClasses) && all;
     all = step(QStringLiteral("toolbar_paleo"), hasText(QStringLiteral("고지형"))) && all;
-    all = step(QStringLiteral("toolbar_terrain"), hasText(QStringLiteral("지형맵"))) && all;
+    // [F191] The terrain chip is labelled 지형. Check that chip itself: 「수치지형」·「고지형」
+    // also contain 지형, so a plain text search could not fail.
+    {
+      auto* terrain = w->findChild<QToolButton*>(QStringLiteral("btnTerrain"));
+      all = step(QStringLiteral("toolbar_terrain"), terrain && terrain->text() == QStringLiteral("지형")) && all;
+    }
     all = step(QStringLiteral("toolbar_trench_grid"), hasText(QStringLiteral("시굴격자"))) && all;
-    all = step(QStringLiteral("map_grid_check"), hasText(QStringLiteral("좌표격자"))) && all;
+    // [F191] 좌표격자 is a QCheckBox under the map, not a toolbar item.
+    {
+      bool gridCheck = false;
+      for (auto* box : w->findChildren<QCheckBox*>()) {
+        if (box && box->text() == QStringLiteral("좌표격자")) {
+          gridCheck = true;
+          break;
+        }
+      }
+      all = step(QStringLiteral("map_grid_check"), gridCheck) && all;
+    }
     all = step(QStringLiteral("toolbar_no_crs_peer"),
                !hasText(QStringLiteral("5186→")) && !hasText(QStringLiteral("5187→")) &&
                    !hasText(QStringLiteral("5186→5179")) && !hasText(QStringLiteral("5187→5179")),
                toolbarTexts.join(QLatin1Char(','))) &&
           all;
-    bool sendInSubmitMenu = false;
-    if (auto* btnSubmit = w->findChild<QToolButton*>(QStringLiteral("btnSubmit"))) {
-      if (QMenu* sm = btnSubmit->menu()) {
-        for (QAction* a : sm->actions()) {
-          if (a && a->text().contains(QStringLiteral("보내기"))) {
-            sendInSubmitMenu = true;
-            break;
-          }
-        }
-      }
-    }
-    all = step(QStringLiteral("submit_menu_send"), sendInSubmitMenu) && all;
+    // [F191/F001] The 보내기 menu is gone: submission is the one 「검수·제출」 chip (Ctrl+E).
+    all = step(QStringLiteral("submit_review_action"), hasText(QStringLiteral("검수·제출"))) && all;
 
+    // The chip is grey until a survey session is ready (syncRecordTools); say so in the detail
+    // instead of failing five steps with no explanation.
+    QString drawInfo;
+    auto* sub = w->findChild<QToolBar*>(QStringLiteral("subToolbar"));
     if (auto* btnDraw = w->findChild<QToolButton*>(QStringLiteral("btnDraw"))) {
+      auto* canvas = w->findChild<QgsMapCanvas*>();
+      const QString tool = canvas && canvas->mapTool() ? QString::fromLatin1(canvas->mapTool()->metaObject()->className())
+                                                       : QStringLiteral("none");
+      drawInfo = QStringLiteral("before: enabled=%1 visible=%2 checked=%3 subVisible=%4 tool=%5")
+                     .arg(btnDraw->isEnabled()).arg(btnDraw->isVisible()).arg(btnDraw->isChecked())
+                     .arg(sub && sub->isVisible()).arg(tool);
+      // The chip mirrors an active draw tool (mapToolSet); a press on a pressed chip closes the
+      // tool instead of opening the row. Close first, then open the draw row.
+      if (btnDraw->isChecked()) {
+        btnDraw->click();
+        QCoreApplication::processEvents();
+      }
       btnDraw->click();
       QCoreApplication::processEvents();
+      drawInfo += QStringLiteral(" after: enabled=%1 checked=%2")
+                      .arg(btnDraw->isEnabled()).arg(btnDraw->isChecked());
+    } else {
+      drawInfo = QStringLiteral("btnDraw not found");
     }
-    auto* sub = w->findChild<QToolBar*>(QStringLiteral("subToolbar"));
+    drawInfo += QStringLiteral(" | sub=%1 visible=%2 actions=%3")
+                    .arg(sub != nullptr).arg(sub && sub->isVisible()).arg(sub ? sub->actions().size() : -1);
     auto subHas = [&](const QString& needle) {
       if (!sub || !sub->isVisible()) return false;
       for (QAction* a : sub->actions()) {
@@ -567,11 +605,14 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
       }
       return false;
     };
-    all = step(QStringLiteral("sub_draw_select"), subHas(QStringLiteral("선택"))) && all;
-    all = step(QStringLiteral("sub_draw_snap"), subHas(QStringLiteral("자석"))) && all;
+    all = step(QStringLiteral("sub_draw_select"), subHas(QStringLiteral("선택")), drawInfo) && all;
+    // [F191] The magnet is a KaSnapSettingsWidget, not an action.
+    all = step(QStringLiteral("sub_draw_snap"),
+               sub && sub->isVisible() && sub->findChild<KaSnapSettingsWidget*>() != nullptr) && all;
     all = step(QStringLiteral("sub_draw_area"), subHas(QStringLiteral("구역"))) && all;
     all = step(QStringLiteral("sub_draw_artifact"), subHas(QStringLiteral("유물"))) && all;
-    all = step(QStringLiteral("sub_draw_attr"), subHas(QStringLiteral("속성"))) && all;
+    // [F191] No attribute popups while drawing: the draw row must not offer a 속성 action.
+    all = step(QStringLiteral("sub_draw_no_attr_popup"), !subHas(QStringLiteral("속성"))) && all;
     all = step(QStringLiteral("sub_draw_merge"), subHas(QStringLiteral("묶기"))) && all;
   }
 #else
@@ -638,6 +679,8 @@ int KaApplication::run(int argc, char** argv) {
 #endif
   // 충돌 시 심볼 스택·미니덤프가 남도록 가장 먼저 설치한다.
   KaCrashGuard::install();
+  // Every KaUserError dialog offers 「로그 폴더 열기」 for the session log from here on.
+  KaShellStartup::ensureLogFolder();
   QElapsedTimer bootTimer;
   bootTimer.start();
 
@@ -720,6 +763,7 @@ int KaApplication::run(int argc, char** argv) {
   app.setStyle(QStringLiteral("Fusion"));
   app.setWindowIcon(KaIcons::appIcon());
   KaTheme::apply(&app);
+  KaTheme::applySavedDisplayOptions(&app);  // opt-in 고대비·큰 글씨 from 「화면 보기」; the default stays stock Strata
 
   std::unique_ptr<KaStartupSplash> splash;
   if (!autoQa) {
@@ -734,6 +778,11 @@ int KaApplication::run(int argc, char** argv) {
   const QString prefix = resolvePrefixPath();
   if (prefix.isEmpty()) {
     qCritical("QGIS_PREFIX_PATH/OSGEO4W_ROOT not set or qgis apps dir missing");
+    // A desktop launch has no console: say why instead of letting the window vanish.
+    if (!autoQa) {
+      if (splash) splash->close();
+      KaShellStartup::showCritical(KaShellStartup::missingQgisSpec(kaExeDir()));
+    }
     return 2;
   }
   QgsApplication::setPrefixPath(prefix, true);
@@ -785,17 +834,28 @@ int KaApplication::run(int argc, char** argv) {
     if (!req) return;
     req->setHeader(QNetworkRequest::UserAgentHeader,
                    QStringLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ka-hgis/0.3 QGIS"));
-    const QString host = req->url().host();
-    if (host.contains(QLatin1String("vworld.kr"), Qt::CaseInsensitive))
-      req->setRawHeader("Referer", "https://localhost");
+    // VWorld authenticates keys by Referer; no other provider is sent one (F059, same as BasemapOps).
+    const QString referer = BasemapPolicy::refererForUrl(req->url().toString());
+    if (!referer.isEmpty())
+      req->setRawHeader("Referer", referer.toLatin1());
     const QUrl fixed = SoilMapService::rewriteArcGisCacheUrl(req->url());
     if (fixed != req->url())
       req->setUrl(fixed);
   });
   qInfo() << "QGIS prefix:" << prefix;
   qInfo() << "Providers:" << QgsProviderRegistry::instance()->providerList();
-  if (!QgsProviderRegistry::instance()->providerList().contains(QStringLiteral("wms"))) {
+  const QStringList missingProviders =
+      KaShellStartup::missingProviders(QgsProviderRegistry::instance()->providerList());
+  if (missingProviders.contains(QStringLiteral("wms")))
     qCritical("WMS/XYZ provider missing — basemap tiles will not load");
+  if (!missingProviders.isEmpty()) {
+    KaCrashGuard::logLine(QStringLiteral("[boot] 지도 모듈 없음 — %1").arg(missingProviders.join(QStringLiteral(", "))));
+    // Drawing and saving may still work, so the app keeps running after the notice.
+    if (!autoQa) {
+      if (splash) splash->hide();
+      KaShellStartup::showCritical(KaShellStartup::missingProvidersSpec(missingProviders, prefix));
+      if (splash) splash->show();
+    }
   }
   KaCrashGuard::logLine(QStringLiteral("[boot] QGIS 초기화 %1 ms").arg(bootTimer.elapsed()));
   // QGIS 내부 경고(WMS 실패, 좌표계 문제 등)도 세션 로그로 남긴다.
@@ -841,8 +901,6 @@ int KaApplication::run(int argc, char** argv) {
   int code = 0;
   {
     MainWindow w;
-    if (autoQa || !openGpkg.isEmpty())
-      w.setRestoreLastSurveyEnabled(false);
     KaCrashGuard::logLine(QStringLiteral("[boot] 메인창 구성 %1 ms").arg(bootTimer.elapsed()));
     if (!splash)
       w.show();  // Preserve visible-window checks in the explicit QA fast path.
@@ -869,10 +927,7 @@ int KaApplication::run(int argc, char** argv) {
       }
     }
 
-    if (autoQa) {
-      // 자동 QA·스모크·스트레스에서는 최근 작업 복원을 건너뛴다.
-      w.setRestoreLastSurveyEnabled(false);
-    }
+    // Startup opens the home screen only: there is no last-survey restore to switch off here.
     if (qaPhase1) {
       // Phase1 QA는 지도 인프라까지 점검하므로 배경지도 로딩을 명시적으로 끝낸다.
       w.loadBootBasemaps();
@@ -904,6 +959,9 @@ int KaApplication::run(int argc, char** argv) {
       // Explicit automated smoke/QA keeps its fast path without a reading delay.
       KaCrashGuard::logLine(QStringLiteral("[boot] 창 표시 %1 ms").arg(bootTimer.elapsed()));
     }
+    // Crash-file retention is one path: KaCrashGuard::install() already kept only the newest
+    // dumps and logs (F113). Session TEMP folders (ka-hgis-XXXXXX) stay: saved workspaces may
+    // reference them (user decision).
     code = app.exec();
   }
 #if KA_HGIS_HAS_QGIS

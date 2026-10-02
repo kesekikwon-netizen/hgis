@@ -75,7 +75,7 @@ QString stripNestedCatch(const QString& body) {
 bool ownBodyLogs(const QString& body) {
   const QString own = stripNestedCatch(body);
   return own.contains(QLatin1String("logLine")) || own.contains(QLatin1String("KaSessionLog::line")) ||
-         own.contains(QLatin1String("appendUtf8"));
+         own.contains(QLatin1String("appendUtf8")) || own.contains(QLatin1String("KA_LOG_EXCEPT"));
 }
 
 QStringList silentCatchSites(const QString& srcRoot) {

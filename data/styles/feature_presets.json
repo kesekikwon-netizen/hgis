@@ -1,24 +1,25 @@
 {
+  "version": 2,
   "kinds": [
-    {"id": "house", "label": "주거지", "pattern": "solid", "marker": "square"},
-    {"id": "pit", "label": "수혈", "pattern": "bdiagonal", "marker": "circle"},
-    {"id": "ditch", "label": "구", "pattern": "horizontal", "marker": "diamond"},
-    {"id": "gully", "label": "도랑", "pattern": "vertical", "marker": "line"},
-    {"id": "tomb", "label": "분묘", "pattern": "fdiagonal", "marker": "triangle"},
-    {"id": "kiln", "label": "가마", "pattern": "cross", "marker": "star"},
-    {"id": "artifact", "label": "유물", "pattern": "solid", "marker": "triangle"},
-    {"id": "other", "label": "기타", "pattern": "dense6", "marker": "circle"}
+    {"id": "house", "label": "주거지", "pattern": "none", "line": "solid", "marker": "square"},
+    {"id": "pit", "label": "수혈", "pattern": "bdiagonal", "line": "0.6;1.2", "marker": "circle"},
+    {"id": "ditch", "label": "구", "pattern": "horizontal", "line": "3;1.5", "marker": "diamond"},
+    {"id": "gully", "label": "도랑", "pattern": "vertical", "line": "3;1.2;0.6;1.2", "marker": "cross_fill"},
+    {"id": "tomb", "label": "분묘", "pattern": "fdiagonal", "line": "3;1.2;0.6;1.2;0.6;1.2", "marker": "triangle"},
+    {"id": "kiln", "label": "가마", "pattern": "cross", "line": "7;1.5", "marker": "star"},
+    {"id": "artifact", "label": "유물", "pattern": "diagcross", "line": "1.5;1.5", "marker": "pentagon"},
+    {"id": "other", "label": "기타", "pattern": "dots", "line": "7;1.2;0.6;1.2", "marker": "hexagon"}
   ],
   "periods": [
-    {"id": "paleolithic", "label": "구석기", "color": "#78716C"},
-    {"id": "neolithic", "label": "신석기", "color": "#15803D"},
-    {"id": "bronze", "label": "청동기", "color": "#C2410C"},
-    {"id": "early_iron", "label": "초기철기", "color": "#B45309"},
-    {"id": "proto_three", "label": "원삼국", "color": "#7C3AED"},
-    {"id": "three_kingdoms", "label": "삼국", "color": "#1D4ED8"},
-    {"id": "unified_silla", "label": "통일신라", "color": "#0F766E"},
-    {"id": "goryeo", "label": "고려", "color": "#9D174D"},
-    {"id": "joseon", "label": "조선", "color": "#1E3A5F"},
-    {"id": "unknown", "label": "미정", "color": "#64748B"}
+    {"id": "paleolithic", "label": "구석기", "color": "#53291B"},
+    {"id": "neolithic", "label": "신석기", "color": "#674028"},
+    {"id": "bronze", "label": "청동기", "color": "#7A5737"},
+    {"id": "early_iron", "label": "초기철기", "color": "#8B7048"},
+    {"id": "proto_three", "label": "원삼국", "color": "#9C8A5B"},
+    {"id": "three_kingdoms", "label": "삼국", "color": "#ABA571"},
+    {"id": "unified_silla", "label": "통일신라", "color": "#BAC08A"},
+    {"id": "goryeo", "label": "고려", "color": "#C7DCA6"},
+    {"id": "joseon", "label": "조선", "color": "#D3F8C4"},
+    {"id": "unknown", "label": "미정", "color": "none"}
   ]
 }

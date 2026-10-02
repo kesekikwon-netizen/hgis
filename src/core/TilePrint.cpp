@@ -1,4 +1,5 @@
 #include "TilePrint.h"
+#include "StandardScales.h"
 
 #include <QFont>
 #include <QFontMetricsF>
@@ -334,11 +335,12 @@ QSizeF TilePrint::pdfPageSizeMm(const QString& pdfPath, QString* error) {
 }
 
 QList<double> TilePrint::enlargedScales(double drawingDenominator, double maxFactor, int limit) {
-  // 발굴·지적 도면에서 자주 쓰는 축척. 큰 분모부터 두어 배율이 작은 것이 먼저 나온다.
-  static const double kNice[] = {50000, 25000, 10000, 5000, 2500, 2000, 1200, 1000, 600, 500, 250, 200, 100};
+  // 발굴·지적 도면에서 자주 쓰는 축척(StandardScales 한 표). 큰 분모부터 두어 배율이 작은 것이 먼저 나온다.
+  const QList<int> ascending = StandardScales::denominators(StandardScales::PrintEnlarge);
   QList<double> out;
   if (drawingDenominator <= 0.0 || maxFactor <= 1.0) return out;
-  for (double d : kNice) {
+  for (auto it = ascending.crbegin(); it != ascending.crend(); ++it) {
+    const double d = double(*it);
     if (d >= drawingDenominator * (1.0 - 1e-6)) continue;
     if (drawingDenominator / d > maxFactor * (1.0 + 1e-9)) break;
     out.append(d);
@@ -347,8 +349,12 @@ QList<double> TilePrint::enlargedScales(double drawingDenominator, double maxFac
   return out;
 }
 
+QList<int> TilePrint::printDpiChoices() {
+  return {300, 600};
+}
+
 QString TilePrint::scaleLabel(double denominator) {
-  return QStringLiteral("1:%1").arg(QLocale(QLocale::English).toString(qlonglong(std::llround(denominator))));
+  return StandardScales::label(denominator);
 }
 
 QString TilePrint::isoName(const QSizeF& mm) {

@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QIODevice>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -222,7 +223,7 @@ class TestStorageSafety : public QObject {
         const QString key = feature.attribute(QStringLiteral("note")).toString();
         QVERIFY(expected.value(original->name()).contains(key));
         const QgsFeature prior = expected.value(original->name()).value(key);
-        QVERIFY(feature.geometry().equals(prior.geometry()));
+        QVERIFY(feature.geometry().isExactlyEqual(prior.geometry()));
         for (const QgsField& field : original->fields()) {
           QVERIFY(snapshot->fields().lookupField(field.name()) >= 0);
           // 저장 왕복에서 생기는 차이는 데이터 손실이 아니다.
@@ -1011,12 +1012,15 @@ class TestStorageSafety : public QObject {
     const QString source = writeHeritageGpkg(dest, &project, &error);
     QVERIFY2(!source.isEmpty(), qPrintable(error));
     const QString good = QDir::fromNativeSeparators(QFileInfo(dest).absoluteFilePath());
-    QString broken = good;
+    // The saved path lost the account folder: <profiles>/<user>/AppData → <profiles>/AppData.
+    // Build it from this PC's real profile location instead of assuming C:/Users.
     const QString home = QDir::fromNativeSeparators(QFileInfo(QDir::homePath()).absoluteFilePath());
-    const QString user = QFileInfo(home).fileName();
-    QVERIFY(broken.contains(QStringLiteral("/") + user + QStringLiteral("/")));
-    broken.replace(QStringLiteral("/") + user + QStringLiteral("/"), QStringLiteral("/"));
-    QVERIFY(broken.startsWith(QStringLiteral("C:/Users/AppData/"), Qt::CaseInsensitive));
+    const QString profiles = QFileInfo(home).path();
+    if (!profiles.endsWith(QStringLiteral("/Users"), Qt::CaseInsensitive))
+      QSKIP("이 복구는 <드라이브>:/Users/<계정> 형태의 프로필에만 해당합니다.");
+    QVERIFY(good.startsWith(home + QLatin1Char('/'), Qt::CaseInsensitive));
+    const QString broken = profiles + good.mid(home.size());
+    QVERIFY(broken.startsWith(profiles + QStringLiteral("/AppData/"), Qt::CaseInsensitive));
     QVERIFY(!QFileInfo::exists(broken));
     auto* layer = new QgsVectorLayer(broken + QStringLiteral("|layername=heritage"),
                                      QStringLiteral("국가지정유산"), QStringLiteral("ogr"));
@@ -1073,11 +1077,18 @@ class TestStorageSafety : public QObject {
 };
 
 int main(int argc, char** argv) {
+  // Isolate everything the storage code writes outside the per-test temp folders before QGIS
+  // starts: user settings (recent list), the session log and the unsafe-project list
+  // (both under LOCALAPPDATA/ka-hgis) and QStandardPaths app folders. Same order as test_perf.
+  QStandardPaths::setTestModeEnabled(true);
+  QTemporaryDir isolated;
+  if (!isolated.isValid()) return 1;
+  QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, isolated.filePath(QStringLiteral("settings")));
+  qputenv("KA_HGIS_LOG_DIR", QDir::toNativeSeparators(isolated.filePath(QStringLiteral("logs"))).toLocal8Bit());
+  qputenv("LOCALAPPDATA", QDir::toNativeSeparators(isolated.filePath(QStringLiteral("local"))).toLocal8Bit());
   QgsApplication app(argc, argv, true);
-  QTemporaryDir settings;
   QgsApplication::setPrefixPath(qEnvironmentVariable("QGIS_PREFIX_PATH"), true);
   QgsApplication::initQgis();
-  QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
   TestStorageSafety tests;
   const int result = QTest::qExec(&tests, argc, argv);
   QgsApplication::exitQgis();

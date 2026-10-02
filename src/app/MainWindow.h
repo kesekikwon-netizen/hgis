@@ -10,9 +10,9 @@
 #include <vector>
 #include <memory>
 #include "core/LocationSearch.h"
-#include "core/AdminBoundaryService.h"
 #include "core/TrenchGridGenerator.h"
 #include "core/HeritageImport.h"
+#include "core/AccountStatus.h"  // [P6 wiring] openAccountSetup(AccountStatus::Source)
 class QListWidget;
 class QListWidgetItem;
 class QAction;
@@ -25,6 +25,7 @@ class QComboBox;
 class QCheckBox;
 class QDoubleSpinBox;
 class QEvent;
+class QBoxLayout;  // [int W1] F044 setupFeatureCard
 class QUndoCommand;
 class KaAboveLabelsOverlay;
 class KaLayerOpacityRail;
@@ -41,6 +42,7 @@ class QCloseEvent;
 class QTabWidget;
 class QFrame;
 class ChecklistEngine;
+struct CheckResult;  // [pkg A] core/ChecklistEngine.h
 class KaStatusBar;
 class KaBeginnerRibbon;
 namespace PolygonErase {
@@ -70,26 +72,36 @@ class KaTerrain3dStudio;
 class KaTerrain3dLayoutStudio;
 class KaStartPage;
 class KaAppBar;
-class KaCoordPointMapTool;
 class KaMeasureMapTool;
 class KaFeatureSelectTool;
 class KaVertexEditTool;
-class KaFoundLocationMark;
+class EditHistory;  // [pkg B1] core/EditHistory.h: edits of all layers on one time line
+class KaLayerRefreshBatch;   // [pkg E1] F131 app/KaLayerRefreshBatch.h
+class KaLayerTreeUndo;       // [pkg E1] F186 app/KaLayerTreeUndo.h
+struct KaLayerTreeSnapshot;  // [pkg E1] F186
+class KaFeatureCard;         // [pkg K] F044 app/KaFeatureCard.h
 class QSplitter;
 class QListWidget;
 class QTimer;
 class QgsVertexMarker;
 class QgsMapToolPan;
-class QgsMapToolSelect;
 class QgsGeometry;
 class QgsFeature;
 class QgsLayerTreeMapCanvasBridge;
 class QgsMessageBar;
 #endif
+// [P6 wiring] Strata shell widgets attached in MainWindowChrome.cpp.
+class KaInspectorPanel;
+class KaSurveyBadge;
+class KaDrawGuideBand;
+class KaBasemapQuickCard;
+class QTimer;
 
 class MainWindow : public QMainWindow {
   Q_OBJECT
 public:
+  // [v3 int] F073: tests wait for the post-open satellite/cadastral pair before taking a layer baseline.
+  bool basemapBootPending() const { return m_basemapBootPending; }
   explicit MainWindow(QWidget* parent = nullptr);
   ~MainWindow() override;
   bool eventFilter(QObject* watched, QEvent* event) override;
@@ -108,7 +120,6 @@ public:
   void loadBootBasemaps();
   // P3-1: 배경 켜/끄기·조판 들락날락·저장·줌을 반복한다. 0이면 성공.
   int runUiStressLoop(int iterations);
-  void setRestoreLastSurveyEnabled(bool enabled) { m_restoreLastSurveyEnabled = enabled; }
   bool addVectorFromPath(const QString& path);
   bool addRasterFromPath(const QString& path);
   bool tryAddDroppedUrls(const QList<QUrl>& urls);
@@ -129,6 +140,10 @@ private:
       std::function<PreparedReferenceMap(QgsFeedback*, const std::function<bool()>&)> prepare,
       std::function<void(const PreparedReferenceMap&)> apply);
   void startDemDownload();
+  // [pkg G1] F121: downloads start only with an open survey folder (empty = refused
+  // after telling the user); download folders replaced this session go at a save point.
+  QString referenceDownloadFolder(const QString& title);
+  void pruneRetiredReferenceFolders();
   void watchUndoFeatureIds(QgsVectorLayer* layer);
   void remapUndoFeatureIdsAfterSave();
   void populateMapContextMenu(QMenu* menu, const QPoint& pos);
@@ -150,6 +165,8 @@ private slots:
   // 이제 「저장」과 닫기 확인에서만 불린다. 테스트도 이 이름으로 직접 부른다.
   bool persistSurveyWork();
   void extractEmbeddedReferenceVectors();
+  // [pkg D2] F114/F133 via D1 API: user-clicked cleanup of stale app staging next to the survey.
+  void cleanSurveyStaging();
   void openProject();
   void startEditSurveyArea();
   void startEditFeaturePoly();
@@ -162,10 +179,6 @@ private slots:
   // 위에 그린 면 모양대로 아래 면에서 그 자리만 지운다(겹친 곳 지우기).
   void eraseOverlapWithShape();
   void startSplitPolygonTool();
-  void onWorkControlClicked(QListWidgetItem* item);
-  void refreshWorkPanel();
-  void saveEdits();
-  void stopEdits();
   void startAttributeEditTool();
   void addUserLayer();
   void addControlPoint();
@@ -173,16 +186,10 @@ private slots:
   void runChecklist();
   void exportPdf();
   void exportShpPackage();
-  void crsDefineOnly();
-  void crsReproject();
   void setWorkCrs5186();
   void setWorkCrs5187();
   void convertSelectedTo5179();
-  void convertSelected5186To5179();
-  void convertSelected5187To5179();
-  void convertShpFileTo5179();
   void startSelectTool();
-  void startVertexEditTool();
   void startMeasureTool();
   void toggleTerrainMap();
   void openTopographicDownload();
@@ -208,13 +215,9 @@ private slots:
   void startTrenchGridMove();   // 전체 이동 모드
   void startTrenchGridEdit();   // 개별 편집 모드(그래픽식 선택·이동·삭제)
   void activateTrenchTool(bool single);
-  void toggleMapGrid();
-  // 격자 선 색을 바꾸고(빨강·파랑·검정·직접 고르기) 눌린 단추를 맞춘다.
-  void setMapGridColor(const QColor& color);
-  void syncMapGridColorButtons();
-  void addBasemapVworld();
-  void addBasemapVworldSat();
-  void addBasemapVworldCadastral();
+  // [pkg I] F087: copies the corner-bar grid settings (explicit 미터/경위도 kind, debounced
+  // values) onto the canvas grid. announce = on/off or kind change → one status line.
+  void applyMapGrid(bool announce);
   void addDaedongyeojidoMap();
   void addHistoryGisMap1919();
   void downloadCadastral();
@@ -227,6 +230,8 @@ private slots:
   // 지금 화면 범위의 배경 타일을 MBTiles로 받아 두고 그 파일로 바꿔 쓴다.
   // 그 뒤로는 네트워크를 타지 않아 팬·줌이 디스크 속도로 돈다.
   void saveOfflineTilePack();
+  // [pkg G1] F060: read-only 「자료 준비 상태」 table, opened only by the user.
+  void showReferenceStatus();
   void georefAssistant();
   void showSubToolsAlign();
   void showAbout();
@@ -235,11 +240,7 @@ private slots:
   void configureTopographicAccount();
   bool configureHeritageAccount();
   void updateTopographicDirectory(const QString& surveyPath);
-  void rebuildLayouts();
-  void onFileBrowserActivated(QListWidgetItem* item);
   void exportReportLayout();
-  void browseDataFolder();
-  void goFileBrowserRoot(const QString& path);
   static QString resolvedDesktopPath();
   void onMapContextMenu(const QPoint& pos);
   void onLayerTreeContextMenu(const QPoint& pos);
@@ -260,9 +261,7 @@ private slots:
   HeritageImport::Result importHeritageDataset(HeritageDataset dataset, const QStringList& files);
   void saveHeritageAgreementReceipt(const QDateTime& when, const QString& terms);
   void showSubToolsBasemap();
-  void showSubToolsSubmit();
   void hideSubTools();
-  void startCoordPointTool();
   void runSiteBuffer500();
   void runSiteBuffer1000();
   void applySnapConfig();
@@ -278,7 +277,6 @@ private slots:
   QString terrain3dSheetPngPath() const;
   void onViewTabCloseRequested(int index);
   void openRecentSurvey(const QString& path);
-  void showHomePage();
   void showMapWorkspace();
   void rememberSurvey(const QString& path, const QString& name);
   void undoLastAction();
@@ -290,9 +288,7 @@ private slots:
 private:
   void buildUi();
   void buildMenus();
-  void setupWorkPanel();
   void updateNextActionStatus();
-  void setupFileBrowser();
   void clearSubToolbar();
   // 지금 켜져 있는 도구에 파란 밑줄이 오게 체크 상태를 맞춘다.
   void updateSubToolbarChecks();
@@ -328,23 +324,15 @@ private:
   void bindMapDisplayScreen();
   void setWorkCrs(const QString& authId);
   void searchLocation(const QString& query, bool parcel = false);
-  void applySurfaceSurveyFieldMap(const QString& sido, const QString& city, const QString& dong);
-  void onAdminBoundaryFetched(const AdminBoundaryParse& parsed);
-  void onAdminBoundaryFailed(const QString& message);
   void onLocationResults(const QVector<LocationHit>& hits);
   void onLocationFailed(const QString& message);
   void zoomToLocation(const LocationHit& hit);
-  // 검색으로 찾은 자리에 표식을 남긴다. 화면만 옮기면 어디를 찾았는지 모른다.
-  void markFoundLocation(const QgsPointXY& mapPt, const QString& title);
-  void clearFoundLocationMark();
   QJsonObject buildProjectState() const;
   QString rulesPath() const;
-  QString vworldApiKeyOrPrompt();
 #if KA_HGIS_HAS_QGIS
   QgsVectorLayer* layerByKey(const QString& layerKey) const;
   QgsVectorLayer* ensureDomainLayerForEdit(const QString& layerKey, const QString& titleKo);
   void onLayerTreeRowsMoved();
-  void moveSelectedLayer(int dir);
   void startAlignSession(QgsMapLayer* layer);
   void stopAlignSession();
   void ensureAlignSplit();
@@ -356,11 +344,23 @@ private:
   void deleteSelectedAlignPoint();
   void applyAlignMove();
   void beginEdit(QgsVectorLayer* layer);
+  bool refuseReadOnlyLayer(const QString& title, const QgsVectorLayer* layer);
   void onGeometryCaptured(const QgsGeometry& geom);
   void stopCaptureTool();
+  // [pkg B1] drawing helpers (KaDrawSketchTools.cpp). 완료·되돌리기·취소 and
+  // 연속 그리기 on the draw sub-toolbar; the first three work only while a sketch has points.
+  void addDrawSketchButtons();
+  void syncDrawSketchButtons();
+  // [pkg B1] Current tool chip in the status bar (도구: 이동 / 그리기 · 유구 면 · 점 3 …).
+  void updateToolChip();
+  QString currentToolLabel() const;
+  // [pkg B1] Leaving the map tab keeps an unfinished sketch; returning shows it again.
+  // parkSketchForOtherTab returns true when it kept the sketch (the caller then must not
+  // call hideSubTools, which would throw the points away).
+  bool parkSketchForOtherTab();
+  void resumeParkedSketch();
   void ensureAttributeTool();
   void editFeatureAttributes(QgsVectorLayer* layer, const QgsFeature& feature);
-  void editAttributesAtCanvasPos(const QPoint& canvasPos);
   static QString attributeFieldLabelKo(const QString& fieldName);
 #endif
   bool commitSurveyEdits(int* committedCount = nullptr);
@@ -378,6 +378,14 @@ private:
   void captureRecoverySnapshot();
   void offerRecoverySnapshot();
   void clearRecoveryOffer(const QString& recoveryDirectory);
+  // [pkg D2] F073/F176/F038 (MainWindowSession.cpp): satellite·cadastral after open/new run on
+  // the event loop; the survey save freezes the canvas around the GPKG write (the silent
+  // recovery copy waits for an idle canvas instead); a failed save stays visible outside the
+  // map tab. [v3 D2] waitForCanvasIdle (nested event loop) removed.
+  void scheduleDefaultBasemaps();
+  void reportSaveFailure(const QString& title, const QString& reason,
+                         const QString& recoveryNote = QString(),
+                         const QString& details = QString());
   // 레이어 점호. 직전과 달라졌으면 무엇이 사라졌는지 세션 로그에 적고 되살린다.
   void auditLayerHealth();
   // 조사를 연 뒤에도 원본 파일을 못 찾은 레이어를 알림 줄로 알린다(다른 PC에서 옮겨 온 조사).
@@ -386,7 +394,6 @@ private:
   // 화면에 실제로 무엇이 그려졌는지. 확대했을 때 위성이 비는 현상을 잡기 위한 계측 —
   // 캔버스가 그리기로 잡고 있는 레이어 목록과 축척을, 목록이 바뀔 때만 기록한다.
   void logCanvasPaintState();
-  void restoreLastSurvey();
 
   // Non-blocking feedback on the canvas. Reserve QMessageBox for questions and
   // for failures the user must acknowledge before anything else happens.
@@ -400,17 +407,13 @@ private:
   QLabel* m_help = nullptr;
   QLabel* m_checkView = nullptr;
   KaStatusBar* m_status = nullptr;
-  QLabel* m_workHint = nullptr;
-  QListWidget* m_workList = nullptr;
   QSplitter* m_leftSplit = nullptr;
   QFrame* m_layersCard = nullptr;
   QFrame* m_filesCard = nullptr;
   class KaFileBrowserPanel* m_filesPanel = nullptr;
   QListWidget* m_fileBrowser = nullptr;
-  QString m_browserPath;
   ChecklistEngine* m_checklist = nullptr;
   LocationSearch* m_locator = nullptr;
-  AdminBoundaryService* m_adminBoundary = nullptr;
   QString m_surveyPath;
   class HeritageRegionResolver* m_heritageResolver = nullptr;
   QPointer<class KaHeritageBrowser> m_heritageBrowser;
@@ -434,7 +437,6 @@ private:
   QgsMapCanvas* m_canvas = nullptr;
   QgsLayerTreeView* m_layerTree = nullptr;
   KaCaptureMapTool* m_captureTool = nullptr;
-  KaCoordPointMapTool* m_coordPointTool = nullptr;
   KaMeasureMapTool* m_measureTool = nullptr;
   QAction* m_actMeasure = nullptr;
   QAction* m_actSelect = nullptr;
@@ -457,14 +459,11 @@ private:
   KaAboveLabelsOverlay* m_aboveLabels = nullptr;
   int m_aboveLabelsCount = -1;
   bool m_labelOrderQueued = false;
-  QCheckBox* m_mapGridCheck = nullptr;
   KaMapCornerBar* m_mapGridBar = nullptr;
-  QDoubleSpinBox* m_mapGridStep = nullptr;
-  QDoubleSpinBox* m_mapGridRot = nullptr;
-  QDoubleSpinBox* m_mapGridWidth = nullptr;
-  QComboBox* m_mapGridDash = nullptr;
-  QColor m_mapGridColor = QColor(51, 65, 85, 210);
-  QVector<QToolButton*> m_mapGridColorBtns;
+  // [pkg I] F087: grid controls of the corner bar (KaShellGridControls.h).
+  class KaShellGridControls* m_gridControls = nullptr;
+  // [pkg I] F149: opt-in 지도 넓게 보기 / left-panel fold (KaShellFocus.h).
+  class KaShellFocus* m_shellFocus = nullptr;
   KaAttributeMapTool* m_attributeTool = nullptr;
   KaLayerOpacityRail* m_layerOpacityRail = nullptr;
   KaAlignMapTool* m_alignTool = nullptr;
@@ -485,11 +484,7 @@ private:
   QPoint m_alignLiveScreen;
   QTimer* m_alignCursorTimer = nullptr;
   QgsMapToolPan* m_panTool = nullptr;
-  QgsMapToolSelect* m_selectTool = nullptr;
   KaFeatureSelectTool* m_featureSelectTool = nullptr;
-  KaVertexEditTool* m_vertexEditTool = nullptr;
-  KaFoundLocationMark* m_locationMark = nullptr;
-  QString m_locationMarkTitle;
   QgsVectorLayer* m_editLayer = nullptr;
   bool m_isSplittingPolygon = false;
   QgsLayerTreeMapCanvasBridge* m_bridge = nullptr;
@@ -508,7 +503,6 @@ private:
   // 조사 열기가 끝나기를 기다리며 다시 시도한 횟수. 0.3초 × 40 = 12초까지.
   int m_basemapBootRetries = 0;
   static constexpr int kBasemapBootRetryMax = 40;
-  bool m_restoreLastSurveyEnabled = false;
   bool m_isLoadingBasemaps = false;
   bool m_isOpeningSurvey = false;
   bool m_canvasSyncQueued = false;
@@ -529,6 +523,11 @@ private:
   QTimer* m_recoverySnapshotTimer = nullptr;
   bool m_recoverySnapshotBusy = false;
   bool m_recoveryOfferDone = false;
+  // [pkg D2] F072/F116/F176: copy only layers with unsaved edits, skip when those edits did not
+  // change since the last copy, and retry shortly instead of aborting an in-flight render.
+  QByteArray m_recoverySignature;
+  int m_recoverySnapshotRetries = 0;
+  bool m_recoverySnapshotRetryQueued = false;
   // 레이어 사라짐 추적. 직전 점호 결과와 다를 때만 로그를 남긴다.
   QTimer* m_layerWatchTimer = nullptr;
   QString m_lastLayerCensus;
@@ -550,17 +549,42 @@ private:
   static QStringList mapOnlyRibbonGroups();
   void showMapTabFromStudio();
   struct KaUndoAction {
-    enum Type { FeatureAdded, FeatureDeleted, FeatureChanged, AttributesChanged, LayerAdded, LayersRemoved };
+    enum Type { FeatureAdded, FeatureDeleted, FeatureChanged, AttributesChanged, LayerAdded, LayersRemoved,
+                LayerTreeChanged /* [pkg E1] F186 */ };
     Type type = FeatureAdded;
     QString layerId;
     qint64 featureId = -1;
     QgsFeature featureData;
     QVector<QPair<QString, QgsFeature>> deletedFeatures;
     std::shared_ptr<KaRemovedLayers> removedLayers;
+    std::shared_ptr<KaLayerTreeSnapshot> treeBefore;  // [pkg E1] F186: list order/checks before the user's drag or click
     QString description;
+    quint64 seq = 0;        // [pkg B1] time on EditHistory's line
+    quint64 commandId = 0;  // [pkg B1] layer-stack command this mirrors; 0 = standalone
   };
   QVector<KaUndoAction> m_undoActions;
   QSet<QString> m_undoObservedLayers;
+  // [pkg E1] F186/F131 (KaLayerTreeUndo / KaLayerRefreshBatch, wired in MainWindow.cpp)
+  std::unique_ptr<KaLayerTreeUndo> m_layerTreeUndo;
+  std::unique_ptr<KaLayerRefreshBatch> m_layerRefreshBatch;
+  // [int W1] F044 「선택한 유구」 card in the layer panel (MainWindowFeatureCard.cpp)
+  KaFeatureCard* m_featureCard = nullptr;
+  void setupFeatureCard(QWidget* host, QBoxLayout* layout);
+  void syncFeatureCard(QgsMapLayer* layer);
+  // [pkg B1] Ctrl+Z in time order across layer stacks and m_undoActions (KaEditUndoOrder.cpp).
+  // Anything added to m_undoActions must go through pushUndoAction so it gets a time.
+  EditHistory* m_editHistory = nullptr;
+  EditHistory* editHistory();
+  // Stamps the action (mirrors a command of stackLayer's undo stack when given) and caps
+  // the history, releasing the oldest removed layers first.
+  void pushUndoAction(KaUndoAction action, QgsVectorLayer* stackLayer = nullptr);
+  QgsVectorLayer* newestUndoLayer();
+  QgsVectorLayer* newestRedoLayer();
+  int newestFallbackUndoIndex();
+  void pruneUndoActions();
+  // [pkg B1] drawing state (KaDrawSketchTools.cpp, MainWindowEditing.cpp)
+  QLabel* m_toolChip = nullptr;
+  bool m_continuousDraw = false;  // 연속 그리기: skip the name/number form after each shape
   // 여러 레이어를 한 번에 고친 편집(겹친 곳 지우기). 되돌리기 기록은 레이어마다 따로라서,
   // 묶어 두지 않으면 Ctrl+Z 한 번에 반만 돌아온다.
   struct KaLinkedEdit {
@@ -586,7 +610,43 @@ private:
   // 방금 그린 면. 「겹친 곳 지우기」를 아무것도 고르지 않고 누르면 이 면을 골라 보여 준다.
   QPointer<QgsVectorLayer> m_lastDrawnLayer;
   QgsFeatureId m_lastDrawnFid = FID_NULL;
-  QPointer<QProgressDialog> m_boundaryProgress;
   QPointer<QProgressDialog> m_searchProgress;
 #endif
+  // [pkg A] 검수·제출: review dialog, submit package flow and go-to (KaSubmitFlow.cpp).
+  // The ribbon chip 「검수·제출」 (Ctrl+E) opens openSubmitReview.
+private slots:
+  void openSubmitReview();
+private:
+  bool ensureChecklistRules();
+  QVector<CheckResult> evaluateChecklist();
+  void makeSubmitPackage();
+  void goToCheckTargets(const CheckResult& result);
+  void runCheckAction(const QString& action);
+  // " · 종류·시대 빈 유구 N" for the status bar after drawing; empty when none.
+  QString missingAttributeCounterText() const;
+  bool m_submitBusy = false;
+
+  // [P6 wiring] Strata shell (MainWindowChrome.cpp): the 「선택한 유구」 inspector as the third
+  // pane of m_mainSplit (F10 folds it), the 「조사 열림 · 이름」 badge in the tab corner, the
+  // drawing guide band over the map, the 「배경 지도」 card and the home 「설정」 buttons. The
+  // widgets only display; every value flows in from here.
+private:
+  void setupStrataShell();
+  // Home 「설정」 → the dialog that already owns that key or account, then the home reloads.
+  void openAccountSetup(AccountStatus::Source source);
+  // Badge, 「저장 안 됨 n건」 chip and the 「저장」 icon dot; calls within 300 ms are merged.
+  void syncShellChips();
+  // The card's 위성·지형·옛 지도 buttons mirror the legend and the ribbon (display only).
+  void syncBasemapCard();
+  // After a successful save: survey_area / feature_poly + feature_line counts for the home dots.
+  void recordSurveyFacts();
+  // Guide-band words for the active map tool (empty: the band shows undo/redo only).
+  QString currentToolHint() const;
+  QString currentToolIconId() const;
+  KaInspectorPanel* m_inspector = nullptr;
+  KaSurveyBadge* m_surveyBadge = nullptr;
+  KaDrawGuideBand* m_drawGuide = nullptr;
+  KaBasemapQuickCard* m_basemapCard = nullptr;
+  QAction* m_actSave = nullptr;
+  QTimer* m_shellSyncTimer = nullptr;
 };

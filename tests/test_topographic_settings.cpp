@@ -1,6 +1,7 @@
 #include <QtTest>
 #include <QDir>
 #include <QFile>
+#include <QScopeGuard>
 #include <QSettings>
 #include <QTemporaryDir>
 #include "core/KaSecretStore.h"
@@ -91,6 +92,70 @@ private slots:
     QVERIFY(!stored.contains(QStringLiteral("ngii/password_dpapi")));
     QVERIFY(!stored.contains(QStringLiteral("ngii/password")));
     KaSecretStore::resetPortableSecretsForTests();
+  }
+
+  // F167: reading in the portable build must not lower a DPAPI value to the
+  // travelling form. Only an explicit save changes the stored form.
+  void portableReadKeepsDpapiUntilExplicitSave() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const auto guard = qScopeGuard([] { KaSecretStore::resetPortableSecretsForTests(); });
+    const auto personal = temp.filePath(QStringLiteral("ngii-account.ini"));
+    const TopographicSettings::Credentials expected{QStringLiteral("dpapi-user"),
+                                                    QStringLiteral("pw-dpapi")};
+    KaSecretStore::setPortableSecretsForTests(false);
+    QString error;
+    QVERIFY2(TopographicSettings::saveToFile(personal, expected, &error), qPrintable(error));
+    KaSecretStore::setPortableSecretsForTests(true);
+    const auto actual = TopographicSettings::readFromFiles(personal, {});
+    QCOMPARE(actual.password, expected.password);
+    {
+      QSettings stored(personal, QSettings::IniFormat);
+      stored.setFallbacksEnabled(false);
+      QVERIFY(stored.contains(QStringLiteral("ngii/password_dpapi")));
+      QVERIFY(!stored.contains(QStringLiteral("ngii/password_portable")));
+      QVERIFY(KaSecretStore::hasReadablePassword(stored, QStringLiteral("ngii")));
+    }
+    QVERIFY2(TopographicSettings::saveToFile(personal, expected, &error), qPrintable(error));
+    QSettings resaved(personal, QSettings::IniFormat);
+    resaved.setFallbacksEnabled(false);
+    QVERIFY(resaved.contains(QStringLiteral("ngii/password_portable")));
+    QVERIFY(!resaved.contains(QStringLiteral("ngii/password_dpapi")));
+  }
+
+  // F172: the status probe (hasCredentials) reads without migrate and must not rewrite.
+  void readOnlyProbeLeavesFileUntouched() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const auto personal = temp.filePath(QStringLiteral("ngii-account.ini"));
+    QVERIFY(fixture(personal, QStringLiteral("probe-user"), QStringLiteral("probe-secret")));
+    QFile before(personal);
+    QVERIFY(before.open(QIODevice::ReadOnly));
+    const QByteArray original = before.readAll();
+    before.close();
+    const auto value = TopographicSettings::readFromFiles(personal, {}, false);
+    QCOMPARE(value.username, QStringLiteral("probe-user"));
+    QCOMPARE(value.password, QStringLiteral("probe-secret"));
+    QFile after(personal);
+    QVERIFY(after.open(QIODevice::ReadOnly));
+    QCOMPARE(after.readAll(), original);
+  }
+
+  // F170: a plain password= left by the personal-package script is upgraded on the
+  // first read, so it does not linger in the portable folder.
+  void portablePlaintextIsUpgradedOnFirstRead() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const auto guard = qScopeGuard([] { KaSecretStore::resetPortableSecretsForTests(); });
+    const auto personal = temp.filePath(QStringLiteral("ngii-account.ini"));
+    QVERIFY(fixture(personal, QStringLiteral("plain-user"), QStringLiteral("plain-secret")));
+    KaSecretStore::setPortableSecretsForTests(true);
+    const auto actual = TopographicSettings::readFromFiles(personal, {});
+    QCOMPARE(actual.password, QStringLiteral("plain-secret"));
+    QSettings stored(personal, QSettings::IniFormat);
+    stored.setFallbacksEnabled(false);
+    QVERIFY(!stored.contains(QStringLiteral("ngii/password")));
+    QVERIFY(stored.contains(QStringLiteral("ngii/password_portable")));
   }
 
   void deadDpapiPersonalFallsBackToBundledPlaintext() {

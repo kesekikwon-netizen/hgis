@@ -6,9 +6,12 @@
 #include <QList>
 #include <QPointer>
 #include <QSize>
+#include <QString>
+#include <memory>
 
 #include <qgsrectangle.h>
 
+class QObject;
 class QgsMapLayer;
 class QgsMapCanvas;
 
@@ -23,9 +26,15 @@ class QgsMapCanvas;
 // 본 화면 목록에서는 이 대상이 빠져 있다. 이 항목이 그 도형을 한 번만 그리고,
 // 글자가 있는 레이어는 심볼 없이 이름만 얹는다. 지적 지번은 본 화면에 남는다.
 // 대상은 LayerOps::layersDrawnAboveLabels. 지질·지형도·위성은 넣지 않는다.
+//
+// The cached picture is drawn at the canvas device pixel ratio (125-200 % field
+// screens stay sharp) and is rebuilt only when its inputs change: the layer list,
+// a watched layer's style/data/edit signal, or the extent, size, DPR, CRS or
+// rotation. A finished base-map render alone does not redraw it.
 class KaAboveLabelsOverlay : public QgsMapCanvasItem {
 public:
   explicit KaAboveLabelsOverlay(QgsMapCanvas* canvas);
+  ~KaAboveLabelsOverlay() override;
 
   // 맨 위가 앞. 비면 아무것도 그리지 않는다.
   void setLayers(const QList<QgsMapLayer*>& layers);
@@ -33,19 +42,32 @@ public:
 
   void updatePosition() override;
 
+  // Tests and diagnostics: physical cache size, its DPR, and how often it was rebuilt.
+  QSize cachePixelSize() const { return m_cache.size(); }
+  qreal cacheDevicePixelRatio() const { return m_cache.isNull() ? 0. : m_cache.devicePixelRatio(); }
+  int rebuildCount() const { return m_rebuilds; }
+
 protected:
   void paint(QPainter* painter) override;
 
 private:
   QList<QgsMapLayer*> currentLayers() const;
-  void rebuildCache();
+  void syncWithProject();
+  void watchLayers();
+  void markDirty();
+  QString cacheKey() const;
+  void rebuildCache(qreal dpr);
 
   QList<QPointer<QgsMapLayer>> m_layers;
   // 화면을 칠할 때마다 지도를 다시 그리면 팬·줌이 멎는다. 결과를 담아 두고
-  // 범위·크기가 바뀌거나 지도가 실제로 다시 그려졌을 때만 새로 만든다.
+  // 입력이 바뀌었을 때만 새로 만든다.
   QImage m_cache;
-  QgsRectangle m_cacheExtent;
+  QString m_cacheKey;
   QSize m_cacheSize;
   bool m_dirty = true;
   bool m_painting = false;
+  int m_rebuilds = 0;
+  // Connection owners: destroyed with the item so no signal reaches a dead overlay.
+  std::unique_ptr<QObject> m_canvasContext;
+  std::unique_ptr<QObject> m_layerContext;
 };

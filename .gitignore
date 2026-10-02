@@ -86,6 +86,8 @@ symbology-style.db
 *.idb
 *.ipdb
 *.iobj
+# DWG 변환기 LibreDWG(GPLv3 이상)는 링크하지 않고 별도 프로그램으로 앱과 함께 둔다. 받은 그대로 저장소에 넣는다(third_party/libredwg/0.14/SOURCE.txt).
+!third_party/libredwg/**
 
 # Generated portable output stays local; maintain sources in scripts/data/docs.
 /dist/
@@ -133,10 +135,24 @@ venv/
 *.gpkg
 *.qgz
 !samples/**/*.gpkg
+!samples/**/*.qgz
+# Old-version compatibility samples are synthetic surveys saved by that version's
+# app code (no real site data). They must travel with the repo, or a fresh clone/CI
+# cannot run save_open_portable::oldVersionSurveysStillOpen (tests/data/compat/README.md).
+!tests/data/compat/**
 
+# Account/key files: never commit, wherever a checkout, build or portable puts them.
 config/secrets.ini
 config/ngii-local.ini
+config/*-local.ini
+config/*-account.ini
+**/config/*-local.ini
+**/config/*-account.ini
 **/secrets.ini
+ka-hgis-vworld.ini
+
+# CTest writes cost data next to the build; not source.
+Testing/
 
 
 # QGIS offline manuals: large Desktop User Guide PDFs stay local (see docs/vendor/qgis-manual-3.44/README.md)

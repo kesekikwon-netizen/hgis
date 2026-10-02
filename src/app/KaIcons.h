@@ -1,16 +1,34 @@
 #pragma once
 #include <QColor>
 #include <QIcon>
+#include <QPixmap>
 #include <QString>
 
 namespace KaIcons {
-// Rounded group-colored field icons, including high-DPI and state variants: a light tint tile
-// with the glyph in a deep shade of the group color, so the map stays the loudest thing on screen.
+// Glyph styles. Mockup (default): a light-grey rounded tile with a navy Lucide line glyph
+// (KaIconsMockup); an id without a mapped SVG is drawn in the Outline style. Outline: one
+// charcoal outline on a transparent square; a checked button shows the accent glyph on an
+// accentWash tile; save_unsaved alone keeps a solid accent tile with a warn dot. Tile: the
+// legacy light group-coloured tile. Outline and Tile stay behind KA_HGIS_ICON_STYLE or
+// setGlyphStyle(). An id without an outline drawing renders its legacy drawing in plain
+// ink, never a "?" box.
+enum class GlyphStyle { Tile, Outline, Mockup };
+GlyphStyle glyphStyle();
+void setGlyphStyle(GlyphStyle style);
+// The start-up style: Mockup unless KA_HGIS_ICON_STYLE is "outline" or "tile".
+GlyphStyle glyphStyleFromEnvironment();
+
+// Field icons for every mode/state and DPI. An id without any glyph logs one warning and
+// shows a dashed "?" box, never another icon.
 QIcon icon(const QString& id);
-// The same glyph on a solid group-colored tile, for the few buttons people press most
-// (저장·도면·인쇄).
+// Tile: the same glyph on a solid group-coloured tile (저장·도면·인쇄). Outline and Mockup: icon().
 QIcon strongIcon(const QString& id);
 // A valid ink requests a monochrome icon in every mode/state.
 QIcon icon(const QString& id, const QColor& ink);
+// One direct render in ink at px logical pixels (dpr device scale) for chips, dots, badges
+// and search fields: the outline stroke is drawn at that size, not scaled from a bake.
+QPixmap glyphPixmap(const QString& id, const QColor& ink, int px, qreal dpr = 1.0);
 QIcon appIcon();
+// True when id has its own glyph in either style (or is an alias of one).
+bool hasIcon(const QString& id);
 }

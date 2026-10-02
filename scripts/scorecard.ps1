@@ -1,7 +1,64 @@
 # Read existing ka-hgis measurements. Does not run CTest.
 # ASCII only.
+#   -LineLimitOnly   only the source line-limit gate (CI, F213): a C++ file under src/ or tests/
+#                    over 300 lines fails unless docs/quality/line-limit-baseline.txt lists it,
+#                    and a listed file fails when it grew past its recorded size.
+#   -WriteBaseline   with -LineLimitOnly: rewrite the baseline from the current tree.
+param([switch]$LineLimitOnly, [switch]$WriteBaseline)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+$lineLimit = 300
+$baselinePath = Join-Path $root 'docs/quality/line-limit-baseline.txt'
+
+function Get-OversizeSources() {
+  $rows = @()
+  foreach ($dir in @('src', 'tests')) {
+    $base = Join-Path $root $dir
+    if (-not (Test-Path -LiteralPath $base)) { continue }
+    # Filter by extension: Windows PowerShell 5.1 ignores -Include with -LiteralPath and counted .ico/.dxf.
+    Get-ChildItem -LiteralPath $base -Recurse -File | Where-Object { $_.Extension -in '.cpp', '.h', '.hpp' } | ForEach-Object {
+      # Read as UTF-8: Windows PowerShell 5.1 reads BOM-less UTF-8 as the ANSI code page (cp949) and miscounts lines.
+      $count = @(Get-Content -LiteralPath $_.FullName -Encoding UTF8).Count
+      if ($count -gt $lineLimit) {
+        $relative = $_.FullName.Substring($root.Length).TrimStart('\', '/') -replace '\\', '/'
+        $rows += [pscustomobject]@{ path = $relative; lines = $count }
+      }
+    }
+  }
+  return @($rows | Sort-Object path)
+}
+
+if ($LineLimitOnly) {
+  $current = Get-OversizeSources
+  if ($WriteBaseline) {
+    $text = @('# C++ files already over the 300-line limit and their size when recorded.',
+              '# scripts/scorecard.ps1 -LineLimitOnly fails when a file not listed here passes 300 lines',
+              '# or a listed file grows. Shrinking is always fine; rewrite with -WriteBaseline after it.') +
+            ($current | ForEach-Object { '{0} {1}' -f $_.lines, $_.path })
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $baselinePath) | Out-Null
+    [System.IO.File]::WriteAllText($baselinePath, (($text -join "`n") + "`n"))
+    Write-Host ("line-limit baseline written: {0} files" -f $current.Count)
+    exit 0
+  }
+  $allowed = @{}
+  if (Test-Path -LiteralPath $baselinePath) {
+    foreach ($line in Get-Content -LiteralPath $baselinePath) {
+      if ($line -match '^\s*(\d+)\s+(\S.*)$') { $allowed[$Matches[2].Trim()] = [int]$Matches[1] }
+    }
+  }
+  $problems = @()
+  foreach ($row in $current) {
+    if (-not $allowed.ContainsKey($row.path)) {
+      $problems += ('{0}: {1} lines (new file over {2}; split it)' -f $row.path, $row.lines, $lineLimit)
+    } elseif ($row.lines -gt $allowed[$row.path]) {
+      $problems += ('{0}: {1} lines, grew from {2} (hotspots must not grow)' -f $row.path, $row.lines, $allowed[$row.path])
+    }
+  }
+  Write-Host ("line limit {0}: {1} files over, {2} problems" -f $lineLimit, $current.Count, $problems.Count)
+  foreach ($p in $problems) { Write-Host "  $p" }
+  if ($problems.Count -gt 0) { exit 1 }
+  exit 0
+}
 $build = Join-Path $root 'build'
 $junit = Join-Path $build 'release-tests.xml'
 $failedLog = Join-Path $build 'Testing\Temporary\LastTestsFailed.log'
@@ -10,7 +67,7 @@ $nowPath = Join-Path $root '.codex\NOW.md'
 
 function Count-Lines([string]$path) {
   if (-not (Test-Path -LiteralPath $path)) { return $null }
-  return @(Get-Content -LiteralPath $path).Count
+  return @(Get-Content -LiteralPath $path -Encoding UTF8).Count
 }
 
 function Count-TodoFixme() {
@@ -18,7 +75,7 @@ function Count-TodoFixme() {
   foreach ($dir in @('src', 'tests')) {
     $base = Join-Path $root $dir
     if (-not (Test-Path -LiteralPath $base)) { continue }
-    Get-ChildItem -LiteralPath $base -Recurse -File -Include *.cpp,*.h,*.hpp | ForEach-Object {
+    Get-ChildItem -LiteralPath $base -Recurse -File | Where-Object { $_.Extension -in '.cpp', '.h', '.hpp' } | ForEach-Object {
       $n += @(Select-String -LiteralPath $_.FullName -Pattern 'TODO|FIXME' -AllMatches).Count
     }
   }
@@ -148,6 +205,7 @@ $card = [ordered]@{
   hotspots = $hotspots
   nowMdBytes = $nowBytes
   todoFixme = Count-TodoFixme
+  sourcesOver300Lines = @(Get-OversizeSources).Count
 }
 
 New-Item -ItemType Directory -Force -Path $build | Out-Null
@@ -164,6 +222,7 @@ Write-Host ("MainWindow.cpp lines {0}" -f $hotspots['src/app/MainWindow.cpp'])
 Write-Host ("LayerOps.cpp lines   {0}" -f $hotspots['src/core/LayerOps.cpp'])
 Write-Host ("NOW.md bytes         {0}" -f $nowBytes)
 Write-Host ("TODO|FIXME           {0}" -f $card.todoFixme)
+Write-Host ("C++ files >300 lines {0}" -f $card.sourcesOver300Lines)
 if ($flake) { Write-Host ("flake              {0} summary={1}" -f $flake.dir, $flake.summary) }
 else { Write-Host 'flake              none' }
 Write-Host ("wrote              {0}" -f $out)

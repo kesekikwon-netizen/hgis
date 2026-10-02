@@ -1,6 +1,8 @@
 #include <QtTest>
 #include <QApplication>
+#include <QComboBox>
 #include <QDir>
+#include <QFileInfo>
 #include <QPageSize>
 #include <QPainter>
 #include <QPdfDocument>
@@ -9,6 +11,7 @@
 #include <QTemporaryDir>
 
 #include "app/KaPrintDialog.h"
+#include "core/StandardScales.h"
 #include "core/TilePrint.h"
 
 namespace {
@@ -365,6 +368,46 @@ private slots:
     QVERIFY2(dialog.summary().contains(QStringLiteral("실제 크기(100%)")) &&
                  dialog.summary().contains(QStringLiteral("1:5,000")),
              qPrintable(dialog.summary()));
+  }
+
+  void enlargedScalesComeFromTheStandardTable() {
+    for (double d : TilePrint::enlargedScales(50000, 1000.0, 50))
+      QVERIFY2(StandardScales::isStandard(d, StandardScales::PrintEnlarge), qPrintable(QString::number(d)));
+    QCOMPARE(TilePrint::scaleLabel(1200), QStringLiteral("1:1,200"));
+  }
+
+  void printResolutionCanBeRaisedForFineLines() {
+    // Printing still draws the same drawing PDF; only the picture resolution cap changes.
+    QCOMPARE(TilePrint::printDpiChoices(), (QList<int>{300, 600}));
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = makeQuadrantPdf(dir.filePath(QStringLiteral("drawing.pdf")), QSizeF(297, 420));
+    KaPrintDialog dialog(source, QStringLiteral("시험 도면"));
+    QVERIFY(dialog.findChild<QComboBox*>(QStringLiteral("printDpi")));
+    dialog.setPrintDpi(300);
+    QCOMPARE(dialog.printDpi(), 300.0);
+    dialog.setTiled(true);
+    dialog.setSheet(KaPrintDialog::SheetA4);
+    dialog.setOutput(KaPrintDialog::OutputDrawing);
+    dialog.setOverview(false);
+    QVERIFY2(dialog.plan().ok, qPrintable(dialog.plan().error));
+    QString error;
+    const QString normal = dir.filePath(QStringLiteral("300.pdf"));
+    QVERIFY2(dialog.saveTilesPdf(normal, &error), qPrintable(error));
+    dialog.setPrintDpi(600);
+    QCOMPARE(dialog.printDpi(), 600.0);
+    const QString fine = dir.filePath(QStringLiteral("600.pdf"));
+    QVERIFY2(dialog.saveTilesPdf(fine, &error), qPrintable(error));
+    QPdfDocument a;
+    QPdfDocument b;
+    QCOMPARE(a.load(normal), QPdfDocument::Error::None);
+    QCOMPARE(b.load(fine), QPdfDocument::Error::None);
+    QCOMPARE(a.pageCount(), b.pageCount());
+    QCOMPARE(a.pagePointSize(0), b.pagePointSize(0));
+    QVERIFY2(QFileInfo(fine).size() > QFileInfo(normal).size(),
+             "600 DPI tiles must carry a finer picture than 300 DPI");
+    dialog.setPrintDpi(1234);  // not offered: keep the current choice
+    QCOMPARE(dialog.printDpi(), 600.0);
   }
 };
 

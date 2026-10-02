@@ -21,6 +21,9 @@ void hornDeriv(const std::vector<float>& z, int w, int h, int x, int y, double x
   if (x <= 0 || y <= 0 || x >= w - 1 || y >= h - 1)
     return;
   auto cell = [&](int cx, int cy) -> float { return z[static_cast<size_t>(cy) * w + cx]; };
+  // Like gdaldem, a NoData centre cell has no shade even when its neighbours hold data.
+  if (hasNd && cell(x, y) == nd)
+    return;
   const float a = cell(x - 1, y - 1);
   const float b = cell(x, y - 1);
   const float c = cell(x + 1, y - 1);
@@ -260,48 +263,6 @@ void slopeDegrees(const std::vector<float>& z, const RasterInfo& info, double zF
   }
 }
 
-bool writeByteGeoTiff(const QString& outPath, const RasterInfo& info,
-                      const std::vector<std::uint8_t>& gray, QString* errorOut) {
-  GDALAllRegister();
-  GDALDriver* drv = GetGDALDriverManager()->GetDriverByName("GTiff");
-  if (!drv) {
-    if (errorOut)
-      *errorOut = QStringLiteral("GTiff 드라이버 없음");
-    return false;
-  }
-  GDALDataset* ds = drv->Create(outPath.toUtf8().constData(), info.width, info.height, 1, GDT_Byte,
-                                nullptr);
-  if (!ds) {
-    if (errorOut)
-      *errorOut = QStringLiteral("GeoTIFF를 만들 수 없습니다.");
-    return false;
-  }
-  ds->SetGeoTransform(const_cast<double*>(info.geotransform));
-  if (!info.projectionWkt.isEmpty())
-    ds->SetProjection(info.projectionWkt.toUtf8().constData());
-  GDALRasterBand* band = ds->GetRasterBand(1);
-  band->SetNoDataValue(0);
-  const CPLErr err =
-      band->RasterIO(GF_Write, 0, 0, info.width, info.height,
-                     const_cast<std::uint8_t*>(gray.data()), info.width, info.height, GDT_Byte, 0, 0);
-  GDALClose(ds);
-  if (err != CE_None) {
-    if (errorOut)
-      *errorOut = QStringLiteral("GeoTIFF 쓰기 실패");
-    return false;
-  }
-  return true;
-}
-
-bool runHillshadeFile(const QString& demPath, const QString& outPath, const Options& opt,
-                      QString* errorOut) {
-  std::vector<float> z;
-  RasterInfo info;
-  if (!readFloatBand(demPath, &z, &info, errorOut))
-    return false;
-  std::vector<std::uint8_t> gray;
-  hillshadeHorn(z, info, opt, &gray);
-  return writeByteGeoTiff(outPath, info, gray, errorOut);
-}
+// writeByteGeoTiff, runHillshadeFile and hillshadeOutputPath live in DemHillshadeFile.cpp.
 
 }  // namespace DemAnalyzer

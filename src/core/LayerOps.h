@@ -22,6 +22,10 @@ class QgsCoordinateReferenceSystem;
 
 class LayerOps {
 public:
+  // The layer list is flat (PO goal ORIG-3); the stored role separates survey data
+  // from reference maps. kGroupSurveyData only names the caller's intent in
+  // placeInLegendGroup. kGroupCadastral is read to unpack legacy 「지적도」 bundles.
+  // kGroupReference is the bundle heritage and survey-contour imports build.
   static constexpr const char* kGroupSurveyData = "조사 데이터";
   static constexpr const char* kGroupCadastral = "지적도";
   static constexpr const char* kGroupReference = "참조 지도";
@@ -83,10 +87,21 @@ public:
   // Writes name/number into the edit buffer. Does not commit. Empty text clears the field.
   static bool applyFeatureFormValues(QgsVectorLayer* layer, qint64 featureId, const QString& name,
                                      const QString& number, QString* errorOut = nullptr);
+  // New map labels start at this size and face on every path (drawing, list
+  // checkbox, 표시 설정, context menu). A size the user picked
+  // (ka_hgis/label_font_size) is kept.
+  static constexpr double kDefaultLabelSizePt = 8.0;
+  static constexpr const char* kDefaultLabelFont = "Malgun Gothic";
   static bool applyNameAttributeLabels(QgsVectorLayer* layer, const QString& fieldName = QString(),
-                                       double fontSizePt = 5.0, bool showArea = false);
+                                       double fontSizePt = kDefaultLabelSizePt, bool showArea = false);
   static bool setLabelFontSize(QgsVectorLayer* layer, double fontSizePt);
-  static double labelFontSize(const QgsVectorLayer* layer, double defaultSize = 5.0);
+  static double labelFontSize(const QgsVectorLayer* layer, double defaultSize = kDefaultLabelSizePt);
+  // Optional label look for dense feature maps. Expressions, placement and
+  // visibility stay as they are. False when the layer has no labels yet.
+  static QColor labelColor(const QgsVectorLayer* layer);
+  static bool setLabelColor(QgsVectorLayer* layer, const QColor& color);
+  static bool labelHalo(const QgsVectorLayer* layer);
+  static bool setLabelHalo(QgsVectorLayer* layer, bool on);
   static bool labelShowArea(const QgsVectorLayer* layer, bool defaultShow = false);
   static QString currentLabelField(const QgsVectorLayer* layer);
   // 외부에서 받은 SHP 파일(.cpg 없는 경우)의 한글 깨짐을 방지하기 위한 인코딩 준비 및 변경
@@ -95,12 +110,13 @@ public:
   // Vector labeling only. Cadastral WMS/XYZ text is baked into tiles.
   static bool hasToggleableLabels(const QgsMapLayer* layer);
   // 레이어가 밑에 있으면 글자도 밑으로. 레이어 순서가 바뀔 때마다 부른다.
+  // renderAboveLabels·라벨 zIndex 를 쓰는 유일한 곳이다.
   static void applyLayerOrderToLabels(QgsProject* project, QgsMapCanvas* canvas = nullptr);
-  // 라벨 뒤(위)에 한 번만 그릴 레이어들. 맨 위가 앞이다.
+  // 라벨 뒤(위)에 한 번만 그릴 레이어들. 맨 위가 앞이다. 조회만 한다(레이어를 바꾸지 않음).
   // 본 화면 목록에서는 빠진다. 지적 지번은 여기 넣지 않고 본 화면에 남긴다.
   static QList<QgsMapLayer*> layersDrawnAboveLabels(QgsProject* project);
   // 본 화면·조판 본지도. 덧그림에 올라간 조사·유적은 빼서 한 번만 그린다.
-  // 지적 지번은 이 목록에 남는다.
+  // 지적 지번은 이 목록에 남는다. 조회만 한다.
   static QList<QgsMapLayer*> sheetBasePaintLayers(QgsProject* project);
   static bool labelsVisible(const QgsMapLayer* layer);
   static bool setLabelsVisible(QgsMapLayer* layer, bool on);
@@ -111,7 +127,10 @@ public:
                                     double* strokeWidthMm, double* markerSizeMm,
                                     bool* noFill = nullptr, bool* noStroke = nullptr,
                                     bool* dashed = nullptr);
-  static bool mergePolygonFeatures(QgsVectorLayer* layer, QString* errorOut = nullptr);
+  // Merges the given polygons (two or more ids; an empty set is refused, never "all").
+  // One undo command in the edit buffer: Ctrl+Z restores them, the survey save writes
+  // the file. The polygon drawn first keeps its attributes; ask the user first with
+  // GeometryEditOps::mergeConflicts when they differ.
   static bool mergePolygonFeatures(QgsVectorLayer* layer, const QgsFeatureIds& featureIds, QString* errorOut = nullptr);
   static bool explodeMultipartFeatures(QgsVectorLayer* layer, const QgsFeatureIds& featureIds = QgsFeatureIds(), QString* errorOut = nullptr);
   static QgsVectorLayer* clipLayerByBoundary(QgsVectorLayer* sourceLayer,
@@ -229,12 +248,18 @@ public:
                                           const QString& categoryField, QString* errorOut = nullptr);
 
   static bool setLayerOpacity(QgsProject* project, QgsMapCanvas* canvas, const QString& name, double opacity);
-  static bool setMapLayerOpacity(QgsMapLayer* layer, double opacity, QgsMapCanvas* canvas = nullptr);
   static double mapLayerOpacity(const QgsMapLayer* layer);
+  // Transparency is display only and allowed on every valid layer: survey
+  // polygons, imported SHP and pictures alike (decided apart from edit rules).
+  static QString opacityUnavailableReason(const QgsMapLayer* layer);  // empty = allowed
+  static bool canAdjustOpacity(const QgsMapLayer* layer);
+  static bool applyLayerOpacity(QgsMapLayer* layer, double opacity, QgsMapCanvas* canvas = nullptr);
   // 그림(래스터) 밝기. -255~255, 0이 원본. 벡터에는 밝기가 없다.
   static bool canAdjustBrightness(const QgsMapLayer* layer);
   static bool setMapLayerBrightness(QgsMapLayer* layer, int brightness, QgsMapCanvas* canvas = nullptr);
   static int mapLayerBrightness(const QgsMapLayer* layer);
+  // Edit/delete rules: key-less reference, cadastral and background layers. Role
+  // decisions come from LayerRole (stored role first, legacy titles last).
   static bool isReferenceOrBasemapLayer(const QgsMapLayer* layer);
 
   static bool toggleLayerVisibility(QgsProject* project, QgsMapCanvas* canvas, const QString& name, bool visible);
@@ -266,12 +291,14 @@ public:
   // 데이터 원본이 잠깐 끊겨 무효가 된 레이어를 같은 원본으로 다시 연다. GPKG에 쓰는
   // 동안(자동 저장·스타일 기록)이나 OneDrive가 파일을 바꿔치기할 때 생긴다.
   // 되살린 레이어 이름은 revived에, 끝내 못 살린 것은 stillBroken에 담는다.
+  // 원본 파일이 없다고 확인된 레이어는 LayerTreeRecovery 간격(15초→최대 5분)으로만 다시 본다.
   static int reviveInvalidLayers(QgsProject* project, QStringList* revived = nullptr,
                                  QStringList* stillBroken = nullptr);
   // 예전 저장이 .ka-survey-gen-* 기준으로 상대 경로를 적어, 다시 열면
   // C:/Users/AppData/... 처럼 사용자 폴더가 빠진 절대 경로가 되는 경우를
   // 홈·조사 폴더·로컬 주변유적 캐시에서 다시 찾는다.
-  static int repairPersistedFileSources(QgsProject* project);
+  // throttled: 지도 동기화마다 부르는 경로. 원본이 없다고 확인된 레이어는 다음 확인 시각까지 건너뛴다.
+  static int repairPersistedFileSources(QgsProject* project, bool throttled = false);
   // 저장된 작업공간의 VWorld 주소에는 그때 쓰던 인증키가 통째로 박혀 있다. 키를 새로
   // 발급받아도 예전 조사를 열면 만료된 키로 타일을 받아 배경지도가 백지가 된다.
   // 여는 순간 현재 키로 갈아 끼운다. 바꾼 레이어 수를 돌려준다.
@@ -331,7 +358,6 @@ public:
   static int importControlPointsCsv(QgsVectorLayer* controlPoints, const QString& csvPath,
                                     QString* errorOut = nullptr, bool swapAxes = false);
 
-  static QgsLayerTreeGroup* ensureLegendGroup(QgsProject* project, const QString& groupName);
   static void placeInLegendGroup(QgsProject* project, QgsMapLayer* layer, const QString& groupName,
                                  bool insertAtBottom = false);
   static void markSurveyLayer(QgsMapLayer* layer, const QString& layerKey);

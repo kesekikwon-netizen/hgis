@@ -25,6 +25,9 @@ public:
   ~KaTopographicImportDialog() override;
   void scanFolder(const QString& folder);
   void setMapsEnabled(bool enabled);
+  // Folder for the merged sheet GPKG (normally <survey>/지형도/합침). Empty uses a
+  // file-backed source folder or the app data folder, never the working directory.
+  void setMergeDirectory(const QString& directory);
   void setAutomaticLoadingEnabled(bool enabled);
   bool isAutomaticLoading() const { return m_automaticLoading; }
   // Only the trusted download/sheet resolver calls this. Every record must carry
@@ -80,6 +83,7 @@ private:
   };
   std::vector<PreparedLayer> m_prepared;
   QStringList m_loadErrors;
+  QString m_mergeDirectory;
   bool m_mapsEnabled = true;
   bool m_updatingCoverage = false;
   bool m_automaticLoadingEnabled = true;

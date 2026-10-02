@@ -134,11 +134,29 @@ void paintCard(QPainter& painter, const QRectF& card, double radius, const QImag
 
   painter.save();
   painter.setClipPath(path);
-  if (!texture.isNull()) painter.drawImage(card.topLeft(), texture);
+  if (!texture.isNull()) {
+    // Contour strokes fade under the text band, so the small licence lines
+    // never sit on a line (the texture already fades toward the lower left).
+    QImage faded = texture.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    QPainter mask(&faded);
+    mask.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+    QLinearGradient keep(QPointF(0.0, card.height() * 0.62), QPointF(0.0, card.height() * 0.80));
+    keep.setColorAt(0.0, QColor(0, 0, 0, 255));
+    keep.setColorAt(1.0, QColor(0, 0, 0, 60));
+    mask.fillRect(QRectF(QPointF(0.0, 0.0), card.size()), keep);
+    mask.end();
+    painter.drawImage(card.topLeft(), faded);
+  }
   QLinearGradient sheen(card.topLeft(), QPointF(card.left(), card.top() + card.height() * 0.45));
   sheen.setColorAt(0.0, QColor(255, 255, 255, 34));
   sheen.setColorAt(1.0, QColor(255, 255, 255, 0));
   painter.fillRect(card, sheen);
+  // The title, status and notices sit in the lower part: deepen it a little so
+  // the small licence lines stay readable over the lighter left-hand blue.
+  QLinearGradient foot(QPointF(card.left(), card.top() + card.height() * 0.55), card.bottomLeft());
+  foot.setColorAt(0.0, withAlpha(kDeep, 0.0));
+  foot.setColorAt(1.0, withAlpha(kDeep, 0.30));
+  painter.fillRect(card, foot);
   painter.restore();
 
   painter.save();

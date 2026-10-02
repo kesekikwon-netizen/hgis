@@ -1,0 +1,61 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "QA phase 1 draw row check",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "qa", "label": "writePhase1Qa" },
+    { "id": "ribbon", "label": "MainWindowRibbon" },
+    { "id": "win", "label": "MainWindow" }
+  ],
+  "phases": [
+    { "id": "probe", "label": "Probe", "fromCol": 0, "toCol": 1 },
+    { "id": "toggle", "label": "Toggle", "fromCol": 2, "toCol": 4, "variant": "emphasis" },
+    { "id": "check", "label": "Check", "fromCol": 5, "toCol": 5 }
+  ],
+  "mainPath": ["state", "press", "lambda", "show", "sync", "verify"],
+  "nodes": [
+    { "id": "state", "lane": "qa", "col": 0, "type": "external", "label": "chip + tool state", "sublabel": "KaApplication.cpp:575-582", "width": 150 },
+    { "id": "press", "lane": "qa", "col": 1, "type": "frontend", "label": "close if pressed, press", "sublabel": "KaApplication.cpp:585-592", "width": 190 },
+    { "id": "lambda", "lane": "ribbon", "col": 2, "type": "frontend", "label": "btnDraw clicked(on)", "sublabel": "MainWindowRibbon.cpp:347-353", "width": 170 },
+    { "id": "show", "lane": "ribbon", "col": 3, "type": "frontend", "label": "showSubToolsDraw / hideSubTools", "sublabel": "MainWindowRibbon.cpp:840-941, 766-782", "width": 230 },
+    { "id": "sync", "lane": "win", "col": 4, "type": "backend", "label": "mapToolSet mirrors chip", "sublabel": "MainWindow.cpp:708-718", "width": 190 },
+    { "id": "verify", "lane": "qa", "col": 5, "type": "frontend", "label": "sub_draw_* steps", "sublabel": "KaApplication.cpp:600-611", "width": 150 }
+  ],
+  "edges": [
+    { "from": "state", "to": "press", "label": "checked?" },
+    { "from": "press", "to": "lambda", "label": "click()", "variant": "emphasis" },
+    { "from": "lambda", "to": "show", "label": "on / off" },
+    { "from": "show", "to": "sync", "label": "stopCaptureTool" },
+    { "from": "sync", "to": "verify", "label": "row visible" }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Was",
+      "items": [
+        "QA pressed the chip once, unconditionally",
+        "A pressed chip (active draw tool) toggled the row closed",
+        "Five sub_draw_* steps failed with no detail"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Now",
+      "items": [
+        "Detail records enabled/visible/checked/subVisible/tool",
+        "Pressed chip is released first, then the row is opened"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Keep",
+      "items": [
+        "Chip semantics unchanged: press on pressed = close tool",
+        "No product code changed for this step"
+      ]
+    }
+  ]
+}

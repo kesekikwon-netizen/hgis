@@ -1,4 +1,5 @@
 #include "CadastralImport.h"
+#include "CadastralEncoding.h"
 #include "KaSessionLog.h"
 #include "LayerOps.h"
 #include <QCryptographicHash>
@@ -84,7 +85,9 @@ PreparedReferenceMap CadastralImport::prepare(const QStringList& sources, const 
     result.error = QStringLiteral("지적도 표시 파일을 저장할 폴더를 만들지 못했습니다."); return result;
   }
   QCryptographicHash identity(QCryptographicHash::Sha256);
-  identity.addData("cadastral-scope-v1");
+  // v2: shapefiles without .cpg are decoded with the CP949 fallback. Older caches
+  // were built without it and are rebuilt once.
+  identity.addData("cadastral-scope-v2");
   identity.addData(scope.asWkb()); identity.addData(crs.toWkt().toUtf8());
   QDomDocument transformDocument;
   auto transformElement = transformDocument.createElement(QStringLiteral("transforms"));
@@ -154,6 +157,9 @@ PreparedReferenceMap CadastralImport::prepare(const QStringList& sources, const 
       if (!input.isValid() || !input.crs().isValid() || input.geometryType() != Qgis::GeometryType::Polygon) {
         result.error = QStringLiteral("지적도 도형 또는 원본 좌표계를 확인하지 못했습니다."); return result;
       }
+      // No .cpg: read Korean jibun text as CP949 (UTF-8 only when the DBF clearly is).
+      if (const QString encoding = CadastralEncoding::fallbackFor(source); !encoding.isEmpty())
+        input.setProviderEncoding(encoding);
       const int jibun = input.fields().lookupField(QStringLiteral("JIBUN"));
       const int pnu = input.fields().lookupField(QStringLiteral("PNU"));
       if (jibun < 0) { result.error = QStringLiteral("지적도 원본에 지번(JIBUN) 항목이 없습니다."); return result; }

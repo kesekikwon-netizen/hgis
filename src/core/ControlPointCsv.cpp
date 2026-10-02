@@ -1,204 +1,209 @@
-#include "KaSessionLog.h"
+#include "ControlPointCsv.h"
+#include "FeatureRecord.h"
 #include "LayerOps.h"
-#include "LayerLabelControls.h"
-#include "DemPresentation.h"
-#include "DemColorRampLegend.h"
-#include "GeorefService.h"
-#include "SoilMapService.h"
-#include "VworldSettings.h"
-#include "KaPortableRuntime.h"
 
-#include <QSignalBlocker>
-#include <QDateTime>
-#include <QEvent>
 #include <QFile>
-#include <QFileInfo>
-#include <QImage>
-#include <QTextStream>
-#include <QStringConverter>
 #include <QRegularExpression>
-#include <cmath>
-#include <memory>
-#include <limits>
+#include <QStringDecoder>
 #include <algorithm>
-#include <QPainter>
-#include <QScreen>
-#include <QSize>
-#include <QUrl>
-#include <QWindow>
-#include <QColor>
-#include <QFont>
-#include <QDir>
-#include <QDomDocument>
-#include <QUrlQuery>
-#include <QSet>
-#include <QTemporaryFile>
-#include <QPointer>
-#include <QScopedValueRollback>
-#include <QTimer>
-#include <QHash>
-#include <functional>
-#include <QNetworkRequest>
+#include <cmath>
+#include <initializer_list>
+#include <limits>
 
-#include <qgis.h>
-#include <QUndoStack>
-#include <qgsproject.h>
-#include <qgssnappingconfig.h>
-#include <qgsvectorlayer.h>
-#include <qgsrasterlayer.h>
-#include <qgsbrightnesscontrastfilter.h>
-#include <qgsmapcanvas.h>
-#include <qgsvectorfilewriter.h>
 #include <qgscoordinatereferencesystem.h>
-#include <qgscoordinatetransformcontext.h>
 #include <qgscoordinatetransform.h>
+#include <qgscoordinatetransformcontext.h>
 #include <qgsexception.h>
-#include <qgsfield.h>
-#include <qgsfields.h>
 #include <qgsfeature.h>
-#include <qgsfeaturerequest.h>
 #include <qgsfeatureiterator.h>
+#include <qgsfeaturerequest.h>
+#include <qgsfields.h>
 #include <qgsgeometry.h>
-#include <qgspoint.h>
-#include <qgspointxy.h>
-#include <qgslinestring.h>
-#include <qgscategorizedsymbolrenderer.h>
-#include <qgssinglesymbolrenderer.h>
-#include <qgsinvertedpolygonrenderer.h>
-#include <qgssymbol.h>
-#include <qgssymbollayer.h>
-#include <qgsfillsymbol.h>
-#include <qgsfillsymbollayer.h>
-#include <qgslinesymbol.h>
-#include <qgslinesymbollayer.h>
-#include <qgsmarkersymbol.h>
-#include <qgsrenderer.h>
+#include <qgsproject.h>
 #include <qgsrectangle.h>
-#include <qgslayertree.h>
-#include <qgslayertreelayer.h>
-#include <qgsbilinearrasterresampler.h>
-#include <qgsrasterresamplefilter.h>
-#include <qgsrasterdataprovider.h>
-#include <qgsvectordataprovider.h>
-#include <qgsrasterrenderer.h>
-#include <qgsrastertransparency.h>
-#include <qgssinglebandpseudocolorrenderer.h>
-#include <qgsrastershader.h>
-#include <qgscolorrampshader.h>
-#include <qgscolorramplegendnodesettings.h>
-#include <qgshillshaderenderer.h>
-#include <qgsrasterbandstats.h>
-#include <cpl_conv.h>
-#include <cpl_error.h>
-#include <gdal.h>
-#include <gdal_utils.h>
-#include <ogr_api.h>
-#include <qgsnetworkaccessmanager.h>
-#include <qgslayertreegroup.h>
-#include <qgsdataprovider.h>
-#include <qgsprojectviewsettings.h>
-#include <qgspallabeling.h>
-#include <qgsvectorlayerlabeling.h>
-#include <qgstextformat.h>
-#include <qgslabelobstaclesettings.h>
-#include <qgsreferencedgeometry.h>
+#include <qgsvectorlayer.h>
 
-static QString normalizeCsvHeader(QString h) {
-  h = h.trimmed().toLower();
+namespace ControlPointCsv {
+namespace {
+const QHash<QString, QString>& aliases() {
+  static const QHash<QString, QString> table = [] {
+    QHash<QString, QString> t;
+    const auto add = [&t](const char* target, std::initializer_list<const char*> names) {
+      for (const char* name : names) t.insert(QString::fromUtf8(name), QString::fromLatin1(target));
+    };
+    add("point_id", {"id", "point", "pid", "pt", "name", "no", "station", "point_name", "측점", "측점명", "측점번호",
+                     "점명", "점번호", "점", "기준점", "기준점명", "기준점번호", "번호", "이름", "명칭"});
+    add("x", {"lon", "longitude", "경도", "easting", "east", "e", "x좌표", "좌표x", "동거"});
+    add("y", {"lat", "latitude", "위도", "northing", "north", "n", "y좌표", "좌표y", "북거"});
+    add("z", {"h", "el", "elev", "elevation", "height", "alt", "altitude", "표고", "높이", "고도", "해발", "해발고도",
+              "z좌표", "표고z"});
+    add("datum", {"측지기준계", "측지계", "기준계", "측지기준"});
+    add("ellipsoid", {"타원체"});
+    add("projection", {"proj", "crs", "투영", "투영법", "좌표계"});
+    add("origin", {"원점", "투영원점"});
+    add("accuracy_m", {"acc", "accuracy", "정확도", "정밀도", "오차"});
+    add("fix_type", {"fix", "fixtype", "수신상태", "측위방식"});
+    return t;
+  }();
+  return table;
+}
+
+bool isKnownColumn(const QString& name) {
+  return name == QLatin1String("pdop") || aliases().key(name).size() > 0;  // every alias target is a column
+}
+
+// Lower case, no quotes/BOM, no unit or axis note: "X(m)" -> "x", "표고 (m)" -> "표고".
+QString bareHeader(const QString& raw) {
+  static const QRegularExpression note(QStringLiteral("[\\(\\[（].*[\\)\\]）]"));
+  QString h = raw.trimmed().toLower();
   h.remove(QLatin1Char('"'));
+  h.remove(QChar(0xFEFF));
+  h.remove(note);
+  h = h.trimmed();
   h.replace(QLatin1Char(' '), QLatin1Char('_'));
-  if (h == QLatin1String("id") || h == QLatin1String("point") || h == QLatin1String("pid"))
-    return QStringLiteral("point_id");
-  if (h == QLatin1String("lon") || h == QLatin1String("longitude") || h == QStringLiteral("경도") ||
-      h == QLatin1String("easting") || h == QLatin1String("east"))
-    return QStringLiteral("x");
-  if (h == QLatin1String("lat") || h == QLatin1String("latitude") || h == QStringLiteral("위도") ||
-      h == QLatin1String("northing") || h == QLatin1String("north"))
-    return QStringLiteral("y");
-  if (h == QLatin1String("acc") || h == QLatin1String("accuracy"))
-    return QStringLiteral("accuracy_m");
-  if (h == QLatin1String("fix") || h == QLatin1String("fixtype"))
-    return QStringLiteral("fix_type");
-  if (h == QLatin1String("proj") || h == QLatin1String("crs"))
-    return QStringLiteral("projection");
   return h;
 }
 
-static bool csvHeaderIsGeographic(const QString& raw) {
-  const QString h = raw.trimmed().toLower();
+bool headerIsGeographic(const QString& raw) {
+  const QString h = bareHeader(raw);
   return h == QLatin1String("lon") || h == QLatin1String("lat") || h == QLatin1String("longitude") ||
          h == QLatin1String("latitude") || h == QStringLiteral("경도") || h == QStringLiteral("위도");
 }
 
-static QString decodeCsvBytes(const QByteArray& raw, QString* encodingOut) {
-  QByteArray bytes = raw;
+bool isNumber(const QString& text) {
+  bool ok = false;
+  text.trimmed().toDouble(&ok);
+  return ok;
+}
+
+QString decodeCsvBytes(const QByteArray& bytes, QString* encodingOut) {
   if (bytes.startsWith("\xEF\xBB\xBF")) {
-    if (encodingOut) *encodingOut = QStringLiteral("UTF-8");
+    *encodingOut = QStringLiteral("UTF-8");
     return QString::fromUtf8(bytes.mid(3));
   }
   QStringDecoder utf8(QStringDecoder::Utf8);
   const QString utf8Text = utf8.decode(bytes);
   if (!utf8.hasError()) {
-    if (encodingOut) *encodingOut = QStringLiteral("UTF-8");
+    *encodingOut = QStringLiteral("UTF-8");
     return utf8Text;
   }
   QStringDecoder cp949(QStringLiteral("CP949"));
   if (!cp949.isValid()) cp949 = QStringDecoder(QStringLiteral("EUC-KR"));
   if (!cp949.isValid()) {
-    if (encodingOut) *encodingOut = QStringLiteral("UTF-8");
+    *encodingOut = QStringLiteral("UTF-8");
     return QString::fromUtf8(bytes);
   }
-  if (encodingOut) *encodingOut = QStringLiteral("CP949");
+  *encodingOut = QStringLiteral("CP949");
   return cp949.decode(bytes);
 }
+}  // namespace
 
-struct ControlCsvTable {
-  QString encoding;
-  bool headerGeographic = false;
-  QStringList headers;
-  QList<QStringList> rows;
-  int idColumn = -1;
-  int xColumn = -1;
-  int yColumn = -1;
-};
+QString normalizeHeader(const QString& raw) {
+  const QString h = bareHeader(raw);
+  return aliases().value(h, h);
+}
 
-static bool loadControlCsv(const QString& csvPath, ControlCsvTable* table, QString* errorOut) {
-  QFile file(csvPath);
-  if (!file.open(QIODevice::ReadOnly)) {
-    if (errorOut) *errorOut = QStringLiteral("CSV를 열 수 없습니다: %1").arg(csvPath);
-    return false;
+QChar detectDelimiter(const QString& line) {
+  int comma = 0, semicolon = 0, tab = 0;
+  bool quoted = false;
+  for (const QChar c : line) {
+    if (c == QLatin1Char('"')) quoted = !quoted;
+    if (quoted) continue;
+    if (c == QLatin1Char(',')) ++comma;
+    else if (c == QLatin1Char(';')) ++semicolon;
+    else if (c == QLatin1Char('\t')) ++tab;
   }
-  const QString text = decodeCsvBytes(file.readAll(), &table->encoding);
-  const QRegularExpression sep(QStringLiteral("[,;\\t]"));
-  for (const QString& rawLine : text.split(QRegularExpression(QStringLiteral("[\\r\\n]+")))) {
+  if (comma == 0 && semicolon == 0 && tab == 0)
+    return line.trimmed().contains(QLatin1Char(' ')) ? QLatin1Char(' ') : QLatin1Char(',');
+  if (comma >= semicolon && comma >= tab) return QLatin1Char(',');
+  return semicolon >= tab ? QLatin1Char(';') : QLatin1Char('\t');
+}
+
+QStringList splitLine(const QString& rawLine, QChar delimiter) {
+  const QString line = delimiter == QLatin1Char(' ') ? rawLine.simplified() : rawLine;
+  QStringList cells;
+  QString current;
+  bool quoted = false;
+  for (qsizetype i = 0; i < line.size(); ++i) {
+    const QChar c = line.at(i);
+    if (quoted) {
+      if (c != QLatin1Char('"')) current += c;
+      else if (i + 1 < line.size() && line.at(i + 1) == QLatin1Char('"')) current += line.at(++i);
+      else quoted = false;
+    } else if (c == QLatin1Char('"')) {
+      quoted = true;
+    } else if (c == delimiter) {
+      cells << current.trimmed();
+      current.clear();
+    } else {
+      current += c;
+    }
+  }
+  cells << current.trimmed();
+  return cells;
+}
+
+bool parseText(const QString& text, Table* table, QString* errorOut) {
+  static const QRegularExpression lineBreak(QStringLiteral("[\\r\\n]+"));
+  QStringList rawHeaders;
+  bool delimiterKnown = false;
+  for (const QString& rawLine : text.split(lineBreak)) {
     const QString line = rawLine.trimmed();
     if (line.isEmpty() || line.startsWith(QLatin1Char('#'))) continue;
-    const QStringList parts = line.split(sep);
-    if (parts.isEmpty()) continue;
-    const QString h0 = normalizeCsvHeader(parts.first());
-    if (table->headers.isEmpty() &&
-        (h0 == QLatin1String("point_id") || h0 == QLatin1String("x") ||
-         parts.first().trimmed().compare(QStringLiteral("id"), Qt::CaseInsensitive) == 0 ||
-         parts.first().trimmed().compare(QStringLiteral("point_id"), Qt::CaseInsensitive) == 0)) {
-      for (const QString& part : parts) {
-        if (csvHeaderIsGeographic(part)) table->headerGeographic = true;
-        table->headers.append(normalizeCsvHeader(part));
+    if (!delimiterKnown) {
+      table->delimiter = detectDelimiter(line);
+      delimiterKnown = true;
+    }
+    const QStringList cells = splitLine(line, table->delimiter);
+    if (!table->headerFound && table->rows.isEmpty()) {
+      // A header names a known column and is not itself a coordinate row.
+      int known = 0, numbers = 0;
+      for (const QString& c : cells) {
+        if (isKnownColumn(normalizeHeader(c))) ++known;
+        if (isNumber(c)) ++numbers;
       }
+      if (known > 0 && numbers < 2) {
+        table->headerFound = true;
+        rawHeaders = cells;
+        for (const QString& c : cells) {
+          if (headerIsGeographic(c)) table->headerGeographic = true;
+          table->headers << normalizeHeader(c);
+        }
+        continue;
+      }
+    }
+    if (cells.size() < 2) {
+      ++table->shortRows;
       continue;
     }
-    if (parts.size() < 3) continue;
-    table->rows.append(parts);
+    table->rows.append(cells);
   }
-  if (table->headers.isEmpty()) {
-    table->headers = {QStringLiteral("point_id"), QStringLiteral("x"), QStringLiteral("y"),
-                      QStringLiteral("datum"), QStringLiteral("ellipsoid"), QStringLiteral("projection"),
-                      QStringLiteral("accuracy_m"), QStringLiteral("pdop"), QStringLiteral("fix_type")};
+  if (!table->headerFound) {
+    // No header: 점 이름, X, Y, then 표고 when the fourth cell is a number in every row
+    // that has one (a datum is never a number), else the older datum-first order.
+    int fourth = 0, fourthNumbers = 0;
+    for (const QStringList& row : std::as_const(table->rows)) {
+      if (row.size() < 4 || row.at(3).trimmed().isEmpty()) continue;
+      ++fourth;
+      if (isNumber(row.at(3))) ++fourthNumbers;
+    }
+    table->headers = {QStringLiteral("point_id"), QStringLiteral("x"), QStringLiteral("y")};
+    if (fourth > 0 && fourthNumbers == fourth) table->headers << QStringLiteral("z");
+    table->headers << QStringLiteral("datum") << QStringLiteral("ellipsoid") << QStringLiteral("projection")
+                   << QStringLiteral("accuracy_m") << QStringLiteral("pdop") << QStringLiteral("fix_type");
   }
-  table->idColumn = table->headers.indexOf(QStringLiteral("point_id"));
-  table->xColumn = table->headers.indexOf(QStringLiteral("x"));
-  table->yColumn = table->headers.indexOf(QStringLiteral("y"));
+  // A named point column (측점, point_id) wins over a plain row number (No, 번호).
+  for (int i = 0; i < table->headers.size() && table->idColumn < 0; ++i) {
+    const QString bare = i < rawHeaders.size() ? bareHeader(rawHeaders.at(i)) : QString();
+    if (table->headers.at(i) == QLatin1String("point_id") && bare != QLatin1String("no") && bare != QStringLiteral("번호"))
+      table->idColumn = i;
+  }
+  if (table->idColumn < 0) table->idColumn = static_cast<int>(table->headers.indexOf(QStringLiteral("point_id")));
+  table->xColumn = static_cast<int>(table->headers.indexOf(QStringLiteral("x")));
+  table->yColumn = static_cast<int>(table->headers.indexOf(QStringLiteral("y")));
+  table->zColumn = static_cast<int>(table->headers.indexOf(QStringLiteral("z")));
   if (table->xColumn < 0 || table->yColumn < 0) {
-    if (errorOut) *errorOut = QStringLiteral("CSV에 x,y(또는 lon/lat) 열이 필요합니다.");
+    if (errorOut) *errorOut = QStringLiteral("CSV에 X·Y(또는 경도·위도) 열이 필요합니다.");
     return false;
   }
   if (table->rows.isEmpty()) {
@@ -208,69 +213,74 @@ static bool loadControlCsv(const QString& csvPath, ControlCsvTable* table, QStri
   return true;
 }
 
-static QString csvCell(const QStringList& row, int index) {
+bool load(const QString& path, Table* table, QString* errorOut) {
+  QFile file(path);
+  if (!file.open(QIODevice::ReadOnly)) {
+    if (errorOut) *errorOut = QStringLiteral("CSV를 열 수 없습니다: %1").arg(path);
+    return false;
+  }
+  return parseText(decodeCsvBytes(file.readAll(), &table->encoding), table, errorOut);
+}
+
+QString cell(const QStringList& row, int index) {
   if (index < 0 || index >= row.size()) return {};
   return row.at(index).trimmed().remove(QLatin1Char('"'));
 }
 
-static bool koreaDegreePair(double a, double b) {
+void DuplicateIndex::add(const QString& id, const QgsPointXY& point) {
+  if (!id.isEmpty()) m_points[id].append(point);
+}
+
+bool DuplicateIndex::isSamePoint(const QString& id, const QgsPointXY& point) const {
+  const auto found = m_points.constFind(id);
+  if (id.isEmpty() || found == m_points.constEnd()) return false;
+  return std::any_of(found->cbegin(), found->cend(),
+                     [&](const QgsPointXY& p) { return p.distance(point) <= m_tolerance; });
+}
+}  // namespace ControlPointCsv
+
+using ControlPointCsv::cell;
+
+namespace {
+bool koreaDegreePair(double a, double b) {
   const auto lon = [](double v) { return v >= 124.0 && v <= 132.5; };
   const auto lat = [](double v) { return v >= 33.0 && v <= 43.5; };
   return (lon(a) && lat(b)) || (lat(a) && lon(b));
 }
 
-static bool rowsAreGeographic(const ControlCsvTable& table) {
-  if (table.headerGeographic) {
-    for (const QStringList& row : table.rows) {
-      bool okX = false, okY = false;
-      const double x = csvCell(row, table.xColumn).toDouble(&okX);
-      const double y = csvCell(row, table.yColumn).toDouble(&okY);
-      if (okX && okY && (std::abs(x) > 180.0 || std::abs(y) > 180.0)) return false;
-    }
-    return true;
-  }
+bool rowsAreGeographic(const ControlPointCsv::Table& table) {
   bool any = false;
   for (const QStringList& row : table.rows) {
     bool okX = false, okY = false;
-    const double x = csvCell(row, table.xColumn).toDouble(&okX);
-    const double y = csvCell(row, table.yColumn).toDouble(&okY);
+    const double x = cell(row, table.xColumn).toDouble(&okX);
+    const double y = cell(row, table.yColumn).toDouble(&okY);
     if (!okX || !okY) continue;
+    if (table.headerGeographic && (std::abs(x) > 180.0 || std::abs(y) > 180.0)) return false;
     any = true;
-    if (!koreaDegreePair(x, y)) return false;
+    if (!table.headerGeographic && !koreaDegreePair(x, y)) return false;
   }
-  return any;
+  return table.headerGeographic || any;
 }
 
-static bool geographicPairInRange(double longitude, double latitude) {
-  return std::abs(longitude) <= 180.0 && std::abs(latitude) <= 90.0;
-}
-
-static QgsPointXY mapControlPoint(double x, double y, bool swapAxes, bool geographic,
-                                  const QgsCoordinateTransform* transform, bool* ok) {
+QgsPointXY mapControlPoint(double x, double y, bool swapAxes, bool geographic, const QgsCoordinateTransform* transform,
+                           bool* ok) {
   if (swapAxes) std::swap(x, y);
-  if (geographic) {
-    if (!transform || !transform->isValid() || !geographicPairInRange(x, y)) {
-      if (ok) *ok = false;
-      return {};
-    }
-    try {
-      const QgsPointXY point = transform->transform(x, y);
-      if (!std::isfinite(point.x()) || !std::isfinite(point.y())) {
-        if (ok) *ok = false;
-        return {};
-      }
-      if (ok) *ok = true;
-      return point;
-    } catch (const QgsCsException&) {
-      if (ok) *ok = false;
-      return {};
-    }
+  *ok = false;
+  if (!geographic) {
+    *ok = true;
+    return QgsPointXY(x, y);
   }
-  if (ok) *ok = true;
-  return QgsPointXY(x, y);
+  if (!transform || !transform->isValid() || std::abs(x) > 180.0 || std::abs(y) > 90.0) return {};
+  try {
+    const QgsPointXY point = transform->transform(x, y);
+    *ok = std::isfinite(point.x()) && std::isfinite(point.y());
+    return *ok ? point : QgsPointXY();
+  } catch (const QgsCsException&) {
+    return {};
+  }
 }
 
-static double distanceToExtent(const QgsPointXY& point, const QgsRectangle& extent) {
+double distanceToExtent(const QgsPointXY& point, const QgsRectangle& extent) {
   if (extent.isEmpty()) return std::numeric_limits<double>::infinity();
   if (extent.contains(point)) return 0.0;
   const double x = std::clamp(point.x(), extent.xMinimum(), extent.xMaximum());
@@ -278,15 +288,14 @@ static double distanceToExtent(const QgsPointXY& point, const QgsRectangle& exte
   return std::hypot(point.x() - x, point.y() - y);
 }
 
-static QString formatMeters(double meters) {
+QString formatMeters(double meters) {
   if (!std::isfinite(meters)) return QStringLiteral("알 수 없음");
   if (meters < 1000.0) return QStringLiteral("%1m").arg(qRound(meters));
   return QStringLiteral("%1km").arg(meters / 1000.0, 0, 'f', 1);
 }
 
-static QgsRectangle surveyExtentFor(QgsProject* project, const QgsCoordinateReferenceSystem& dest) {
+QgsRectangle surveyExtentFor(QgsProject* project, const QgsCoordinateReferenceSystem& dest) {
   QgsRectangle box;
-  bool any = false;
   if (!project) return box;
   for (QgsVectorLayer* layer : LayerOps::surveyAreaLayers(project)) {
     if (!layer || layer->featureCount() <= 0) continue;
@@ -299,89 +308,105 @@ static QgsRectangle surveyExtentFor(QgsProject* project, const QgsCoordinateRefe
         continue;
       }
     }
-    if (!any) box = extent;
+    if (box.isEmpty()) box = extent;
     else box.combineExtentWith(extent);
-    any = true;
   }
-  return any ? box : QgsRectangle();
+  return box;
 }
 
-static int importParsedControlCsv(QgsVectorLayer* controlPoints, const ControlCsvTable& table, bool swapAxes,
-                                  QString* errorOut) {
+// The points already in the layer, by point_id, for the re-import check.
+ControlPointCsv::DuplicateIndex existingPoints(const QgsVectorLayer* layer) {
+  ControlPointCsv::DuplicateIndex index;
+  const int field = layer->fields().lookupField(QStringLiteral("point_id"));
+  if (field < 0) return index;
+  QgsFeatureRequest request;
+  request.setSubsetOfAttributes(QgsAttributeList{field});
+  QgsFeatureIterator it = layer->getFeatures(request);
+  QgsFeature f;
+  while (it.nextFeature(f)) {
+    if (!f.hasGeometry()) continue;
+    const QgsGeometry g = f.geometry();
+    index.add(f.attribute(field).toString().trimmed(), g.isMultipart() ? g.centroid().asPoint() : g.asPoint());
+  }
+  return index;
+}
+
+bool makeTransform(const QgsVectorLayer* layer, QgsProject* project, QgsCoordinateTransform* out) {
+  const QgsCoordinateReferenceSystem wgs(QStringLiteral("EPSG:4326"));
+  if (!wgs.isValid() || !layer->crs().isValid()) return false;
+  *out = QgsCoordinateTransform(wgs, layer->crs(),
+                                project ? project->transformContext() : QgsCoordinateTransformContext());
+  return out->isValid();
+}
+
+int importParsedControlCsv(QgsVectorLayer* controlPoints, const ControlPointCsv::Table& table, bool swapAxes,
+                           QString* errorOut) {
   const bool geographic = rowsAreGeographic(table);
   QgsCoordinateTransform transform;
-  bool haveTransform = false;
-  if (geographic) {
-    const QgsCoordinateReferenceSystem wgs(QStringLiteral("EPSG:4326"));
-    if (!wgs.isValid() || !controlPoints->crs().isValid()) {
-      if (errorOut) *errorOut = QStringLiteral("경위도를 작업 좌표계로 변환할 수 없습니다.");
-      return -1;
-    }
-    transform = QgsCoordinateTransform(wgs, controlPoints->crs(), QgsProject::instance()->transformContext());
-    haveTransform = transform.isValid();
-    if (!haveTransform) {
-      if (errorOut) *errorOut = QStringLiteral("경위도를 작업 좌표계로 변환할 수 없습니다.");
-      return -1;
-    }
+  if (geographic && !makeTransform(controlPoints, QgsProject::instance(), &transform)) {
+    if (errorOut) *errorOut = QStringLiteral("경위도를 작업 좌표계로 변환할 수 없습니다.");
+    return -1;
   }
+  ControlPointCsv::DuplicateIndex seen = existingPoints(controlPoints);
   if (!controlPoints->isEditable() && !controlPoints->startEditing()) {
     if (errorOut) *errorOut = QStringLiteral("control_points 편집 모드 실패");
     return -1;
   }
+  const QgsFields fields = controlPoints->fields();
   int added = 0;
+  int alreadyThere = 0;
   for (const QStringList& row : table.rows) {
     bool okX = false, okY = false;
-    const double rawX = csvCell(row, table.xColumn).toDouble(&okX);
-    const double rawY = csvCell(row, table.yColumn).toDouble(&okY);
+    const double rawX = cell(row, table.xColumn).toDouble(&okX);
+    const double rawY = cell(row, table.yColumn).toDouble(&okY);
     if (!okX || !okY) continue;
     bool mappedOk = false;
-    const QgsPointXY point = mapControlPoint(rawX, rawY, swapAxes, geographic, haveTransform ? &transform : nullptr,
-                                             &mappedOk);
+    const QgsPointXY point = mapControlPoint(rawX, rawY, swapAxes, geographic, &transform, &mappedOk);
     if (!mappedOk) continue;
-    QgsFeature feat(controlPoints->fields());
-    const QString pid = table.idColumn >= 0 ? csvCell(row, table.idColumn) : QStringLiteral("P%1").arg(added + 1);
-    auto setStr = [&](const char* field, int idx) {
-      const int fi = controlPoints->fields().indexOf(QString::fromUtf8(field));
-      if (fi >= 0 && idx >= 0) feat.setAttribute(fi, csvCell(row, idx));
+    const QString pid = table.idColumn >= 0 ? cell(row, table.idColumn) : QStringLiteral("P%1").arg(added + 1);
+    // The same point imported again (same name, same place) is not added twice.
+    if (seen.isSamePoint(pid, point)) {
+      ++alreadyThere;
+      continue;
+    }
+    seen.add(pid, point);
+    QgsFeature feat(fields);
+    const auto setValue = [&](const char* field, const QVariant& value) {
+      const int fi = fields.lookupField(QString::fromLatin1(field));
+      if (fi >= 0 && value.isValid()) feat.setAttribute(fi, value);
     };
-    auto setNum = [&](const char* field, int idx) {
-      const int fi = controlPoints->fields().indexOf(QString::fromUtf8(field));
-      if (fi < 0 || idx < 0) return;
+    const auto column = [&](const char* name) { return table.headers.indexOf(QString::fromLatin1(name)); };
+    const auto text = [&](const char* name) {
+      const QString v = cell(row, static_cast<int>(column(name)));
+      return v.isEmpty() ? QVariant() : QVariant(v);
+    };
+    // A cell that is not a number stays empty: text in a REAL column would be written as 0,
+    // and 0 m is a believable elevation.
+    const auto number = [&](const char* name) {
+      const QString v = cell(row, static_cast<int>(column(name)));
       bool ok = false;
-      const double v = csvCell(row, idx).toDouble(&ok);
-      if (ok) feat.setAttribute(fi, v);
-      else if (!csvCell(row, idx).isEmpty()) feat.setAttribute(fi, csvCell(row, idx));
+      const double d = v.toDouble(&ok);
+      return ok ? QVariant(d) : QVariant();
     };
-    {
-      const int fi = controlPoints->fields().indexOf(QStringLiteral("point_id"));
-      if (fi >= 0) feat.setAttribute(fi, pid);
-    }
-    {
-      const int fi = controlPoints->fields().indexOf(QStringLiteral("x"));
-      if (fi >= 0) feat.setAttribute(fi, point.x());
-    }
-    {
-      const int fi = controlPoints->fields().indexOf(QStringLiteral("y"));
-      if (fi >= 0) feat.setAttribute(fi, point.y());
-    }
-    setStr("datum", table.headers.indexOf(QStringLiteral("datum")));
-    setStr("ellipsoid", table.headers.indexOf(QStringLiteral("ellipsoid")));
-    setStr("projection", table.headers.indexOf(QStringLiteral("projection")));
-    setStr("origin", table.headers.indexOf(QStringLiteral("origin")));
-    setStr("fix_type", table.headers.indexOf(QStringLiteral("fix_type")));
-    setNum("accuracy_m", table.headers.indexOf(QStringLiteral("accuracy_m")));
-    setNum("pdop", table.headers.indexOf(QStringLiteral("pdop")));
-    {
-      const int fi = controlPoints->fields().indexOf(QStringLiteral("accuracy"));
-      const int ia = table.headers.indexOf(QStringLiteral("accuracy_m"));
-      if (fi >= 0 && ia >= 0 && !csvCell(row, ia).isEmpty()) feat.setAttribute(fi, csvCell(row, ia));
-    }
+    setValue("point_id", pid);
+    setValue("x", point.x());
+    setValue("y", point.y());
+    setValue("z", number("z"));
+    for (const char* name : {"datum", "ellipsoid", "projection", "origin", "fix_type"}) setValue(name, text(name));
+    setValue("accuracy_m", number("accuracy_m"));
+    setValue("pdop", number("pdop"));
+    setValue("accuracy", text("accuracy_m"));
+    FeatureRecord::stampNew(feat);  // uid / created_at / updated_at when the survey has them
     feat.setGeometry(QgsGeometry::fromPointXY(point));
     if (controlPoints->addFeature(feat)) ++added;
   }
   if (added == 0) {
     if (controlPoints->isEditable()) controlPoints->rollBack();
-    if (errorOut) *errorOut = QStringLiteral("좌표로 읽을 수 있는 기준점이 없습니다.");
+    if (errorOut)
+      *errorOut = alreadyThere > 0
+                      ? QStringLiteral("CSV의 점 %1개가 모두 이미 가져온 점(같은 이름·같은 위치)이라 새로 넣은 점이 없습니다.")
+                            .arg(alreadyThere)
+                      : QStringLiteral("좌표로 읽을 수 있는 기준점이 없습니다.");
     return -1;
   }
   if (!controlPoints->commitChanges()) {
@@ -392,6 +417,7 @@ static int importParsedControlCsv(QgsVectorLayer* controlPoints, const ControlCs
   }
   return added;
 }
+}  // namespace
 
 int LayerOps::importControlPointsCsv(QgsVectorLayer* controlPoints, const QString& csvPath, QString* errorOut,
                                     bool swapAxes) {
@@ -399,8 +425,8 @@ int LayerOps::importControlPointsCsv(QgsVectorLayer* controlPoints, const QStrin
     if (errorOut) *errorOut = QStringLiteral("control_points 레이어가 없습니다. 먼저 새 조사를 만드세요.");
     return -1;
   }
-  ControlCsvTable table;
-  if (!loadControlCsv(csvPath, &table, errorOut))
+  ControlPointCsv::Table table;
+  if (!ControlPointCsv::load(csvPath, &table, errorOut))
     return table.rows.isEmpty() && table.xColumn >= 0 ? 0 : -1;
   return importParsedControlCsv(controlPoints, table, swapAxes, errorOut);
 }
@@ -412,41 +438,45 @@ LayerOps::ControlCsvPreview LayerOps::previewControlPointsCsv(QgsVectorLayer* co
     if (errorOut) *errorOut = QStringLiteral("control_points 레이어가 없습니다. 먼저 새 조사를 만드세요.");
     return preview;
   }
-  ControlCsvTable table;
-  if (!loadControlCsv(csvPath, &table, errorOut)) return preview;
+  ControlPointCsv::Table table;
+  if (!ControlPointCsv::load(csvPath, &table, errorOut)) return preview;
   preview.encoding = table.encoding;
   preview.geographic = rowsAreGeographic(table);
   QgsCoordinateTransform transform;
-  const QgsCoordinateTransform* transformPtr = nullptr;
-  if (preview.geographic) {
-    const QgsCoordinateReferenceSystem wgs(QStringLiteral("EPSG:4326"));
-    if (wgs.isValid() && controlPoints->crs().isValid()) {
-      transform = QgsCoordinateTransform(wgs, controlPoints->crs(),
-                                        project ? project->transformContext() : QgsCoordinateTransformContext());
-      if (transform.isValid()) transformPtr = &transform;
-    }
-    if (!transformPtr) {
-      if (errorOut) *errorOut = QStringLiteral("경위도를 작업 좌표계로 변환할 수 없습니다.");
-      return preview;
-    }
+  if (preview.geographic && !makeTransform(controlPoints, project, &transform)) {
+    if (errorOut) *errorOut = QStringLiteral("경위도를 작업 좌표계로 변환할 수 없습니다.");
+    return preview;
   }
   const QgsRectangle extent = surveyExtentFor(project, controlPoints->crs());
-  double asIs = 0;
-  double swapped = 0;
-  int counted = 0;
-  int swappedCount = 0;
+  // Re-import check for either axis order; the count shown follows the suggested one.
+  ControlPointCsv::DuplicateIndex seenDirect = existingPoints(controlPoints);
+  ControlPointCsv::DuplicateIndex seenSwapped = seenDirect;
+  int sameDirect = 0, sameSwapped = 0, nameDirect = 0, nameSwapped = 0;
+  double asIs = 0, swapped = 0;
+  int counted = 0, swappedCount = 0, skipped = table.shortRows;
   QStringList samples;
   for (const QStringList& row : table.rows) {
     bool okX = false, okY = false;
-    const double rawX = csvCell(row, table.xColumn).toDouble(&okX);
-    const double rawY = csvCell(row, table.yColumn).toDouble(&okY);
-    if (!okX || !okY) continue;
+    const double rawX = cell(row, table.xColumn).toDouble(&okX);
+    const double rawY = cell(row, table.yColumn).toDouble(&okY);
     bool ok = false;
-    const QgsPointXY direct = mapControlPoint(rawX, rawY, false, preview.geographic, transformPtr, &ok);
-    if (!ok) continue;
+    const QgsPointXY direct = okX && okY ? mapControlPoint(rawX, rawY, false, preview.geographic, &transform, &ok)
+                                         : QgsPointXY();
+    if (!ok) {
+      ++skipped;
+      continue;
+    }
     bool okSwap = false;
-    const QgsPointXY flipped = mapControlPoint(rawX, rawY, true, preview.geographic, transformPtr, &okSwap);
+    const QgsPointXY flipped = mapControlPoint(rawX, rawY, true, preview.geographic, &transform, &okSwap);
     ++counted;
+    const QString id = table.idColumn >= 0 ? cell(row, table.idColumn) : QString();
+    const auto check = [&id](ControlPointCsv::DuplicateIndex& seen, const QgsPointXY& p, int& same, int& name) {
+      if (seen.isSamePoint(id, p)) ++same;
+      else if (seen.hasName(id)) ++name;
+      seen.add(id, p);
+    };
+    check(seenDirect, direct, sameDirect, nameDirect);
+    if (okSwap) check(seenSwapped, flipped, sameSwapped, nameSwapped);
     if (!extent.isEmpty()) {
       asIs += distanceToExtent(direct, extent);
       if (okSwap) {
@@ -455,8 +485,14 @@ LayerOps::ControlCsvPreview LayerOps::previewControlPointsCsv(QgsVectorLayer* co
       }
     }
     if (samples.size() < 3) {
-      const QString id = table.idColumn >= 0 ? csvCell(row, table.idColumn) : QString::number(counted);
-      samples << QStringLiteral("%1  X=%2  Y=%3").arg(id).arg(rawX, 0, 'f', 3).arg(rawY, 0, 'f', 3);
+      QString sample = QStringLiteral("%1  X=%2  Y=%3")
+                           .arg(id.isEmpty() ? QString::number(counted) : id)
+                           .arg(rawX, 0, 'f', 3)
+                           .arg(rawY, 0, 'f', 3);
+      bool okZ = false;
+      const double z = cell(row, table.zColumn).toDouble(&okZ);
+      if (okZ) sample += QStringLiteral("  Z=%1").arg(z, 0, 'f', 3);
+      samples << sample;
     }
   }
   if (counted == 0) {
@@ -465,30 +501,34 @@ LayerOps::ControlCsvPreview LayerOps::previewControlPointsCsv(QgsVectorLayer* co
   }
   preview.ok = true;
   preview.count = counted;
-  if (!extent.isEmpty() && counted > 0) {
+  if (!extent.isEmpty() && swappedCount == counted) {
     asIs /= counted;
-    if (swappedCount == counted) {
-      swapped /= counted;
-      preview.swapSuggested = asIs > 1000.0 && swapped + 1000.0 < asIs;
-    }
+    swapped /= counted;
+    preview.swapSuggested = asIs > 1000.0 && swapped + 1000.0 < asIs;
+  } else if (!extent.isEmpty()) {
+    asIs /= counted;
   }
   QStringList lines;
   lines << QStringLiteral("%1 · %2점").arg(preview.encoding).arg(preview.count);
+  if (skipped > 0) lines << QStringLiteral("좌표를 읽지 못한 %1행은 건너뜁니다.").arg(skipped);
+  if (!table.headerFound) lines << QStringLiteral("첫 줄에 열 이름이 없어 점 이름, X, Y 순서로 읽습니다.");
+  if (table.zColumn >= 0) lines << QStringLiteral("표고(Z) 열도 함께 가져옵니다.");
+  const int same = preview.swapSuggested ? sameSwapped : sameDirect;
+  const int name = preview.swapSuggested ? nameSwapped : nameDirect;
+  if (same > 0) lines << QStringLiteral("이미 가져온 점과 이름·위치가 같은 %1행은 다시 넣지 않습니다.").arg(same);
+  if (name > 0) lines << QStringLiteral("이름은 같은데 위치가 다른 점이 %1개 있습니다. 가져온 뒤 확인하세요.").arg(name);
   if (preview.geographic)
     lines << QStringLiteral("경위도로 읽고 EPSG:4326에서 작업 좌표계로 변환합니다.");
   else
     lines << controlPointAxisHint();
   lines << samples;
-  if (!extent.isEmpty() && swappedCount == counted) {
-    lines << QStringLiteral("조사구역까지 이대로 %1, 교환하면 %2.")
-                 .arg(formatMeters(asIs), formatMeters(swapped));
-  } else if (!extent.isEmpty()) {
+  if (!extent.isEmpty() && swappedCount == counted)
+    lines << QStringLiteral("조사구역까지 이대로 %1, 교환하면 %2.").arg(formatMeters(asIs), formatMeters(swapped));
+  else if (!extent.isEmpty())
     lines << QStringLiteral("조사구역까지 이대로 %1. 교환 좌표는 변환되지 않습니다.").arg(formatMeters(asIs));
-  } else {
+  else
     lines << QStringLiteral("조사구역이 없어 떨어진 거리는 확인하지 못했습니다.");
-  }
-  if (preview.swapSuggested)
-    lines << QStringLiteral("X·Y가 바뀐 것 같습니다. 교환한 쪽이 조사구역에 더 가깝습니다.");
+  if (preview.swapSuggested) lines << QStringLiteral("X·Y가 바뀐 것 같습니다. 교환한 쪽이 조사구역에 더 가깝습니다.");
   preview.summary = lines.join(QLatin1Char('\n'));
   return preview;
 }
@@ -504,8 +544,7 @@ QgsPointXY LayerOps::controlPointMapXy(double x, double y, bool swapAxes) {
   return QgsPointXY(x, y);
 }
 
-LayerOps::ControlCsvPreview LayerOps::suggestControlPointAxisSwap(QgsProject* project, double x,
-                                                                  double y) {
+LayerOps::ControlCsvPreview LayerOps::suggestControlPointAxisSwap(QgsProject* project, double x, double y) {
   ControlCsvPreview preview;
   preview.ok = std::isfinite(x) && std::isfinite(y);
   if (!preview.ok) return preview;
@@ -515,16 +554,11 @@ LayerOps::ControlCsvPreview LayerOps::suggestControlPointAxisSwap(QgsProject* pr
   lines << QStringLiteral("입력  X=%1  Y=%2").arg(x, 0, 'f', 3).arg(y, 0, 'f', 3);
   const QgsCoordinateReferenceSystem dest = project ? project->crs() : QgsCoordinateReferenceSystem();
   const QgsRectangle extent = surveyExtentFor(project, dest);
-  bool ok = false;
-  const QgsPointXY direct = mapControlPoint(x, y, false, false, nullptr, &ok);
-  bool okSwap = false;
-  const QgsPointXY flipped = mapControlPoint(x, y, true, false, nullptr, &okSwap);
-  if (!extent.isEmpty() && ok && okSwap) {
-    const double asIs = distanceToExtent(direct, extent);
-    const double swapped = distanceToExtent(flipped, extent);
+  if (!extent.isEmpty()) {
+    const double asIs = distanceToExtent(QgsPointXY(x, y), extent);
+    const double swapped = distanceToExtent(QgsPointXY(y, x), extent);
     preview.swapSuggested = asIs > 1000.0 && swapped + 1000.0 < asIs;
-    lines << QStringLiteral("조사구역까지 이대로 %1, 교환하면 %2.")
-                 .arg(formatMeters(asIs), formatMeters(swapped));
+    lines << QStringLiteral("조사구역까지 이대로 %1, 교환하면 %2.").arg(formatMeters(asIs), formatMeters(swapped));
     if (preview.swapSuggested)
       lines << QStringLiteral("X·Y가 바뀐 것 같습니다. 교환한 쪽이 조사구역에 더 가깝습니다.");
   } else {
@@ -533,4 +567,3 @@ LayerOps::ControlCsvPreview LayerOps::suggestControlPointAxisSwap(QgsProject* pr
   preview.summary = lines.join(QLatin1Char('\n'));
   return preview;
 }
-

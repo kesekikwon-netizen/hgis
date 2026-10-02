@@ -1,6 +1,8 @@
 #include "KaSessionLog.h"
+#include "KaLogExcept.h"
 #include "KaSafeQgis.h"
 #include "KaPortableRuntime.h"
+#include "SurveyDurability.h"
 
 #include <QDir>
 #include <QFile>
@@ -163,6 +165,9 @@ bool kaWriteQgisProjectAtomic(QgsProject* project, const QString& path, QString*
         *detail = output.errorString();
         return false;
       }
+      // QSaveFile::commit already asks the file engine to sync before the rename; this makes the
+      // durability explicit (FlushFileBuffers) for field laptops that lose power. Best effort.
+      SurveyDurability::flushPathToDisk(target);
       return true;
     };
     QString detail;
@@ -188,7 +193,7 @@ bool kaWriteQgisProjectAtomic(QgsProject* project, const QString& path, QString*
             "작업 화면 저장 중 오류가 발생했습니다. 작업을 유지한 채 다시 저장하거나 다른 이름으로 저장해 주세요.\n%1")
             .arg(QString::fromUtf8(ex.what())));
   } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/KaSafeQgis.cpp:189"));
+    KA_LOG_EXCEPT();
     return fail(QStringLiteral(
         "작업 화면 저장 중 오류가 발생했습니다. 작업을 유지한 채 다시 저장하거나 다른 이름으로 저장해 주세요."));
   }

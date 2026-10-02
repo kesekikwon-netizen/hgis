@@ -18,6 +18,28 @@ endif()
 if(NOT KA_HGIS_GIT_HASH MATCHES "^[0-9a-fA-F]+$")
   set(KA_HGIS_GIT_HASH "unknown")
 endif()
+# F138: the hash above is read at configure time. Re-run configure when HEAD or the
+# checked-out branch moves, so a rebuilt EXE never carries an older commit's hash.
+if(GIT_FOUND)
+  set(_ka_git_watch HEAD packed-refs)
+  execute_process(COMMAND "${GIT_EXECUTABLE}" symbolic-ref -q HEAD
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" OUTPUT_VARIABLE _ka_git_branch
+    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  if(_ka_git_branch)
+    list(APPEND _ka_git_watch "${_ka_git_branch}")
+  endif()
+  foreach(_ka_git_ref IN LISTS _ka_git_watch)
+    execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse --git-path "${_ka_git_ref}"
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" OUTPUT_VARIABLE _ka_git_file
+      OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(_ka_git_file)
+      get_filename_component(_ka_git_file "${_ka_git_file}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+      if(EXISTS "${_ka_git_file}")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_ka_git_file}")
+      endif()
+    endif()
+  endforeach()
+endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,7 +60,7 @@ endif()
 # LTO(링크 타임 최적화): 번역 단위 경계를 넘어 인라이닝한다. Release 에서만.
 # check_ipo_supported() 는 build/CMakeFiles 에 임시 테스트 프로젝트를 남겨
 # VS 제너레이터의 ALL_BUILD 를 깨뜨리므로(MSB3202) 쓰지 않는다.
-# MSVC 2022 는 /GL + /LTCG 를 확실히 지원하므로 바로 켠다.
+# MSVC: LTO 는 끈다. /GL + /LTCG 빌드에서 c2.dll 내부 오류(ICE)가 났다. 다시 켜려면 링크 시간·EXE 크기를 재고, 먼저 /Gw·/OPT:ICF·PCH 효과부터 본다(F208).
 if(MSVC)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF)
   message(STATUS "LTO: MSVC c2.dll 내부 오류 회피를 위해 OFF")
@@ -97,17 +119,40 @@ add_library(ka_core STATIC
   src/core/SurveyStorage.cpp
   src/core/SurveyBundle.cpp
   src/core/SurveySession.cpp
+  src/core/SurveyDurability.cpp
+  src/core/SurveyFileFingerprint.cpp
+  src/core/SurveyFileHygiene.cpp
+  src/core/SurveyRecovery.cpp
   src/core/PreparedReferenceMap.cpp
+  src/core/ReferenceTiledFetch.cpp
+  src/core/ReferenceStorage.cpp
+  src/core/ReferenceInventory.cpp
+  src/core/ReferenceSheetSnapshot.cpp
   src/core/DemDownloadService.cpp
   src/core/ExportService.cpp
   src/core/MapGeoTiffExport.cpp
   src/core/ProjectStateBuilder.cpp
+  src/core/ChecklistStateGeometry.cpp
+  src/core/ChecklistStateFields.cpp
+  src/core/ChecklistStateSheets.cpp
+  src/core/SubmitShp.cpp
+  src/core/SubmitReadme.cpp
   src/core/LayoutService.cpp
   src/core/LayerOps.cpp
   src/core/FeaturePick.cpp
   src/core/PolygonErase.cpp
   src/core/BasemapOps.cpp
   src/core/LabelOps.cpp
+  src/core/LayerTreeLabelStack.cpp
+  src/core/LayerRole.cpp
+  src/core/LayerStyleDefaults.cpp
+  src/core/LayerStyleKinds.cpp
+  src/core/LayerStyleOpacity.cpp
+  src/core/LayerTreeRecovery.cpp
+  src/core/LayerTreePolicy.cpp
+  src/core/GeometryEditMerge.cpp
+  src/core/PolygonPieces.cpp
+  src/core/GeometryEditVertex.cpp
   src/core/ControlPointCsv.cpp
   src/core/SurveyPointSchema.cpp
   src/core/SurveyPointReader.cpp
@@ -115,6 +160,8 @@ add_library(ka_core STATIC
   src/core/SurveyContourWrite.cpp
   src/core/SurveyContourClip.cpp
   src/core/SurveyContourStyle.cpp
+  src/core/SurveyPointArrange.cpp
+  src/core/SurveyContourTin.cpp
   src/core/KaPortableRuntime.cpp
   src/core/DemColorRampLegend.cpp
   src/core/DemPresentation.cpp
@@ -133,16 +180,34 @@ add_library(ka_core STATIC
   src/core/SurveyScopeClip.cpp
   src/core/HeritageFormParser.cpp
   src/core/HeritageHttpClient.cpp
+  src/core/HeritageFetchPlan.cpp
+  src/core/HeritageNearbyRegions.cpp
+  src/core/HeritageRecentDownloads.cpp
+  src/core/HeritagePledge.cpp
+  src/core/AccountStatus.cpp
+  src/core/CadastralEncoding.cpp
   src/core/WorkflowGuide.cpp
   src/core/VworldSettings.cpp
   src/core/GeorefService.cpp
+  src/core/GeorefBackup.cpp
+  src/core/GeorefPixelWindow.cpp
+  src/core/GeorefQuality.cpp
   src/core/FeaturePresets.cpp
+  src/core/FeatureRecordStyle.cpp
+  src/core/FeatureNumbering.cpp
+  src/core/FeatureRecord.cpp
+  src/core/SurveySchema.cpp
   src/core/BufferAnalysis.cpp
   src/core/RecentSurveys.cpp
   src/core/KaSafeQgis.cpp
   src/core/MeasureOps.cpp
+  src/core/EditGeometryRepair.cpp
+  src/core/EditHistory.cpp
   src/core/DemAnalyzer.cpp
+  src/core/DemHillshadeFile.cpp
   src/core/TrenchGridGenerator.cpp
+  src/core/TrenchLayerEdit.cpp
+  src/core/TrenchPlanCache.cpp
   src/core/TilePackService.cpp
   src/core/SoilMapService.cpp
   src/core/PaleoLandformService.cpp
@@ -152,14 +217,35 @@ add_library(ka_core STATIC
   src/core/Terrain3dService.cpp
   src/core/Terrain3dLayoutService.cpp
   src/core/TilePrint.cpp
+  src/core/PdfExportSettings.cpp
+  src/core/StandardScales.cpp
+  src/core/LayoutBadgePlacer.cpp
+  src/core/SectionSheetDecor.cpp
+  src/core/CadDwgConverter.cpp
+  src/core/CadDrawingReader.cpp
+  src/core/CadCrsGuess.cpp
+  src/core/CadDrawingStore.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
   src/core/SurveyStorage.h
   src/core/SurveySession.h
+  src/core/SurveyDurability.h
+  src/core/SurveyFileFingerprint.h
+  src/core/SurveyFileHygiene.h
+  src/core/SurveyRecovery.h
   src/core/ExportService.h
   src/core/ProjectStateBuilder.h
+  src/core/ChecklistStateChecks.h
+  src/core/SubmitShp.h
+  src/core/SubmitReadme.h
   src/core/LayoutService.h
   src/core/LayerOps.h
+  src/core/LayerRole.h
+  src/core/LayerStyleDefaults.h
+  src/core/LayerStyleKinds.h
+  src/core/LayerTreeRecovery.h
+  src/core/LayerTreePolicy.h
+  src/core/GeometryEditOps.h
   src/core/FeaturePick.h
   src/core/PolygonErase.h
   src/core/KaPortableRuntime.h
@@ -177,16 +263,33 @@ add_library(ka_core STATIC
   src/core/SurveyScopeClip.h
   src/core/HeritageFormParser.h
   src/core/HeritageHttpClient.h
+  src/core/HeritageFetchPlan.h
+  src/core/HeritageNearbyRegions.h
+  src/core/HeritageRecentDownloads.h
+  src/core/HeritagePledge.h
+  src/core/AccountStatus.h
+  src/core/CadastralEncoding.h
   src/core/WorkflowGuide.h
   src/core/VworldSettings.h
   src/core/GeorefService.h
+  src/core/GeorefBackup.h
+  src/core/GeorefPixelWindow.h
+  src/core/GeorefQuality.h
   src/core/FeaturePresets.h
+  src/core/FeatureNumbering.h
+  src/core/FeatureRecord.h
+  src/core/SurveySchema.h
+  src/core/ControlPointCsv.h
   src/core/BufferAnalysis.h
   src/core/RecentSurveys.h
   src/core/KaSafeQgis.h
   src/core/MeasureOps.h
+  src/core/EditGeometryRepair.h
+  src/core/EditHistory.h
   src/core/DemAnalyzer.h
   src/core/TrenchGridGenerator.h
+  src/core/TrenchLayerEdit.h
+  src/core/TrenchPlanCache.h
   src/core/TilePackService.h
   src/core/SoilMapService.h
   src/core/PaleoLandformService.h
@@ -196,6 +299,10 @@ add_library(ka_core STATIC
   src/core/Terrain3dService.h
   src/core/Terrain3dLayoutService.h
   src/core/TilePrint.h
+  src/core/CadDwgConverter.h
+  src/core/CadDrawingReader.h
+  src/core/CadCrsGuess.h
+  src/core/CadDrawingStore.h
 )
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
@@ -272,12 +379,19 @@ add_executable(ka-hgis
     src/app/MainWindowSession.cpp
     src/app/MainWindowTopographic.cpp
     src/app/MainWindowCadastral.cpp
+    src/app/MainWindowFeatureCard.cpp
   src/app/KaLayerInformation.cpp
   src/app/KaLayerInformation.h
+  src/app/KaLayerInformationPanel.cpp
+  src/app/KaLayerRefreshBatch.cpp
+  src/app/KaLayerRefreshBatch.h
+  src/app/KaLayerTreeUndo.cpp
+  src/app/KaLayerTreeUndo.h
   src/app/KaTopographicBrowser.cpp
   src/app/KaTopographicBrowser.h
   src/app/KaHeritageBrowser.cpp
   src/app/KaHeritageBrowser.h
+  src/app/KaHeritageBrowserPlan.cpp
   src/app/KaHeritageSetupDialogs.cpp
   src/app/KaHeritageSetupDialogs.h
   src/app/KaTopographicAccountDialog.cpp
@@ -285,6 +399,7 @@ add_executable(ka-hgis
   src/app/KaTopographicImportDialog.cpp
   src/app/KaTopographicImportDialog.h
   src/app/KaBeginnerRibbon.cpp
+  src/app/KaToolbarFit.cpp
   src/app/KaApplication.cpp
   src/app/KaStartupSplash.cpp
   src/app/KaStartupSplash.h
@@ -296,38 +411,70 @@ add_executable(ka-hgis
   src/app/KaDownloadUi.cpp
   src/app/KaDownloadUi.h
   src/app/KaReferenceDownloadJob.cpp
+  src/app/KaReferenceStatusDialog.cpp
+  src/app/KaReferenceStatusDialog.h
   src/app/KaTheme.cpp
+  src/app/KaThemeSheet.cpp
+  src/app/KaThemeStyle.cpp
+  src/app/KaThemeOptions.cpp
+  src/app/KaThemeOptions.h
+  src/app/KaIconMetrics.h
   src/app/KaUserError.cpp
+  src/app/KaSubmitDialog.cpp
+  src/app/KaSubmitDialog.h
+  src/app/KaSubmitFlow.cpp
   src/app/KaIcons.cpp
   src/app/KaCaptureMapTool.cpp
   src/app/KaAttributeMapTool.cpp
-  src/app/KaLayoutWindow.cpp
   src/app/KaDrawingStudio.cpp
+  src/app/KaDrawingStudioSheets.cpp
+  src/app/KaDrawingTools.cpp
+  src/app/KaDrawingNorthArrow.cpp
+  src/app/KaDrawingCoordCallout.cpp
+  src/app/KaDrawingLayerSets.cpp
+  src/app/KaDrawingSheetSet.cpp
+  src/app/KaDrawingPdfProgress.cpp
+  src/app/KaTitleBlock.cpp
   src/app/KaSectionDrawingStudio.cpp
   src/app/KaTerrain3dStudio.cpp
   src/app/KaTerrain3dLayoutStudio.cpp
   src/app/KaTerrain3dView.cpp
   src/app/KaAlignMapTool.cpp
+  src/app/KaAlignMapToolEdit.cpp
   src/app/KaImageView.cpp
+  src/app/KaAlignImageDetail.cpp
   src/app/KaStartPage.cpp
   src/app/KaStartHero.cpp
+  src/app/KaHomeRecentCard.cpp
+  src/app/KaHomeStatus.cpp
+  src/app/KaHomeText.cpp
+  src/app/KaNewSurveyDialog.cpp
+  src/app/KaRecoverySnapshots.cpp
   src/app/KaAppBar.cpp
   src/app/KaMapControls.cpp
-  src/app/KaCoordPointMapTool.cpp
   src/app/KaMeasureMapTool.cpp
+  src/app/KaEditErrors.cpp
+  src/app/KaEditUndoOrder.cpp
+  src/app/KaDrawSketchTools.cpp
   src/app/KaAboveLabelsOverlay.cpp
   src/app/KaCanvasGridOverlay.cpp
+  src/app/KaGridOriginButton.cpp
   src/app/KaTrenchMoveTool.cpp
   src/app/KaVertexEditTool.cpp
   src/app/KaFeatureSelectTool.cpp
-  src/app/KaFoundLocationMark.cpp
+  src/app/KaFeatureSelectPick.cpp
   src/app/KaTrenchDialog.cpp
+  src/app/KaTrenchDialogPlan.cpp
   src/app/KaDemClassDialog.cpp
   src/app/KaSurveyContourDialog.cpp
   src/app/MainWindowSurveyContour.cpp
   src/app/KaSurveyAreaDialog.cpp
   src/app/KaStatusBar.cpp
   src/app/KaCrashGuard.cpp
+  src/app/KaShellUi.cpp
+  src/app/KaShellStartup.cpp
+  src/app/KaShellGridControls.cpp
+  src/app/KaShellFocus.cpp
   src/app/KaGdalErrorLog.cpp
   src/app/KaRegionLocator.cpp
   src/app/KaFileBrowserPanel.cpp
@@ -336,6 +483,9 @@ add_executable(ka-hgis
   src/app/KaSnapSettingsWidget.h
   src/app/KaFeatureFormDialog.cpp
   src/app/KaFeatureFormDialog.h
+  src/app/KaFeatureCard.cpp
+  src/app/KaFeatureCard.h
+  src/app/KaFeatureCardEdit.cpp
   src/app/KaPrintDialog.cpp
   src/app/KaPrintDialog.h
   src/app/MainWindow.h
@@ -343,14 +493,21 @@ add_executable(ka-hgis
   src/app/KaFileBrowserPanel.h
   src/app/KaLayerOpacityRail.h
   src/app/KaBeginnerRibbon.h
+  src/app/KaToolbarFit.h
   src/app/KaApplication.h
   src/app/KaTheme.h
   src/app/KaUserError.h
   src/app/KaIcons.h
   src/app/KaCaptureMapTool.h
   src/app/KaAttributeMapTool.h
-  src/app/KaLayoutWindow.h
   src/app/KaDrawingStudio.h
+  src/app/KaDrawingTools.h
+  src/app/KaDrawingNorthArrow.h
+  src/app/KaDrawingCoordCallout.h
+  src/app/KaDrawingLayerSets.h
+  src/app/KaDrawingSheetSet.h
+  src/app/KaDrawingPdfProgress.h
+  src/app/KaTitleBlock.h
   src/app/KaSectionDrawingStudio.h
   src/app/KaTerrain3dStudio.h
   src/app/KaTerrain3dLayoutStudio.h
@@ -359,22 +516,32 @@ add_executable(ka-hgis
   src/app/KaImageView.h
   src/app/KaStartPage.h
   src/app/KaStartHero.h
+  src/app/KaHomeRecentCard.h
+  src/app/KaHomeStatus.h
+  src/app/KaHomeText.h
+  src/app/KaNewSurveyDialog.h
+  src/app/KaRecoverySnapshots.h
   src/app/KaAppBar.h
   src/app/KaMapControls.h
-  src/app/KaCoordPointMapTool.h
   src/app/KaMeasureMapTool.h
+  src/app/KaEditErrors.h
+  src/app/KaEditTolerance.h
   src/app/KaAboveLabelsOverlay.h
   src/app/KaCanvasGridOverlay.h
+  src/app/KaGridOriginButton.h
   src/app/KaTrenchMoveTool.h
   src/app/KaVertexEditTool.h
   src/app/KaFeatureSelectTool.h
-  src/app/KaFoundLocationMark.h
   src/app/KaTrenchDialog.h
   src/app/KaDemClassDialog.h
   src/app/KaSurveyContourDialog.h
   src/app/KaStatusBar.h
   src/app/KaRegionLocator.h
   src/app/KaCrashGuard.h
+  src/app/KaShellUi.h
+  src/app/KaShellStartup.h
+  src/app/KaShellGridControls.h
+  src/app/KaShellFocus.h
   src/app/KaGdalErrorLog.h
 )
 target_include_directories(ka-hgis PRIVATE ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
@@ -422,6 +589,15 @@ add_custom_command(TARGET ka-hgis POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/ka-hgis-실행.bat"
     "$<TARGET_FILE_DIR:ka-hgis>/ka-hgis-실행.bat"
+  # DWG 변환기 LibreDWG(별도 프로그램): CadDwgConverter::bundledTool() 이 앱 폴더의 tools/libredwg 에서 찾는다.
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ka-hgis>/tools/libredwg"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/third_party/libredwg/0.14/dwg2dxf.exe"
+    "${CMAKE_SOURCE_DIR}/third_party/libredwg/0.14/libredwg-0.dll"
+    "${CMAKE_SOURCE_DIR}/third_party/libredwg/0.14/libiconv-2.dll"
+    "${CMAKE_SOURCE_DIR}/third_party/libredwg/0.14/COPYING"
+    "${CMAKE_SOURCE_DIR}/third_party/libredwg/0.14/SOURCE.txt"
+    "$<TARGET_FILE_DIR:ka-hgis>/tools/libredwg"
 )
 
 if(KA_HGIS_BUILD_TESTS)
@@ -461,6 +637,41 @@ if(KA_HGIS_BUILD_TESTS)
     target_compile_options(ka_workflow_tests PRIVATE /utf-8)
   endif()
   ka_add_qtest(workflow_engine ka_workflow_tests)
+  set_tests_properties(workflow_engine PROPERTIES TIMEOUT 300)
+
+  add_executable(ka_editing_tools_tests tests/test_editing_tools.cpp
+    src/app/KaCaptureMapTool.cpp src/app/KaCaptureMapTool.h
+    src/app/KaFeatureSelectTool.cpp src/app/KaFeatureSelectPick.cpp src/app/KaFeatureSelectTool.h
+    src/app/KaVertexEditTool.cpp src/app/KaVertexEditTool.h
+    src/app/KaAttributeMapTool.cpp src/app/KaAttributeMapTool.h
+    src/app/KaEditTolerance.h
+    src/app/KaCrashGuard.cpp src/app/KaCrashGuard.h)
+  target_link_libraries(ka_editing_tools_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_editing_tools_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_editing_tools_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_editing_tools_tests PRIVATE ${KA_TEST_DEFS})
+  ka_add_qtest(editing_tools ka_editing_tools_tests)
+
+  # 도형선택 cases that used to pick nothing (unsaved shape, lifted layer, inner piece) and key A.
+  add_executable(ka_inner_piece_tests tests/test_inner_piece.cpp
+    src/app/KaCaptureMapTool.cpp src/app/KaCaptureMapTool.h
+    src/app/KaFeatureSelectTool.cpp src/app/KaFeatureSelectPick.cpp src/app/KaFeatureSelectTool.h
+    src/app/KaVertexEditTool.cpp src/app/KaVertexEditTool.h
+    src/app/KaAttributeMapTool.cpp src/app/KaAttributeMapTool.h
+    src/app/KaEditTolerance.h src/app/KaPickLayers.h
+    src/app/KaCrashGuard.cpp src/app/KaCrashGuard.h)
+  target_link_libraries(ka_inner_piece_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_inner_piece_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_inner_piece_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_inner_piece_tests PRIVATE ${KA_TEST_DEFS})
+  ka_add_qtest(inner_piece ka_inner_piece_tests)
+
+  add_executable(ka_polygon_pieces_tests tests/test_polygon_pieces.cpp)
+  target_link_libraries(ka_polygon_pieces_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_polygon_pieces_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_polygon_pieces_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_polygon_pieces_tests PRIVATE ${KA_TEST_DEFS})
+  ka_add_qtest(polygon_pieces ka_polygon_pieces_tests)
 
   add_executable(ka_georef_tests tests/test_georef.cpp)
   target_link_libraries(ka_georef_tests PRIVATE ${KA_TEST_LIBS})
@@ -469,12 +680,83 @@ if(KA_HGIS_BUILD_TESTS)
   target_compile_definitions(ka_georef_tests PRIVATE ${KA_TEST_DEFS})
   ka_add_qtest(georef_engine ka_georef_tests)
 
+  # DWG를 DXF로 바꾸는 CadDwgConverter. 앱 폴더 대신 third_party 의 LibreDWG dwg2dxf 를 바로 돌린다.
+  add_executable(ka_cad_dwg_tests tests/test_cad_dwg.cpp)
+  target_link_libraries(ka_cad_dwg_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_cad_dwg_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_cad_dwg_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_cad_dwg_tests PRIVATE ${KA_TEST_DEFS}
+    "KA_TEST_LIBREDWG=\"${CMAKE_SOURCE_DIR}/third_party/libredwg/0.14/dwg2dxf.exe\""
+    "KA_TEST_CAD_DATA=\"${CMAKE_SOURCE_DIR}/tests/data/cad\"")
+  set_target_properties(ka_cad_dwg_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(cad_dwg ka_cad_dwg_tests)
+
+  # DXF 한 장을 모형 공간 도형만 선·면·점·글자로 읽는 CadDrawingReader(GDAL DXF 드라이버).
+  add_executable(ka_cad_reader_tests tests/test_cad_reader.cpp)
+  target_link_libraries(ka_cad_reader_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_cad_reader_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_cad_reader_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_cad_reader_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_cad_reader_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(cad_reader ka_cad_reader_tests)
+
+  # 좌표계 없는 CAD 도면 숫자로 한국 좌표계 후보를 찾는 CadCrsGuess.
+  add_executable(ka_cad_crs_tests tests/test_cad_crs.cpp)
+  target_link_libraries(ka_cad_crs_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_cad_crs_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_cad_crs_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_cad_crs_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_cad_crs_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(cad_crs ka_cad_crs_tests)
+
+  # 도면 한 장을 작업 좌표계 GPKG 변환본으로 쓰고 정합을 모든 표에 적용하는 CadDrawingStore.
+  add_executable(ka_cad_store_tests tests/test_cad_store.cpp)
+  target_link_libraries(ka_cad_store_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_cad_store_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_cad_store_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_cad_store_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_cad_store_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(cad_store ka_cad_store_tests)
+
   add_executable(ka_preset_tests tests/test_presets.cpp)
   target_link_libraries(ka_preset_tests PRIVATE ${KA_TEST_LIBS})
   target_include_directories(ka_preset_tests PRIVATE ${KA_INCLUDES})
   target_link_directories(ka_preset_tests PRIVATE ${KA_LIBDIRS})
   target_compile_definitions(ka_preset_tests PRIVATE ${KA_TEST_DEFS})
   ka_add_qtest(feature_presets ka_preset_tests)
+  add_executable(ka_feature_record_tests tests/test_feature_records.cpp)
+  target_link_libraries(ka_feature_record_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_feature_record_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_feature_record_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_feature_record_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_feature_record_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(feature_records ka_feature_record_tests)
+
+  add_executable(ka_schema_version_tests tests/test_schema_version.cpp)
+  target_link_libraries(ka_schema_version_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_schema_version_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_schema_version_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_schema_version_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_schema_version_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(schema_version ka_schema_version_tests)
+
+  add_executable(ka_control_point_csv_tests tests/test_control_point_csv.cpp)
+  target_link_libraries(ka_control_point_csv_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_control_point_csv_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_control_point_csv_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_control_point_csv_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_control_point_csv_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(control_point_csv ka_control_point_csv_tests)
+
+  add_executable(ka_feature_card_tests tests/test_feature_card.cpp
+    src/app/KaFeatureCard.cpp src/app/KaFeatureCard.h src/app/KaFeatureCardEdit.cpp
+    src/app/KaFeatureFormDialog.cpp src/app/KaFeatureFormDialog.h)
+  target_link_libraries(ka_feature_card_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_feature_card_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_feature_card_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_feature_card_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_feature_card_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(feature_card ka_feature_card_tests)
 
   add_executable(ka_buffer_tests tests/test_buffer.cpp)
   target_link_libraries(ka_buffer_tests PRIVATE ${KA_TEST_LIBS})
@@ -482,6 +764,42 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_directories(ka_buffer_tests PRIVATE ${KA_LIBDIRS})
   target_compile_definitions(ka_buffer_tests PRIVATE ${KA_TEST_DEFS})
   ka_add_qtest(buffer_ring ka_buffer_tests)
+  add_executable(ka_georef_quality_tests tests/test_georef_quality.cpp)
+  target_link_libraries(ka_georef_quality_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_georef_quality_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_georef_quality_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_georef_quality_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_georef_quality_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(georef_quality ka_georef_quality_tests)
+
+  add_executable(ka_georef_backup_tests tests/test_georef_backup.cpp)
+  target_link_libraries(ka_georef_backup_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_georef_backup_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_georef_backup_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_georef_backup_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_georef_backup_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(georef_backup ka_georef_backup_tests)
+
+  add_executable(ka_align_tool_tests tests/test_align_tool.cpp
+    src/app/KaAlignMapTool.cpp src/app/KaAlignMapTool.h src/app/KaAlignMapToolEdit.cpp)
+  target_link_libraries(ka_align_tool_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_align_tool_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_align_tool_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_align_tool_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_align_tool_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(align_tool ka_align_tool_tests)
+
+  add_executable(ka_align_image_view_tests
+    tests/test_align_image_view.cpp
+    src/app/KaImageView.cpp src/app/KaImageView.h
+    src/app/KaAlignImageDetail.cpp
+    src/app/KaTheme.cpp
+    src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp)
+  set_target_properties(ka_align_image_view_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_align_image_view_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
+  target_include_directories(ka_align_image_view_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
+  ka_add_qtest(align_image_view ka_align_image_view_tests)
 
   add_executable(ka_measure_tests tests/test_measure.cpp)
   target_link_libraries(ka_measure_tests PRIVATE ${KA_TEST_LIBS})
@@ -489,6 +807,12 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_directories(ka_measure_tests PRIVATE ${KA_LIBDIRS})
   target_compile_definitions(ka_measure_tests PRIVATE ${KA_TEST_DEFS})
   ka_add_qtest(measure_tape ka_measure_tests)
+  add_executable(ka_editing_history_tests tests/test_editing_history.cpp)
+  target_link_libraries(ka_editing_history_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_editing_history_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_editing_history_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_editing_history_tests PRIVATE ${KA_TEST_DEFS})
+  ka_add_qtest(editing_history ka_editing_history_tests)
 
   add_executable(ka_dem_trench_tests tests/test_dem_trench.cpp)
   target_link_libraries(ka_dem_trench_tests PRIVATE ${KA_TEST_LIBS})
@@ -499,6 +823,31 @@ if(KA_HGIS_BUILD_TESTS)
     target_compile_options(ka_dem_trench_tests PRIVATE /utf-8)
   endif()
   ka_add_qtest(dem_trench_engine ka_dem_trench_tests)
+  add_executable(ka_trench_plan_tests tests/test_trench_plan.cpp)
+  target_link_libraries(ka_trench_plan_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_trench_plan_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_trench_plan_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_trench_plan_tests PRIVATE ${KA_TEST_DEFS})
+  if (MSVC)
+    target_compile_options(ka_trench_plan_tests PRIVATE /utf-8)
+  endif()
+  ka_add_qtest(trench_plan ka_trench_plan_tests)
+  set_tests_properties(trench_plan PROPERTIES TIMEOUT 120)
+
+  add_executable(ka_trench_edit_tests tests/test_trench_edit.cpp
+    src/app/KaTrenchMoveTool.cpp src/app/KaTrenchMoveTool.h
+    src/app/KaTrenchDialog.cpp src/app/KaTrenchDialogPlan.cpp src/app/KaTrenchDialog.h
+    src/app/KaCanvasGridOverlay.cpp src/app/KaCanvasGridOverlay.h
+    src/app/KaCrashGuard.cpp src/app/KaCrashGuard.h)
+  target_link_libraries(ka_trench_edit_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_trench_edit_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_trench_edit_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_trench_edit_tests PRIVATE ${KA_TEST_DEFS})
+  if (MSVC)
+    target_compile_options(ka_trench_edit_tests PRIVATE /utf-8)
+  endif()
+  ka_add_qtest(trench_edit ka_trench_edit_tests)
+  set_tests_properties(trench_edit PROPERTIES TIMEOUT 120)
 
   add_executable(ka_survey_contour_tests tests/test_survey_contour.cpp tests/test_survey_contour_clip.cpp)
   target_link_libraries(ka_survey_contour_tests PRIVATE ${KA_TEST_LIBS})
@@ -509,7 +858,53 @@ if(KA_HGIS_BUILD_TESTS)
     target_compile_options(ka_survey_contour_tests PRIVATE /utf-8)
   endif()
   ka_add_qtest(survey_contour ka_survey_contour_tests)
-  set_tests_properties(survey_contour PROPERTIES TIMEOUT 180)
+  set_tests_properties(survey_contour PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+  add_executable(ka_survey_point_arrange_tests tests/test_survey_point_arrange.cpp)
+  target_link_libraries(ka_survey_point_arrange_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_survey_point_arrange_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  if (MSVC)
+    target_compile_options(ka_survey_point_arrange_tests PRIVATE /utf-8)
+  endif()
+  ka_add_qtest(survey_point_arrange ka_survey_point_arrange_tests)
+
+  add_executable(ka_contour_safety_tests tests/test_contour_safety.cpp)
+  target_link_libraries(ka_contour_safety_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_contour_safety_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  if (MSVC)
+    target_compile_options(ka_contour_safety_tests PRIVATE /utf-8)
+  endif()
+  ka_add_qtest(contour_safety ka_contour_safety_tests)
+  set_tests_properties(contour_safety PROPERTIES TIMEOUT 180)
+
+  add_executable(ka_grid_math_tests tests/test_grid_math.cpp)
+  target_link_libraries(ka_grid_math_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_grid_math_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(grid_math ka_grid_math_tests)
+
+  add_executable(ka_dem_hillshade_tests tests/test_dem_hillshade.cpp)
+  target_link_libraries(ka_dem_hillshade_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_dem_hillshade_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  if (MSVC)
+    target_compile_options(ka_dem_hillshade_tests PRIVATE /utf-8)
+  endif()
+  ka_add_qtest(dem_hillshade ka_dem_hillshade_tests)
+
+  add_executable(ka_survey_point_dialog_tests tests/test_survey_point_dialogs.cpp
+    src/app/KaSurveyContourDialog.cpp src/app/KaSurveyContourDialog.h
+    src/app/KaSurveyAreaDialog.cpp src/app/KaSurveyAreaDialog.h
+    src/app/KaDemClassDialog.cpp src/app/KaDemClassDialog.h
+    src/app/KaGridOriginButton.cpp src/app/KaGridOriginButton.h
+    src/app/KaCanvasGridOverlay.cpp src/app/KaCanvasGridOverlay.h
+    src/app/KaCrashGuard.cpp src/app/KaCrashGuard.h
+    src/app/KaTheme.cpp src/app/KaThemeSheet.cpp src/app/KaThemeStyle.cpp)
+  target_link_libraries(ka_survey_point_dialog_tests PRIVATE ka_core Qt6::Test)
+  target_include_directories(ka_survey_point_dialog_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
+  set_target_properties(ka_survey_point_dialog_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  if (MSVC)
+    target_compile_options(ka_survey_point_dialog_tests PRIVATE /utf-8)
+  endif()
+  ka_add_qtest(survey_point_dialogs ka_survey_point_dialog_tests)
+  set_tests_properties(survey_point_dialogs PROPERTIES TIMEOUT 90)
 
   add_executable(ka_section_layout_tests tests/test_section_layout.cpp)
   target_link_libraries(ka_section_layout_tests PRIVATE ${KA_TEST_LIBS})
@@ -533,6 +928,8 @@ if(KA_HGIS_BUILD_TESTS)
     src/app/KaSectionDrawingStudio.cpp
     src/app/KaIcons.cpp
     src/app/KaTheme.cpp
+    src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp
   )
   target_link_libraries(ka_section_studio_tests PRIVATE ${KA_TEST_LIBS})
   target_include_directories(ka_section_studio_tests PRIVATE ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
@@ -552,6 +949,8 @@ if(KA_HGIS_BUILD_TESTS)
     data/theme/icons.qrc
     tests/test_theme.cpp
     src/app/KaTheme.cpp
+    src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp
     src/app/KaBeginnerRibbon.cpp
     src/app/KaIcons.cpp
     src/app/KaAppBar.cpp
@@ -564,6 +963,70 @@ if(KA_HGIS_BUILD_TESTS)
     ${CMAKE_BINARY_DIR}/generated
   )
   ka_add_qtest(theme_qss ka_theme_tests)
+  add_executable(ka_theme_options_tests
+    tests/test_theme_options.cpp
+    src/app/KaTheme.cpp
+    src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp
+    src/app/KaThemeOptions.cpp
+  )
+  add_executable(ka_theme_render_tests
+    tests/test_theme_render.cpp
+    src/app/KaTheme.cpp
+    src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp
+    src/app/KaBeginnerRibbon.cpp
+    src/app/KaDownloadUi.cpp
+  )
+  add_executable(ka_ribbon_overflow_tests
+    tests/test_ribbon_overflow.cpp
+    src/app/KaTheme.cpp
+    src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp
+    src/app/KaBeginnerRibbon.cpp
+    src/app/KaAppBar.cpp
+  )
+  add_executable(ka_ribbon_pixels_tests
+    tests/test_ribbon_pixels.cpp
+    src/app/KaIcons.cpp
+    src/app/KaTheme.cpp
+    src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp
+    src/app/KaBeginnerRibbon.cpp
+  )
+  add_executable(ka_toolbar_fit_tests
+    tests/test_toolbar_fit.cpp
+    src/app/KaToolbarFit.cpp
+    src/app/KaTheme.cpp
+    src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp
+  )
+  add_executable(ka_icon_glyph_tests
+    tests/test_icons.cpp
+    src/app/KaIcons.cpp
+    src/app/KaTheme.cpp
+    src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp
+  )
+  add_executable(ka_icon_mockup_tests
+    tests/test_icons_mockup.cpp
+    src/app/KaIcons.cpp
+    src/app/KaTheme.cpp
+    src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp
+  )
+  foreach(_ka_theme_target IN ITEMS ka_theme_options_tests ka_theme_render_tests ka_ribbon_overflow_tests ka_ribbon_pixels_tests ka_toolbar_fit_tests ka_icon_glyph_tests ka_icon_mockup_tests)
+    set_target_properties(${_ka_theme_target} PROPERTIES WIN32_EXECUTABLE FALSE)
+    target_link_libraries(${_ka_theme_target} PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
+    target_include_directories(${_ka_theme_target} PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
+  endforeach()
+  ka_add_qtest(theme_options ka_theme_options_tests)
+  ka_add_qtest(theme_render ka_theme_render_tests)
+  ka_add_qtest(ribbon_overflow ka_ribbon_overflow_tests)
+  ka_add_qtest(ribbon_pixels ka_ribbon_pixels_tests)
+  ka_add_qtest(toolbar_fit ka_toolbar_fit_tests)
+  ka_add_qtest(icon_glyphs ka_icon_glyph_tests)
+  ka_add_qtest(icon_mockup ka_icon_mockup_tests)
 
   add_executable(ka_user_error_tests
     tests/test_user_error.cpp
@@ -575,7 +1038,7 @@ if(KA_HGIS_BUILD_TESTS)
   ka_add_qtest(user_error ka_user_error_tests)
 
   add_executable(ka_region_locator_tests tests/test_region_locator.cpp
-    src/app/KaRegionLocator.cpp src/app/KaBeginnerRibbon.cpp src/app/KaTheme.cpp
+    src/app/KaRegionLocator.cpp src/app/KaBeginnerRibbon.cpp src/app/KaTheme.cpp src/app/KaThemeSheet.cpp src/app/KaThemeStyle.cpp
     src/core/KoreaRegionCatalog.cpp)
   set_target_properties(ka_region_locator_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   target_link_libraries(ka_region_locator_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
@@ -590,11 +1053,29 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_gdal_log_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_gdal_log_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(gdal_error_log ka_gdal_log_tests)
+  add_executable(ka_shell_tests tests/test_shell.cpp
+    src/app/KaShellUi.cpp src/app/KaShellUi.h
+    src/app/KaShellStartup.cpp src/app/KaShellStartup.h
+    src/app/KaShellGridControls.cpp src/app/KaShellGridControls.h
+    src/app/KaShellFocus.cpp src/app/KaShellFocus.h
+    src/app/KaTheme.cpp src/app/KaTheme.h src/app/KaThemeSheet.cpp src/app/KaThemeStyle.cpp
+    src/app/KaUserError.cpp src/app/KaUserError.h
+    src/app/KaCrashGuard.cpp src/app/KaCrashGuard.h)
+  target_include_directories(ka_shell_tests PRIVATE src ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
+  target_link_directories(ka_shell_tests PRIVATE ${KA_LIBDIRS})
+  target_link_libraries(ka_shell_tests PRIVATE ka_core Qt6::Test Qt6::Widgets)
+  set_target_properties(ka_shell_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(shell_chrome ka_shell_tests)
   add_executable(ka_catch_log_tests tests/test_catch_log.cpp src/core/KaSessionLog.cpp)
   set_target_properties(ka_catch_log_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   target_include_directories(ka_catch_log_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
   target_link_libraries(ka_catch_log_tests PRIVATE Qt6::Test Qt6::Core)
   ka_add_qtest(catch_log ka_catch_log_tests)
+  add_executable(ka_log_session_tests tests/test_log_session.cpp src/core/KaSessionLog.cpp)
+  set_target_properties(ka_log_session_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_include_directories(ka_log_session_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(ka_log_session_tests PRIVATE Qt6::Test Qt6::Core)
+  ka_add_qtest(log_session ka_log_session_tests)
   add_executable(ka_export_survey_areas_tests tests/test_export_survey_areas.cpp)
   target_link_libraries(ka_export_survey_areas_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_export_survey_areas_tests PROPERTIES WIN32_EXECUTABLE FALSE)
@@ -612,6 +1093,23 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_map_geotiff_export_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_map_geotiff_export_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(map_geotiff_export ka_map_geotiff_export_tests)
+  add_executable(ka_checklist_rules_tests tests/test_checklist_rules.cpp)
+  target_link_libraries(ka_checklist_rules_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_checklist_rules_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(checklist_rules ka_checklist_rules_tests)
+  add_executable(ka_checklist_state_tests tests/test_checklist_state.cpp)
+  target_link_libraries(ka_checklist_state_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_checklist_state_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(checklist_state ka_checklist_state_tests)
+  add_executable(ka_submit_package_tests tests/test_submit_package.cpp)
+  target_link_libraries(ka_submit_package_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_submit_package_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(submit_package ka_submit_package_tests)
+  add_executable(ka_submit_dialog_tests tests/test_submit_dialog.cpp src/app/KaSubmitDialog.cpp src/app/KaSubmitDialog.h)
+  target_link_libraries(ka_submit_dialog_tests PRIVATE ka_core Qt6::Test Qt6::Widgets)
+  target_include_directories(ka_submit_dialog_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  set_target_properties(ka_submit_dialog_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(submit_dialog ka_submit_dialog_tests)
   target_link_libraries(ka_heritage_import_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_heritage_import_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(heritage_import ka_heritage_import_tests)
@@ -637,6 +1135,11 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_heritage_style_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_heritage_style_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(heritage_style ka_heritage_style_tests)
+  add_executable(ka_layout_sheet_rules_tests tests/test_layout_sheet_rules.cpp)
+  target_link_libraries(ka_layout_sheet_rules_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_layout_sheet_rules_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(layout_sheet_rules ka_layout_sheet_rules_tests)
+  set_tests_properties(layout_sheet_rules PROPERTIES TIMEOUT 120)
   add_executable(ka_heritage_flow_tests tests/test_heritage_flow.cpp)
   target_link_libraries(ka_heritage_flow_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_heritage_flow_tests PROPERTIES WIN32_EXECUTABLE FALSE)
@@ -649,16 +1152,59 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_heritage_region_tests PRIVATE ka_core Qt6::Test Qt6::Network)
   set_target_properties(ka_heritage_region_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(heritage_region ka_heritage_region_tests)
+  add_executable(ka_heritage_fetch_plan_tests tests/test_heritage_fetch_plan.cpp)
+  target_link_libraries(ka_heritage_fetch_plan_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_heritage_fetch_plan_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(heritage_fetch_plan ka_heritage_fetch_plan_tests)
+  add_executable(ka_account_status_tests tests/test_account_status.cpp)
+  target_link_libraries(ka_account_status_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_account_status_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(account_status ka_account_status_tests)
   add_executable(ka_layer_state_tests tests/test_layer_state.cpp)
   add_executable(ka_layer_label_tests tests/test_layer_labels.cpp)
   target_link_libraries(ka_layer_label_tests PRIVATE ka_core Qt6::Test)
   ka_add_qtest(layer_labels ka_layer_label_tests)
   add_executable(ka_layer_information_tests tests/test_layer_information.cpp
-    src/app/KaLayerInformation.cpp src/app/KaLayerInformation.h)
+    src/app/KaLayerInformation.cpp src/app/KaLayerInformation.h src/app/KaLayerInformationPanel.cpp)
   target_link_libraries(ka_layer_information_tests PRIVATE ka_core Qt6::Test)
   ka_add_qtest(layer_information ka_layer_information_tests)
   set_tests_properties(layer_labels layer_information PROPERTIES TIMEOUT 90)
   set_target_properties(ka_layer_label_tests ka_layer_information_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  add_executable(ka_layer_roles_tests tests/test_layer_roles.cpp)
+  target_link_libraries(ka_layer_roles_tests PRIVATE ka_core Qt6::Test)
+  ka_add_qtest(layer_roles ka_layer_roles_tests)
+  add_executable(ka_layer_styles_tests tests/test_layer_styles.cpp)
+  target_link_libraries(ka_layer_styles_tests PRIVATE ka_core Qt6::Test)
+  ka_add_qtest(layer_styles ka_layer_styles_tests)
+  add_executable(ka_layer_edits_tests tests/test_layer_edits.cpp)
+  target_link_libraries(ka_layer_edits_tests PRIVATE ka_core Qt6::Test)
+  ka_add_qtest(layer_edits ka_layer_edits_tests)
+  add_executable(ka_layer_panel_tests tests/test_layer_panel.cpp
+    src/app/KaLayerInformation.cpp src/app/KaLayerInformation.h src/app/KaLayerInformationPanel.cpp)
+  target_link_libraries(ka_layer_panel_tests PRIVATE ka_core Qt6::Test)
+  ka_add_qtest(layer_panel ka_layer_panel_tests)
+  add_executable(ka_layer_tree_undo_tests tests/test_layer_tree_undo.cpp
+    src/app/KaLayerTreeUndo.cpp src/app/KaLayerTreeUndo.h src/app/KaLayerRefreshBatch.cpp src/app/KaLayerRefreshBatch.h)
+  target_link_libraries(ka_layer_tree_undo_tests PRIVATE ka_core Qt6::Test)
+  ka_add_qtest(layer_tree_undo ka_layer_tree_undo_tests)
+  set_target_properties(ka_layer_roles_tests ka_layer_styles_tests ka_layer_edits_tests ka_layer_panel_tests ka_layer_tree_undo_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  set_tests_properties(layer_roles layer_styles layer_edits layer_panel layer_tree_undo PROPERTIES TIMEOUT 90)
+  add_executable(ka_home_tests tests/test_home.cpp
+    src/app/KaStartPage.cpp src/app/KaStartPage.h
+    src/app/KaStartHero.cpp src/app/KaStartHero.h
+    src/app/KaSplashArt.cpp
+    src/app/KaHomeRecentCard.cpp src/app/KaHomeRecentCard.h
+    src/app/KaHomeStatus.cpp src/app/KaHomeStatus.h
+    src/app/KaHomeText.cpp
+    src/app/KaNewSurveyDialog.cpp
+    src/app/KaRecoverySnapshots.cpp
+    src/app/KaTheme.cpp src/app/KaThemeSheet.cpp src/app/KaThemeStyle.cpp)
+  target_link_libraries(ka_home_tests PRIVATE ${KA_TEST_LIBS} Qt6::Network)
+  target_include_directories(ka_home_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
+  target_compile_definitions(ka_home_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_home_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(home_start ka_home_tests)
+  set_tests_properties(home_start PROPERTIES TIMEOUT 90)
   add_executable(ka_dem_legend_tests tests/test_dem_legend.cpp)
   add_executable(ka_topographic_catalog_tests tests/test_topographic_catalog.cpp)
   add_executable(ka_topographic_archive_tests tests/test_topographic_archive.cpp)
@@ -739,6 +1285,8 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_download_ui_tests PRIVATE ka_core Qt6::Test Qt6::WebEngineWidgets)
   set_target_properties(ka_download_ui_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(download_ui ka_download_ui_tests)
+  target_sources(ka_heritage_download_retry_tests PRIVATE src/app/KaHeritageBrowserPlan.cpp)
+  target_sources(ka_download_ui_tests PRIVATE src/app/KaHeritageBrowserPlan.cpp)
   set_tests_properties(download_ui PROPERTIES TIMEOUT 90)
   add_executable(ka_tile_print_tests tests/test_tile_print.cpp
     src/app/KaPrintDialog.cpp src/app/KaPrintDialog.h)
@@ -747,6 +1295,21 @@ if(KA_HGIS_BUILD_TESTS)
   set_target_properties(ka_tile_print_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(tile_print ka_tile_print_tests)
   set_tests_properties(tile_print PROPERTIES TIMEOUT 90)
+  add_executable(ka_drawing_studio_tests tests/test_drawing_studio.cpp
+    src/app/KaDrawingNorthArrow.cpp src/app/KaDrawingNorthArrow.h
+    src/app/KaDrawingCoordCallout.cpp src/app/KaDrawingCoordCallout.h
+    src/app/KaDrawingLayerSets.cpp src/app/KaDrawingLayerSets.h
+    src/app/KaDrawingSheetSet.cpp src/app/KaDrawingSheetSet.h
+    src/app/KaDrawingPdfProgress.cpp src/app/KaDrawingPdfProgress.h
+    src/app/KaTitleBlock.cpp src/app/KaTitleBlock.h)
+  target_include_directories(ka_drawing_studio_tests PRIVATE src)
+  target_link_libraries(ka_drawing_studio_tests PRIVATE ka_core Qt6::Test Qt6::Svg)
+  set_target_properties(ka_drawing_studio_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  if (MSVC)
+    target_compile_options(ka_drawing_studio_tests PRIVATE /utf-8)
+  endif()
+  ka_add_qtest(drawing_studio ka_drawing_studio_tests)
+  set_tests_properties(drawing_studio PROPERTIES TIMEOUT 90)
   add_executable(ka_dem_rendering_tests tests/test_dem_rendering.cpp)
   add_executable(ka_dem_presentation_tests tests/test_dem_presentation.cpp src/app/KaDemClassDialog.cpp src/app/KaDemClassDialog.h)
   target_link_libraries(ka_dem_presentation_tests PRIVATE ka_core Qt6::Test)
@@ -763,6 +1326,19 @@ if(KA_HGIS_BUILD_TESTS)
   set_target_properties(ka_map_render_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   target_link_libraries(ka_map_render_tests PRIVATE ka_core Qt6::Test Qt6::Network)
   ka_add_qtest(map_render ka_map_render_tests)
+  add_executable(ka_vworld_settings_tests tests/test_vworld_settings.cpp)
+  set_target_properties(ka_vworld_settings_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_vworld_settings_tests PRIVATE ka_core Qt6::Test)
+  ka_add_qtest(vworld_settings ka_vworld_settings_tests)
+  add_executable(ka_basemap_reference_tests tests/test_basemap_reference.cpp)
+  set_target_properties(ka_basemap_reference_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_basemap_reference_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_basemap_reference_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_basemap_reference_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_basemap_reference_tests PRIVATE ${KA_TEST_DEFS})
+  ka_add_qtest(basemap_reference ka_basemap_reference_tests)
+  set_tests_properties(vworld_settings log_session PROPERTIES TIMEOUT 60)
+  set_tests_properties(basemap_reference PROPERTIES TIMEOUT 120)
   add_executable(ka_parallel_render_tests tests/test_parallel_render.cpp)
   set_target_properties(ka_parallel_render_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   target_link_libraries(ka_parallel_render_tests PRIVATE ka_core Qt6::Test Qt6::Network)
@@ -797,6 +1373,23 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_storage_safety_tests PRIVATE ka_core Qt6::Test)
   ka_add_qtest(storage_safety ka_storage_safety_tests)
   set_tests_properties(storage_safety PROPERTIES TIMEOUT 120)
+  add_executable(ka_storage_generation_tests tests/test_storage_generation.cpp)
+  target_link_libraries(ka_storage_generation_tests PRIVATE ka_core Qt6::Test)
+  ka_add_qtest(storage_generation ka_storage_generation_tests)
+  # Six write-through generation saves take ~108 s alone on the field PC (13-23 s each);
+  # 120 s left no room for a parallel ctest run.
+  set_tests_properties(storage_generation PROPERTIES TIMEOUT 300)
+
+  add_executable(ka_survey_durability_tests tests/test_survey_durability.cpp)
+  target_link_libraries(ka_survey_durability_tests PRIVATE ka_core Qt6::Test)
+  ka_add_qtest(survey_durability ka_survey_durability_tests)
+  # Two survey copies plus the product's 10 s replace retry window: about 40 s alone.
+  set_tests_properties(survey_durability PROPERTIES TIMEOUT 180)
+
+  add_executable(ka_storage_hygiene_tests tests/test_storage_hygiene.cpp)
+  target_link_libraries(ka_storage_hygiene_tests PRIVATE ka_core Qt6::Test)
+  ka_add_qtest(storage_hygiene ka_storage_hygiene_tests)
+  set_tests_properties(storage_hygiene PROPERTIES TIMEOUT 60)
 
   add_executable(ka_reference_download_tests tests/test_reference_download.cpp
     src/app/KaReferenceDownloadJob.cpp
@@ -804,6 +1397,14 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_reference_download_tests PRIVATE ka_core Qt6::Test Qt6::Network)
   ka_add_qtest(reference_download ka_reference_download_tests)
   set_tests_properties(reference_download PROPERTIES TIMEOUT 60)
+  add_executable(ka_reference_status_tests tests/test_reference_status.cpp
+    src/app/KaReferenceStatusDialog.cpp src/app/KaReferenceStatusDialog.h)
+  target_link_libraries(ka_reference_status_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_reference_status_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_reference_status_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_reference_status_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_reference_status_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(reference_status ka_reference_status_tests)
 
   add_executable(ka_cadastral_tests tests/test_cadastral.cpp)
   target_link_libraries(ka_cadastral_tests PRIVATE ka_core Qt6::Test Qt6::Network)
@@ -836,6 +1437,8 @@ if(KA_HGIS_BUILD_TESTS)
     ribbonButtonsAllHaveDifferentIcons
     ribbonGroupsMatchTheirPurpose
     narrowWindowKeepsDrawingAndPrintVisible
+    subToolbarFitsAt1904WhileSketching
+    unsavedSaveChipLabelTurnsBoldAndBack
     recordToolsWaitForASurvey
     provinceChipMovesMapWithoutLoadingLayers)
   ka_add_qtest_filter(save_open_topo ka_save_open_tests
@@ -876,7 +1479,9 @@ if(KA_HGIS_BUILD_TESTS)
     eraseOverlap_severalShapesAskBeforeRemovingThem
     eraseOverlap_secondPressUsesTheShapeJustDrawn
     drawnShapeOnTopOffersEraseWhenFinished
-    selectTool_picksTheShapeDrawnOnTopAndKeyAStartsIt)
+    selectTool_picksTheShapeDrawnOnTopAndKeyAStartsIt
+    selectTool_rightClickErasesAndKeyAEndsSplitMode
+    polygonCommands_leaveReferenceAndCadastralShapesAlone)
   ka_add_qtest_filter(save_open_roundtrip ka_save_open_tests
     saveAndReopen_keepsTreeGeometryAttributesAndStyle
     saveReopenSubmit_preservesWorkAndPackage
@@ -910,7 +1515,8 @@ if(KA_HGIS_BUILD_TESTS)
     savedWorkspaceNeverPointsIntoTheSaveGenerationFolder
     newPortableFolderInheritsRecentSurveys
     saveAgainAfterAddingSurveyAreaKeepsEveryFeature
-    oldVersionSurveysStillOpen)
+    oldVersionSurveysStillOpen
+    samplesOpenAsSurveys)
   set(KA_SAVE_OPEN_TESTS
     save_open_window save_open_topo save_open_drawing
     save_open_edit save_open_erase save_open_roundtrip save_open_open
@@ -942,6 +1548,11 @@ if(KA_HGIS_BUILD_TESTS)
     string(JOIN "\\;" _ka_path_esc ${_ka_path})
     set_tests_properties(layer_labels layer_information checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss user_error recent_surveys section_layout_engine section_studio_engine terrain_3d_engine ${KA_SAVE_OPEN_TESTS} e2e_opaque_suite network_services storage_safety reference_download region_locator_popup layer_state_regressions map_render above_labels above_labels_125 above_labels_150 above_labels_200 PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
+    set_tests_properties(layer_roles layer_styles layer_edits layer_panel layer_tree_undo PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
+    set_tests_properties(georef_quality georef_backup align_tool align_image_view PROPERTIES
+      ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
+    set_tests_properties(cad_dwg cad_reader cad_crs cad_store PROPERTIES
+      ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     set_tests_properties(dem_legend PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(topographic_catalog PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(topographic_archive PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
@@ -949,10 +1560,13 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(topographic_source_crs PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(topographic_shapefile topographic_settings topographic_account_dialog heritage_setup_dialogs PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
     set_tests_properties(topographic_scope PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 90)
-    set_tests_properties(topographic_import PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
+    set_tests_properties(topographic_import PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
+    set_tests_properties(reference_status PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(heritage_flow PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+    set_tests_properties(trench_plan trench_edit PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(heritage_style PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
     set_tests_properties(heritage_form PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+    set_tests_properties(theme_options theme_render ribbon_overflow ribbon_pixels toolbar_fit icon_glyphs icon_mockup PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(heritage_download_retry PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 90)
     set_tests_properties(gdal_error_log PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(catch_log PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
@@ -962,6 +1576,9 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(parallel_render PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
     set_tests_properties(heritage_import map_geotiff_export PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
     set_tests_properties(heritage_region PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+    set_tests_properties(heritage_fetch_plan account_status PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+    set_tests_properties(basemap_reference vworld_settings PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
+    set_tests_properties(log_session PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(webengine_smoke PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 120)
     set_tests_properties(topographic_browser PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 150)
     # 기본 검사는 로컬 HTTP fixture에서 전송·취소·로그인 세션을 검증한다.
@@ -993,3 +1610,293 @@ if(KA_HGIS_BUILD_TESTS)
     endforeach()
   endif()
 endif()
+
+# ---- [P1 design-system] KaChip + KaThemeFonts (append-only block; design section 3, P1) ----
+set(_ka_p1_chip_sources ${CMAKE_SOURCE_DIR}/src/app/KaChip.cpp ${CMAKE_SOURCE_DIR}/src/app/KaChip.h)
+set(_ka_p1_font_sources ${CMAKE_SOURCE_DIR}/src/app/KaThemeFonts.cpp ${CMAKE_SOURCE_DIR}/src/app/KaThemeFonts.h)
+target_sources(ka-hgis PRIVATE ${_ka_p1_chip_sources} ${_ka_p1_font_sources})
+# Bundled IBM Plex (OFL) travels next to the executable like the QSS copy; only files that exist.
+file(GLOB _ka_p1_font_files "${CMAKE_SOURCE_DIR}/data/fonts/*.ttf" "${CMAKE_SOURCE_DIR}/data/fonts/LICENSE-*.txt")
+foreach(_ka_p1_font IN LISTS _ka_p1_font_files)
+  get_filename_component(_ka_p1_font_name "${_ka_p1_font}" NAME)
+  add_custom_command(TARGET ka-hgis POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${_ka_p1_font}" "$<TARGET_FILE_DIR:ka-hgis>/data/fonts/${_ka_p1_font_name}")
+endforeach()
+if(KA_HGIS_BUILD_TESTS)
+  # ka_feature_card_tests had no theme sources; KaChip needs KaTheme and KaIcons.
+  target_sources(ka_feature_card_tests PRIVATE ${_ka_p1_chip_sources}
+    ${CMAKE_SOURCE_DIR}/src/app/KaIcons.cpp ${CMAKE_SOURCE_DIR}/src/app/KaTheme.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/KaThemeSheet.cpp ${CMAKE_SOURCE_DIR}/src/app/KaThemeStyle.cpp)
+  target_include_directories(ka_feature_card_tests PRIVATE ${CMAKE_BINARY_DIR}/generated)
+  foreach(_ka_p1_target IN ITEMS ka_theme_tests ka_home_tests ka_shell_tests)
+    target_sources(${_ka_p1_target} PRIVATE ${_ka_p1_chip_sources})
+  endforeach()
+  target_sources(ka_home_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/app/KaIcons.cpp)
+  target_sources(ka_shell_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/app/KaIcons.cpp)
+  # KaTheme.cpp / KaThemeSheet.cpp resolve the font tokens through KaThemeFonts.cpp:
+  # every target that compiles them gets the file without editing each block above.
+  get_property(_ka_p1_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(_ka_p1_target IN LISTS _ka_p1_targets)
+    get_target_property(_ka_p1_type ${_ka_p1_target} TYPE)
+    if(NOT _ka_p1_type MATCHES "EXECUTABLE|LIBRARY")
+      continue()
+    endif()
+    get_target_property(_ka_p1_sources ${_ka_p1_target} SOURCES)
+    if(_ka_p1_sources MATCHES "KaTheme(Sheet)?\.cpp" AND NOT _ka_p1_sources MATCHES "KaThemeFonts\.cpp")
+      target_sources(${_ka_p1_target} PRIVATE ${_ka_p1_font_sources})
+    endif()
+  endforeach()
+  add_executable(ka_chip_theme_tests tests/test_chip_theme.cpp
+    ${_ka_p1_chip_sources} ${_ka_p1_font_sources}
+    src/app/KaIcons.cpp src/app/KaTheme.cpp src/app/KaThemeSheet.cpp src/app/KaThemeStyle.cpp)
+  set_target_properties(ka_chip_theme_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_chip_theme_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
+  target_include_directories(ka_chip_theme_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
+  ka_add_qtest(chip_theme ka_chip_theme_tests)
+  set_tests_properties(chip_theme PROPERTIES TIMEOUT 90)
+endif()
+
+# ---- [P2 icons] outline glyph set: travels with KaIcons.cpp wherever that file is compiled ----
+set(_ka_p2_outline_sources
+  ${CMAKE_SOURCE_DIR}/src/app/KaIconsOutline.h
+  ${CMAKE_SOURCE_DIR}/src/app/KaIconsOutlineA.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/KaIconsOutlineB.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/KaIconsOutlineUi.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/KaIconsOutlineEngine.cpp)
+get_property(_ka_p2_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(_ka_p2_target IN LISTS _ka_p2_targets)
+  get_target_property(_ka_p2_type ${_ka_p2_target} TYPE)
+  if(NOT _ka_p2_type MATCHES "EXECUTABLE|LIBRARY")
+    continue()
+  endif()
+  get_target_property(_ka_p2_sources ${_ka_p2_target} SOURCES)
+  if(_ka_p2_sources MATCHES "KaIcons\.cpp" AND NOT _ka_p2_sources MATCHES "KaIconsOutlineEngine")
+    target_sources(${_ka_p2_target} PRIVATE ${_ka_p2_outline_sources})
+  endif()
+endforeach()
+if(KA_HGIS_BUILD_TESTS)
+  add_executable(ka_icon_outline_tests tests/test_icons_outline.cpp
+    src/app/KaIcons.cpp ${_ka_p2_outline_sources} ${_ka_p1_font_sources}
+    src/app/KaTheme.cpp src/app/KaThemeSheet.cpp src/app/KaThemeStyle.cpp)
+  set_target_properties(ka_icon_outline_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_icon_outline_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
+  target_include_directories(ka_icon_outline_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
+  ka_add_qtest(icon_outline ka_icon_outline_tests)
+  set_tests_properties(icon_outline PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
+endif()
+
+# ---- [P3 home] home cards, row delegate and SurveyFacts (append-only block; design section 3, P3) ----
+set(_ka_p3_app_sources
+  ${CMAKE_SOURCE_DIR}/src/app/KaHomeRowDelegate.cpp ${CMAKE_SOURCE_DIR}/src/app/KaHomeRowDelegate.h
+  ${CMAKE_SOURCE_DIR}/src/app/KaHomeGuideCard.cpp ${CMAKE_SOURCE_DIR}/src/app/KaHomeGuideCard.h
+  ${CMAKE_SOURCE_DIR}/src/app/KaHomeConnectionCard.cpp ${CMAKE_SOURCE_DIR}/src/app/KaHomeConnectionCard.h)
+target_sources(ka_core PRIVATE ${CMAKE_SOURCE_DIR}/src/core/SurveyFacts.cpp ${CMAKE_SOURCE_DIR}/src/core/SurveyFacts.h)
+target_sources(ka-hgis PRIVATE ${_ka_p3_app_sources})
+if(KA_HGIS_BUILD_TESTS)
+  target_sources(ka_home_tests PRIVATE ${_ka_p3_app_sources})
+  # Home cards, rows, badges and the compact hero (tests/test_home.cpp stays under 300 lines).
+  add_executable(ka_home_cards_tests tests/test_home_cards.cpp
+    src/app/KaStartPage.cpp src/app/KaStartHero.cpp src/app/KaSplashArt.cpp
+    src/app/KaHomeRecentCard.cpp src/app/KaHomeStatus.cpp src/app/KaHomeText.cpp
+    src/app/KaRecoverySnapshots.cpp
+    src/app/KaTheme.cpp src/app/KaThemeSheet.cpp src/app/KaThemeStyle.cpp src/app/KaIcons.cpp
+    ${_ka_p3_app_sources} ${_ka_p1_chip_sources} ${_ka_p1_font_sources} ${_ka_p2_outline_sources})
+  target_link_libraries(ka_home_cards_tests PRIVATE ${KA_TEST_LIBS} Qt6::Network)
+  target_include_directories(ka_home_cards_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
+  target_compile_definitions(ka_home_cards_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_home_cards_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(home_cards ka_home_cards_tests)
+  set_tests_properties(home_cards PROPERTIES TIMEOUT 90)
+  # SurveyFacts records and the GDAL probe (no QGIS).
+  add_executable(ka_survey_facts_tests tests/test_survey_facts.cpp)
+  target_link_libraries(ka_survey_facts_tests PRIVATE ka_core Qt6::Test)
+  target_include_directories(ka_survey_facts_tests PRIVATE ${KA_INCLUDES})
+  set_target_properties(ka_survey_facts_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(survey_facts ka_survey_facts_tests)
+  set_tests_properties(survey_facts PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
+endif()
+
+# ---- [P4 map-panels] layer list chrome, section bands, inspector panel, basemap card (append-only block; design section 3, P4) ----
+set(_ka_p4_list_sources
+  ${CMAKE_SOURCE_DIR}/src/app/KaLayerInformationView.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/KaLayerSectionDelegate.cpp ${CMAKE_SOURCE_DIR}/src/app/KaLayerSectionDelegate.h)
+set(_ka_p4_card_sources ${CMAKE_SOURCE_DIR}/src/app/KaFeatureCardEditors.cpp)
+set(_ka_p4_panel_sources
+  ${CMAKE_SOURCE_DIR}/src/app/KaLayerListChrome.cpp ${CMAKE_SOURCE_DIR}/src/app/KaLayerListChrome.h
+  ${CMAKE_SOURCE_DIR}/src/app/KaInspectorPanel.cpp ${CMAKE_SOURCE_DIR}/src/app/KaInspectorPanel.h
+  ${CMAKE_SOURCE_DIR}/src/app/KaBasemapQuickCard.cpp ${CMAKE_SOURCE_DIR}/src/app/KaBasemapQuickCard.h)
+# The view methods and configureView moved out of KaLayerInformation.cpp, buildEditors out of
+# KaFeatureCard.cpp: every target that compiles the original file gets the split-off files.
+get_property(_ka_p4_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(_ka_p4_target IN LISTS _ka_p4_targets)
+  get_target_property(_ka_p4_type ${_ka_p4_target} TYPE)
+  if(NOT _ka_p4_type MATCHES "EXECUTABLE|LIBRARY")
+    continue()
+  endif()
+  get_target_property(_ka_p4_sources ${_ka_p4_target} SOURCES)
+  if(_ka_p4_sources MATCHES "KaLayerInformation\.cpp" AND NOT _ka_p4_sources MATCHES "KaLayerInformationView")
+    target_sources(${_ka_p4_target} PRIVATE ${_ka_p4_list_sources})
+  endif()
+  if(_ka_p4_sources MATCHES "KaFeatureCard\.cpp" AND NOT _ka_p4_sources MATCHES "KaFeatureCardEditors")
+    target_sources(${_ka_p4_target} PRIVATE ${_ka_p4_card_sources})
+  endif()
+endforeach()
+target_sources(ka-hgis PRIVATE ${_ka_p4_panel_sources})
+if(KA_HGIS_BUILD_TESTS)
+  set(_ka_p4_theme_sources
+    src/app/KaIcons.cpp ${_ka_p2_outline_sources} src/app/KaTheme.cpp src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp ${_ka_p1_font_sources})
+  # Section bands, base row height, the find field and the edit pencil.
+  add_executable(ka_layer_list_chrome_tests tests/test_layer_list_chrome.cpp tests/layer_list_fixture.h
+    src/app/KaLayerInformation.cpp src/app/KaLayerInformationPanel.cpp ${_ka_p4_list_sources}
+    src/app/KaLayerListChrome.cpp src/app/KaLayerListChrome.h ${_ka_p4_theme_sources})
+  target_link_libraries(ka_layer_list_chrome_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_layer_list_chrome_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
+  target_compile_definitions(ka_layer_list_chrome_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_layer_list_chrome_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(layer_list_chrome ka_layer_list_chrome_tests)
+  # 4 s standalone, but 43 s alone / 65 s in a parallel run when ctest is the parent (theme
+  # applied; cause not found): 180 like the save/open tests so -j16 load cannot time it out.
+  set_tests_properties(layer_list_chrome PROPERTIES
+    ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
+  # The right panel with the hosted feature card and the basemap card.
+  add_executable(ka_inspector_panel_tests tests/test_inspector_panel.cpp
+    src/app/KaInspectorPanel.cpp src/app/KaInspectorPanel.h
+    src/app/KaBasemapQuickCard.cpp src/app/KaBasemapQuickCard.h
+    src/app/KaFeatureCard.cpp src/app/KaFeatureCard.h src/app/KaFeatureCardEdit.cpp ${_ka_p4_card_sources}
+    src/app/KaFeatureFormDialog.cpp src/app/KaFeatureFormDialog.h
+    ${_ka_p1_chip_sources} ${_ka_p4_theme_sources})
+  target_link_libraries(ka_inspector_panel_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_inspector_panel_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
+  target_compile_definitions(ka_inspector_panel_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_inspector_panel_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(inspector_panel ka_inspector_panel_tests)
+  set_tests_properties(inspector_panel PROPERTIES
+    ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
+endif()
+
+# ---- [P5 shell-chrome] survey badge, drawing guide band, edit-buffer summary (append-only block; design section 3, P5) ----
+set(_ka_p5_app_sources
+  ${CMAKE_SOURCE_DIR}/src/app/KaSurveyBadge.cpp ${CMAKE_SOURCE_DIR}/src/app/KaSurveyBadge.h
+  ${CMAKE_SOURCE_DIR}/src/app/KaDrawGuideBand.cpp ${CMAKE_SOURCE_DIR}/src/app/KaDrawGuideBand.h)
+target_sources(ka_core PRIVATE ${CMAKE_SOURCE_DIR}/src/core/EditBufferSummary.cpp ${CMAKE_SOURCE_DIR}/src/core/EditBufferSummary.h)
+target_sources(ka-hgis PRIVATE ${_ka_p5_app_sources})
+if(KA_HGIS_BUILD_TESTS)
+  set(_ka_p5_theme_sources
+    src/app/KaIcons.cpp ${_ka_p2_outline_sources} src/app/KaTheme.cpp src/app/KaThemeSheet.cpp
+    src/app/KaThemeStyle.cpp ${_ka_p1_font_sources})
+  # Status-bar chips, the tab badge and the guide band (no QGIS). The ctest name shell_chrome
+  # already belongs to ka_shell_tests (tests/test_shell.cpp), so this one is shell_widgets.
+  add_executable(ka_shell_chrome_tests tests/test_shell_chrome.cpp
+    src/app/KaStatusBar.cpp src/app/KaStatusBar.h
+    src/app/KaLayerOpacityRail.cpp src/app/KaLayerOpacityRail.h
+    ${_ka_p5_app_sources} ${_ka_p1_chip_sources} ${_ka_p5_theme_sources})
+  set_target_properties(ka_shell_chrome_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_shell_chrome_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
+  target_include_directories(ka_shell_chrome_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
+  ka_add_qtest(shell_widgets ka_shell_chrome_tests)
+  set_tests_properties(shell_widgets PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
+  # Three-pane splitter, F10 fold and the rail inset (tests/test_shell.cpp is at its 300-line limit).
+  add_executable(ka_shell_focus_tests tests/test_shell_focus.cpp
+    src/app/KaShellFocus.cpp src/app/KaShellFocus.h
+    src/app/KaLayerOpacityRail.cpp src/app/KaLayerOpacityRail.h)
+  set_target_properties(ka_shell_focus_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_shell_focus_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
+  target_include_directories(ka_shell_focus_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  ka_add_qtest(shell_focus ka_shell_focus_tests)
+  set_tests_properties(shell_focus PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
+  # 「저장 안 됨 n건」: unique feature ids over the edit buffers (QGIS memory layers).
+  add_executable(ka_edit_buffer_summary_tests tests/test_edit_buffer_summary.cpp)
+  target_link_libraries(ka_edit_buffer_summary_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_edit_buffer_summary_tests PRIVATE ${KA_INCLUDES} ${CMAKE_SOURCE_DIR}/src)
+  target_link_directories(ka_edit_buffer_summary_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_edit_buffer_summary_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_edit_buffer_summary_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(edit_buffer_summary ka_edit_buffer_summary_tests)
+  set_tests_properties(edit_buffer_summary PROPERTIES
+    ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
+endif()
+
+# ---- [P6 wiring] MainWindowChrome.cpp; ka_save_open_tests catches up with the P1-P5 sources (append-only block; design section 3, P6) ----
+target_sources(ka-hgis PRIVATE ${CMAKE_SOURCE_DIR}/src/app/MainWindowChrome.cpp)
+if(KA_HGIS_BUILD_TESTS)
+  # ka_save_open_tests copied the ka-hgis source list before the P1-P5 blocks appended KaChip,
+  # the home cards, the panels, the badge/band and now MainWindowChrome.cpp (which MainWindow*.cpp
+  # call). Give it every ka-hgis source it does not compile yet; main.cpp/KaApplication.cpp/app.rc
+  # stay out as before.
+  get_target_property(_ka_p6_app_sources ka-hgis SOURCES)
+  get_target_property(_ka_p6_test_sources ka_save_open_tests SOURCES)
+  set(_ka_p6_have "")
+  foreach(_ka_p6_src IN LISTS _ka_p6_test_sources)
+    get_filename_component(_ka_p6_abs "${_ka_p6_src}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+    list(APPEND _ka_p6_have "${_ka_p6_abs}")
+  endforeach()
+  set(_ka_p6_missing "")
+  foreach(_ka_p6_src IN LISTS _ka_p6_app_sources)
+    get_filename_component(_ka_p6_abs "${_ka_p6_src}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+    if(_ka_p6_abs MATCHES "/src/app/(main\.cpp|KaApplication\.cpp|app\.rc)$")
+      continue()
+    endif()
+    list(FIND _ka_p6_have "${_ka_p6_abs}" _ka_p6_index)
+    if(_ka_p6_index LESS 0)
+      list(APPEND _ka_p6_missing "${_ka_p6_abs}")
+    endif()
+  endforeach()
+  if(_ka_p6_missing)
+    target_sources(ka_save_open_tests PRIVATE ${_ka_p6_missing})
+  endif()
+  target_link_libraries(ka_save_open_tests PRIVATE Qt6::Network)
+endif()
+
+# ---- [fix] ka_perf_tests catches up with the P1-P6 sources (append-only block; review fix 2026-09-30) ----
+# KA_PERF_SOURCES copied the ka-hgis source list at line ~973, before the P1-P6 blocks appended
+# KaChip, the home cards, the panels, the badge/band and MainWindowChrome.cpp; the perf target
+# then failed to link (19 unresolved symbols). Same catch-up as the P6 block for ka_save_open_tests.
+if(KA_HGIS_BUILD_TESTS)
+  get_target_property(_ka_fix_app_sources ka-hgis SOURCES)
+  get_target_property(_ka_fix_perf_sources ka_perf_tests SOURCES)
+  set(_ka_fix_have "")
+  foreach(_ka_fix_src IN LISTS _ka_fix_perf_sources)
+    get_filename_component(_ka_fix_abs "${_ka_fix_src}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+    list(APPEND _ka_fix_have "${_ka_fix_abs}")
+  endforeach()
+  set(_ka_fix_missing "")
+  foreach(_ka_fix_src IN LISTS _ka_fix_app_sources)
+    get_filename_component(_ka_fix_abs "${_ka_fix_src}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+    if(_ka_fix_abs MATCHES "/src/app/(main\.cpp|KaApplication\.cpp|app\.rc)$")
+      continue()
+    endif()
+    list(FIND _ka_fix_have "${_ka_fix_abs}" _ka_fix_index)
+    if(_ka_fix_index LESS 0)
+      list(APPEND _ka_fix_missing "${_ka_fix_abs}")
+    endif()
+  endforeach()
+  if(_ka_fix_missing)
+    target_sources(ka_perf_tests PRIVATE ${_ka_fix_missing})
+  endif()
+  target_link_libraries(ka_perf_tests PRIVATE Qt6::Network)
+endif()
+
+# ---- [mockup icons] grey tile + Lucide SVG glyph style (design 2026-10-01-mockup-match) ----
+# Every target that compiles KaIcons.cpp (the app, the icon tests, anything that renders a ribbon or a
+# chip) also gets the Mockup engine, the id -> SVG table, the SVG resources and Qt6::Svg. Placed last so
+# targets added by the earlier blocks (and the source copies made for the save/open and perf tests) are
+# all visible here.
+set(_ka_mockup_sources
+  ${CMAKE_SOURCE_DIR}/src/app/KaIconsMockup.h
+  ${CMAKE_SOURCE_DIR}/src/app/KaIconsMockupEngine.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/KaIconsMockupMap.cpp
+  ${CMAKE_SOURCE_DIR}/data/icons/icons-mockup.qrc)
+get_property(_ka_mockup_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(_ka_mockup_target IN LISTS _ka_mockup_targets)
+  get_target_property(_ka_mockup_type ${_ka_mockup_target} TYPE)
+  if(NOT _ka_mockup_type MATCHES "EXECUTABLE|LIBRARY")
+    continue()
+  endif()
+  get_target_property(_ka_mockup_target_sources ${_ka_mockup_target} SOURCES)
+  if(_ka_mockup_target_sources MATCHES "KaIcons\\.cpp" AND NOT _ka_mockup_target_sources MATCHES "KaIconsMockupEngine")
+    target_sources(${_ka_mockup_target} PRIVATE ${_ka_mockup_sources})
+    target_link_libraries(${_ka_mockup_target} PRIVATE Qt6::Svg)
+  endif()
+endforeach()

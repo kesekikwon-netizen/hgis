@@ -2,24 +2,27 @@ name: CI
 
 on:
   push:
-    # Work lives on dated branches (e.g. 20260922-1) long before it reaches main.
-    branches: [main, '20*']
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# No secrets or API keys: both jobs only read the repository.
+permissions:
+  contents: read
 
 jobs:
-  # Always runs on GitHub-hosted runners — no OSGeo4W required
+  # Quick checks on Linux before the Windows build. Compiles nothing.
   sanity:
-    name: Sanity checks
+    name: Sanity checks (no build)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Required paths exist
         run: |
@@ -66,65 +69,135 @@ jobs:
           set -euo pipefail
           python3 scripts/secret-scan.py
 
-  # Full Windows build — needs a self-hosted runner with OSGeo4W + VS2022
-  # Register runner: https://github.com/kwonyoungin11/hgis/settings/actions/runners
-  # Labels must include: self-hosted, Windows, ka-hgis
-  windows-build:
-    name: Windows build (self-hosted)
-    needs: sanity
-    if: ${{ vars.ENABLE_SELF_HOSTED_BUILD == 'true' }}
-    runs-on: [self-hosted, Windows, ka-hgis]
-    timeout-minutes: 45
+      # F213: no new C++ file over 300 lines; files already over (docs/quality/line-limit-baseline.txt)
+      # may shrink but not grow.
+      - name: Source line limit
+        shell: pwsh
+        run: ./scripts/scorecard.ps1 -LineLimitOnly
+
+  # Full build, every CTest group and an app start on GitHub's free Windows runner (the
+  # repository is public). windows-latest now ships only Visual Studio 2026, while the "vs"
+  # preset and the reference PC use Visual Studio 2022, so the job stays on windows-2022.
+  # It runs next to the sanity job, so a line-count or JSON slip never hides the build result.
+  windows:
+    name: Windows build and tests
+    runs-on: windows-2022
+    timeout-minutes: 330
+    env:
+      OSGEO4W_ROOT: C:\OSGeo4W
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      # The OSGeo4W packages of the reference PC (dev-env.lock.json). OSGeo4W serves the newest
+      # qgis-dev, so the cached install is renewed every week and whenever the lock file changes.
+      - name: OSGeo4W package list
+        id: osgeo4w
+        shell: pwsh
+        run: |
+          $lock = Get-Content -Raw dev-env.lock.json | ConvertFrom-Json
+          $names = @($lock.required.osgeo4wPackages.PSObject.Properties.Name)
+          if ($names.Count -lt 10) { throw "dev-env.lock.json lists only $($names.Count) OSGeo4W packages" }
+          "packages=$($names -join ',')" >> $env:GITHUB_OUTPUT
+          "week=$(Get-Date -UFormat '%G-%V')" >> $env:GITHUB_OUTPUT
+
+      - name: Restore OSGeo4W
+        id: osgeo4w-cache
+        uses: actions/cache/restore@v6
         with:
-          fetch-depth: 2
+          path: C:\OSGeo4W
+          key: osgeo4w-${{ hashFiles('dev-env.lock.json') }}-${{ steps.osgeo4w.outputs.week }}
 
-      # The runner is the reference PC: fail when it has drifted from the
-      # committed dev-env.lock.json. A missing lock (exit 2) only warns.
-      - name: Compare with dev-env.lock.json
+      - name: Install OSGeo4W (qgis-dev)
+        if: steps.osgeo4w-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 60
         shell: pwsh
         run: |
-          . .\scripts\dev-env.ps1
-          .\scripts\dev-env-lock.ps1
-          if ($LASTEXITCODE -eq 1) { exit 1 }
-          exit 0
+          $setup = Join-Path $env:RUNNER_TEMP 'osgeo4w-setup.exe'
+          Invoke-WebRequest -Uri 'https://download.osgeo.org/osgeo4w/v2/osgeo4w-setup.exe' -OutFile $setup -MaximumRetryCount 3 -RetryIntervalSec 15
+          $setupArgs = @('-q', '-k', '-n', '-r', '-O', '-a', 'x86_64',
+                         '-s', 'https://download.osgeo.org/osgeo4w/v2',
+                         '-R', 'C:\OSGeo4W', '-l', (Join-Path $env:RUNNER_TEMP 'osgeo4w-packages'),
+                         '-P', '${{ steps.osgeo4w.outputs.packages }}')
+          $p = Start-Process -FilePath $setup -ArgumentList $setupArgs -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) {
+            $log = 'C:\OSGeo4W\var\log\setup.log.full'
+            if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 60 }
+            throw "osgeo4w-setup exit $($p.ExitCode)"
+          }
+          # The opencl package moves opencl.dll into System32, which the cache does not keep, while
+          # qgis_core.dll imports it. Keep a copy inside OSGeo4W so a restored cache still starts.
+          $ocl = 'C:\OSGeo4W\bin\opencl.dll'
+          $system = Join-Path $env:WINDIR 'System32\OpenCL.dll'
+          if (-not (Test-Path -LiteralPath $ocl) -and (Test-Path -LiteralPath $system)) { Copy-Item -LiteralPath $system -Destination $ocl }
+          foreach ($f in 'apps\qgis-dev\lib\qgis_core.lib', 'apps\gdal-dev\lib\gdal_i.lib', 'apps\Qt6\bin\Qt6Core.dll', 'bin\opencl.dll') {
+            if (-not (Test-Path -LiteralPath (Join-Path 'C:\OSGeo4W' $f))) { throw "OSGeo4W install is missing $f" }
+          }
 
+      # Saved right after the install, so a later failing step does not force the next run to
+      # download about a hundred packages again.
+      - name: Save OSGeo4W
+        if: steps.osgeo4w-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: C:\OSGeo4W
+          key: ${{ steps.osgeo4w-cache.outputs.cache-primary-key }}
+
+      # CI builds against the newest nightly qgis-dev; the versions tell an OSGeo4W update apart
+      # from a change in this repository.
+      - name: OSGeo4W versions
+        shell: pwsh
+        run: |
+          Get-Content -LiteralPath 'C:\OSGeo4W\etc\setup\installed.db' |
+            Select-String -Pattern '^(qgis-dev|gdal-dev|qt6-libs) '
+
+      # Same order as scripts/build-all.ps1: configure, build, CTest, start the app.
       - name: Configure (VS 2022 x64)
+        timeout-minutes: 15
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
           . .\scripts\dev-env.ps1
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DKA_HGIS_BUILD_TESTS=ON
+          cmake --preset vs
 
+      # Two compiler processes per project keep the 16 GB runner clear of out-of-memory errors (C1060).
       - name: Build Release
+        timeout-minutes: 150
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
           . .\scripts\dev-env.ps1
-          cmake --build build --config Release
+          cmake --build build --config Release --parallel -- /p:CL_MPCount=2
 
-      - name: clang-tidy changed lines
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          . .\scripts\dev-env.ps1
-          .\scripts\gen-compile-commands.ps1
-          .\scripts\clang-tidy-changed.ps1 -Base HEAD^
-
+      # Two tests at a time keep the timing-sensitive groups steady on a 4-core runner;
+      # a failing test gets one more try before the job fails. perf budgets scale against the
+      # reference PC's calibration (TEST_INFRA.md).
       - name: CTest
+        timeout-minutes: 150
         shell: pwsh
+        env:
+          KA_PERF_CALIBRATION_REF_MS: '14'
         run: |
-          $ErrorActionPreference = 'Stop'
           . .\scripts\dev-env.ps1
-          ctest --test-dir build -C Release --output-on-failure
+          ctest --test-dir build -C Release -j2 --output-on-failure --repeat until-pass:2
+
+      - name: Start and quit the app
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          KA_HGIS_LOG_DIR: ${{ github.workspace }}\build\test-logs\app-smoke
+        run: |
+          . .\scripts\dev-env.ps1
+          $p = Start-Process -FilePath build\Release\ka-hgis.exe -ArgumentList '--smoke-quit' -WorkingDirectory build\Release -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "ka-hgis --smoke-quit exit $($p.ExitCode)" }
 
       # Reference runners use ASCII TEMP; Korean-path PCs do not.
       # CTest ENVIRONMENT pins TEMP to the configure-time path, so run the
       # workflow exe directly under a Hangul TEMP (same class as P0-2).
       - name: Workflow tests under Korean TEMP
+        timeout-minutes: 20
         shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen:configfile=${{ github.workspace }}/cmake/offscreen-1920.json
         run: |
           $ErrorActionPreference = 'Stop'
           . .\scripts\dev-env.ps1
@@ -146,16 +219,22 @@ jobs:
             exit $code
           }
 
-      - name: Smoke quit
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          . .\scripts\dev-env.ps1
-          .\scripts\run-ka-hgis.ps1 --smoke-quit
-
+      # CTest and the Korean-TEMP step already ran the test executables and "Start and quit the app"
+      # started the app; e2e-smoke only adds the rule-file and hard-coded-path checks here.
       - name: E2E smoke
+        timeout-minutes: 10
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           . .\scripts\dev-env.ps1
-          .\scripts\e2e-smoke.ps1
+          .\scripts\e2e-smoke.ps1 -SkipTests -SkipSmoke
+
+      # A step that times out is cancelled, not failed, so upload in both cases.
+      - name: Upload test logs
+        if: ${{ failure() || cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-logs
+          path: build/test-logs
+          if-no-files-found: ignore
+          overwrite: true

@@ -79,7 +79,9 @@ ctest --test-dir build -C Release -R e2e_opaque_suite --output-on-failure
 
 ## 3. Discovered Implementation Defects (Escalated to Orchestrator / Developer)
 
-### Defect 1 (Critical): Unclosed `encoding.txt` File Handle Causes Corrupt Hash in `MANIFEST.sha256`
+> 상태(2026-09-29): 아래 두 항목은 이 문서를 쓸 때의 기록이다. Defect 1 은 **고쳐졌다** — `ExportService` 가 `encoding.txt` 를 `QSaveFile` 로 쓰고 `commit()` 한 뒤 MANIFEST 를 만든다. Defect 2 의 검사(`zoomToKorea_5186StaysInsideMercatorSatelliteQuad`)는 `workflow_engine` 에 그대로 있으며 현재 결과는 ctest 로그가 정본이다. 스위트 번호("Test #15")와 "18 passed" 는 그때의 숫자다.
+
+### Defect 1 (Resolved — was Critical): Unclosed `encoding.txt` File Handle Causes Corrupt Hash in `MANIFEST.sha256`
 - **Location**: `src/core/ExportService.cpp:123-127`
 - **Observation**:
   ```cpp

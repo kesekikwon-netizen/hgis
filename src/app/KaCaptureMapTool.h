@@ -3,7 +3,6 @@
 #include <qgsgeometry.h>
 #include <qgspointxy.h>
 #include <qgsmapmouseevent.h>
-#include <qgsfeatureid.h>
 #include <QVector>
 #include <QPointer>
 
@@ -11,7 +10,11 @@ class QgsRubberBand;
 class QgsVertexMarker;
 class QgsVectorLayer;
 class QgsMapCanvas;
+class QTimer;
 
+// Sketches one new shape at a time. Saved shapes are changed in 도형선택, never here,
+// so the first click always starts a new shape, even on top of an existing vertex
+// (neighbouring features may share that corner).
 class KaCaptureMapTool : public QgsMapTool {
   Q_OBJECT
 public:
@@ -29,6 +32,10 @@ public:
   bool undoLastVertex();
   Mode mode() const { return m_mode; }
   int pointCount() const { return m_points.size(); }
+  bool hasSketch() const { return !m_points.isEmpty(); }
+  // Set right before geometryCaptured when closing the polygon had to change the sketch
+  // (parts of a self-intersecting ring left out, near-zero area). Empty otherwise.
+  QString lastRepairNotice() const { return m_repairNotice; }
 
   Flags flags() const override;
   void canvasPressEvent(QgsMapMouseEvent* e) override;
@@ -39,11 +46,19 @@ public:
   void activate() override;
   void deactivate() override;
 
+public slots:
+  // On-screen buttons for pen and touch: the same as right-click/Enter and Esc.
+  void finishSketch();
+  void cancelSketch();
+
 signals:
   void geometryCaptured(const QgsGeometry& geom);
+  // Finishing did not produce a shape (too few points, unusable geometry).
   void captureCanceled();
-  void vertexMoved();
-  void vertexMoveFailed(const QString& message);
+  // Esc or 취소 threw away the points drawn so far.
+  void sketchCanceled();
+  // The number of sketch points changed (0 after finishing, canceling or leaving).
+  void sketchChanged(int pointCount);
 
 private:
   void finish();
@@ -52,13 +67,14 @@ private:
   void destroyRubber();
   void updateSnapMarker(const QgsPointXY& mapPt, bool snapped, bool isIntersection = false);
   void destroySnapMarker();
-  bool mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, bool* snapped = nullptr);
+  bool mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, bool* snapped = nullptr,
+                         bool* onVertex = nullptr);
   bool nearPoint(const QgsPointXY& a, const QgsPointXY& b) const;
   int indexOfSketchVertex(const QgsPointXY& pt) const;
-  bool hitSavedVertex(const QgsPointXY& mapPt, QgsFeatureId* fid, int* vertex);
-  void previewMovedVertex(const QgsPointXY& mapPt);
-  void finishVertexDrag(const QgsPointXY& mapPt);
-  void cancelVertexDrag();
+  void announceSketch();
+  void startDwell(const QgsPointXY& mapPt);
+  void stopDwell();
+  void addDwellPoint();
 
   Mode m_mode = Mode::Polygon;
   QPointer<QgsVectorLayer> m_layer;
@@ -68,8 +84,11 @@ private:
   bool m_finishing = false;
   bool m_snapEnabled = true;
   bool m_easyDraw = false;
-  bool m_draggingVertex = false;
-  QgsFeatureId m_dragFid = -1;
-  int m_dragVertex = -1;
+  int m_announcedCount = 0;
+  QString m_repairNotice;
+  // Easy draw adds a vertex snap on hover; an edge snap only after the pointer rests.
+  QTimer* m_dwell = nullptr;
+  QgsPointXY m_dwellPoint;
+  bool m_dwellValid = false;
   Qt::ContextMenuPolicy m_savedMenuPolicy = Qt::DefaultContextMenu;
 };

@@ -2,6 +2,8 @@
 #include "core/KaSessionLog.h"
 
 #include <QDir>
+#include <QFile>
+#include <QStringList>
 
 #include <atomic>
 #include <cstdio>
@@ -138,8 +140,7 @@ void writeMiniDump(const wchar_t* stem, EXCEPTION_POINTERS* ep) {
   mei.ThreadId = GetCurrentThreadId();
   mei.ExceptionPointers = ep;
   mei.ClientPointers = FALSE;
-  const auto type = static_cast<MINIDUMP_TYPE>(MiniDumpNormal | MiniDumpWithThreadInfo |
-                                               MiniDumpWithIndirectlyReferencedMemory);
+  const auto type = static_cast<MINIDUMP_TYPE>(KaCrashGuard::miniDumpTypeFlags());
   MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), h, type, ep ? &mei : nullptr,
                     nullptr, nullptr);
   CloseHandle(h);
@@ -238,6 +239,32 @@ void kaQtMessageHandler(QtMsgType type, const QMessageLogContext& ctx, const QSt
 
 QString KaCrashGuard::logDir() { return KaSessionLog::dir(); }
 
+unsigned long KaCrashGuard::miniDumpTypeFlags() {
+#ifdef Q_OS_WIN
+  return static_cast<unsigned long>(MiniDumpNormal | MiniDumpWithThreadInfo);
+#else
+  return 0;
+#endif
+}
+
+int KaCrashGuard::pruneCrashFiles(const QString& dir, int keepDumps, int keepLogs) {
+  if (dir.isEmpty()) return 0;
+  const QDir folder(dir);
+  if (!folder.exists()) return 0;
+  int removed = 0;
+  const auto prune = [&](const QString& pattern, int keep) {
+    // Name order is age order because the stem is crash-YYYYMMDD-HHMMSS.
+    QStringList names = folder.entryList({pattern}, QDir::Files, QDir::Name);
+    const int excess = static_cast<int>(names.size()) - qMax(0, keep);
+    for (int i = 0; i < excess; ++i) {
+      if (QFile::remove(folder.filePath(names.at(i)))) ++removed;
+    }
+  };
+  prune(QStringLiteral("crash-*.dmp"), keepDumps);
+  prune(QStringLiteral("crash-*.log"), keepLogs);
+  return removed;
+}
+
 QString KaCrashGuard::dumpHint() { return KaSessionLog::dumpHint(); }
 
 void KaCrashGuard::logLine(const QString& line) { KaSessionLog::line(line); }
@@ -254,4 +281,11 @@ void KaCrashGuard::install() {
 #endif
   g_prevQtHandler = qInstallMessageHandler(kaQtMessageHandler);
   logLine(QStringLiteral("[boot] 진단 장치 시작 — %1").arg(dumpHint()));
+  // Old dumps pile up on field laptops and may hold memory contents; keep only the newest.
+  const int pruned = pruneCrashFiles(logDirQ());
+  if (pruned > 0)
+    logLine(QStringLiteral("[boot] 오래된 충돌 파일 %1개 정리 (덤프 %2개·로그 %3개까지 보관)")
+                .arg(pruned)
+                .arg(kKeepCrashDumps)
+                .arg(kKeepCrashLogs));
 }

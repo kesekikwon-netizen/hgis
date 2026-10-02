@@ -1,0 +1,186 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Shape select: what a click can pick",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "win",
+      "label": "MainWindow"
+    },
+    {
+      "id": "tool",
+      "label": "KaFeatureSelectTool"
+    },
+    {
+      "id": "core",
+      "label": "core"
+    },
+    {
+      "id": "edit",
+      "label": "KaVertexEditTool"
+    }
+  ],
+  "phases": [
+    {
+      "id": "on",
+      "label": "Tool on",
+      "fromCol": 0,
+      "toCol": 0
+    },
+    {
+      "id": "pick",
+      "label": "Pick",
+      "fromCol": 1,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "take",
+      "label": "Take out",
+      "fromCol": 4,
+      "toCol": 5
+    }
+  ],
+  "mainPath": [
+    "key",
+    "select",
+    "candidates",
+    "piece",
+    "delete",
+    "replace"
+  ],
+  "nodes": [
+    {
+      "id": "key",
+      "lane": "win",
+      "col": 0,
+      "type": "external",
+      "label": "A / 선택 / click",
+      "sublabel": "KaFeatureSelectPick.cpp:91-128",
+      "width": 200
+    },
+    {
+      "id": "select",
+      "lane": "tool",
+      "col": 1,
+      "type": "frontend",
+      "label": "selectAtPoint",
+      "sublabel": "KaFeatureSelectPick.cpp:130-206",
+      "width": 200
+    },
+    {
+      "id": "layers",
+      "lane": "tool",
+      "col": 2,
+      "type": "frontend",
+      "label": "kaPickLayers (lifted + legend + canvas)",
+      "sublabel": "KaPickLayers.h:15-25",
+      "width": 230
+    },
+    {
+      "id": "candidates",
+      "lane": "core",
+      "col": 2,
+      "type": "backend",
+      "label": "FeaturePick::candidates",
+      "sublabel": "FeaturePick.cpp:64-151",
+      "width": 210
+    },
+    {
+      "id": "piece",
+      "lane": "core",
+      "col": 3,
+      "type": "backend",
+      "label": "innerPieceAt",
+      "sublabel": "PolygonPieces.cpp:47-69",
+      "width": 170
+    },
+    {
+      "id": "delete",
+      "lane": "tool",
+      "col": 4,
+      "type": "frontend",
+      "label": "deleteActivePick",
+      "sublabel": "KaFeatureSelectPick.cpp:63-87",
+      "width": 210
+    },
+    {
+      "id": "replace",
+      "lane": "edit",
+      "col": 5,
+      "type": "backend",
+      "label": "replaceGeometry",
+      "sublabel": "KaVertexEditTool.cpp:392-416",
+      "width": 200
+    }
+  ],
+  "edges": [
+    {
+      "from": "key",
+      "to": "select",
+      "label": "startSelectTool; release"
+    },
+    {
+      "from": "select",
+      "to": "layers",
+      "label": "which layers a click reaches"
+    },
+    {
+      "from": "select",
+      "to": "candidates",
+      "label": "ranked hits; same spot again = next",
+      "variant": "emphasis"
+    },
+    {
+      "from": "candidates",
+      "to": "piece",
+      "label": "polygon or hole under cursor (also edit-buffer shapes)",
+      "variant": "emphasis"
+    },
+    {
+      "from": "piece",
+      "to": "delete",
+      "label": "setActivePiece; Delete"
+    },
+    {
+      "from": "delete",
+      "to": "replace",
+      "label": "withoutPiece / withPieceCutOut"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Was",
+      "items": [
+        "Only QgsMapCanvas::layers(): lifted layers unpickable",
+        "fid >= 0 checks dropped unsaved shapes",
+        "A hole or inner part could not be picked",
+        "Edited shapes were skipped when the click fell in their hole"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Now",
+      "items": [
+        "Pick order lives in core/FeaturePick (one path)",
+        "Edit-buffer shapes are fetched by bounding box too",
+        "FID_NULL is the only 'none' id",
+        "Inner piece is a hit of its own; Delete takes it out",
+        "Key A turns 도형선택 on, never off"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Keep",
+      "items": [
+        "One undo step through runEditCommand",
+        "Reference/cadastral: picked only where no survey shape lies, no handles",
+        "Nothing is written before 저장"
+      ]
+    }
+  ]
+}

@@ -104,7 +104,6 @@ bool MainWindow::runErasePlan(const PolygonErase::Plan& plan) {
   if (m_layerTree && firstLayer) m_layerTree->setCurrentLayer(firstLayer);
   if (m_featureSelectTool) m_featureSelectTool->refreshSelectedGeometry();
   if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
-  refreshWorkPanel();
   updateUndoRedoActions();
 
   QString text = QStringLiteral("「%1」 도형 %2개에서 겹친 자리를 지웠습니다.").arg(layerName).arg(outcome.erased);

@@ -16,7 +16,13 @@
 #include <QWebEngineView>
 #include <cpl_conv.h>
 
+#include <QDir>
+#include <QFileInfo>
+#include <QLabel>
+#include <QTabWidget>
+
 #include "app/KaHeritageBrowser.h"
+#include "core/HeritageRecentDownloads.h"
 #include "core/KaPortableRuntime.h"
 #include "core/TopographicArchive.h"
 
@@ -149,7 +155,9 @@ private slots:
         "<select id='codeCdSg0' name='codeCdSg'><option value='4711'>포항시</option></select>"
         "<button type='button' onclick=\"location.href='/archive.zip?attempt='+Date.now()\">전체다운로드</button>"
         "</form></div>"), QUrl(QStringLiteral("http://127.0.0.1:%1/fixture").arg(server.serverPort())));
-    QVERIFY(loaded.wait(10000));
+    // The first row starts the WebEngine render process. Under parallel ctest that cold
+    // start alone can pass 10 s, so wait on the recorded signal with a wider margin.
+    QTRY_VERIFY_WITH_TIMEOUT(!loaded.isEmpty(), 30000);
     browser.m_pageReady = true;
     browser.m_settle = 0;
     QSignalSpy failed(&browser, &KaHeritageBrowser::failed);
@@ -214,6 +222,127 @@ private slots:
     QCOMPARE(browser.stage(), HeritageStage::Idle);
     QVERIFY(browser.m_downloadMode.isEmpty());
     QCOMPARE(browser.m_datasetIndex, 0);
+  }
+
+  // F120 + F174: ticked neighbours run one 시·군 after another; with 「최근 받은 자료 다시
+  // 쓰기」 chosen, recorded downloads are loaded without contacting the site.
+  void followUpCitiesRunOneAfterAnother() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString rootA = QDir::cleanPath(temp.filePath(QStringLiteral("주변유적/경상북도 안동시/원본")));
+    const HeritageCity yecheon{QStringLiteral("경상북도"), QStringLiteral("예천군")};
+    const QString rootB = HeritageFetchPlanning::siblingRoot(rootA, yecheon);
+    auto writeZip = [](const QString& path) {
+      QDir().mkpath(QFileInfo(path).absolutePath());
+      QFile f(path);
+      return f.open(QIODevice::WriteOnly) && f.write("PK-fixture") == 10;
+    };
+    const QString zipA = QDir(rootA).filePath(QStringLiteral("a/지정유산.zip"));
+    const QString zipB = QDir(rootB).filePath(QStringLiteral("b/지정유산.zip"));
+    QVERIFY(writeZip(zipA));
+    QVERIFY(writeZip(zipB));
+    QVERIFY(HeritageRecentDownloads::record(rootA, HeritageDataset::DesignatedHeritage, {zipA}));
+    QVERIFY(HeritageRecentDownloads::record(rootB, HeritageDataset::DesignatedHeritage, {zipB}));
+
+    KaHeritageBrowser browser;
+    restrictRequests(browser);
+    browser.setDownloadRoot(rootA);
+    browser.setTarget(QStringLiteral("경상북도"), QStringLiteral("안동시"),
+                      {HeritageDataset::DesignatedHeritage});
+    browser.setFetchPlan({{yecheon}, true});
+    QStringList labels;
+    QList<QStringList> received;
+    connect(&browser, &KaHeritageBrowser::datasetReady, &browser,
+            [&](HeritageDataset, const QStringList& files) {
+              labels << browser.regionLabelForImport();
+              received << files;
+            });
+    QSignalSpy done(&browser, &KaHeritageBrowser::allFinished);
+    QSignalSpy failed(&browser, &KaHeritageBrowser::failed);
+    browser.start();
+    QTRY_COMPARE_WITH_TIMEOUT(done.count(), 1, 5000);
+    QCOMPARE(failed.count(), 0);
+    QCOMPARE(labels, (QStringList{QStringLiteral("안동시"), QStringLiteral("예천군")}));
+    QCOMPARE(received.size(), 2);
+    QCOMPARE(received.at(0), QStringList{QFileInfo(zipA).absoluteFilePath()});
+    QCOMPARE(received.at(1), QStringList{QFileInfo(zipB).absoluteFilePath()});
+    QCOMPARE(browser.stage(), HeritageStage::Done);
+    QCOMPARE(browser.m_downloadRoot, rootB);
+    // No page was opened: nothing was sent to the intranet.
+    QCOMPARE(browser.m_tabs->count(), 0);
+    // A single-city run keeps the old layer names.
+    browser.setTarget(QStringLiteral("경상북도"), QStringLiteral("안동시"),
+                      {HeritageDataset::DesignatedHeritage});
+    QVERIFY(browser.regionLabelForImport().isEmpty());
+  }
+
+  void rejectedRecentCopyIsFetchedAgain() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString root = temp.filePath(QStringLiteral("원본"));
+    const QString zip = QDir(root).filePath(QStringLiteral("a/지정유산.zip"));
+    QDir().mkpath(QFileInfo(zip).absolutePath());
+    QFile f(zip);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write("broken");
+    f.close();
+    QVERIFY(HeritageRecentDownloads::record(root, HeritageDataset::DesignatedHeritage, {zip}));
+    KaHeritageBrowser browser;
+    restrictRequests(browser);
+    browser.setDownloadRoot(root);
+    browser.setTarget(QStringLiteral("경상북도"), QStringLiteral("안동시"),
+                      {HeritageDataset::DesignatedHeritage, HeritageDataset::SurfaceSurveyArea});
+    connect(&browser, &KaHeritageBrowser::datasetReady, &browser,
+            [&](HeritageDataset, const QStringList&) {
+              browser.rejectDataset(QStringLiteral("손상된 ZIP"), true);
+            });
+    QVERIFY(!browser.reuseRecentDatasets());
+    QCOMPARE(browser.m_datasets.size(), 2);
+    QVERIFY(!browser.m_reuseProbe);
+    QVERIFY(browser.stage() != HeritageStage::Failed);
+  }
+
+  void longRetryKeepsGoingAndSaysSo() {
+    KaHeritageBrowser browser;
+    restrictRequests(browser);
+    // F174 hygiene: the intranet login session is never written to disk.
+    QCOMPARE(browser.m_profile->persistentCookiesPolicy(), QWebEngineProfile::NoPersistentCookies);
+    browser.setTarget(QStringLiteral("경상북도"), QStringLiteral("포항시"),
+                      {HeritageDataset::DesignatedHeritage});
+    browser.m_running = true;
+    browser.m_stage = HeritageStage::Download;
+    auto* notice = browser.findChild<QLabel*>(QStringLiteral("heritageNotice"));
+    QVERIFY(notice);
+    for (int i = 1; i <= 3; ++i) {
+      browser.m_downloadRetryReason.clear();
+      browser.rejectDataset(QStringLiteral("손상된 ZIP"), true);
+      QCOMPARE(browser.m_downloadRetryCount, quint64(i));
+      QCOMPARE(notice->isHidden(), i < 3);
+    }
+    QVERIFY(notice->text().contains(QStringLiteral("3번째")));
+    QVERIFY(notice->text().contains(QStringLiteral("취소")));
+    QVERIFY(browser.stage() != HeritageStage::Failed);
+    browser.stop();
+  }
+
+  void failureDoesNotSilentlySkipToTheNextCity() {
+    KaHeritageBrowser browser;
+    restrictRequests(browser);
+    browser.setTarget(QStringLiteral("경상북도"), QStringLiteral("안동시"),
+                      {HeritageDataset::DesignatedHeritage});
+    browser.setFetchPlan({{{QStringLiteral("경상북도"), QStringLiteral("예천군")}}, false});
+    QCOMPARE(browser.regionLabelForImport(), QStringLiteral("안동시"));
+    browser.m_running = true;
+    browser.m_stage = HeritageStage::Download;
+    QSignalSpy done(&browser, &KaHeritageBrowser::allFinished);
+    browser.rejectDataset(QStringLiteral("저장 공간 부족"), false);
+    QCOMPARE(browser.stage(), HeritageStage::Failed);
+    QVERIFY(browser.m_followUps.isEmpty());
+    QVERIFY(!browser.m_pendingNext);
+    auto* notice = browser.findChild<QLabel*>(QStringLiteral("heritageNotice"));
+    QVERIFY(notice && notice->text().contains(QStringLiteral("예천군")));
+    QTest::qWait(20);
+    QCOMPARE(done.count(), 0);
   }
 
   void storageFailureDoesNotRetry() {

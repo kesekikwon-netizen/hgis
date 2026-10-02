@@ -1,8 +1,10 @@
 #include "KaSessionLog.h"
+#include "KaLogExcept.h"
 #include "MeasureOps.h"
 
 #include <cmath>
 #include <exception>
+#include <limits>
 
 #include <qgis.h>
 #include <qgscoordinatereferencesystem.h>
@@ -10,6 +12,7 @@
 #include <qgsdistancearea.h>
 #include <qgsgeometry.h>
 #include <qgspointxy.h>
+#include <qgsproject.h>
 
 namespace {
 
@@ -56,6 +59,28 @@ QgsGeometry polygonGeom(const QVector<QgsPointXY>& pts) {
 
 namespace MeasureOps {
 
+bool pinPlanarEllipsoid(QgsProject* project) {
+  if (!project) return false;
+  const QString stored =
+      project->readEntry(QStringLiteral("Measure"), QStringLiteral("/Ellipsoid"), Qgis::geoNone());
+  if (stored == Qgis::geoNone() && project->ellipsoid() == Qgis::geoNone()) return false;
+  const bool wasDirty = project->isDirty();
+  project->setEllipsoid(Qgis::geoNone());
+  if (!wasDirty) project->setDirty(false);
+  return true;
+}
+
+double gridBearingDegrees(const QgsPointXY& from, const QgsPointXY& to) {
+  const double dx = to.x() - from.x();
+  const double dy = to.y() - from.y();
+  if (std::abs(dx) < 1e-12 && std::abs(dy) < 1e-12)
+    return std::numeric_limits<double>::quiet_NaN();
+  double deg = std::atan2(dx, dy) * 180.0 / 3.14159265358979323846;
+  if (deg < 0.0) deg += 360.0;
+  if (deg >= 360.0) deg -= 360.0;
+  return deg;
+}
+
 double lineLengthMeters(const QVector<QgsPointXY>& pts,
                         const QgsCoordinateReferenceSystem& crs,
                         const QgsCoordinateTransformContext& ctx) {
@@ -71,7 +96,7 @@ double lineLengthMeters(const QVector<QgsPointXY>& pts,
       return v;
   } catch (const std::exception&) {
   } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/MeasureOps.cpp:72"));
+    KA_LOG_EXCEPT();
   }
   return fallbackLength(pts);
 }
@@ -116,7 +141,7 @@ double polygonPerimeterMeters(const QVector<QgsPointXY>& pts,
       return v;
   } catch (const std::exception&) {
   } catch (...) {
-    KaSessionLog::line(QStringLiteral("[except] core/MeasureOps.cpp:110"));
+    KA_LOG_EXCEPT();
   }
   return lineLengthMeters(pts, crs, ctx);
 }
@@ -143,6 +168,21 @@ QString formatLengthM(double meters) {
   if (meters >= 10.0)
     return QStringLiteral("%1 m").arg(meters, 0, 'f', 2);
   return QStringLiteral("%1 m").arg(meters, 0, 'f', 3);
+}
+
+QString formatBearing(double degrees) {
+  if (!std::isfinite(degrees))
+    return QStringLiteral("—");
+  long long total = std::llround(degrees * 3600.0);
+  total %= 360LL * 3600LL;
+  if (total < 0) total += 360LL * 3600LL;
+  const long long d = total / 3600;
+  const long long m = (total % 3600) / 60;
+  const long long sec = total % 60;
+  return QStringLiteral("%1°%2′%3″")
+      .arg(d)
+      .arg(m, 2, 10, QLatin1Char('0'))
+      .arg(sec, 2, 10, QLatin1Char('0'));
 }
 
 QString formatAreaM2(double squareMeters) {

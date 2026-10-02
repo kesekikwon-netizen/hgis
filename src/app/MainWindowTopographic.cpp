@@ -112,5 +112,9 @@ void MainWindow::showTopographicFiles(const QString& folder) {
   showMapWorkspace();
   QSettings().setValue(QStringLiteral("topographic/folder"), QDir(folder).absolutePath());
   if (!m_topographicImport) m_topographicImport = new KaTopographicImportDialog(m_canvas, this);
+  // Manually added sheets merge into the survey's topographic folder as well.
+  if (!m_surveyPath.isEmpty() && QFileInfo::exists(m_surveyPath))
+    m_topographicImport->setMergeDirectory(
+        QFileInfo(m_surveyPath).absoluteDir().filePath(QStringLiteral("지형도/합침")));
   m_topographicImport->scanFolder(folder);
 }

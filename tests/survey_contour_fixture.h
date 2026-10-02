@@ -94,6 +94,48 @@ inline QString writeSurveyDxf(const QString& path) {
   return {};
 }
 
+inline bool writeSurveyText(const QString& path, const QByteArray& text) {
+  QFile file(path);
+  if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+  return file.write(text) == text.size();
+}
+
+// Three elevated points on CAD layer "PT", one 3D polyline on "BRK", one flat polyline on "OUTLINE".
+inline QString writeSurveyDxfWithLines(const QString& path) {
+  GDALAllRegister();
+  CPLErrorReset();
+  GDALDriver* driver = GetGDALDriverManager()->GetDriverByName("DXF");
+  if (!driver) return surveyGdalError(QStringLiteral("DXF 드라이버 없음"));
+  GDALDataset* dataset = driver->Create(path.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr);
+  if (!dataset) return surveyGdalError(QStringLiteral("DXF 생성 실패"));
+  OGRLayer* layer = dataset->CreateLayer("entities", nullptr, wkbUnknown, nullptr);
+  if (layer && layer->GetLayerDefn()->GetFieldIndex("Layer") < 0) {
+    OGRFieldDefn field("Layer", OFTString);
+    layer->CreateField(&field);
+  }
+  auto add = [layer](const char* cad, OGRGeometry* geometry) {
+    OGRFeature* feature = OGRFeature::CreateFeature(layer->GetLayerDefn());
+    feature->SetGeometry(geometry);
+    feature->SetField("Layer", cad);
+    const OGRErr err = layer->CreateFeature(feature);
+    OGRFeature::DestroyFeature(feature);
+    return err == OGRERR_NONE;
+  };
+  bool ok = layer != nullptr;
+  OGRPoint a(0, 0, 10.0), b(20, 0, 10.5), c(10, 20, 11.0);
+  ok = ok && add("PT", &a) && add("PT", &b) && add("PT", &c);
+  OGRLineString ridge;
+  ridge.addPoint(2, 5, 12.0);
+  ridge.addPoint(18, 5, 12.5);
+  OGRLineString outline;
+  outline.addPoint(0, 0);
+  outline.addPoint(20, 0);
+  outline.addPoint(10, 20);
+  ok = ok && add("BRK", &ridge) && add("OUTLINE", &outline);
+  GDALClose(dataset);
+  return ok ? QString() : surveyGdalError(QStringLiteral("DXF 도형 기록 실패"));
+}
+
 inline QVector<SurveyPoint> surveyGrid(int xCount, int yCount, double step, double zAt) {
   QVector<SurveyPoint> points;
   for (int ix = 0; ix < xCount; ++ix) {

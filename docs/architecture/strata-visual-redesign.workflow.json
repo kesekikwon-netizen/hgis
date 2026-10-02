@@ -1,0 +1,256 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Strata visual redesign: P6 wiring (MainWindowChrome.cpp)",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "home",
+      "label": "Home (SurveyFacts → KaStartPage)"
+    },
+    {
+      "id": "panels",
+      "label": "Inspector / feature card"
+    },
+    {
+      "id": "window",
+      "label": "MainWindow (MainWindowChrome.cpp)"
+    },
+    {
+      "id": "chrome",
+      "label": "Guide band / badge / status chips"
+    },
+    {
+      "id": "split",
+      "label": "KaShellFocus (3 panes)"
+    }
+  ],
+  "phases": [
+    {
+      "id": "build",
+      "label": "buildUi: setupStrataShell",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "feed",
+      "label": "Values flow in",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "keep",
+      "label": "Save → home",
+      "fromCol": 4,
+      "toCol": 5
+    }
+  ],
+  "mainPath": [
+    "setup",
+    "inspector",
+    "card",
+    "title",
+    "sync",
+    "chips"
+  ],
+  "nodes": [
+    {
+      "id": "setup",
+      "lane": "window",
+      "col": 0,
+      "type": "backend",
+      "label": "shell setup",
+      "sublabel": "setupStrataShell :1056"
+    },
+    {
+      "id": "inspector",
+      "lane": "panels",
+      "col": 0,
+      "type": "frontend",
+      "label": "inspector",
+      "sublabel": "pane 2 + basemap card"
+    },
+    {
+      "id": "card",
+      "lane": "panels",
+      "col": 1,
+      "type": "frontend",
+      "label": "feature card",
+      "sublabel": "setupFeatureCard"
+    },
+    {
+      "id": "sketch",
+      "lane": "window",
+      "col": 1,
+      "type": "backend",
+      "label": "tool chip",
+      "sublabel": "updateToolChip"
+    },
+    {
+      "id": "band",
+      "lane": "chrome",
+      "col": 1,
+      "type": "frontend",
+      "label": "guide band",
+      "sublabel": "setTool → rail inset"
+    },
+    {
+      "id": "title",
+      "lane": "window",
+      "col": 2,
+      "type": "backend",
+      "label": "title refresh",
+      "sublabel": "Session.cpp:1340"
+    },
+    {
+      "id": "sync",
+      "lane": "window",
+      "col": 3,
+      "type": "backend",
+      "label": "sync chips",
+      "sublabel": "300 ms QTimer"
+    },
+    {
+      "id": "chips",
+      "lane": "chrome",
+      "col": 3,
+      "type": "frontend",
+      "label": "badge · chips",
+      "sublabel": "unsaved n · save dot"
+    },
+    {
+      "id": "save",
+      "lane": "window",
+      "col": 4,
+      "type": "backend",
+      "label": "record facts",
+      "sublabel": "Session.cpp:966"
+    },
+    {
+      "id": "facts",
+      "lane": "home",
+      "col": 5,
+      "type": "database",
+      "label": "SurveyFacts",
+      "sublabel": "rememberCounts → dots"
+    },
+    {
+      "id": "restore",
+      "lane": "split",
+      "col": 0,
+      "type": "backend",
+      "label": "restore/show",
+      "sublabel": "panes==3 else ratio"
+    },
+    {
+      "id": "sizes",
+      "lane": "split",
+      "col": 1,
+      "type": "backend",
+      "label": "sizesWithLeft",
+      "sublabel": "cap 260 · keep 272"
+    },
+    {
+      "id": "fold",
+      "lane": "split",
+      "col": 2,
+      "type": "frontend",
+      "label": "F10 fold",
+      "sublabel": "toggleRightPanel"
+    }
+  ],
+  "edges": [
+    {
+      "from": "setup",
+      "to": "inspector",
+      "label": "addWidget",
+      "variant": "emphasis"
+    },
+    {
+      "from": "inspector",
+      "to": "card",
+      "label": "setFeatureCard",
+      "variant": "emphasis"
+    },
+    {
+      "from": "setup",
+      "to": "sketch",
+      "label": "m_drawGuide"
+    },
+    {
+      "from": "sketch",
+      "to": "band",
+      "label": "tool id + hint"
+    },
+    {
+      "from": "card",
+      "to": "title",
+      "label": "edited → dirty",
+      "variant": "emphasis"
+    },
+    {
+      "from": "title",
+      "to": "sync",
+      "variant": "emphasis"
+    },
+    {
+      "from": "sync",
+      "to": "chips",
+      "label": "setSurvey · setUnsavedCount",
+      "variant": "emphasis"
+    },
+    {
+      "from": "sync",
+      "to": "save",
+      "label": "Ctrl+S save ok",
+      "variant": "dashed"
+    },
+    {
+      "from": "save",
+      "to": "facts",
+      "label": "featureCount sum"
+    },
+    {
+      "from": "restore",
+      "to": "sizes",
+      "label": "setSizes x3"
+    },
+    {
+      "from": "sizes",
+      "to": "fold",
+      "label": "foldInto"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Was",
+      "items": [
+        "Feature card hidden in the layer panel",
+        "Badge, chips, band built (P5) but fed nothing"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Now",
+      "items": [
+        "Inspector = pane 2, card inside, F10 folds",
+        "Chips/badge/save dot from refreshWindowTitle",
+        "Home dots from save; 「설정」 → openAccountSetup → rows re-read next turn",
+        "Draw lock commits the typed value first; 2-pane saved layout is not restored"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Keep",
+      "items": [
+        "MainWindow.cpp +1 line net",
+        "Basemap card asks the window, adds no layer",
+        "removeAllMapLayers never called"
+      ]
+    }
+  ]
+}

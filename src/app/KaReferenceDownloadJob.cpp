@@ -1,4 +1,5 @@
 #include "KaCrashGuard.h"
+#include "core/KaLogExcept.h"
 #include "KaReferenceDownloadJob.h"
 #include <QTimer>
 #include <qgsfeedback.h>
@@ -32,7 +33,7 @@ bool KaReferenceDownloadJob::run() {
   try {
     m_result = m_prepare(&feedback, [this]() { return isCanceled(); });
   } catch (...) {
-    KaCrashGuard::logLine(QStringLiteral("[except] app/KaReferenceDownloadJob.cpp:33"));
+    KA_LOG_EXCEPT();
     // QgsException does not derive from std::exception. No SDK exception may
     // escape this worker boundary and terminate the process.
     m_result.error = QStringLiteral("지도 자료를 준비하다 오류가 발생했습니다. "

@@ -36,12 +36,30 @@ struct PreparedReferenceMap {
 using ReferenceDownload = std::function<bool(
     const QNetworkRequest&, QByteArray*, QString*, QgsFeedback*)>;
 
+// idleMs: abort when no byte arrives for this long; every received chunk restarts it.
+// totalMs: absolute cap, which also bounds a server trickling a few bytes forever.
+struct ReferenceTransferLimits {
+  int idleMs = 15000;
+  int totalMs = 15000;
+};
+
+// Why a transfer failed, so a caller can split a slow piece or retry a dropped one.
+enum class ReferenceTransferFailure { None, Cancelled, Timeout, Network };
+
 namespace ReferenceMapPreparation {
+// Large WFS/WMS payloads on field LTE: a transfer that keeps progressing may take
+// up to three minutes, while a silent connection still fails after 15 seconds.
+inline constexpr ReferenceTransferLimits kLargeTransfer{15000, 180000};
 bool initializeStorage(PreparedReferenceMap& result, const QString& requestedBasePath);
 bool cancelled(PreparedReferenceMap& result, QgsFeedback* feedback);
+// Compatibility form: one value is both the idle and the absolute limit.
 bool download(QNetworkRequest request, QByteArray* body, QString* error,
               QgsFeedback* feedback, const ReferenceDownload& overrideDownload = {},
               int timeoutMs = 15000);
+bool download(QNetworkRequest request, QByteArray* body, QString* error,
+              QgsFeedback* feedback, const ReferenceDownload& overrideDownload,
+              const ReferenceTransferLimits& limits,
+              ReferenceTransferFailure* failure = nullptr);
 bool writeResponse(const QString& path, const QByteArray& body, QString* error);
 bool validateFeatureCollection(const QByteArray& body, QString* error);
 bool validateCompleteFeatureCollection(const QByteArray& body, QString* error);

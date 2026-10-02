@@ -24,6 +24,7 @@
 #include <QSet>
 #include <QSignalSpy>
 #include <QStatusBar>
+#include <QStyle>
 #include <QTabWidget>
 #include <QToolBar>
 #include <QToolButton>
@@ -32,16 +33,17 @@
 #include "core/AddressQuery.h"
 #include "app/KaBeginnerRibbon.h"
 #include "app/KaIcons.h"
+#include "app/KaIconsMockup.h"
 #include "app/KaTheme.h"
+#include "ribbon_label_ink.h"
 
 class TestTheme : public QObject {
   Q_OBJECT
 private slots:
   void initTestCase();
   void ribbonButtons_renderAtIntendedSize();
-  void ribbonOverflow_preservesControlsAndKeyboard();
-  void ribbonOverflow_keepsAlignAtFieldWidth();
-  void ribbonKeepPriorityKeepsExportAndOriginalOrder();
+  void ribbonNarrow_keepsControlsAndKeyboard();
+  void ribbonNarrow_keepsAlignVisible();
   void ribbon_tabEnterNewSurveyToSave();
   void domainIcons_useDistinctColors();
   void iconStates_preserveMeaningAndDisableColor();
@@ -60,6 +62,9 @@ private slots:
   void gisExcludePresent();
   void requiredSelectorsPresent();
   void toolbarCheckedHasDistinctTreatment();
+  void ribbonChip_hoverShowsTileFillOnly();
+  void ribbonChip_unsavedLabelTurnsBold();
+  void subToolbar_usesTileIconsAndRibbonLabelSize();
   void primaryToolbarIconsRemainReadable();
   void noCheapSpinArrowBlock();
   void fieldChevrons_drawnWithoutWinBevel();
@@ -155,6 +160,14 @@ const char* const themedIconIds[] = {
     "check", "pdf", "export", "more", "old_map", "old_topo", "topo_download", "geotiff",
     "web", "heritage", "export_convert",
 };
+
+// The tile checks below pin the legacy style for their run; the default is Outline (P2) and
+// KaIcons keys its cache by style, so the two never mix.
+struct TileStyleScope {
+  KaIcons::GlyphStyle previous = KaIcons::glyphStyle();
+  TileStyleScope() { KaIcons::setGlyphStyle(KaIcons::GlyphStyle::Tile); }
+  ~TileStyleScope() { KaIcons::setGlyphStyle(previous); }
+};
 }
 
 void TestTheme::ribbon_tabEnterNewSurveyToSave() {
@@ -208,7 +221,7 @@ void TestTheme::ribbon_tabEnterNewSurveyToSave() {
   QTRY_COMPARE(saveSpy.count(), 1);
 }
 
-void TestTheme::ribbonOverflow_preservesControlsAndKeyboard() {
+void TestTheme::ribbonNarrow_keepsControlsAndKeyboard() {
   KaBeginnerRibbon ribbon;
   ribbon.addGroup(QStringLiteral("survey"), QStringLiteral("조사파일"));
   ribbon.addGroup(QStringLiteral("record"), QStringLiteral("기록"));
@@ -218,43 +231,37 @@ void TestTheme::ribbonOverflow_preservesControlsAndKeyboard() {
   draw->setText(QStringLiteral("그리기"));
   draw->setCheckable(true);
   ribbon.addWidget(QStringLiteral("record"), draw);
+  ribbon.applyTabOrder();
   QPointer<QToolButton> retainedDraw(draw);
   QSignalSpy activated(draw, &QToolButton::clicked);
   ribbon.resize(700, ribbon.sizeHint().height());
   ribbon.show();
-  QCoreApplication::processEvents();
-  auto* overflow = ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
-  QVERIFY(overflow);
-  QVERIFY(!overflow->isVisible());
-  ribbon.resize(80, ribbon.height());
-  QTRY_VERIFY(overflow->isVisible());
-  QVERIFY(overflow->width() >= overflow->fontMetrics().horizontalAdvance(overflow->text()));
-  auto* menu = ribbon.findChild<QMenu*>(QStringLiteral("ribbonOverflowMenu"));
-  auto* record = ribbon.findChild<QMenu*>(QStringLiteral("ribbonOverflowGroup_record"));
-  QVERIFY(menu && record && record->menuAction()->isVisible());
-  menu->popup(overflow->mapToGlobal(QPoint(0, overflow->height())));
-  menu->setActiveAction(record->menuAction());
-  QTest::keyClick(menu, Qt::Key_Right);
-  QTRY_VERIFY(record->isVisible());
-  QTRY_VERIFY(draw->isVisible());
-  draw->setFocus();
-  QTest::keyClick(draw, Qt::Key_Space);
-  QCOMPARE(activated.count(), 1);
-  QVERIFY(draw->isChecked());
-  menu->close();
+  QVERIFY(QTest::qWaitForWindowExposed(&ribbon));
+  QVERIFY(!ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow")));
   for (int i = 0; i < 3; ++i) {
-    ribbon.resize(700, ribbon.height());
-    QTRY_VERIFY(!overflow->isVisible());
+    // As narrow as the ribbon gets: the labels hide and the icons shrink, but every button stays on it.
+    ribbon.resize(ribbon.minimumSizeHint().width(), ribbon.height());
+    QTRY_VERIFY(!ribbon.look().labels);
+    QVERIFY(ribbon.look().tile <= 24);  // two small groups: their names are as wide as the 24 px and 20 px chips
+    QVERIFY(open->isVisible() && draw->isVisible());
     QVERIFY(retainedDraw && retainedDraw == draw);
     QCOMPARE(open->defaultAction(), survey);
-    QVERIFY(draw->isVisible());
-    QCOMPARE(draw->font().pixelSize(), 12);
-    ribbon.resize(80, ribbon.height());
-    QTRY_VERIFY(overflow->isVisible());
+    // Keyboard: Tab goes from one button to the next, Space presses the checkable one.
+    open->setFocus(Qt::TabFocusReason);
+    QCOMPARE(QApplication::focusWidget(), static_cast<QWidget*>(open));
+    QTest::keyClick(open, Qt::Key_Tab);
+    QCOMPARE(QApplication::focusWidget(), static_cast<QWidget*>(draw));
+    const bool checked = draw->isChecked();
+    QTest::keyClick(draw, Qt::Key_Space);
+    QCOMPARE(activated.count(), i + 1);
+    QCOMPARE(draw->isChecked(), !checked);
+    ribbon.resize(700, ribbon.height());
+    QTRY_VERIFY(ribbon.look().labels);
+    QCOMPARE(draw->font().pixelSize(), 13);
   }
 }
 
-void TestTheme::ribbonOverflow_keepsAlignAtFieldWidth() {
+void TestTheme::ribbonNarrow_keepsAlignVisible() {
   KaBeginnerRibbon ribbon;
   ribbon.setAttribute(Qt::WA_DontShowOnScreen);
   ribbon.addGroup(QStringLiteral("survey"), QStringLiteral("조사"));
@@ -264,9 +271,6 @@ void TestTheme::ribbonOverflow_keepsAlignAtFieldWidth() {
   ribbon.addGroup(QStringLiteral("align"), QStringLiteral("정합"));
   ribbon.addGroup(QStringLiteral("out"), QStringLiteral("내보내기"));
   ribbon.addGroup(QStringLiteral("more"), QStringLiteral("기타"));
-  ribbon.setKeepPriority({QStringLiteral("survey"), QStringLiteral("out"), QStringLiteral("record"),
-                          QStringLiteral("align"), QStringLiteral("fetch"), QStringLiteral("basemap"),
-                          QStringLiteral("more")});
   const struct { const char* group; const char* text; } chips[] = {
       {"survey", "신규"}, {"survey", "열기"}, {"survey", "저장"}, {"survey", "다른이름"},
       {"record", "선택"}, {"record", "측거"}, {"record", "그리기"}, {"record", "시굴격자"},
@@ -277,65 +281,53 @@ void TestTheme::ribbonOverflow_keepsAlignAtFieldWidth() {
       {"out", "도면"}, {"out", "인쇄"}, {"out", "단면"}, {"out", "GeoTIFF"}, {"out", "5179"},
       {"fetch", "웹"}, {"more", "더보기"},
   };
+  QPixmap picture(32, 32);
+  picture.fill(Qt::darkGray);
   for (const auto& chip : chips) {
     auto* button = new QToolButton(&ribbon);
     button->setText(QString::fromUtf8(chip.text));
-    if (QString::fromLatin1(chip.group) == QLatin1String("out") &&
-        QString::fromUtf8(chip.text) == QStringLiteral("도면"))
-      button->setObjectName(QStringLiteral("fieldOut_도면"));
+    button->setIcon(QIcon(picture));
+    button->setObjectName(QStringLiteral("field_") + QString::fromUtf8(chip.text));
     ribbon.addWidget(QString::fromLatin1(chip.group), button);
   }
   ribbon.resize(1280, ribbon.sizeHint().height());
   ribbon.show();
   QCoreApplication::processEvents();
-  auto* overflow = ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow"));
-  QVERIFY(overflow);
-  auto* out = ribbon.group(QStringLiteral("out"));
-  QVERIFY(out);
-  QVERIFY2(out->parentWidget() == &ribbon,
-           "내보내기 must stay on the ribbon at 1280, not inside 더 많은 작업");
-  auto* drawing = ribbon.findChild<QToolButton*>(QStringLiteral("fieldOut_도면"));
-  QVERIFY(drawing);
-  QVERIFY(drawing->isVisible());
+  QVERIFY(!ribbon.findChild<QToolButton*>(QStringLiteral("ribbonOverflow")));
+  auto* align = ribbon.findChild<QToolButton*>(QStringLiteral("field_정합"));
+  auto* drawing = ribbon.findChild<QToolButton*>(QStringLiteral("field_도면"));
+  QVERIFY(align && drawing);
   QCOMPARE(KaTheme::buttonMetrics().ribbonChipGap, 0);
-  QCOMPARE(KaTheme::buttonMetrics().ribbonChipWidth, 56);
-  QCOMPARE(KaTheme::buttonMetrics().ribbonMinWidth, 56);
-  QCOMPARE(KaTheme::buttonMetrics().ribbonFontSize, 12);
-  QVERIFY(drawing->width() >= KaTheme::buttonMetrics().ribbonChipWidth);
-  QVERIFY(drawing->height() >= KaTheme::buttonMetrics().ribbonHeight);
+  QCOMPARE(KaTheme::buttonMetrics().ribbonChipWidth, 40);
+  QCOMPARE(KaTheme::buttonMetrics().ribbonMinWidth, 40);
+  QCOMPARE(KaTheme::buttonMetrics().ribbonFontSize, 13);
+  // At the 1280 field width and at the narrowest the ribbon gets: every group and 「정합」 stay on it.
+  for (const int width : {1280, ribbon.minimumSizeHint().width()}) {
+    ribbon.resize(width, ribbon.height());
+    QCoreApplication::processEvents();
+    int lastX = -1;  // the groups keep the order they were added in, left to right
+    for (const QString& id : {QStringLiteral("survey"), QStringLiteral("record"), QStringLiteral("fetch"),
+                              QStringLiteral("basemap"), QStringLiteral("align"), QStringLiteral("out"),
+                              QStringLiteral("more")}) {
+      QFrame* group = ribbon.group(id);
+      QVERIFY2(group && group->parentWidget() == &ribbon && group->isVisible() && group->geometry().right() < ribbon.width() &&
+                   group->x() > lastX,
+               qPrintable(QStringLiteral("%1 at %2 px").arg(id).arg(width)));
+      lastX = group->x();
+    }
+    const QRect box(align->mapTo(&ribbon, QPoint()), align->size());
+    QVERIFY2(align->isVisible() && ribbon.rect().contains(box), qPrintable(QStringLiteral("정합 at %1 px").arg(width)));
+    QVERIFY(drawing->isVisible());
+    QVERIFY(drawing->width() >= drawing->iconSize().width() + 2);
+    QVERIFY(drawing->height() >= drawing->iconSize().height() + 12);
+  }
   ribbon.resize(2200, ribbon.height());
-  QTRY_VERIFY(ribbon.group(QStringLiteral("more"))->parentWidget() == &ribbon);
+  QCoreApplication::processEvents();
   QVERIFY(drawing->width() >= KaTheme::buttonMetrics().ribbonChipWidth);
   auto* more = ribbon.group(QStringLiteral("more"));
-  QVERIFY(more);
   const int packedRight = more->mapTo(&ribbon, QPoint(more->width(), 0)).x();
   QVERIFY2(ribbon.width() - packedRight >= 80,
            "leftover window width must stay empty on the right, not on chips");
-}
-
-void TestTheme::ribbonKeepPriorityKeepsExportAndOriginalOrder() {
-  KaBeginnerRibbon ribbon;
-  ribbon.setAttribute(Qt::WA_DontShowOnScreen);
-  for (const auto& id : {QStringLiteral("survey"), QStringLiteral("record"), QStringLiteral("basemap"),
-                         QStringLiteral("out")}) {
-    ribbon.addGroup(id, id);
-    for (int i = 0; i < 4; ++i) {
-      auto* button = new QToolButton(&ribbon);
-      button->setText(id);
-      ribbon.addWidget(id, button);
-    }
-  }
-  ribbon.setKeepPriority({QStringLiteral("survey"), QStringLiteral("out"), QStringLiteral("record"),
-                          QStringLiteral("basemap")});
-  ribbon.resize(640, ribbon.sizeHint().height());
-  ribbon.show();
-  QCoreApplication::processEvents();
-  QVERIFY(ribbon.group(QStringLiteral("survey"))->parentWidget() == &ribbon);
-  QVERIFY(ribbon.group(QStringLiteral("out"))->parentWidget() == &ribbon);
-  QVERIFY(ribbon.group(QStringLiteral("basemap"))->parentWidget() != &ribbon);
-  const int surveyX = ribbon.group(QStringLiteral("survey"))->x();
-  const int outX = ribbon.group(QStringLiteral("out"))->x();
-  QVERIFY2(surveyX < outX, "화면 순서는 우선순위가 아니라 원래 왼쪽에서 오른쪽이다");
 }
 
 void TestTheme::ribbonButtons_renderAtIntendedSize() {
@@ -355,7 +347,7 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
   struct ButtonSpec { const char* group; const char* icon; const char* text; bool custom; };
   const ButtonSpec specs[] = {
       {"survey", "new", "신규", false}, {"survey", "open", "열기", false},
-      {"survey", "save", "저장", false}, {"survey", "save_as", "다른이름", false},
+      {"survey", "save", "저장", false}, {"survey", "save_as", "다른 이름", false},
       {"record", "select", "선택", false},
       {"record", "measure", "측거", false}, {"record", "draw_poly", "그리기", true},
       {"record", "trench_grid", "시굴격자", false},
@@ -391,20 +383,48 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
     buttons.append(button);
   }
   toolbar.addWidget(ribbon);
-  toolbar.resize(qMax(1800, toolbar.sizeHint().width()), toolbar.sizeHint().height());
   toolbar.show();
   QCoreApplication::processEvents();
+  // The mockup's normal size (tile 32, labels shown): the ribbon takes the biggest size that fits,
+  // so give it exactly the width of that one.
+  int normal = -1;
+  const QList<RibbonLook> looks = KaBeginnerRibbon::looks();
+  for (int i = 0; i < looks.size(); ++i)
+    if (looks.at(i).tile == 32 && looks.at(i).labels) normal = i;
+  ribbon->setFixedWidth(ribbon->lookWidths().at(normal));
+  toolbar.resize(ribbon->width() + 40, toolbar.sizeHint().height());
+  QCoreApplication::processEvents();
+  QCOMPARE(ribbon->look().tile, 32);
+  QVERIFY(ribbon->look().labels);
 
-  const int commonWidth = buttons.front()->width();
+  // Group names: 11 px in the quiet group ink.
+  const auto captions = ribbon->findChildren<QLabel*>(QStringLiteral("ribbonGroupCaption"));
+  QCOMPARE(captions.size(), 6);
+  for (QLabel* caption : captions) {
+    QCOMPARE(caption->font().pixelSize(), 11);
+    QCOMPARE(caption->palette().color(QPalette::WindowText), KaTheme::tokens().ribbonGroupInk);
+  }
+
   const int commonHeight = buttons.front()->height();
-  QVERIFY(commonWidth >= KaTheme::buttonMetrics().ribbonChipWidth);
-  QVERIFY(commonHeight >= KaTheme::buttonMetrics().ribbonHeight);
+  // The chip follows its tile: tile + 6 px + the label line + 6 px.
+  QCOMPARE(commonHeight, 32 + 12 + QFontMetrics(buttons.front()->font()).height());
+  // Mockup chip: as wide as its label plus 8 px and never under 40 px, one height for all.
+  // Equal label widths give equal chip widths.
+  QHash<int, int> widthByLabel;
   for (int i = 0; i < buttons.size(); ++i) {
     QToolButton* button = buttons.at(i);
     QVERIFY(qobject_cast<QFrame*>(button->parentWidget()));
     QCOMPARE(button->iconSize(), QSize(32, 32));
-    QCOMPARE(button->font().pixelSize(), 12);
-    QCOMPARE(button->width(), commonWidth);
+    QCOMPARE(button->font().pixelSize(), 13);
+    QCOMPARE(button->palette().color(QPalette::ButtonText), KaTheme::tokens().ribbonLabelInk);
+    const int labelWidth = QFontMetrics(button->font()).horizontalAdvance(button->text());
+    QVERIFY(button->width() >= KaTheme::buttonMetrics().ribbonChipWidth);
+    QCOMPARE(button->width(), qMax(40, labelWidth + 8));
+    if (widthByLabel.contains(labelWidth))
+      QCOMPARE(button->width(), widthByLabel.value(labelWidth));
+    widthByLabel.insert(labelWidth, button->width());
+    if (button->text() == QStringLiteral("다른 이름"))
+      QCOMPARE(button->width(), labelWidth + 8);
     QCOMPARE(button->height(), commonHeight);
     QCOMPARE(button->toolButtonStyle(), Qt::ToolButtonTextUnderIcon);
     if (i > 0 && buttons.at(i - 1)->parentWidget() == button->parentWidget()) {
@@ -441,6 +461,36 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
                      << "button" << button->size() << "icon ink (physical px)" << ink.size()
                      << "DPR" << dpr;
   }
+  // The label hangs about 6 px under the tile (mockup) instead of floating mid-chip.
+  for (QToolButton* chip : {buttons.at(0), buttons.at(3)}) {
+    const QImage image = chip->grab().toImage();
+    const qreal dpr = image.devicePixelRatio();
+    const auto rowHas = [&](int y, auto&& match, int atLeast) {
+      int n = 0;
+      for (int x = 0; x < image.width(); ++x)
+        if (match(image.pixelColor(x, y))) ++n;
+      return n >= atLeast;
+    };
+    int tileBottom = -1;
+    for (int y = 0; y < image.height(); ++y)
+      if (rowHas(y, [](const QColor& c) { return closeColor(c, QColor(0xE4, 0xEA, 0xED)); }, 8)) tileBottom = y;
+    int inkTop = -1;
+    for (int y = tileBottom + 1; y < image.height() && inkTop < 0; ++y)
+      if (rowHas(y, [](const QColor& c) { return c.lightness() < 200; }, 1)) inkTop = y;
+    QVERIFY2(tileBottom > 0 && inkTop > tileBottom, qPrintable(chip->text() + QStringLiteral(": tile or label not found")));
+    const qreal gap = (inkTop - tileBottom - 1) / dpr;
+    QVERIFY2(gap >= 5 && gap <= 7,
+             qPrintable(chip->text() + QStringLiteral(": label ink starts %1 px under the tile").arg(gap)));
+    // The darkest label pixel is the mockup's label ink (strokes this thin may stop a little short of it).
+    QColor darkest(Qt::white);
+    for (int y = inkTop; y < image.height(); ++y)
+      for (int x = 0; x < image.width(); ++x)
+        if (image.pixelColor(x, y).lightness() < darkest.lightness()) darkest = image.pixelColor(x, y);
+    const QColor labelInk = KaTheme::tokens().ribbonLabelInk;
+    QVERIFY2(qAbs(darkest.red() - labelInk.red()) <= 16 && qAbs(darkest.green() - labelInk.green()) <= 16 &&
+                 qAbs(darkest.blue() - labelInk.blue()) <= 16,
+             qPrintable(chip->text() + QStringLiteral(": darkest label pixel ") + darkest.name()));
+  }
   QVERIFY2(!KaBeginnerRibbon::twoLine(QStringLiteral("조사 열기")).contains(QLatin1Char('\n')),
            "twoLine keeps spaced Korean on one line");
   QVERIFY2(KaBeginnerRibbon::twoLine(QStringLiteral("1919 조선지형도\n1:5만")) ==
@@ -462,6 +512,7 @@ void TestTheme::ribbonButtons_renderAtIntendedSize() {
 }
 
 void TestTheme::domainIcons_useDistinctColors() {
+  const TileStyleScope tile;
   const auto& palette = KaTheme::iconPalette();
   const struct { const char* id; QColor color; } groups[] = {
       {"new", palette.file}, {"draw_poly", palette.record}, {"dem", palette.map},
@@ -490,6 +541,7 @@ void TestTheme::domainIcons_useDistinctColors() {
 }
 
 void TestTheme::flatIcons_keepTransparentCornersAndHighDpi() {
+  const TileStyleScope tile;
   for (const char* id : {"new", "map", "layer", "gps", "georef", "pdf"}) {
     const auto icon = KaIcons::icon(QString::fromLatin1(id));
     const auto normal = icon.pixmap(QSize(64, 64), 1.0).toImage();
@@ -507,6 +559,7 @@ void TestTheme::flatIcons_keepTransparentCornersAndHighDpi() {
 
 // Everyday buttons sit on a pale tint so the map stays loudest; 저장·도면·인쇄 keep a solid tile.
 void TestTheme::primaryIcons_standOutFromLightTiles() {
+  const TileStyleScope tile;
   for (const char* id : {"save", "pdf", "print"}) {
     const QImage light = KaIcons::icon(QString::fromLatin1(id)).pixmap(QSize(64, 64), 1.0).toImage();
     const QImage strong = KaIcons::strongIcon(QString::fromLatin1(id)).pixmap(QSize(64, 64), 1.0).toImage();
@@ -551,6 +604,7 @@ void TestTheme::appIcon_usesNavyTileWithGoldTrowel() {
 }
 
 void TestTheme::iconStates_preserveMeaningAndDisableColor() {
+  const TileStyleScope tile;
   QWidget grid;
   grid.setAttribute(Qt::WA_DontShowOnScreen);
   auto* layout = new QGridLayout(&grid);
@@ -789,6 +843,10 @@ void TestTheme::strataPalette_matchesSpec() {
   QCOMPARE(tokens.inkMuted, QColor(0x5B, 0x68, 0x75));
   QCOMPARE(tokens.inkDisabled, QColor(0x59, 0x68, 0x74));
   QCOMPARE(tokens.border, QColor(0xDC, 0xE3, 0xEA));
+  // Ribbon inks of the mockup: chip labels, the chosen tool's label and the group names.
+  QCOMPARE(tokens.ribbonLabelInk, QColor(0x20, 0x28, 0x30));
+  QCOMPARE(tokens.ribbonActiveInk, QColor(0x10, 0x50, 0x88));
+  QCOMPARE(tokens.ribbonGroupInk, QColor(0x5E, 0x66, 0x70));
   // The gloss stops remain as flat aliases so older selectors paint plainly.
   QCOMPARE(tokens.glossReflection, tokens.surface);
   QCOMPARE(tokens.glossShoulder, tokens.surface);
@@ -799,12 +857,13 @@ void TestTheme::strataPalette_matchesSpec() {
   QVERIFY(contrastRatio(tokens.railText, tokens.rail) >= 4.5);
   QVERIFY(contrastRatio(tokens.railMuted, tokens.rail) >= 4.5);
   QVERIFY(contrastRatio(tokens.railMuted, tokens.sky3) >= 4.5);
-  // Icon fills keep their softened pre-2026-09-10 intensity.
+  // Icon fills keep their softened pre-2026-09-10 intensity. 배경 지도 green and
+  // 내보내기 teal were 3° apart (F090); their base hues now sit at 140° and 186°.
   const auto& icons = KaTheme::iconPalette();
   const struct { QColor before; QColor after; } fills[] = {
       {QColor(0x32, 0x6B, 0x9B), icons.file}, {QColor(0x95, 0x60, 0x29), icons.record},
-      {QColor(0x39, 0x73, 0x68), icons.map}, {QColor(0x6B, 0x59, 0x96), icons.align},
-      {QColor(0x24, 0x78, 0x6C), icons.output}, {QColor(0x1D, 0x6E, 0xB8), icons.water},
+      {QColor(0x39, 0x73, 0x4C), icons.map}, {QColor(0x6B, 0x59, 0x96), icons.align},
+      {QColor(0x24, 0x70, 0x78), icons.output}, {QColor(0x1D, 0x6E, 0xB8), icons.water},
       {QColor(0x93, 0x60, 0x39), icons.earth},
   };
   for (const auto& fill : fills) {
@@ -947,17 +1006,195 @@ void TestTheme::toolbarCheckedHasDistinctTreatment() {
   toolbar.resize(400, toolbar.sizeHint().height());
   toolbar.show();
   QCoreApplication::processEvents();
-  const QImage off = normal->grab().toImage();
-  const QImage on = checked->grab().toImage();
-  // Compare empty face pixels, not the separately tested icon/check marker.
-  const int faceX = qMax(4, normal->width() / 2);
-  const int faceY = qBound(normal->iconSize().height() + 4, normal->height() - 8,
-                           normal->height() - 4);
-  const QColor normalFace = logicalPixel(off, faceX, faceY);
-  const QColor checkedFace = logicalPixel(on, faceX, faceY);
-  QVERIFY2(normalFace != checkedFace, "checked ribbon needs a visible face treatment");
-  const QColor foreground = checked->palette().color(QPalette::ButtonText);
-  QVERIFY(contrastRatio(foreground, checkedFace) >= 4.5);
+
+  // The chosen chip paints no face and no border of its own: the icon tile (border and fill)
+  // and the bold blue label carry the state.
+  const QString sheet = KaTheme::resolvedStyleSheet(KaTheme::embeddedStyleSheet());
+  const QRegularExpression rule(
+      QStringLiteral("QWidget#beginnerRibbon QToolButton:enabled:checked(?:,[^{]*)?\\s*\\{([^}]*)\\}"));
+  const QRegularExpressionMatch match = rule.match(sheet);
+  QVERIFY2(match.hasMatch(), "the ribbon's checked rule");
+  const QString body = match.captured(1);
+  QVERIFY2(body.contains(QRegularExpression(QStringLiteral("background:\\s*transparent"))), qPrintable(body));
+  QVERIFY2(body.contains(QRegularExpression(QStringLiteral("border:\\s*\\d+px solid transparent"))), qPrintable(body));
+  QVERIFY2(body.contains(QRegularExpression(QStringLiteral("font-weight:\\s*700"))), qPrintable(body));
+  QVERIFY2(body.contains(KaTheme::tokens().ribbonActiveInk.name()), qPrintable(body));
+
+  // Pixels agree: the face beside the tile and label is the toolbar's own surface on both chips.
+  const QImage shot = toolbar.grab().toImage();
+  const int faceX = 2;
+  const int faceY = normal->height() / 2;
+  const QPoint atNormal = normal->mapTo(&toolbar, QPoint(faceX, faceY));
+  const QPoint atChecked = checked->mapTo(&toolbar, QPoint(faceX, faceY));
+  const QColor normalFace = logicalPixel(shot, atNormal.x(), atNormal.y());
+  const QColor checkedFace = logicalPixel(shot, atChecked.x(), atChecked.y());
+  QCOMPARE(checkedFace, normalFace);
+  QCOMPARE(checkedFace, KaTheme::tokens().surface);
+  QVERIFY(contrastRatio(KaTheme::tokens().ribbonActiveInk, checkedFace) >= 4.5);
+
+  // The label (everything below the 32 px tile) turns bold and blue on the chosen chip only.
+  const auto labelArea = [](QToolButton* chip) {
+    const QImage image = chip->grab().toImage();
+    const int top = qRound((chip->iconSize().height() + 8) * image.devicePixelRatio());
+    return image.copy(0, top, image.width(), image.height() - top);
+  };
+  const QImage checkedLabel = labelArea(checked);
+  const QImage normalLabel = labelArea(normal);
+  const auto blueInk = [](const QColor& c) { return c.blue() - c.red() >= 60; };
+  const auto anyInk = [](const QColor& c) { return c.lightness() < 200; };
+  QVERIFY2(opaquePixelsMatching(checkedLabel, blueInk) >= 5, "chosen label is blue");
+  QCOMPARE(opaquePixelsMatching(normalLabel, blueInk), 0);
+  const int boldInk = opaquePixelsMatching(checkedLabel, anyInk);
+  const int plainInk = opaquePixelsMatching(normalLabel, anyInk);
+  QVERIFY2(boldInk > plainInk * 1.15, qPrintable(QStringLiteral("bold %1 vs plain %2").arg(boldInk).arg(plainInk)));
+
+  // The icon's On state shows its blue tile border against the Off tile.
+  const QIcon icon = checkedAction->icon();
+  const QImage tileOn = icon.pixmap(QSize(32, 32), 1.0, QIcon::Normal, QIcon::On).toImage();
+  const QImage tileOff = icon.pixmap(QSize(32, 32), 1.0, QIcon::Normal, QIcon::Off).toImage();
+  QVERIFY2(contrastRatio(tileOn.pixelColor(1, 16), tileOff.pixelColor(1, 16)) >= 4.5,
+           "checked tile border must stand out from the unchecked tile");
+  // ...and the chip's own pixels carry it.
+  const auto blueBorder = [](const QColor& c) { return closeColor(c, QColor(0x1A, 0x68, 0xB0)); };
+  QVERIFY2(opaquePixelsMatching(checked->grab().toImage(), blueBorder) >= 60, "checked chip draws the tile border");
+  QCOMPARE(opaquePixelsMatching(normal->grab().toImage(), blueBorder), 0);
+}
+
+void TestTheme::ribbonChip_hoverShowsTileFillOnly() {
+  QToolBar toolbar;
+  toolbar.setAttribute(Qt::WA_DontShowOnScreen);
+  toolbar.setObjectName(QStringLiteral("mainToolbar"));
+  auto* ribbon = new KaBeginnerRibbon(&toolbar);
+  ribbon->addGroup(QStringLiteral("survey"), QStringLiteral("조사"));
+  QToolButton* chip = ribbon->addAction(
+      QStringLiteral("survey"), new QAction(KaIcons::icon(QStringLiteral("open")), QStringLiteral("열기"), ribbon));
+  toolbar.addWidget(ribbon);
+  toolbar.resize(300, toolbar.sizeHint().height());
+  toolbar.show();
+  QCoreApplication::processEvents();
+
+  // A point on the tile beside the glyph, and one on the chip's empty face under the label.
+  const QPoint origin = chip->mapTo(&toolbar, QPoint());
+  const QPoint onTile = origin + QPoint(7, 20);
+  const QPoint onFace = origin + QPoint(1, chip->height() - 4);
+  const QImage rest = toolbar.grab().toImage();
+  // The offscreen platform sends no real mouse enter, so mark the chip as under the mouse.
+  chip->setAttribute(Qt::WA_UnderMouse, true);
+  chip->update();
+  QCoreApplication::processEvents();
+  const QImage hover = toolbar.grab().toImage();
+  chip->setAttribute(Qt::WA_UnderMouse, false);
+
+  QVERIFY2(closeColor(logicalPixel(rest, onTile.x(), onTile.y()), QColor(0xE4, 0xEA, 0xED)),
+           qPrintable(logicalPixel(rest, onTile.x(), onTile.y()).name()));
+  QVERIFY2(closeColor(logicalPixel(hover, onTile.x(), onTile.y()), QColor(0xD9, 0xE2, 0xE7)),
+           qPrintable(logicalPixel(hover, onTile.x(), onTile.y()).name()));
+  // The chip itself paints no wash or border: its face stays the toolbar's surface.
+  QCOMPARE(logicalPixel(rest, onFace.x(), onFace.y()), KaTheme::tokens().surface);
+  QCOMPARE(logicalPixel(hover, onFace.x(), onFace.y()), KaTheme::tokens().surface);
+}
+
+void TestTheme::ribbonChip_unsavedLabelTurnsBold() {
+  // MainWindow::syncShellChips marks the 「저장」 chip with the dynamic property `unsaved` and repolishes it;
+  // the sheet then draws the label bold (spec row 「저장 안 됨」; the blue tile and dot come from the icon).
+  QToolBar toolbar;
+  toolbar.setAttribute(Qt::WA_DontShowOnScreen);
+  toolbar.setObjectName(QStringLiteral("mainToolbar"));
+  auto* ribbon = new KaBeginnerRibbon(&toolbar);
+  ribbon->addGroup(QStringLiteral("survey"), QStringLiteral("조사"));
+  QToolButton* chip = ribbon->addAction(
+      QStringLiteral("survey"), new QAction(KaIcons::icon(QStringLiteral("save")), QStringLiteral("저장"), ribbon));
+  toolbar.addWidget(ribbon);
+  toolbar.resize(300, toolbar.sizeHint().height());
+  toolbar.show();
+  QCoreApplication::processEvents();
+
+  const QSize size = chip->size();
+  const RibbonLabelInk::Measure plain = RibbonLabelInk::measure(chip);
+  QVERIFY2(plain.pixels > 0, "the label has ink");
+  const auto markUnsaved = [&](bool unsaved) {
+    chip->setProperty("unsaved", unsaved);
+    chip->style()->unpolish(chip);
+    chip->style()->polish(chip);
+    QCoreApplication::processEvents();
+  };
+  markUnsaved(true);
+  const RibbonLabelInk::Measure bold = RibbonLabelInk::measure(chip);
+  qInfo() << "unsaved label ink" << plain.pixels << "->" << bold.pixels << "columns" << bold.left << ".." << bold.right
+          << "in a" << chip->width() << "px chip";
+  QVERIFY2(bold.pixels > plain.pixels * 1.15,
+           qPrintable(QStringLiteral("unsaved label ink %1 vs plain %2").arg(bold.pixels).arg(plain.pixels)));
+  // Bold must not clip: the ink stays inside the border and padding (2 px each side) of the 40 px chip.
+  QVERIFY2(bold.left >= 2 && bold.right <= chip->width() - 3,
+           qPrintable(QStringLiteral("bold label spans %1..%2 in a %3 px chip").arg(bold.left).arg(bold.right).arg(chip->width())));
+  QCOMPARE(chip->size(), size);
+  markUnsaved(false);
+  QVERIFY2(RibbonLabelInk::measure(chip).pixels <= plain.pixels * 1.05, "saved again: the label is regular");
+  QCOMPARE(chip->size(), size);
+}
+
+void TestTheme::subToolbar_usesTileIconsAndRibbonLabelSize() {
+  // The drawing sub-toolbar (MainWindowRibbon.cpp, KaDrawSketchTools.cpp) speaks the ribbon's grammar:
+  // tile icons from the Mockup set, 13 px labels, and the same tile emphasis on the chosen tool.
+  QMainWindow window;
+  window.setAttribute(Qt::WA_DontShowOnScreen);
+  auto* sub = new QToolBar(&window);
+  sub->setObjectName(QStringLiteral("subToolbar"));
+  sub->setIconSize(QSize(20, 20));
+  sub->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+  sub->setMovable(false);
+  const struct { const char* id; const char* text; } tools[] = {
+      {"select", "도형선택"}, {"easy_draw", "쉽게그리기"}, {"draw_area", "조사구역 그리기"},
+      {"draw_poly", "유구 그리기"}, {"draw_line", "유구 선"}, {"artifact", "유물위치표시"},
+      {"check", "완료"}, {"undo", "되돌리기"}, {"stop", "취소"},
+  };
+  QAction* chosen = nullptr;
+  for (const auto& tool : tools) {
+    QVERIFY2(!KaIconsMockup::svgPathFor(QString::fromLatin1(tool.id)).isEmpty(), tool.id);
+    QAction* action = sub->addAction(KaIcons::icon(QString::fromLatin1(tool.id)), QString::fromUtf8(tool.text));
+    action->setCheckable(true);
+    if (QString::fromLatin1(tool.id) == QLatin1String("draw_poly")) chosen = action;
+  }
+  QVERIFY(chosen);
+  chosen->setChecked(true);
+  window.addToolBar(sub);
+  window.setCentralWidget(new QWidget(&window));
+  window.resize(1600, 300);
+  window.show();
+  QCoreApplication::processEvents();
+
+  const auto blueBorder = [](const QColor& c) { return closeColor(c, QColor(0x1A, 0x68, 0xB0)); };
+  const auto tileFill = [](const QColor& c) { return closeColor(c, QColor(0xE4, 0xEA, 0xED)); };
+  int checkedButtons = 0;
+  for (QToolButton* button : sub->findChildren<QToolButton*>()) {
+    if (!button->defaultAction()) continue;
+    QCOMPARE(button->iconSize(), QSize(20, 20));
+    QCOMPARE(button->font().pixelSize(), KaTheme::buttonMetrics().ribbonFontSize);
+    const QImage face = button->grab().toImage();
+    if (button->defaultAction() == chosen) {
+      ++checkedButtons;
+      QVERIFY2(opaquePixelsMatching(face, blueBorder) >= 30, "chosen tool shows the tile border");
+    } else {
+      QCOMPARE(opaquePixelsMatching(face, blueBorder), 0);
+      QVERIFY2(opaquePixelsMatching(face, tileFill) >= 150, qPrintable(button->text() + QStringLiteral(": tile icon")));
+      QCOMPARE(button->palette().color(QPalette::ButtonText), KaTheme::tokens().ribbonLabelInk);  // the ribbon's label ink
+    }
+  }
+  QCOMPARE(checkedButtons, 1);
+
+  // The underline stays (test_workflow looks for it), in the ribbon's active ink, on no face.
+  const QString sheet = KaTheme::resolvedStyleSheet(KaTheme::embeddedStyleSheet());
+  const QRegularExpression rule(
+      QStringLiteral("QToolBar#subToolbar QToolButton:enabled:checked\\s*\\{([^}]*)\\}"));
+  const QRegularExpressionMatch match = rule.match(sheet);
+  QVERIFY2(match.hasMatch(), "the sub-toolbar's checked rule");
+  const QString body = match.captured(1);
+  QVERIFY2(body.contains(QRegularExpression(QStringLiteral("background:\\s*transparent"))), qPrintable(body));
+  QVERIFY2(body.contains(QStringLiteral("border-bottom: 2px solid ") + KaTheme::tokens().ribbonActiveInk.name()),
+           qPrintable(body));
+  const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+  if (!output.isEmpty() && QDir(output).exists())
+    QVERIFY2(sub->grab().save(QDir(output).filePath(QStringLiteral("theme-subtoolbar-widget-render.png"))), "render");
 }
 
 void TestTheme::primaryToolbarIconsRemainReadable() {

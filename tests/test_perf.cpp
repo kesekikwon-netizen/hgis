@@ -1,7 +1,18 @@
 // 15만 합성 도형으로 필지 렌더·조사 열기·조판 진입 상한을 고정한다.
 // P3-2: 시작→홈 화면, A3 PDF 내보내기 예산을 추가한다.
+// 조사 저장(persistWorkspace)·제출 패키지(exportSubmissionPackage) 상한도 둔다.
 // 원본 현장 GPKG는 쓰지 않는다. 생성 시간은 예산에 넣지 않는다.
+//
+// 예산은 기준 PC 값이다. 다른 PC 등급은 코드를 고치지 않고 올린다(F188/F207):
+//   KA_PERF_BUDGET_<LABEL>=<ms>   한 관문만, 예) KA_PERF_BUDGET_STARTUP_HOME=120
+//   KA_PERF_BUDGET_SCALE=<배수>    모든 관문
+//   KA_PERF_BUDGETS=<json 파일>    {"scale": 1.5, "startup_home": 120, "calibration_ref_ms": 12}
+// 상대 비교: calibration_ref_ms(또는 KA_PERF_CALIBRATION_REF_MS)에 기준 PC 의 교정 작업
+// 중앙값을 적으면, 이 PC 의 교정 중앙값 / 기준 값(1 미만이면 1)만큼 모든 예산을 늘린다.
+// 교정 작업(1000도형 격자 렌더)은 매 실행 initTestCase 에서 재어 로그에 남긴다.
+// 실패 메시지에는 표본을 모두 적어 일시적 흔들림과 회귀를 구분하게 한다.
 #include "app/MainWindow.h"
+#include "core/ExportService.h"
 #include "core/LayerOps.h"
 #include "core/LayoutService.h"
 #include "core/SurveyProjectFactory.h"
@@ -15,6 +26,8 @@
 #include <QFontDatabase>
 #include <QGuiApplication>
 #include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSettings>
 #include <QTabWidget>
 #include <QTemporaryDir>
@@ -36,6 +49,7 @@
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
 #include <qgsrectangle.h>
+#include <qgsvectordataprovider.h>
 #include <qgsvectorfilewriter.h>
 #include <qgsvectorlayer.h>
 
@@ -51,6 +65,12 @@ constexpr qint64 kLayoutEnterBudgetMs = 10000;
 // P3-2: 기준 PC 5회 중앙값 × 1.3 (startup_home median 54→70, a3_pdf median 21→27).
 constexpr qint64 kStartupHomeBudgetMs = 70;
 constexpr qint64 kA3PdfExportBudgetMs = 27;
+// F207: the heaviest synchronous paths. Ceilings against gross regressions, not tuned yet:
+// replace them with the reference PC's median x 1.3 once measured there.
+constexpr qint64 kSurveySaveBudgetMs = 10000;
+constexpr qint64 kSubmissionExportBudgetMs = 20000;
+
+qint64 g_calibrationMs = 0;
 
 QgsRectangle gridExtent() {
   const int rows = (kFeatureCount + kGridCols - 1) / kGridCols;
@@ -95,10 +115,60 @@ bool writeGridGpkg(const QString& path, const QString& layerName, int featureCou
   return true;
 }
 
-void assertUnderBudget(const char* label, qint64 elapsedMs, qint64 budgetMs) {
-  qInfo().noquote() << label << "elapsed_ms=" << elapsedMs << "budget_ms=" << budgetMs;
+const QJsonObject& budgetFile() {
+  static const QJsonObject values = [] {
+    const QString path = qEnvironmentVariable("KA_PERF_BUDGETS");
+    if (path.isEmpty()) return QJsonObject();
+    QFile file(path);
+    const QJsonDocument doc =
+        file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()) : QJsonDocument();
+    if (!doc.isObject()) qWarning().noquote() << "KA_PERF_BUDGETS is not a readable JSON object:" << path;
+    return doc.object();
+  }();
+  return values;
+}
+
+// A positive number from the environment first, then from the KA_PERF_BUDGETS file; 0 when unset.
+double budgetSetting(const QString& jsonKey, const QByteArray& envName) {
+  bool ok = false;
+  const double fromEnv = qEnvironmentVariable(envName.constData()).toDouble(&ok);
+  if (ok && fromEnv > 0) return fromEnv;
+  const double fromFile = budgetFile().value(jsonKey).toDouble(0.0);
+  return fromFile > 0 ? fromFile : 0.0;
+}
+
+qint64 budgetFor(const char* label, qint64 referenceMs, QString* how) {
+  const QString key = QString::fromLatin1(label);
+  if (const double exact = budgetSetting(key, "KA_PERF_BUDGET_" + key.toUpper().toLatin1()); exact > 0) {
+    *how = QStringLiteral("override");
+    return qRound64(exact);
+  }
+  double scale = 1.0;
+  if (const double factor = budgetSetting(QStringLiteral("scale"), "KA_PERF_BUDGET_SCALE"); factor > 0)
+    scale *= factor;
+  const double reference = budgetSetting(QStringLiteral("calibration_ref_ms"), "KA_PERF_CALIBRATION_REF_MS");
+  if (reference > 0 && g_calibrationMs > 0) scale *= std::max(1.0, double(g_calibrationMs) / reference);
+  *how = qFuzzyCompare(scale, 1.0) ? QStringLiteral("reference")
+                                   : QStringLiteral("scaled x%1").arg(scale, 0, 'f', 2);
+  return qRound64(double(referenceMs) * scale);
+}
+
+void assertUnderBudget(const char* label, qint64 elapsedMs, qint64 referenceBudgetMs,
+                       const QList<qint64>& samples = {}) {
+  QString how;
+  const qint64 budgetMs = budgetFor(label, referenceBudgetMs, &how);
+  QStringList listed;
+  for (qint64 sample : samples) listed << QString::number(sample);
+  if (listed.isEmpty()) listed << QString::number(elapsedMs);
+  qInfo().noquote() << label << "elapsed_ms=" << elapsedMs << "budget_ms=" << budgetMs << how
+                    << "samples_ms=" << listed.join(QLatin1Char(',')) << "calibration_ms=" << g_calibrationMs;
   QVERIFY2(elapsedMs <= budgetMs,
-           qPrintable(QStringLiteral("%1 %2ms > %3ms").arg(QString::fromUtf8(label)).arg(elapsedMs).arg(budgetMs)));
+           qPrintable(QStringLiteral("%1 %2ms > %3ms (%4) samples_ms=[%5] calibration_ms=%6")
+                          .arg(QString::fromUtf8(label))
+                          .arg(elapsedMs)
+                          .arg(budgetMs)
+                          .arg(how, listed.join(QStringLiteral(", ")))
+                          .arg(g_calibrationMs)));
 }
 
 qint64 medianOf(QList<qint64> samples) {
@@ -107,6 +177,39 @@ qint64 medianOf(QList<qint64> samples) {
   if (n == 0) return 0;
   if (n % 2 == 1) return samples[n / 2];
   return (samples[n / 2 - 1] + samples[n / 2]) / 2;
+}
+
+// Calibration: a fixed 1000-polygon render measured in the same run as the gates.
+qint64 measureCalibrationMs() {
+  QgsVectorLayer grid(QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("calibration"),
+                      QStringLiteral("memory"));
+  if (!grid.isValid()) return 0;
+  QgsFeatureList features;
+  for (int i = 0; i < 1000; ++i) {
+    QgsFeature feature;
+    const double x = 200000.0 + (i % 40) * 10.0;
+    const double y = 450000.0 + (i / 40) * 10.0;
+    feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(x, y, x + 8.0, y + 8.0)));
+    features << feature;
+  }
+  if (!grid.dataProvider()->addFeatures(features)) return 0;
+  grid.updateExtents();
+  QgsMapSettings settings;
+  settings.setLayers({&grid});
+  settings.setDestinationCrs(grid.crs());
+  settings.setOutputSize(QSize(600, 600));
+  settings.setOutputDpi(96.0);
+  settings.setExtent(grid.extent());
+  QList<qint64> samples;
+  for (int i = 0; i < 5; ++i) {
+    QElapsedTimer timer;
+    timer.start();
+    QgsMapRendererSequentialJob job(settings);
+    job.start();
+    job.waitForFinished();
+    samples << timer.elapsed();
+  }
+  return medianOf(samples);
 }
 
 }  // namespace
@@ -120,6 +223,8 @@ private slots:
   void layoutEnter_underBudget();
   void startupHome_underBudget();
   void a3PdfExport_underBudget();
+  void surveySave_underBudget();
+  void submissionExport_underBudget();
 
 private:
   void ensureParcelGrid();
@@ -134,6 +239,8 @@ private:
 
 void TestPerf::initTestCase() {
   QVERIFY2(m_dir.isValid(), "QTemporaryDir");
+  g_calibrationMs = measureCalibrationMs();
+  qInfo().noquote() << "calibration_1000_polygons median_ms=" << g_calibrationMs;
 }
 
 void TestPerf::ensureParcelGrid() {
@@ -263,6 +370,11 @@ void TestPerf::startupHome_underBudget() {
     const qint64 ms = timer.elapsed();
     samples.append(ms);
     QCOMPARE(QgsProject::instance()->mapLayers().size(), 0);
+    // QTRY_COMPARE returns at once when the home tab is already current, so deferred boot
+    // work (singleShot 0) has not run yet. Spin the loop outside the timed part and check
+    // again that nothing was loaded behind the home screen.
+    QTest::qWait(100);
+    QCOMPARE(QgsProject::instance()->mapLayers().size(), 0);
     window.close();
     QCoreApplication::processEvents();
     qInfo().noquote() << "startup_home sample" << (i + 1) << "elapsed_ms=" << ms;
@@ -271,7 +383,7 @@ void TestPerf::startupHome_underBudget() {
   const qint64 budget = kStartupHomeBudgetMs;
   qInfo().noquote() << "startup_home median_ms=" << med << "median_x1_3=" << qRound(med * 1.3)
                      << "budget_ms=" << budget;
-  assertUnderBudget("startup_home", med, budget);
+  assertUnderBudget("startup_home", med, budget, samples);
 }
 
 void TestPerf::a3PdfExport_underBudget() {
@@ -324,7 +436,95 @@ void TestPerf::a3PdfExport_underBudget() {
   const qint64 budget = kA3PdfExportBudgetMs;
   qInfo().noquote() << "a3_pdf_export median_ms=" << med << "median_x1_3=" << qRound(med * 1.3)
                      << "budget_ms=" << budget;
-  assertUnderBudget("a3_pdf_export", med, budget);
+  assertUnderBudget("a3_pdf_export", med, budget, samples);
+}
+
+void TestPerf::surveySave_underBudget() {
+  // Ctrl+S 경로: 편집 버퍼를 다음 세대 파일에 옮기고 검증·교체까지. 도형 준비는 예산 밖.
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  QString err;
+  const QString gpkg = SurveyProjectFactory::createNewSurvey(dir.path(), QStringLiteral("perfsave"), &err,
+                                                             QStringLiteral("EPSG:5187"));
+  QVERIFY2(!gpkg.isEmpty(), qPrintable(err));
+  QgsProject project;
+  project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+  auto* features = LayerOps::ensureDomainLayer(&project, gpkg, QStringLiteral("feature_poly"),
+                                               QStringLiteral("유구"), &err);
+  QVERIFY2(features, qPrintable(err));
+  QList<qint64> samples;
+  for (int round = 0; round < 3; ++round) {
+    QVERIFY(features->isEditable() || features->startEditing());
+    for (int i = 0; i < 2000; ++i) {
+      QgsFeature feature(features->fields());
+      const double x = 200000.0 + (i % 50) * 8.0;
+      const double y = 450000.0 + (i / 50 + round * 40) * 8.0;
+      feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(x, y, x + 6.0, y + 6.0)));
+      QVERIFY(features->addFeature(feature));
+    }
+    project.setDirty(true);
+    QElapsedTimer timer;
+    timer.start();
+    const auto attempt =
+        SurveyStorage::persistWorkspace(&project, gpkg, dir.filePath(QStringLiteral("복구사본")));
+    samples << timer.elapsed();
+    QVERIFY2(attempt.saved, qPrintable(attempt.error));
+    qInfo().noquote() << "survey_save sample" << (round + 1) << "elapsed_ms=" << samples.last();
+  }
+  QCOMPARE(features->featureCount(), 6000LL);
+  assertUnderBudget("survey_save", medianOf(samples), kSurveySaveBudgetMs, samples);
+}
+
+void TestPerf::submissionExport_underBudget() {
+  // 제출 변환: 5179 SHP + 조사도면.pdf + MANIFEST. 준비는 예산 밖, 패키지 생성만 잰다.
+  QString err;
+  const QString source = m_dir.filePath(QStringLiteral("submission_source.gpkg"));
+  QVERIFY2(writeGridGpkg(source, QStringLiteral("feature_poly"), 400, &err), qPrintable(err));
+  QgsProject project;
+  project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+  auto* area = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187&field=survey_name:string(60)"),
+                                  QStringLiteral("조사구역"), QStringLiteral("memory"));
+  QVERIFY(area->isValid());
+  LayerOps::markSurveyLayer(area, QStringLiteral("survey_area"));
+  QgsFeature areaFeature(area->fields());
+  areaFeature.setAttribute(0, QStringLiteral("성능"));
+  areaFeature.setGeometry(QgsGeometry::fromRect(QgsRectangle(200000.0, 450000.0, 200400.0, 450080.0)));
+  QgsFeatureList areaFeatures{areaFeature};
+  QVERIFY(area->dataProvider()->addFeatures(areaFeatures));
+  area->updateExtents();
+  project.addMapLayer(area);
+  auto* features = new QgsVectorLayer(source + QStringLiteral("|layername=feature_poly"), QStringLiteral("유구"),
+                                      QStringLiteral("ogr"));
+  QVERIFY(features->isValid());
+  LayerOps::markSurveyLayer(features, QStringLiteral("feature_poly"));
+  project.addMapLayer(features);
+  QVERIFY2(!LayoutService::createBlankSheet(&project, 420.0, 297.0, QStringLiteral("user_sheet"), &err)
+                .isEmpty(),
+           qPrintable(err));
+  auto* layout =
+      dynamic_cast<QgsPrintLayout*>(project.layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  QVERIFY(layout);
+  auto* map = new QgsLayoutItemMap(layout);
+  map->setId(QStringLiteral("ka_map"));
+  map->attemptSetSceneRect(QRectF(20.0, 20.0, 380.0, 250.0));
+  map->setCrs(project.crs());
+  map->setKeepLayerSet(true);
+  map->setLayers(QList<QgsMapLayer*>{features, area});
+  map->zoomToExtent(area->extent());
+  if (map->scene() != layout) layout->addLayoutItem(map);
+  LayoutService::markStudioSheetComposed(layout);
+  QList<qint64> samples;
+  for (int i = 0; i < 3; ++i) {
+    const QString out = m_dir.filePath(QStringLiteral("submission_%1").arg(i));
+    QElapsedTimer timer;
+    timer.start();
+    const QString written = ExportService::exportSubmissionPackage(&project, out, QStringLiteral("UTF-8"),
+                                                                   QStringLiteral("OK"), true, false, &err);
+    samples << timer.elapsed();
+    QVERIFY2(written == out, qPrintable(err));
+    qInfo().noquote() << "submission_export sample" << (i + 1) << "elapsed_ms=" << samples.last();
+  }
+  assertUnderBudget("submission_export", medianOf(samples), kSubmissionExportBudgetMs, samples);
 }
 
 #include "test_perf.moc"

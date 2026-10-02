@@ -1,4 +1,5 @@
 #include "KaCrashGuard.h"
+#include "core/KaLogExcept.h"
 #include "KaMeasureMapTool.h"
 #include "core/MeasureOps.h"
 
@@ -212,11 +213,11 @@ bool KaMeasureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, b
   try {
     *out = e->mapPoint();
   } catch (...) {
-    KaCrashGuard::logLine(QStringLiteral("[except] app/KaMeasureMapTool.cpp:202"));
+    KA_LOG_EXCEPT();
     try {
       *out = toMapCoordinates(e->pos());
     } catch (...) {
-      KaCrashGuard::logLine(QStringLiteral("[except] app/KaMeasureMapTool.cpp:204"));
+      KA_LOG_EXCEPT();
       return false;
     }
   }
@@ -332,12 +333,19 @@ QString KaMeasureMapTool::copyText() const {
   if (m_mode == Mode::Area) {
     lines << QStringLiteral("면적 %1").arg(
         MeasureOps::formatAreaM2(MeasureOps::polygonAreaSquareMeters(m_points, crs, ctx)));
+    if (m_points.size() >= 3)
+      lines << QStringLiteral("둘레 %1").arg(
+          MeasureOps::formatLengthM(MeasureOps::polygonPerimeterMeters(m_points, crs, ctx)));
   } else {
     lines << QStringLiteral("거리 %1").arg(
         MeasureOps::formatLengthM(MeasureOps::lineLengthMeters(m_points, crs, ctx)));
     const auto segs = MeasureOps::segmentLengthsMeters(m_points, crs, ctx);
     for (int i = 0; i < segs.size(); ++i)
-      lines << QStringLiteral("%1구간 %2").arg(i + 1).arg(MeasureOps::formatLengthM(segs[i]));
+      lines << QStringLiteral("%1구간 %2 · 도북 방위 %3")
+                   .arg(i + 1)
+                   .arg(MeasureOps::formatLengthM(segs[i]))
+                   .arg(MeasureOps::formatBearing(
+                       MeasureOps::gridBearingDegrees(m_points.at(i), m_points.at(i + 1))));
   }
   if (crs.isValid())
     lines << QStringLiteral("작업좌표 %1 평면").arg(crs.authid());
@@ -362,6 +370,9 @@ void KaMeasureMapTool::refreshHud(const QgsPointXY* cursorOrNull) {
   if (m_mode == Mode::Area) {
     const double area = MeasureOps::polygonAreaSquareMeters(live, crs, ctx);
     total = MeasureOps::formatAreaM2(area);
+    if (live.size() >= 3)
+      bits << QStringLiteral("둘레 %1").arg(
+          MeasureOps::formatLengthM(MeasureOps::polygonPerimeterMeters(live, crs, ctx)));
     if (m_finished)
       bits << QStringLiteral("면적만 산출");
     else if (live.size() < 3)
@@ -377,6 +388,9 @@ void KaMeasureMapTool::refreshHud(const QgsPointXY* cursorOrNull) {
       const auto segs = MeasureOps::segmentLengthsMeters(live, crs, ctx);
       for (int i = 0; i < segs.size() && i < 8; ++i)
         bits << QStringLiteral("%1구간 %2").arg(i + 1).arg(MeasureOps::formatLengthM(segs[i]));
+      // Grid bearing of the segment being drawn (or the last one once finished).
+      bits << QStringLiteral("도북 방위 %1").arg(MeasureOps::formatBearing(
+                  MeasureOps::gridBearingDegrees(live.at(live.size() - 2), live.last())));
       if (!m_finished)
         bits << QStringLiteral("우클릭 → 마침");
     }
@@ -398,7 +412,7 @@ void KaMeasureMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
   if (!e)
     return;
   if (e->button() == Qt::RightButton) {
-    showTapeMenu(e->globalPos());
+    showTapeMenu(e->globalPosition().toPoint());
     return;
   }
   if (e->button() != Qt::LeftButton)

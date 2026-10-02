@@ -1,15 +1,27 @@
 #include "SectionLayoutService.h"
 #include "LayoutService.h"
+#include "PdfExportSettings.h"
+#include "SectionSheetDecor.h"
+#include "StandardScales.h"
 
 #include <QColor>
+#include <QCryptographicHash>
+#include <QDataStream>
 #include <QDate>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
+#include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QList>
 #include <QLocale>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QPolygonF>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QTextStream>
@@ -236,6 +248,40 @@ bool findPhotoPixelBox(GDALDataset* ds, PhotoBox* out)
     return true;
 }
 
+/// findPhotoPixelBox reads every row of the TIFF. Remember the result per file
+/// version so option changes and re-opened studios do not scan it again.
+bool cachedPhotoPixelBox(const QString& path, GDALDataset* ds, PhotoBox* out)
+{
+    struct Scan {
+        bool ok = false;
+        PhotoBox box;
+    };
+    static QMutex mutex;
+    static QHash<QString, Scan> cache;
+    const QFileInfo info(path);
+    const QString key = info.exists()
+        ? QStringLiteral("%1|%2|%3").arg(info.absoluteFilePath()).arg(info.size())
+              .arg(info.lastModified().toMSecsSinceEpoch())
+        : QString();
+    if (!key.isEmpty()) {
+        QMutexLocker lock(&mutex);
+        const auto it = cache.constFind(key);
+        if (it != cache.cend()) {
+            if (it->ok && out) *out = it->box;
+            return it->ok;
+        }
+    }
+    Scan scan;
+    scan.ok = findPhotoPixelBox(ds, &scan.box);
+    if (!key.isEmpty()) {
+        QMutexLocker lock(&mutex);
+        if (cache.size() > 64) cache.clear();
+        cache.insert(key, scan);
+    }
+    if (scan.ok && out) *out = scan.box;
+    return scan.ok;
+}
+
 void knockOutSectionPaper(QgsRasterLayer* rl)
 {
     if (!rl || !rl->isValid() || rl->bandCount() < 3) return;
@@ -267,7 +313,7 @@ void inspectRaster(QgsRasterLayer* rl, SectionPlane* out)
     const int cols = ds->GetRasterXSize();
     const int rows = ds->GetRasterYSize();
     PhotoBox photo;
-    const bool hasPhoto = findPhotoPixelBox(ds, &photo);
+    const bool hasPhoto = cachedPhotoPixelBox(rl->source(), ds, &photo);
     GDALClose(ds);
     if (cols <= 0 || rows <= 0) return;
 
@@ -325,7 +371,9 @@ void inspectRaster(QgsRasterLayer* rl, SectionPlane* out)
                                out->lengthM, out->elevBottom + out->heightM);
 }
 
-void removeDisplayLayers(QgsProject* project)
+/// Sheets built before display layers were layout-owned registered them in the
+/// project (and so in the saved .qgs with a temp path). Drop those; return files.
+QStringList takeLegacyDisplayLayers(QgsProject* project)
 {
     QStringList ids;
     QStringList paths;
@@ -339,7 +387,26 @@ void removeDisplayLayers(QgsProject* project)
     }
     if (!ids.isEmpty())
         project->removeMapLayers(ids);
-    for (const QString& p : paths) {
+    return paths;
+}
+
+/// Derived display files of a section sheet (its layout owns the layers).
+QStringList ownedDisplayPaths(QgsLayout* layout)
+{
+    QStringList paths;
+    if (!layout) return paths;
+    for (QgsRasterLayer* rl : layout->findChildren<QgsRasterLayer*>(QString(), Qt::FindDirectChildrenOnly)) {
+        if (!rl->customProperty(QLatin1String(kPropSectionDisplay)).toBool()) continue;
+        const QString p = rl->customProperty(QLatin1String(kPropSectionDisplayPath)).toString();
+        if (!p.isEmpty()) paths.append(p);
+    }
+    return paths;
+}
+
+void removeStaleDisplayFiles(const QStringList& stale, const QSet<QString>& keep)
+{
+    for (const QString& p : stale) {
+        if (keep.contains(p)) continue;
         if (p.startsWith(QLatin1String("/vsimem/")))
             VSIUnlink(p.toUtf8().constData());
         else
@@ -361,10 +428,87 @@ void sharpenSectionRaster(QgsRasterLayer* rl)
     }
 }
 
+constexpr const char* kPropSheetPlanes = "ka_section/planes";
+
+/// Plane parameters per source raster, in map order, as compact JSON (a plain
+/// string survives any project-file property writer). Enough to derive the
+/// display raster again without scanning the photo.
+QString planesToJson(const QVector<SectionPlane>& planes)
+{
+    QVariantList out;
+    for (const SectionPlane& plane : planes) {
+        QVariantMap m;
+        m.insert(QStringLiteral("src"), plane.src ? plane.src->id() : QString());
+        m.insert(QStringLiteral("flatten"), plane.flatten);
+        m.insert(QStringLiteral("lengthM"), plane.lengthM);
+        m.insert(QStringLiteral("heightM"), plane.heightM);
+        m.insert(QStringLiteral("elevBottom"), plane.elevBottom);
+        m.insert(QStringLiteral("cropX0"), plane.cropX0);
+        m.insert(QStringLiteral("cropY0"), plane.cropY0);
+        m.insert(QStringLiteral("cropW"), plane.cropW);
+        m.insert(QStringLiteral("cropH"), plane.cropH);
+        out.append(m);
+    }
+    return QString::fromUtf8(QJsonDocument(QJsonArray::fromVariantList(out)).toJson(QJsonDocument::Compact));
+}
+
+QVariantList planesFromProperty(const QVariant& property)
+{
+    return QJsonDocument::fromJson(property.toString().toUtf8()).array().toVariantList();
+}
+
+QgsVectorLayer* addBlankLayer(QgsLayout* layout, const QgsCoordinateReferenceSystem& crs)
+{
+    // An empty layer set would draw every project layer (WMS) in the frame.
+    const QString auth = crs.isValid() ? crs.authid() : QStringLiteral("EPSG:5187");
+    auto* blank = new QgsVectorLayer(QStringLiteral("Polygon?crs=%1").arg(auth),
+                                     QStringLiteral("ka_section_blank"), QStringLiteral("memory"));
+    blank->setParent(layout);
+    return blank;
+}
+
+/// Temp file stem for one source file version + plane. The same inputs reuse
+/// the earlier derived file instead of copying the whole TIFF again.
+QString derivedStem(const QgsRasterLayer* src, const SectionPlane& plane, const QString& wkt)
+{
+    QByteArray bytes;
+    QDataStream stream(&bytes, QIODevice::WriteOnly);
+    const QFileInfo info(src->source());
+    stream << info.absoluteFilePath() << info.size() << info.lastModified().toMSecsSinceEpoch()
+           << plane.cropX0 << plane.cropY0 << plane.cropW << plane.cropH
+           << plane.lengthM << plane.heightM << plane.elevBottom << wkt;
+    const QByteArray digest = QCryptographicHash::hash(bytes, QCryptographicHash::Sha1).toHex().left(16);
+    return QDir::temp().filePath(QStringLiteral("ka_section_%1").arg(QString::fromLatin1(digest)));
+}
+
+/// Display layers belong to the section sheet layout, not to the project, so
+/// a saved survey never references a temp file. They die with the layout.
+QgsRasterLayer* adoptDisplayLayer(QgsRasterLayer* layer, const QString& path,
+                                  const QgsCoordinateReferenceSystem& planeCrs, QObject* owner)
+{
+    layer->setCustomProperty(QLatin1String(kPropSectionDisplay), true);
+    layer->setCustomProperty(QLatin1String(kPropSectionDisplayPath), path);
+    if (planeCrs.isValid())
+        layer->setCrs(planeCrs);
+    sharpenSectionRaster(layer);
+    knockOutSectionPaper(layer);
+    layer->setParent(owner);
+    return layer;
+}
+
 QgsRasterLayer* makeNorthUpDisplay(QgsRasterLayer* src,
                                    const QgsCoordinateReferenceSystem& planeCrs,
-                                   const SectionPlane& plane, QgsProject* project)
+                                   const SectionPlane& plane, QObject* owner)
 {
+    const QString stem = derivedStem(src, plane, planeCrs.isValid() ? planeCrs.toWkt() : QString());
+    for (const QString& reuse : {stem + QStringLiteral(".tif"), stem + QStringLiteral(".vrt")}) {
+        if (!QFile::exists(reuse)) continue;
+        auto* layer = new QgsRasterLayer(reuse, src->name(), QStringLiteral("gdal"));
+        if (layer->isValid())
+            return adoptDisplayLayer(layer, reuse, planeCrs, owner);
+        delete layer;
+        QFile::remove(reuse);
+    }
     GDALAllRegister();
     GDALDataset* ds = static_cast<GDALDataset*>(
         GDALOpen(src->source().toUtf8().constData(), GA_ReadOnly));
@@ -391,16 +535,17 @@ QgsRasterLayer* makeNorthUpDisplay(QgsRasterLayer* src,
     double ngt[6] = {0.0, px, 0.0, elevTop, 0.0, -py};
     const bool cropped = plane.cropW > 0;
 
-    QString outPath = QDir::temp().filePath(
-        QStringLiteral("ka_section_%1.tif").arg(src->id()));
-    QFile::remove(outPath);
+    QString outPath = stem + QStringLiteral(".tif");
+    // Write under a part name and rename, so an interrupted copy is never reused.
+    const QString partPath = stem + QStringLiteral(".part.tif");
+    QFile::remove(partPath);
 
     QString wkt = planeCrs.isValid() ? planeCrs.toWkt() : QString();
     GDALDriver* drv = GetGDALDriverManager()->GetDriverByName("GTiff");
     GDALDataset* copy = nullptr;
     if (drv && !cropped) {
         char** copts = CSLSetNameValue(nullptr, "TILED", "YES");
-        copy = drv->CreateCopy(QDir::fromNativeSeparators(outPath).toUtf8().constData(),
+        copy = drv->CreateCopy(QDir::fromNativeSeparators(partPath).toUtf8().constData(),
                                ds, FALSE, copts, nullptr, nullptr);
         CSLDestroy(copts);
     }
@@ -410,6 +555,9 @@ QgsRasterLayer* makeNorthUpDisplay(QgsRasterLayer* src,
             copy->SetProjection(wkt.toUtf8().constData());
         GDALClose(copy);
         GDALClose(ds);
+        QFile::remove(outPath);
+        if (!QFile::rename(partPath, outPath))
+            outPath = partPath;
     } else {
         wkt.replace(QLatin1Char('&'), QLatin1String("&amp;"));
         wkt.replace(QLatin1Char('<'), QLatin1String("&lt;"));
@@ -452,14 +600,13 @@ QgsRasterLayer* makeNorthUpDisplay(QgsRasterLayer* src,
         }
         ts << QStringLiteral("</VRTDataset>\n");
         GDALClose(ds);
-        const QString vrtPath = QDir::temp().filePath(
-            QStringLiteral("ka_section_%1.vrt").arg(src->id()));
+        QFile::remove(partPath);
+        const QString vrtPath = stem + QStringLiteral(".vrt");
         QFile f(vrtPath);
         if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
             return nullptr;
         f.write(xml.toUtf8());
         f.close();
-        QFile::remove(outPath);
         outPath = vrtPath;
     }
 
@@ -469,14 +616,7 @@ QgsRasterLayer* makeNorthUpDisplay(QgsRasterLayer* src,
         QFile::remove(outPath);
         return nullptr;
     }
-    layer->setCustomProperty(QLatin1String(kPropSectionDisplay), true);
-    layer->setCustomProperty(QLatin1String(kPropSectionDisplayPath), outPath);
-    if (planeCrs.isValid())
-        layer->setCrs(planeCrs);
-    sharpenSectionRaster(layer);
-    knockOutSectionPaper(layer);
-    project->addMapLayer(layer, false);
-    return layer;
+    return adoptDisplayLayer(layer, outPath, planeCrs, owner);
 }
 
 } // namespace
@@ -570,9 +710,9 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
     }
 
     // 2. 용지 치수 (mm, 가로)
-    const bool isA3 = (options.paper == SectionLayoutOptions::Paper::A3);
-    const double W = isA3 ? 420.0 : 297.0;
-    const double H = isA3 ? 297.0 : 210.0;
+    const QSizeF paperMm = paperSizeMm(options.paper);
+    const double W = paperMm.width();
+    const double H = paperMm.height();
 
     // 3. 레이아웃 구역 (mm)
     const double leftAxisW   = 22.0;  // 표고 축 영역
@@ -595,9 +735,29 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
     const double autoScale  = std::max(scaleFromW, scaleFromH);
 
     // 사용자 지정 분모 또는 자동; 용지에 안 맞으면 자동 최솟값으로 올린다.
+    // 조용히 바꾸지 않는다: 안내와 용지에 들어가는 표준 축척을 함께 돌려준다.
     double scaleDenom = (options.scaleDenominator > 0.0)
         ? options.scaleDenominator : autoScale;
+    const bool requestedTooLarge = options.scaleDenominator > 0.0
+        && options.scaleDenominator < autoScale * (1.0 - 1e-9);
     if (scaleDenom < autoScale) scaleDenom = autoScale;
+    if (firstRaster) {
+        const int standardFit = StandardScales::snapUp(
+            autoScale, StandardScales::Section | StandardScales::Snap);
+        if (!StandardScales::isStandard(std::round(scaleDenom * 1000.0) / 1000.0))
+            result.suggestedScaleDenominator = standardFit;
+        if (requestedTooLarge) {
+            const QString paperName = options.paper == SectionLayoutOptions::Paper::A4 ? QStringLiteral("A4")
+                : options.paper == SectionLayoutOptions::Paper::A2 ? QStringLiteral("A2")
+                : options.paper == SectionLayoutOptions::Paper::A1 ? QStringLiteral("A1")
+                                                                    : QStringLiteral("A3");
+            result.warningKo = QStringLiteral(
+                "지정한 축척(%1)은 %2 용지에 들어가지 않아 용지에 맞춘 축척(%3)으로 그렸습니다. "
+                "표준 축척(%4)을 고르거나 더 큰 용지를 쓰세요.")
+                .arg(StandardScales::label(options.scaleDenominator), paperName,
+                     StandardScales::label(scaleDenom), StandardScales::label(standardFit));
+        }
+    }
 
     // 지도 프레임 크기: extent와 같은 종횡비 → zoomToExtent가 정확히 combinedExtent를 렌더링
     const double frameW = extW * 1000.0 / scaleDenom;
@@ -639,8 +799,11 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
 
     // 6. 기존 조판 제거 후 새 조판 생성 (검증 통과 이후에만 삭제)
     static const QString kName = QStringLiteral("section_sheet");
-    if (auto* old = project->layoutManager()->layoutByName(kName))
+    QStringList staleDisplayFiles;
+    if (auto* old = project->layoutManager()->layoutByName(kName)) {
+        staleDisplayFiles += ownedDisplayPaths(dynamic_cast<QgsLayout*>(old));
         project->layoutManager()->removeLayout(old);
+    }
 
     auto* layout = new QgsPrintLayout(project);
     layout->setName(kName);
@@ -651,20 +814,21 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
             ->setPageSize(QgsLayoutSize(W, H, Qgis::LayoutUnit::Millimeters));
     }
     project->layoutManager()->addLayout(layout);
-    layout->renderContext().setFlag(
-        Qgis::LayoutRenderFlag::DisableTiledRasterLayerRenders, true);
+    KaPdfExport::prepareLayout(layout);
 
-    removeDisplayLayers(project);
+    staleDisplayFiles += takeLegacyDisplayLayers(project);
+    QSet<QString> liveDisplayFiles;
     QList<QgsMapLayer*> mapLayers;
     for (const SectionPlane& plane : planes) {
         if (plane.flatten) {
             QgsRasterLayer* display = makeNorthUpDisplay(
-                plane.src, mapCrs, plane, project);
+                plane.src, mapCrs, plane, layout);
             if (!display) {
                 result.errorKo =
                     QStringLiteral("단면 GeoTIFF를 거리×표고 평면으로 펼치지 못했습니다.");
                 return result;
             }
+            liveDisplayFiles.insert(display->customProperty(QLatin1String(kPropSectionDisplayPath)).toString());
             mapLayers.append(display);
         } else {
             sharpenSectionRaster(plane.src);
@@ -672,16 +836,12 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
             mapLayers.append(plane.src);
         }
     }
-    if (mapLayers.isEmpty()) {
-        const QString auth = mapCrs.isValid() ? mapCrs.authid()
-                                              : QStringLiteral("EPSG:5187");
-        auto* blank = new QgsVectorLayer(
-            QStringLiteral("Polygon?crs=%1").arg(auth),
-            QStringLiteral("ka_section_blank"),
-            QStringLiteral("memory"));
-        blank->setParent(layout);
-        mapLayers.append(blank);
-    }
+    if (mapLayers.isEmpty())
+        mapLayers.append(addBlankLayer(layout, mapCrs));
+    removeStaleDisplayFiles(staleDisplayFiles, liveDisplayFiles);
+    // Display rasters are not saved with the survey; keep what is needed to
+    // derive them again after the survey is reopened (restoreDisplayLayers).
+    layout->setCustomProperty(QLatin1String(kPropSheetPlanes), planesToJson(planes));
 
     // 7. 지도 항목 (ka_section_map): extent 종횡비와 동일한 프레임 크기
     auto* map = new QgsLayoutItemMap(layout);
@@ -750,13 +910,13 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
 
         auto* lbl = new QgsLayoutItemLabel(layout);
         lbl->setId(QStringLiteral("ka_section_elevation_%1").arg(i));
-        lbl->setText(QString::number(tickVal, 'f', 2));
+        lbl->setText(SectionSheetDecor::elevationText(tickVal, options));
+        lbl->setCustomProperty(SectionSheetDecor::tickKindKey(), QStringLiteral("elevation"));
+        lbl->setCustomProperty(SectionSheetDecor::tickValueKey(), tickVal);
         lbl->setHAlign(Qt::AlignRight);
         lbl->setVAlign(Qt::AlignVCenter);
         lbl->attemptSetSceneRect(QRectF(0.5, layoutY - 2.5, mapX - 4.0, 5.0));
-        QFont f(QStringLiteral("Malgun Gothic"));
-        f.setPointSize(5);
-        lbl->setFont(f);
+        SectionSheetDecor::setLabelFont(lbl, SectionSheetDecor::tickFont(options));
         layout->addLayoutItem(lbl);
     }
 
@@ -790,32 +950,23 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
 
         auto* lbl = new QgsLayoutItemLabel(layout);
         lbl->setId(QStringLiteral("ka_section_distance_%1").arg(i));
-        lbl->setText(QStringLiteral("%1m").arg(relDist, 0, 'f', 2));
+        lbl->setText(SectionSheetDecor::distanceText(relDist));
+        lbl->setCustomProperty(SectionSheetDecor::tickKindKey(), QStringLiteral("distance"));
+        lbl->setCustomProperty(SectionSheetDecor::tickValueKey(), relDist);
         lbl->setHAlign(Qt::AlignHCenter);
         lbl->setVAlign(Qt::AlignTop);
         lbl->attemptSetSceneRect(QRectF(layoutX - 10.0, axisY + 3.0, 20.0, 5.0));
-        QFont f(QStringLiteral("Malgun Gothic"));
-        f.setPointSize(5);
-        lbl->setFont(f);
+        SectionSheetDecor::setLabelFont(lbl, SectionSheetDecor::tickFont(options));
         layout->addLayoutItem(lbl);
     }
 
     // 10. 기준선: #D7191C 점선 0.20mm (지도 하단 = 기준 표고)
-    if (options.showReferenceLine) {
-        QPolygonF ln;
-        ln << QPointF(mapX, mapY + frameH) << QPointF(mapX + frameW, mapY + frameH);
-        auto* refItem = new QgsLayoutItemPolyline(ln, layout);
-        refItem->setId(QStringLiteral("ka_section_reference_line"));
-        refItem->setStartMarker(QgsLayoutItemPolyline::NoMarker);
-        refItem->setEndMarker(QgsLayoutItemPolyline::NoMarker);
-        if (auto sym = QgsLineSymbol::createSimple({
-                {QStringLiteral("line_color"),      options.referenceLineColor},
-                {QStringLiteral("line_width"),      QString::number(options.referenceLineWidthMm)},
-                {QStringLiteral("line_width_unit"), QStringLiteral("MM")},
-                {QStringLiteral("line_style"),      QStringLiteral("dash")}}))
-            refItem->setSymbol(sym.get());
-        layout->addLayoutItem(refItem);
-    }
+    const QRectF mapRect(mapX, mapY, frameW, frameH);
+    if (options.showReferenceLine)
+        SectionSheetDecor::addReferenceLine(layout, mapRect, options);
+    // 선택 주기(예: A–A′ 단면 · 북벽). 비어 있으면 넣지 않는다.
+    if (!options.noteText.trimmed().isEmpty())
+        SectionSheetDecor::addNote(layout, mapRect, options.noteText.trimmed());
 
     // 11. 크롬: 거리 눈금 바로 아래 왼쪽 축척자 하나. 샘플 스타일은 용지에 두지 않는다.
     const double chromeY = mapY + frameH + bottomAxisH;
@@ -855,6 +1006,7 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
         sb->setTextFormat(sbFmt);
         LayoutService::applySheetScaleBarInk(sb);
         sb->attemptSetSceneRect(QRectF(mapX, barY, barW, barH));
+        SectionSheetDecor::markAutoPosition(sb);
     }
 
     {
@@ -870,43 +1022,94 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
         lbl->attemptSetSceneRect(QRectF(mapX + barW + 4.0, barY + 1.5, 40.0, 9.0));
         QFont f(QStringLiteral("Malgun Gothic"));
         f.setPointSize(7);
-        lbl->setFont(f);
+        SectionSheetDecor::setLabelFont(lbl, f);
         layout->addLayoutItem(lbl);
+        SectionSheetDecor::markAutoPosition(lbl);
     }
 
     {
-        const QString crsId = titleCrsId.isEmpty() ? QStringLiteral("-") : titleCrsId;
+        // 좌표계 번호에 한글 원점명을 붙인다(예: EPSG:5187 · 동부원점(GRS80)).
         auto* lbl = new QgsLayoutItemLabel(layout);
         lbl->setId(QStringLiteral("ka_section_crs"));
-        lbl->setText(crsId);
+        lbl->setText(SectionSheetDecor::crsText(titleCrsId));
         lbl->setHAlign(Qt::AlignLeft);
         lbl->setVAlign(Qt::AlignVCenter);
         lbl->attemptSetSceneRect(QRectF(mapX + barW + 46.0, barY + 1.5, 70.0, 9.0));
         QFont f(QStringLiteral("Malgun Gothic"));
         f.setPointSize(7);
-        lbl->setFont(f);
+        SectionSheetDecor::setLabelFont(lbl, f);
         layout->addLayoutItem(lbl);
+        SectionSheetDecor::markAutoPosition(lbl);
     }
 
     {
-        const QString title = options.titleKo.isEmpty()
-            ? QStringLiteral("단면도") : options.titleKo;
-        const QString date  = QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd"));
         auto* lbl = new QgsLayoutItemLabel(layout);
         lbl->setId(QStringLiteral("ka_section_title_block"));
-        lbl->setText(QStringLiteral("%1  |  수직: 표고(m)  |  작성일: %2").arg(title, date));
+        lbl->setText(SectionSheetDecor::titleText(options));
         lbl->setHAlign(Qt::AlignLeft);
         lbl->setVAlign(Qt::AlignVCenter);
         lbl->attemptSetSceneRect(QRectF(mapX, chromeY + 13.2, frameW, 6.0));
         QFont f(QStringLiteral("Malgun Gothic"));
         f.setPointSize(7);
         f.setBold(true);
-        lbl->setFont(f);
+        SectionSheetDecor::setLabelFont(lbl, f);
         layout->addLayoutItem(lbl);
+        SectionSheetDecor::markAutoPosition(lbl);
     }
 
     result.layoutName = kName;
     return result;
+}
+
+// ---- restoreDisplayLayers: re-derive layout-owned display rasters ----
+
+bool SectionLayoutService::restoreDisplayLayers(QgsProject* project)
+{
+    if (!project) return false;
+    auto* layout = dynamic_cast<QgsPrintLayout*>(
+        project->layoutManager()->layoutByName(QStringLiteral("section_sheet")));
+    auto* map = layout ? qobject_cast<QgsLayoutItemMap*>(
+        layout->itemById(QStringLiteral("ka_section_map"))) : nullptr;
+    if (!map || !layout->customProperty(QLatin1String(kPropSheetPlanes)).isValid())
+        return false;
+    const QVariantList stored = planesFromProperty(layout->customProperty(QLatin1String(kPropSheetPlanes)));
+    const QList<QgsMapLayer*> current = map->layers();
+    const bool complete = !current.isEmpty() && current.size() == std::max<qsizetype>(1, stored.size())
+        && std::all_of(current.cbegin(), current.cend(),
+                       [](const QgsMapLayer* l) { return l && l->isValid(); });
+    if (complete) return false;
+    QList<QgsMapLayer*> layers;
+    for (const QVariant& value : stored) {
+        const QVariantMap m = value.toMap();
+        auto* src = qobject_cast<QgsRasterLayer*>(
+            project->mapLayer(m.value(QStringLiteral("src")).toString()));
+        if (!src || !src->isValid())
+            return false;  // the source is gone: leave the sheet as it is
+        if (!m.value(QStringLiteral("flatten")).toBool()) {
+            sharpenSectionRaster(src);
+            knockOutSectionPaper(src);
+            layers.append(src);
+            continue;
+        }
+        SectionPlane plane;
+        plane.src = src;
+        plane.flatten = true;
+        plane.lengthM = m.value(QStringLiteral("lengthM")).toDouble();
+        plane.heightM = m.value(QStringLiteral("heightM")).toDouble();
+        plane.elevBottom = m.value(QStringLiteral("elevBottom")).toDouble();
+        plane.cropX0 = m.value(QStringLiteral("cropX0")).toInt();
+        plane.cropY0 = m.value(QStringLiteral("cropY0")).toInt();
+        plane.cropW = m.value(QStringLiteral("cropW")).toInt();
+        plane.cropH = m.value(QStringLiteral("cropH")).toInt();
+        QgsRasterLayer* display = makeNorthUpDisplay(src, map->crs(), plane, layout);
+        if (!display) return false;
+        layers.append(display);
+    }
+    if (layers.isEmpty())
+        layers.append(addBlankLayer(layout, map->crs()));
+    map->setLayers(layers);
+    map->invalidateCache();
+    return true;
 }
 
 // ---- Task 3: exportSectionPdf ----
@@ -929,16 +1132,14 @@ QString SectionLayoutService::exportSectionPdf(
         return {};
     }
 
-    // 래스터를 타일 없이 한 번에 그려 PDF에서 조각 없이 나오게 한다
-    layout->renderContext().setFlag(
-        Qgis::LayoutRenderFlag::DisableTiledRasterLayerRenders, true);
+    // 다시 연 조사에서는 임시 표시 래스터가 없다. 저장된 평면값으로 다시 만든다.
+    restoreDisplayLayers(project);
+    // 래스터를 타일 없이 한 번에 그려 PDF에서 조각 없이 나오게 한다.
+    // 설정은 도면 PDF(조판·제출)와 같은 KaPdfExport 한 곳에서 온다.
+    KaPdfExport::prepareLayout(layout);
 
     QgsLayoutExporter exporter(layout);
-    QgsLayoutExporter::PdfExportSettings settings;
-    settings.dpi                = 300;
-    settings.forceVectorOutput  = true;
-    settings.rasterizeWholeImage = false;
-    settings.textRenderFormat   = Qgis::TextRenderFormat::AlwaysText;
+    const QgsLayoutExporter::PdfExportSettings settings = KaPdfExport::sheetSettings();
 
     const double keepDpi = layout->renderContext().dpi();
     layout->renderContext().setDpi(settings.dpi);

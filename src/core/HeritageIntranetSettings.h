@@ -14,6 +14,7 @@ public:
   static Credentials credentials();
   static bool saveCredentials(const Credentials& credentials, QString* error = nullptr);
   // 아이디·비밀번호가 모두 있는가. 값 자체를 꺼내지 않고 확인만 할 때 쓴다.
+  // 읽기 전용이다: 계정 파일을 고쳐 쓰지 않는다.
   static bool hasCredentials();
   // 로그·화면에 쓸 수 있는 표기. 비밀번호는 절대 포함하지 않는다.
   static QString describeForLog();
@@ -21,6 +22,7 @@ public:
 private:
   friend class HeritageIntranetSettingsTest;
   friend class HeritageIntranetFlowTest;
-  static Credentials readFromFiles(const QString& personalFile, const QStringList& fallbackFiles);
+  static Credentials readFromFiles(const QString& personalFile, const QStringList& fallbackFiles,
+                                   bool migrate = true);
   static bool saveToFile(const QString& personalFile, const Credentials& credentials, QString* error);
 };
