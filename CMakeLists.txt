@@ -116,6 +116,7 @@ add_library(ka_core STATIC
   src/core/TopographicSettings.cpp
   src/core/ChecklistEngine.cpp
   src/core/SurveyProjectFactory.cpp
+  src/core/SurveySaveAs.cpp
   src/core/SurveyStorage.cpp
   src/core/SurveyBundle.cpp
   src/core/SurveySession.cpp
@@ -228,6 +229,7 @@ add_library(ka_core STATIC
   src/core/CadDrawingLayers.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
+  src/core/SurveySaveAs.h
   src/core/SurveyStorage.h
   src/core/SurveySession.h
   src/core/SurveyDurability.h
@@ -1115,6 +1117,13 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_undo_group_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_undo_group_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(undo_group ka_undo_group_tests)
+  # 「다른 이름으로 저장」이 원본 조사 파일을 바꾸지 않고 저장하지 않은 편집을 새 파일에만 쓴다(SurveySaveAs).
+  add_executable(ka_survey_save_as_tests tests/test_survey_save_as.cpp)
+  target_include_directories(ka_survey_save_as_tests PRIVATE src ${KA_INCLUDES})
+  target_link_directories(ka_survey_save_as_tests PRIVATE ${KA_LIBDIRS})
+  target_link_libraries(ka_survey_save_as_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_survey_save_as_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(survey_save_as ka_survey_save_as_tests)
   add_executable(ka_shell_tests tests/test_shell.cpp
     src/app/KaShellUi.cpp src/app/KaShellUi.h
     src/app/KaShellStartup.cpp src/app/KaShellStartup.h
@@ -1610,7 +1619,7 @@ if(KA_HGIS_BUILD_TESTS)
     string(JOIN "\\;" _ka_path_esc ${_ka_path})
     set_tests_properties(layer_labels layer_information checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss user_error recent_surveys section_layout_engine section_studio_engine terrain_3d_engine ${KA_SAVE_OPEN_TESTS} e2e_opaque_suite network_services storage_safety reference_download region_locator_popup layer_state_regressions map_render above_labels above_labels_125 above_labels_150 above_labels_200 PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
-    set_tests_properties(layer_roles layer_styles layer_edits layer_panel layer_tree_undo undo_group PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
+    set_tests_properties(layer_roles layer_styles layer_edits layer_panel layer_tree_undo undo_group survey_save_as PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(georef_quality georef_backup align_tool align_image_view PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(cad_dwg cad_reader cad_crs cad_store cad_layers cad_dialog cad_import cad_align blocking_task PROPERTIES

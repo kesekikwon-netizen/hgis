@@ -5337,12 +5337,12 @@ private slots:
     QVERIFY(feature.setAttribute(QStringLiteral("name"), QStringLiteral("독립 구역")));
     feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(190200, 560200, 190250, 560250)));
     QVERIFY(second->addFeature(feature));
-    QVERIFY(second->commitChanges());
+    QVERIFY(second->isModified());  // 저장하지 않은 편집은 새 파일에만 가고 원본은 그대로여야 한다(R19)
     const QString secondId = second->id();
     const QString tableOptions = second->source().section(QLatin1Char('|'), 1);
     const QString target = m_files.filePath(QStringLiteral("새 이름.gpkg"));
     QVERIFY(selectSaveAs(window, target));
-    QVERIFY(QFile::exists(target));
+    QVERIFY(QFile::exists(target) && QgsVectorLayer(path + QLatin1Char('|') + tableOptions, QStringLiteral("원본"), QStringLiteral("ogr")).featureCount() == 0);
     QCOMPARE(second->source().section(QLatin1Char('|'), 1), tableOptions);
     QCOMPARE(QFileInfo(second->source().section(QLatin1Char('|'), 0, 0)).absoluteFilePath(),
              QFileInfo(target).absoluteFilePath());

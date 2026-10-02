@@ -40,6 +40,8 @@
 | 블록 안에 블록이 든 도면이 「변환본을 쓰지 못했습니다」로 실패하거나 그 안의 선·점이 빠짐 | GDAL 은 겹친 블록을 모음 안의 모음(선·점이 섞임)이나 여러선(선만)으로 주는데 한 단계만 풀었다. 여러선은 한 조각 선 표에 쓰지 못하고, 모음은 버려졌다. | 모음·여러 조각을 끝까지 풀어 한 조각씩 담는다. 시험: `cad_reader` (`read_nestedBlocksGiveSingleParts`). |
 | 탐색기에서 끌어 온 도면을 취소하면 파일함에서 골라 둔 다른 파일이 대신 올라감 | 끌어놓기가 「아무것도 못 올림」으로 보고 파일함 선택으로 넘어갔다. | 도면은 취소·실패해도 그 흐름이 알렸으니 처리한 것으로 본다. 앱 창 끌어놓기라 자동 시험은 없다(빌드와 `save_open_window` 로 확인). |
 | 도형을 그리고 이름·번호를 넣으면 Ctrl+Z 를 두 번 눌러야 도형이 사라짐(한 번은 이름만 지워짐) | 도형 넣기(「도형 그리기」)와 이름·번호 입력이 레이어 되돌리기 목록에 따로 두 단계로 남았다. | KaUndoGroup 으로 도형 넣기부터 이름·번호까지를 한 단계로 묶는다(Ctrl+Z·Ctrl+Y 한 번). 「겹친 곳 지우기」를 고르면 지우기 직전에 묶음을 닫아 지우기는 지금처럼 따로 한 단계다. 시험: `undo_group`, `save_open_erase`. |
+| 「다른 이름으로 저장」을 하면 저장하지 않은 편집이 원본 조사 파일에 먼저 써짐 | 복사하기 전에 편집을 원본에 저장(commitSurveyEdits)했다. | 원본의 마지막 저장본을 새 파일로 복사하고 레이어를 옮긴 뒤(SurveySaveAs::moveToCopy) 편집을 새 파일에만 쓴다. QGIS 는 데이터 경로를 바꿔도 편집 버퍼를 지킨다(2026-10-02 실험). 시험: `survey_save_as`, `save_open_saveas` (`saveAs_preservesActualTablesAndReopensCopy`). |
+| 떨어진 조사구역 두 개를 「폴리곤 묶기」로 묶으면 저장 때 면적 0인 고장 난 도형이 됨 | 합친 결과가 여러 조각(멀티폴리곤)인데 한 조각 표에 넣었다. | 한 조각 표에서는 떨어진 구역을 묶지 않고 「두 구역은 따로 저장되고 제출에도 함께 들어갑니다」라고 알린다. 맞닿거나 겹친 구역만 묶는다. 시험: `layer_edits` (`mergeRefusesSeparatePolygonsInASinglePartLayer`). |
 | GitHub 자동 검사(CI)만 「Build Release」에서 실패하고 이 PC에서는 빌드됨(2026-10-02, `cannot convert from 'std::unique_ptr<QgsSymbol…>' to 'QgsSymbol *'`) | CI는 OSGeo4W 최신 qgis-dev(1237)를, 이 PC는 1201을 쓴다. 그 사이 QGIS가 `QgsSymbol::defaultSymbol`·`Qgs*SymbolLayer::create` 같은 함수를 unique_ptr 반환으로 바꿨다. | 받은 값을 `std::unique_ptr<T>(f()).release()`로 감싸 두 판 모두에서 컴파일한다. 새 판에서 깨지는 곳은 그 판의 헤더만 끼운 임시 OSGEO4W_ROOT(A:\tmp\osgeo-1237, 폴더 연결)로 전체를 컴파일해 찾는다. 확인: 새 헤더 컴파일 오류 0, layer_styles·feature_records·heritage_style 통과. |
 
 ## 지적 GetMap (확인된 사실)

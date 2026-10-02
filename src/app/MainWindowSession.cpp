@@ -25,6 +25,7 @@
 #include "core/SurveyProjectFactory.h"
 #include "core/SurveyRecovery.h"
 #include "core/SurveySession.h"
+#include "core/SurveySaveAs.h"
 #include "core/SurveyStorage.h"
 #include "core/VworldSettings.h"
 
@@ -1468,8 +1469,6 @@ void MainWindow::saveProjectAs() {
   const SaveBusyScope busy(statusBar());  // F071: visible while the copy/absorb/write runs
   const QString previousSurvey = m_surveyPath;
   try {
-  if (!commitSurveyEdits()) return;
-
   struct OriginalSource {
     QPointer<QgsVectorLayer> layer;
     QString source;
@@ -1523,10 +1522,11 @@ void MainWindow::saveProjectAs() {
     project->setDirty(true);
   });
 
-  // 1. 기존 조사가 있으면 새 GPKG로 복사하여 조사 데이터(유구, 구역 등) 보존
+  // 1. 기존 조사의 마지막 저장본을 새 GPKG로 복사하고 레이어를 그쪽으로 옮긴다. 저장하지 않은 편집은
+  //    아래 commitSurveyEdits 에서 새 파일에만 쓴다. 원본 조사 파일은 바꾸지 않는다.
   if (!m_surveyPath.isEmpty() && QFile::exists(m_surveyPath) && !sameFile) {
     QString copyError;
-    if (!SurveyStorage::copySurvey(m_surveyPath, targetGpkg, &copyError)) {
+    if (!SurveySaveAs::moveToCopy(QgsProject::instance(), m_surveyPath, targetGpkg, &copyError)) {
       KaUserError::warn(this, {
           QStringLiteral("저장 실패"),
           QStringLiteral("다른 이름으로 저장할 조사 파일을 만들지 못했습니다."),
@@ -1534,26 +1534,6 @@ void MainWindow::saveProjectAs() {
           QStringLiteral("저장 폴더의 쓰기 권한과 남은 공간을 확인한 뒤 다시 저장하세요."),
       });
       return;
-    }
-    // 논리 키는 같은 구역도 실제 테이블은 survey_area_2 등으로 다를 수 있다.
-    // 파일 경로만 바꾸고 각 레이어의 테이블·옵션·스타일은 보존한다.
-    for (QgsMapLayer* l : QgsProject::instance()->mapLayers()) {
-      auto* vl = qobject_cast<QgsVectorLayer*>(l);
-      if (!vl || vl->providerType() != QLatin1String("ogr")) continue;
-      const QString source = vl->source();
-      const QString sourcePath = source.section(QLatin1Char('|'), 0, 0);
-      if (QFileInfo(sourcePath).absoluteFilePath().compare(
-              QFileInfo(m_surveyPath).absoluteFilePath(), Qt::CaseInsensitive) == 0) {
-        const int options = source.indexOf(QLatin1Char('|'));
-        vl->setDataSource(targetGpkg + (options < 0 ? QString() : source.mid(options)),
-                          vl->name(), QStringLiteral("ogr"));
-        if (!vl->isValid()) {
-          reportSaveFailure(QStringLiteral("저장 실패"),
-                            QStringLiteral("새 파일에서 %1을 읽지 못했습니다. 현재 작업은 유지됩니다. "
-                                           "다른 저장 폴더를 선택해 다시 저장하세요.").arg(vl->name()));
-          return;
-        }
-      }
     }
   } else if (m_surveyPath.isEmpty() || !QFile::exists(m_surveyPath)) {
     QString err;
@@ -1572,6 +1552,7 @@ void MainWindow::saveProjectAs() {
     }
     targetGpkg = created;
   }
+  if (!commitSurveyEdits()) return;  // 저장하지 않은 편집은 여기서 새 파일에만 쓴다
 
   // 2. 이전 조사 폴더와 이 PC의 AppData·임시·앱 폴더에 있던 자료를 새 조사 폴더로 모은다.
   //    새 조사 폴더 하나만 건네도 다른 PC에서 그대로 열리게 하기 위해서다.

@@ -92,6 +92,19 @@ private slots:
     QVERIFY(layer->rollBack());
   }
 
+  // 떨어진 두 구역은 하나로 묶지 않는다: 한 조각 표(조사구역·유구면)에 여러 조각 도형을 넣으면 저장 때 면적 0인
+  // 고장 난 도형이 된다(2026-10-02 조사 R25). 두 구역은 그대로 남아 따로 저장·제출된다.
+  void mergeRefusesSeparatePolygonsInASinglePartLayer() {
+    auto layer = featurePolygons();
+    const QgsFeatureId a = addRect(layer.get(), QgsRectangle(0, 0, 10, 10), QStringLiteral("구역"), QStringLiteral("1"));
+    const QgsFeatureId b = addRect(layer.get(), QgsRectangle(20, 0, 30, 10), QStringLiteral("구역"), QStringLiteral("2"));
+    QString error;
+    QVERIFY(!LayerOps::mergePolygonFeatures(layer.get(), {a, b}, &error));
+    QVERIFY2(error.contains(QStringLiteral("떨어진 구역")), qUtf8Printable(error));
+    QCOMPARE(layer->featureCount(), 2);
+    QVERIFY(!layer->isModified());
+  }
+
   void sharedVertexMoveTouchesOnlyNeighbours() {
     auto layer = featurePolygons();
     const QgsFeatureId left = addRect(layer.get(), QgsRectangle(0, 0, 10, 10), QStringLiteral("a"), QStringLiteral("1"));

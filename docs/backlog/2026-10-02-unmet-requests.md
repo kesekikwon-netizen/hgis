@@ -7,7 +7,7 @@
 ## 남은 일 (순서대로)
 
 ### 1. 도형을 그리고 이름을 넣으면 Ctrl+Z를 두 번 눌러야 하는 문제
-- 상태: 할 일 · 종류: bug · 크기: S · 요청 번호: R91
+- 상태: 완료(ac24ce1) · 종류: bug · 크기: S · 요청 번호: R91
 - 사용자 말: 「The trials confirmed a real app bug: Ctrl+Z needs two presses after drawing a shape and filling the name/number form, because the shape and the form are separate edit commands (`src/app/MainWindowEditing.cpp` ~867–872). Not fixed in main.」
 - 남은 것: 도형을 그린 기록(「도형 그리기」, MainWindowEditing.cpp 약 817행)과 이름·번호 입력 기록(「이름·번호」, 약 850행)이 따로 남는다. 그래서 Ctrl+Z를 한 번 누르면 이름만 지워지고 도형은 남는다. 할 일: 두 기록을 한 단계로 묶는다(입력값을 넣은 뒤 한 번에 추가하거나, 묶어서 되돌리기). Ctrl+Y도 한 번에 되살아나게 한다. 회귀 시험(그리기 → 이름 입력 → 되돌리기 한 번 → 도형 0개)과 docs/ERROR_REGRESSION.md 줄도 넣는다.
 - 승인: 없음(새로 묻거나 기록부터)

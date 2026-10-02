@@ -127,6 +127,13 @@ bool LayerOps::mergePolygonFeatures(QgsVectorLayer* layer, const QgsFeatureIds& 
   if (merged.isEmpty() || !merged.isGeosValid()) merged = QgsGeometry::collectGeometry(geoms);
   if (merged.isEmpty()) return fail(QStringLiteral("폴리곤 결합 실패"));
   if (!merged.isGeosValid()) merged = merged.makeValid();
+  // 한 조각 표(조사구역·유구면)에 여러 조각 도형을 넣으면 저장 때 면적 0인 고장 난 도형이 된다.
+  if (!QgsWkbTypes::isMultiType(layer->wkbType()) && merged.isMultipart()) {
+    if (merged.constGet()->partCount() > 1)
+      return fail(QStringLiteral("떨어진 구역은 하나로 묶을 수 없습니다. 두 구역은 따로 저장되고 제출에도 함께 들어갑니다. "
+                                 "맞닿거나 겹친 구역만 하나로 묶습니다."));
+    merged.convertToSingleType();
+  }
 
   // The polygon drawn first keeps its record; keys are left for the provider.
   QgsFeatureIds ids;
