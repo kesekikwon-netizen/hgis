@@ -1465,6 +1465,12 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_file_cleanup_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_file_cleanup_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(file_cleanup ka_file_cleanup_tests)
+  # 화면 글자의 용어 결정: 「조판」은 「도면」(R87). 소스 문자열과 점검 규칙을 읽어 본다.
+  add_executable(ka_ui_terms_tests tests/test_ui_terms.cpp)
+  target_link_libraries(ka_ui_terms_tests PRIVATE Qt6::Core Qt6::Test)
+  target_compile_definitions(ka_ui_terms_tests PRIVATE "KA_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\"")
+  set_target_properties(ka_ui_terms_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(ui_terms ka_ui_terms_tests)
   # Six write-through generation saves take ~108 s alone on the field PC (13-23 s each);
   # 120 s left no room for a parallel ctest run.
   set_tests_properties(storage_generation PROPERTIES TIMEOUT 300)

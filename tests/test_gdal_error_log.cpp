@@ -12,7 +12,9 @@
 #include <cpl_error.h>
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
+#include <io.h>
 
 namespace {
 
@@ -74,6 +76,26 @@ private slots:
     QCOMPARE(text.count(QStringLiteral("unable to open database file")), 1);
     QVERIFY(text.contains(QStringLiteral("반복")));
     KaGdalErrorLog::uninstall();
+  }
+
+  // 기본 처리기(터미널 stderr)로는 다시 넘기지 않는다: 세션 기록에 이미 남겼다. 앱을 터미널에서 켜면 같은 오류
+  // 1000개가 터미널에 쏟아졌다(2026-09-18 신고, R30).
+  void failuresAreNotRepeatedOnTheTerminal() {
+    const QString capture = QDir::temp().filePath(QStringLiteral("ka-gdal-stderr.txt"));
+    fflush(stderr);
+    const int saved = _dup(_fileno(stderr));
+    QVERIFY(freopen(qPrintable(capture), "w", stderr));
+    CPLSetErrorHandler(CPLDefaultErrorHandler);
+    KaGdalErrorLog::install();
+    CPLError(CE_Failure, CPLE_AppDefined, "%s", "terminal-noise-check");
+    KaGdalErrorLog::uninstall();
+    fflush(stderr);
+    _dup2(saved, _fileno(stderr));
+    _close(saved);
+    QFile printed(capture);
+    QVERIFY(printed.open(QIODevice::ReadOnly));
+    QVERIFY2(!printed.readAll().contains("terminal-noise-check"), "the default handler printed the error again");
+    QVERIFY(sessionLog().contains(QStringLiteral("terminal-noise-check")));
   }
 
   void uninstallRestoresPreviousAndInstallWorksAgain() {

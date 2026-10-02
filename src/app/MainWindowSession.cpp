@@ -856,7 +856,7 @@ bool MainWindow::commitSurveyEdits(int* committedCount) {
         if (!recovery.isEmpty()) {
           recoveryNote = QStringLiteral(" 현재 편집 도형의 복구 사본을 보관했습니다: %1").arg(QDir::toNativeSeparators(recovery));
           details += QStringLiteral("\n복구 사본은 벡터 피처와 레이어 구성을 보관합니다. "
-                                    "조판은 포함하지 않으며 사진·래스터는 외부 원본 참조로 남습니다. "
+                                    "도면 용지는 포함하지 않으며 사진·래스터는 외부 원본 참조로 남습니다. "
                                     "원본 파일도 함께 보관하세요. 현재 조사 저장은 아직 완료되지 않았습니다.");
           if (!m_surveyPath.isEmpty()) {
             QSettings st = RecentSurveys::userSettings();

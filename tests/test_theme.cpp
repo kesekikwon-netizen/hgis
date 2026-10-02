@@ -1372,7 +1372,7 @@ void TestTheme::beginnerChrome_questionLabels() {
   QVERIFY2(ds.open(QIODevice::ReadOnly | QIODevice::Text), "KaDrawingStudio.cpp");
   const QString studio = QString::fromUtf8(ds.readAll());
   QVERIFY2(studio.contains(QString::fromUtf8("PDF 내보내기")), "조판 PDF");
-  QVERIFY2(studio.contains(QString::fromUtf8("조판 항목")), "조판 오른쪽 안내");
+  QVERIFY2(studio.contains(QString::fromUtf8("도면 항목")), "도면 오른쪽 안내");
   QVERIFY2(!studio.contains(QLatin1String("studioToolbar")), "조판 위 보기 툴바 없음 — 휠·드래그");
   QVERIFY2(!studio.contains(QString::fromUtf8("용지 전체를 볼까?")), "용지 맞춤 버튼 없음");
   QVERIFY2(!studio.contains(QString::fromUtf8("화면을 움직여볼까?")), "화면 이동 버튼 없음");

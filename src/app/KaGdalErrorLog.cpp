@@ -37,10 +37,10 @@ void CPL_STDCALL handleGdalError(CPLErr level, CPLErrorNum code, const char* mes
                                                     QString::fromUtf8(message ? message : ""));
       if (!line.isEmpty()) KaCrashGuard::logLine(line);  // thread safe, folds repeats
     }
-    if (const CPLErrorHandler previous = g_previous.load())
+    // 기본 처리기는 같은 오류를 터미널(stderr)에 다시 찍을 뿐이다: 세션 기록에 남겼으니 넘기지 않는다
+    // (앱을 터미널에서 켜면 같은 오류 1000개가 쏟아졌다, R30).
+    if (const CPLErrorHandler previous = g_previous.load(); previous && previous != CPLDefaultErrorHandler)
       previous(level, code, message);
-    else
-      CPLCallPreviousHandler(level, code, message);
   } catch (...) {
     KA_LOG_EXCEPT();
   }

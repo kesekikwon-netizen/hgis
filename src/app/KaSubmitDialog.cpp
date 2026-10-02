@@ -25,7 +25,7 @@ KaSubmitDialog::KaSubmitDialog(QWidget* parent) : QDialog(parent) {
       QStringLiteral("제출 꾸러미 = EPSG:5179 SHP + 조사도면.pdf + MANIFEST.sha256 입니다. "
                      "검수 오류가 한 건이라도 있으면 만들 수 없습니다.\n"
                      "필수 도면 5종은 조사구역도·유적위치도·유구배치도·개별유구실측도·층위도입니다. "
-                     "유적위치도·유구배치도·개별유구실측도는 「도면」에서 조판한 용지로 확인합니다."),
+                     "유적위치도·유구배치도·개별유구실측도는 「도면」에서 만든 용지로 확인합니다."),
       this);
   intro->setWordWrap(true);
   layout->addWidget(intro);

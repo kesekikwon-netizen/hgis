@@ -103,8 +103,8 @@ void MainWindow::makeSubmitPackage() {
   QgsProject* project = QgsProject::instance();
   if (!LayoutService::isComposedStudioSheet(project, QStringLiteral("user_sheet"))) {
     if (KaUserError::warn(this, {QStringLiteral("검수·제출"),
-                                 QStringLiteral("조판한 도면 용지가 없어 제출 꾸러미를 만들지 않았습니다."),
-                                 QStringLiteral("꾸러미의 조사도면.pdf는 「도면」에서 조판한 용지로 만듭니다."),
+                                 QStringLiteral("「도면」에서 만든 용지가 없어 제출 꾸러미를 만들지 않았습니다."),
+                                 QStringLiteral("꾸러미의 조사도면.pdf는 「도면」에서 만든 용지로 만듭니다."),
                                  QStringLiteral("「도면」에서 용지에 지도를 올린 뒤 다시 만드세요."),
                                  QStringLiteral("도면 열기")}) == KaUserError::Result::ActionChosen)
       openLayoutDesigner();

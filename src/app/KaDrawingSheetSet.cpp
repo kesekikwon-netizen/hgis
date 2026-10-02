@@ -68,7 +68,7 @@ bool store(QgsProject* project, const QString& workingName, const QString& title
   if (QgsPrintLayout* old = printLayout(project, layoutName)) {
     if (!old->customProperty(kSavedProperty, false).toBool()) {
       delete copy;
-      fail(error, QStringLiteral("같은 이름의 다른 조판이 있습니다. 다른 이름을 쓰세요."));
+      fail(error, QStringLiteral("같은 이름의 다른 도면이 있습니다. 다른 이름을 쓰세요."));
       return false;
     }
     project->layoutManager()->removeLayout(old);

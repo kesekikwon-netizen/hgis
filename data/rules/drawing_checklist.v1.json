@@ -9,7 +9,7 @@
     {"id": "REQ_DRAWING_FEATURE_PLAN", "severity": "error", "message_ko": "유구배치도가 준비되지 않았습니다.", "check_type": "layout_exists:feature_plan",
      "fix_ko": "유구를 그린 뒤 「도면」에서 유구가 보이게 용지에 지도를 올리세요.", "basis_ko": "발굴조사 필수 도면 · 유구배치도", "action": "open_layout"},
     {"id": "REQ_DRAWING_FEATURE_DETAIL", "severity": "warn", "message_ko": "개별유구실측도가 없습니다.", "check_type": "layout_exists:feature_detail",
-     "fix_ko": "「도면」에서 유구를 1:200보다 크게(예: 1:50) 조판하면 확인됩니다.", "basis_ko": "발굴조사 필수 도면 · 개별유구실측도", "action": "open_layout"},
+     "fix_ko": "「도면」에서 유구를 1:200보다 크게(예: 1:50) 용지에 넣으면 확인됩니다.", "basis_ko": "발굴조사 필수 도면 · 개별유구실측도", "action": "open_layout"},
     {"id": "REQ_DRAWING_SECTION", "severity": "warn", "message_ko": "층위도가 준비되지 않았습니다.", "check_type": "layout_exists:section",
      "fix_ko": "「단면도」에서 단면 GeoTIFF로 층위도를 만드세요.", "basis_ko": "발굴조사 필수 도면 · 층위도", "action": "open_section"},
     {"id": "GEOMETRY_VALID", "severity": "error", "message_ko": "자기교차 등 유효하지 않은 도형이 있습니다. 제출 전에 수정하세요.", "check_type": "geometry_valid:domain",

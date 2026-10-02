@@ -479,7 +479,7 @@ KaDrawingStudio::KaDrawingStudio(QgsProject* project, QgsMapCanvas* mapCanvas,
     : QMainWindow(parent), m_project(project ? project : QgsProject::instance()), m_mapCanvas(mapCanvas),
       m_paperW(paperWidthMm), m_paperH(paperHeightMm) {
   setAttribute(Qt::WA_DeleteOnClose, false);
-  setWindowTitle(QStringLiteral("조판"));
+  setWindowTitle(QStringLiteral("도면"));
   resize(1280, 860);
   ensureLayoutGuiRegistered(mapCanvas);
   const auto* savedLayout = layout();
@@ -997,7 +997,7 @@ void KaDrawingStudio::buildUi() {
   auto* legendLay = new QVBoxLayout(m_cardLegend);
   legendLay->setContentsMargins(10, 10, 10, 10);
   legendLay->setSpacing(6);
-  auto* legendCap = new QLabel(QStringLiteral("조판 항목"), m_cardLegend);
+  auto* legendCap = new QLabel(QStringLiteral("도면 항목"), m_cardLegend);
   legendCap->setObjectName(QStringLiteral("cardCaption"));
   legendLay->addWidget(legendCap);
   // 이 카드는 용지에 올릴 범례와, 그 옆의 PDF·인쇄를 둔다.
@@ -1350,7 +1350,7 @@ void KaDrawingStudio::buildUi() {
   m_status = new QLabel(this);
   m_status->hide();
   showStatus(QStringLiteral(
-      "조판 중 — 항목을 끌어 옮기고, 끝나면 「PDF 내보내기」. 작업 좌표계 → 제출 5179."));
+      "도면 만드는 중 — 항목을 끌어 옮기고, 끝나면 「PDF 내보내기」. 작업 좌표계 → 제출 5179."));
   m_paperFitPending = true;
 }
 
@@ -1377,7 +1377,7 @@ QWidget* KaDrawingStudio::buildBottomTools(QWidget* desk) {
                              QStringLiteral("용지에서 꼭짓점을 찍으면 화살표와 X·Y가 붙습니다"),
                              &KaDrawingStudio::beginPlaceCoordPoint));
   btLay->addWidget(addBottom(QStringLiteral("layout_center"), QStringLiteral("레이어를 가운데"),
-                             QStringLiteral("축척은 두고, 고른 레이어를 조판 한가운데로 옮깁니다"),
+                             QStringLiteral("축척은 두고, 고른 레이어를 용지 한가운데로 옮깁니다"),
                              &KaDrawingStudio::centerSurveyInMap));
   // Same actions as the map frame's right-click menu, now visible without it.
   m_adjustBtn = addBottom(QStringLiteral("layout_activate"), QStringLiteral("지도 조정"),
@@ -3705,7 +3705,7 @@ void KaDrawingStudio::centerSurveyInMap() {
   panLayoutMapTo(c);
   markUserComposed();
   if (m_status)
-    showStatus(QStringLiteral("축척 1 : %1 을 유지한 채 조판 가운데로 옮겼습니다.")
+    showStatus(QStringLiteral("축척 1 : %1 을 유지한 채 용지 가운데로 옮겼습니다.")
                           .arg(displayScale(map->scale())));
 }
 

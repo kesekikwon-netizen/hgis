@@ -707,7 +707,7 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
     auto* singleRenderer = dynamic_cast<QgsSingleSymbolRenderer*>(sourceRenderer);
     const bool single = singleRenderer != nullptr;
     if (!categorized && !single) {
-      m_error = QStringLiteral("'%1'의 조판 번호는 단일 심볼 또는 분류 스타일에서 사용할 수 있습니다.").arg(layer->name());
+      m_error = QStringLiteral("'%1'의 도면 번호는 단일 심볼 또는 분류 스타일에서 사용할 수 있습니다.").arg(layer->name());
       return false;
     }
     QgsGeometry footprint = mapFootprintOnPaper(map, m_exporting);
@@ -933,7 +933,7 @@ void HeritageLayoutNumbers::publishNumberPins(QgsLayoutItemMap* map, const QVect
         QStringLiteral("Point?crs=%1&field=num:integer&field=nm:string(80)&field=layer:string(64)"
                        "&field=ox:double&field=oy:double&field=size:double&field=fill:string(16)&field=ink:string(16)&field=fid:string(32)")
             .arg(auth),
-        QStringLiteral("조판번호"), QStringLiteral("memory"));
+        QStringLiteral("도면번호"), QStringLiteral("memory"));
     auto marker = QgsMarkerSymbol::createSimple({
         {QStringLiteral("name"), QStringLiteral("circle")},
         {QStringLiteral("color"), QStringLiteral("#888888")},

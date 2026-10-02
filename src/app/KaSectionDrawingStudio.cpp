@@ -558,7 +558,7 @@ QWidget* KaSectionDrawingStudio::buildRightPanel()
 
     m_buildBtn = new QPushButton(QStringLiteral("단면도 만들기"), output);
     m_buildBtn->setObjectName(QStringLiteral("btnPrimary"));
-    m_buildBtn->setToolTip(QStringLiteral("체크된 레이어로 단면도 조판을 생성합니다"));
+    m_buildBtn->setToolTip(QStringLiteral("체크된 레이어로 단면도 용지를 만듭니다"));
     outputLay->addWidget(m_buildBtn, 1);
 
     m_pdfBtn = new QPushButton(QStringLiteral("PDF 저장"), output);

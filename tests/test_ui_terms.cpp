@@ -1,0 +1,56 @@
+// 화면에 보이는 글자의 용어 결정(2026-09-23 Strata 이름·용어): 「조판」은 「도면」으로 부른다(2026-10-02 조사 R87).
+// 소스의 문자열(주석 제외)과 점검 규칙 파일에 「조판」이 다시 들어오면 실패한다.
+#include <QDirIterator>
+#include <QFile>
+#include <QRegularExpression>
+#include <QtTest>
+
+namespace {
+
+// 한 줄에서 // 주석을 떼고 "…" 문자열만 모은다(문자열 안의 // 는 남긴다).
+QStringList literalsOf(const QString& line) {
+  QStringList out;
+  bool inString = false;
+  QString current;
+  for (int i = 0; i < line.size(); ++i) {
+    const QChar c = line.at(i);
+    if (!inString && c == QLatin1Char('/') && i + 1 < line.size() && line.at(i + 1) == QLatin1Char('/')) break;
+    if (c == QLatin1Char('"') && (i == 0 || line.at(i - 1) != QLatin1Char('\\'))) {
+      if (inString) out << current;
+      current.clear();
+      inString = !inString;
+    } else if (inString) {
+      current += c;
+    }
+  }
+  return out;
+}
+
+}  // namespace
+
+class TestUiTerms : public QObject {
+  Q_OBJECT
+ private slots:
+  void visibleTextSaysDrawingNotJopan() {
+    const QString root = QString::fromUtf8(KA_SOURCE_DIR);
+    QStringList hits;
+    for (const QString& folder : {QStringLiteral("src/app"), QStringLiteral("src/core"), QStringLiteral("data/rules")}) {
+      QDirIterator it(root + QLatin1Char('/') + folder, {QStringLiteral("*.cpp"), QStringLiteral("*.h"), QStringLiteral("*.json")},
+                      QDir::Files);
+      while (it.hasNext()) {
+        const QString path = it.next();
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QStringList lines = QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'));
+        for (int n = 0; n < lines.size(); ++n)
+          for (const QString& text : literalsOf(lines.at(n)))
+            if (text.contains(QStringLiteral("조판"))) hits << QStringLiteral("%1:%2 %3").arg(path.mid(root.size() + 1)).arg(n + 1).arg(text);
+      }
+    }
+    QVERIFY2(hits.isEmpty(), qUtf8Printable(hits.join(QLatin1Char('\n'))));
+  }
+};
+
+QTEST_GUILESS_MAIN(TestUiTerms)
+
+#include "test_ui_terms.moc"
