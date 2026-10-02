@@ -225,6 +225,7 @@ add_library(ka_core STATIC
   src/core/CadDrawingReader.cpp
   src/core/CadCrsGuess.cpp
   src/core/CadDrawingStore.cpp
+  src/core/CadDrawingLayers.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
   src/core/SurveyStorage.h
@@ -303,6 +304,7 @@ add_library(ka_core STATIC
   src/core/CadDrawingReader.h
   src/core/CadCrsGuess.h
   src/core/CadDrawingStore.h
+  src/core/CadDrawingLayers.h
 )
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
@@ -717,6 +719,15 @@ if(KA_HGIS_BUILD_TESTS)
   target_compile_definitions(ka_cad_store_tests PRIVATE ${KA_TEST_DEFS})
   set_target_properties(ka_cad_store_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(cad_store ka_cad_store_tests)
+
+  # 도면 변환본을 참조 지도 아래 「<이름> (도면)」 묶음으로 올리는 CadDrawingLayers.
+  add_executable(ka_cad_layers_tests tests/test_cad_layers.cpp)
+  target_link_libraries(ka_cad_layers_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_cad_layers_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_cad_layers_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_cad_layers_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_cad_layers_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(cad_layers ka_cad_layers_tests)
 
   add_executable(ka_preset_tests tests/test_presets.cpp)
   target_link_libraries(ka_preset_tests PRIVATE ${KA_TEST_LIBS})
@@ -1551,7 +1562,7 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(layer_roles layer_styles layer_edits layer_panel layer_tree_undo PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(georef_quality georef_backup align_tool align_image_view PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
-    set_tests_properties(cad_dwg cad_reader cad_crs cad_store PROPERTIES
+    set_tests_properties(cad_dwg cad_reader cad_crs cad_store cad_layers PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     set_tests_properties(dem_legend PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(topographic_catalog PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
