@@ -179,6 +179,34 @@ test('installIntent leaves the old skill in place when CLAUDE.md cannot be writt
   assert.equal(read(cfg, 'CLAUDE.md'), ORIGINAL);
 });
 
+// Review finding: a cp949 (ANSI) or UTF-16 CLAUDE.md was read as UTF-8 and written back as garbage.
+test('installIntent and removeIntent refuse a CLAUDE.md that is not UTF-8', (t) => {
+  const cp949 = Buffer.from([0x23, 0x20, 0xc0, 0xfc, 0xbf, 0xaa, 0x0a, 0x2d, 0x20, 0xc7, 0xcf, 0xb3, 0xaa, 0x0a]);
+  const utf16 = Buffer.from(`${BOM}# 전역 지침\r\n- 하나\r\n`, 'utf16le');
+  for (const bytes of [cp949, utf16]) {
+    const cfg = tempConfig(t, {});
+    fs.writeFileSync(path.join(cfg, 'CLAUDE.md'), bytes);
+    assert.throws(() => installIntent({ configDir: cfg, sourceDir: HERE, stamp: 'a' }), /UTF-8/);
+    assert.throws(() => removeIntent({ configDir: cfg, stamp: 'b' }), /UTF-8/);
+    assert.deepEqual(fs.readFileSync(path.join(cfg, 'CLAUDE.md')), bytes);
+    assert.equal(fs.existsSync(path.join(cfg, 'skills')), false);
+    assert.equal(fs.existsSync(path.join(cfg, '_reset_backup')), false);
+  }
+});
+
+// Review finding: `remove` (no dashes) or `—remove` (autocorrected dash) installed instead.
+test('command line refuses an unknown option and changes nothing', (t) => {
+  const cfg = tempConfig(t, { 'CLAUDE.md': ORIGINAL });
+  for (const arg of ['remove', '—remove', '--Remove']) {
+    const run = spawnSync(process.execPath, [path.join(HERE, 'install-intent.mjs'), arg],
+      { env: { ...process.env, CLAUDE_CONFIG_DIR: cfg }, encoding: 'utf8' });
+    assert.equal(run.status, 1, `${arg}: ${run.stdout}`);
+    assert.match(run.stderr, /알 수 없는 옵션/);
+  }
+  assert.equal(read(cfg, 'CLAUDE.md'), ORIGINAL);
+  assert.equal(fs.existsSync(path.join(cfg, 'skills')), false);
+});
+
 test('command line installs into CLAUDE_CONFIG_DIR and removes with --remove', (t) => {
   const cfg = tempConfig(t, { 'CLAUDE.md': ORIGINAL });
   const run = (...args) => spawnSync(process.execPath, [path.join(HERE, 'install-intent.mjs'), ...args],

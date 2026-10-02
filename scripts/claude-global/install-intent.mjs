@@ -95,6 +95,17 @@ export function removeBlock(text) {
 }
 
 const readIfExists = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null);
+const NOT_UTF8 = [String.fromCharCode(0xfffd), String.fromCharCode(0)];
+
+// An ANSI (cp949) or UTF-16 CLAUDE.md read as UTF-8 shows replacement or NUL characters; writing
+// that text back would destroy the person's lines, so such a file is left alone.
+function readClaudeMd(file) {
+  const text = readIfExists(file);
+  if (text !== null && NOT_UTF8.some((ch) => text.includes(ch))) {
+    throw new Error('CLAUDE.md 파일이 UTF-8이 아니라서 건드리지 않았습니다. 메모장에서 UTF-8로 다시 저장한 뒤 실행하세요.');
+  }
+  return text;
+}
 
 // <config>/_reset_backup/<stamp>-intent, or -2, -3 … when that name is already taken.
 function newBackupDir(configDir, stamp) {
@@ -139,7 +150,7 @@ export function installIntent({ configDir, sourceDir, stamp }) {
   const { rule } = validateSource(sourceDir);
   const claudeMd = path.join(configDir, 'CLAUDE.md');
   const skillDir = path.join(configDir, 'skills', SKILL);
-  const next = applyBlock(readIfExists(claudeMd) ?? '', rule);
+  const next = applyBlock(readClaudeMd(claudeMd) ?? '', rule);
 
   const backupDir = newBackupDir(configDir, stamp);
   backUp(backupDir, claudeMd, skillDir);
@@ -155,7 +166,7 @@ export function installIntent({ configDir, sourceDir, stamp }) {
 export function removeIntent({ configDir, stamp }) {
   const claudeMd = path.join(configDir, 'CLAUDE.md');
   const skillDir = path.join(configDir, 'skills', SKILL);
-  const old = readIfExists(claudeMd);
+  const old = readClaudeMd(claudeMd);
   const next = old === null ? null : removeBlock(old);
   const hasRule = old !== null && next !== old;
   const hasSkill = fs.existsSync(skillDir);
@@ -178,6 +189,11 @@ function stampNow(date = new Date()) {
 }
 
 function main(args) {
+  const unknown = args.filter((arg) => arg !== '--remove');
+  if (unknown.length) {
+    console.error(`[중단] 알 수 없는 옵션: ${unknown.join(' ')} (쓸 수 있는 것: --remove)`);
+    return 1;
+  }
   const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const sourceDir = path.dirname(fileURLToPath(import.meta.url));
   try {
