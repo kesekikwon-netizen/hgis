@@ -70,5 +70,5 @@
   - G 증상 신고: superpowers 원인 찾기를 썼다.
   - H 검토 요청: superpowers 코드 검토를 썼다.
 - 코드 검토 1회: 중요 지적 5건과 작은 지적 3건을 고쳤다. 작은 지적 4건은 남겼다. 읽기 전용 파일일 때의 안내 문구, 스킬 폴더 단계 실패 때의 영어 오류, `--remove` 범위, 기록 커밋 조건이다.
-- 확인 방법 1번(새 Strata 대화)은 Strata 지침 변경이 main에 올라간 뒤(「커밋 푸시」) 새 대화에서 볼 수 있다.
-- 커밋: b9dedd0 … f2136a4. 가지는 claude/intent-md-explanation-433e1d이다.
+- 확인 방법 1번(새 Strata 대화)은 Strata 지침 변경이 main에 올라간 뒤 새 대화에서 볼 수 있다. 2026-10-02 「커밋 푸시」로 올렸다.
+- 커밋: 1b76ac9부터 이 기록까지 12개다. 2026-10-02에 새 main(4a0fc8a) 위로 옮겨 쌓고, 새 GitHub(kesekikwon-netizen/hgis) main에 올렸다.
