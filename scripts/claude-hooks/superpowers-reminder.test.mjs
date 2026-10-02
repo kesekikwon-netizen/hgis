@@ -47,7 +47,17 @@ test('inside the Strata repo every message gets the skill routing', () => {
 
 // 2026-10-02 「빠르게 진행」: no per-task worker/reviewer loop; plans run in this session and get
 // one review when the feature is done.
-test('the routing is the light 2026-10-02 workflow', () => {
+// 2026-10-03 「가볍게 쓴다 문구수정하라 해당시 적극사용한다로」: a long conversation called no skill in 8 of the
+// 10 requests after its context was compacted, so the reminder says to call each skill again at its stage.
+test('skills are used actively at their stage, called again after a compaction', () => {
+  const text = reminderOf(runHook(JSON.stringify({ cwd: 'A:\qgis' })));
+  assert.ok(!text.includes('가볍게'), text);
+  assert.ok(text.includes('적극 사용') && text.includes('Skill 도구'), text);
+  assert.ok(text.includes('대화 요약') && text.includes('다시 부른다'), text);
+  assert.ok(text.includes('run-strata'), text);
+});
+
+test('the routing keeps the 2026-10-02 no-loop rule', () => {
   const text = reminderOf(runHook(JSON.stringify({ cwd: 'A:\qgis' })));
   assert.ok(text.includes('2026-10-02'), text);
   assert.ok(text.includes('superpowers:executing-plans'), text);
