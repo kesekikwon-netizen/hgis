@@ -628,7 +628,7 @@ void MainWindow::buildMenus() {
   more->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   more->setToolTip(QStringLiteral("가끔 쓰는 기능"));
   auto* moreMenu = new QMenu(more);
-  moreMenu->addAction(KaIcons::icon(QStringLiteral("open")), QStringLiteral("벡터 불러오기"),
+  moreMenu->addAction(KaIcons::icon(QStringLiteral("open")), QStringLiteral("벡터·도면 불러오기"),
                       this, &MainWindow::openVectorLayer);
   moreMenu->addAction(KaIcons::icon(QStringLiteral("layer")),
                       QStringLiteral("참조 벡터를 조사 파일 밖으로…"), this,

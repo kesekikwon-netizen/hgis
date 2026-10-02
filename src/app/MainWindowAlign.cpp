@@ -850,14 +850,14 @@ void MainWindow::georefAssistant() {
         this, QStringLiteral("맞출 도면"), QString(),
         QStringLiteral("도면 (*.png *.jpg *.jpeg *.tif *.tiff *.dxf *.dwg)"));
     if (path.isEmpty()) return;
-    const bool ok = GeorefService::isImagePath(path) ? addRasterFromPath(path)
-                                                     : addVectorFromPath(path);
+    if (GeorefService::isCadPath(path)) { addVectorFromPath(path); return; }  // 좌표가 없으면 그 흐름이 정합을 시작
+    const bool ok = addRasterFromPath(path);
     if (!ok) {
       KaUserError::warn(this, {
           QStringLiteral("맞추기"),
           QStringLiteral("맞출 도면 파일을 열지 못했습니다."),
-          QStringLiteral("지원하지 않는 형식이거나 DWG 드라이버가 이 버전을 읽지 못합니다."),
-          QStringLiteral("DWG면 AutoCAD에서 DXF로 저장한 뒤 다시 시도하세요."),
+          QStringLiteral("지원하지 않는 그림 형식이거나 파일이 손상되었습니다."),
+          QStringLiteral("JPG·PNG·TIF 그림인지 확인한 뒤 다시 시도하세요."),
       });
       return;
     }

@@ -120,7 +120,7 @@ public:
   void loadBootBasemaps();
   // P3-1: 배경 켜/끄기·조판 들락날락·저장·줌을 반복한다. 0이면 성공.
   int runUiStressLoop(int iterations);
-  bool addVectorFromPath(const QString& path);
+  bool addVectorFromPath(const QString& path, const QString& cadAuthId = QString());  // 도면은 KaCadImport
   bool addRasterFromPath(const QString& path);
   bool tryAddDroppedUrls(const QList<QUrl>& urls);
   void showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoint& pos);

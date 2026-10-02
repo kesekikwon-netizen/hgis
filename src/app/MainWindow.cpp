@@ -11,6 +11,7 @@
 #include "core/DemPresentation.h"
 #include "KaTheme.h"
 #include "KaUserError.h"
+#include "KaCadImport.h"
 #include "KaIcons.h"
 #include "KaCaptureMapTool.h"
 #include "KaAttributeMapTool.h"
@@ -890,6 +891,7 @@ void MainWindow::buildUi() {
   m_filesCard = filesPanel;
   m_fileBrowser = filesPanel->listView();
   connect(filesPanel, &KaFileBrowserPanel::fileActivated, this, [this](const QString& path) {
+    if (GeorefService::isCadPath(path)) { addVectorFromPath(path); return; }  // 도면은 실패를 그 흐름이 알린다
     const bool raster = GeorefService::isImagePath(path);
     if (raster ? !addRasterFromPath(path) : !addVectorFromPath(path)) {
       KaUserError::warn(this, {
@@ -2574,9 +2576,10 @@ static bool layerSitsOnWorkMap(QgsMapLayer* layer, const QString& workCrs) {
 void MainWindow::openVectorLayer() {
 #if KA_HGIS_HAS_QGIS
   const QString path = QFileDialog::getOpenFileName(
-      this, QStringLiteral("SHP/벡터 추가"), QString(),
-      QStringLiteral("Vector (*.shp *.gpkg *.geojson)"));
+      this, QStringLiteral("SHP/벡터·도면 추가"), QString(),
+      QStringLiteral("벡터·도면 (*.shp *.gpkg *.geojson *.dxf *.dwg)"));
   if (path.isEmpty()) return;
+  if (GeorefService::isCadPath(path)) { addVectorFromPath(path); return; }
   LayerOps::prepareShapefileEncoding(path);
   const QString title = QFileInfo(path).completeBaseName();
   auto* layer = new QgsVectorLayer(path, title, QStringLiteral("ogr"));
@@ -2942,8 +2945,14 @@ bool MainWindow::addRasterFromPath(const QString& path) {
 #endif
 }
 
-bool MainWindow::addVectorFromPath(const QString& path) {
+bool MainWindow::addVectorFromPath(const QString& path, const QString& cadAuthId) {
 #if KA_HGIS_HAS_QGIS
+  // 도면(DXF·DWG)은 좌표계를 알아내 변환본으로 올린다. 맞추기·파일함·끌어놓기·벡터 불러오기가 모두 여기로 온다.
+  if (GeorefService::isCadPath(path))
+    return KaCadImport::run({this, m_canvas, m_messageBar, m_surveyPath, m_workCrs,
+                             [this](QgsMapLayer* layer) { startAlignSession(layer); },
+                             [this](const QString& p, const QString& a) { return addVectorFromPath(p, a); }},
+                            path, cadAuthId);
   LayerOps::prepareShapefileEncoding(path);
   const QString baseTitle = QFileInfo(path).completeBaseName();
   QList<QgsVectorLayer*> added;
@@ -2966,11 +2975,7 @@ bool MainWindow::addVectorFromPath(const QString& path) {
       LayerOps::setShapefileEncoding(layer, QStringLiteral("CP949"));
     }
     layer->setName(title);
-    if (GeorefService::isCadPath(path)) {
-      LayerOps::markReferenceLayer(layer);
-      layer->setCustomProperty(QStringLiteral("ka_hgis/imported_reference"), true);
-    } else
-      LayerOps::markSurveyLayer(layer, QStringLiteral("user:%1").arg(title));
+    LayerOps::markSurveyLayer(layer, QStringLiteral("user:%1").arg(title));
     LayerOps::applySimpleVectorStyle(layer, QColor(0, 0, 0, 0), QColor(0, 0, 0), 0.2, 3.5, true,
                                      false);
     // SHP 등 벡터 레이어 추가 시 명칭 속성 기본 크기 자동 라벨링
@@ -3011,19 +3016,7 @@ bool MainWindow::addVectorFromPath(const QString& path) {
   } else {
     takeLayer(new QgsVectorLayer(path, baseTitle, QStringLiteral("ogr")), baseTitle);
   }
-  if (added.isEmpty()) {
-    const QString low = path.toLower();
-    if (low.endsWith(QLatin1String(".dwg")) || low.endsWith(QLatin1String(".dxf"))) {
-      KaUserError::warn(this, {
-          QStringLiteral("파일"),
-          QStringLiteral("이 CAD 파일을 열지 못했습니다."),
-          QStringLiteral("DXF는 보통 열리고, DWG는 버전·드라이버에 따라 안 열릴 수 있습니다.\n%1")
-              .arg(QDir::toNativeSeparators(path)),
-          QStringLiteral("AutoCAD에서 DXF로 저장한 뒤 다시 끌어 넣으세요."),
-      });
-    }
-    return false;
-  }
+  if (added.isEmpty()) return false;
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
   LayerOps::pruneEmptyLegendGroups(QgsProject::instance());
   if (m_layerTree && !added.isEmpty()) m_layerTree->setCurrentLayer(added.first());
@@ -3056,6 +3049,7 @@ bool MainWindow::addVectorFromPath(const QString& path) {
   return true;
 #else
   Q_UNUSED(path);
+  Q_UNUSED(cadAuthId);
   return false;
 #endif
 }
