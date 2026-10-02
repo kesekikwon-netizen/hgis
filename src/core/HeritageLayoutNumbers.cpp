@@ -953,8 +953,8 @@ void HeritageLayoutNumbers::publishNumberPins(QgsLayoutItemMap* map, const QVect
     glyph->setDataDefinedProperty(QgsSymbolLayer::Property::Character, QgsProperty::fromField(QStringLiteral("num")));
     glyph->setDataDefinedProperty(QgsSymbolLayer::Property::FillColor, QgsProperty::fromField(QStringLiteral("ink")));
     marker->appendSymbolLayer(glyph);
-    if (auto* leader = dynamic_cast<QgsGeometryGeneratorSymbolLayer*>(
-            QgsGeometryGeneratorSymbolLayer::create({{QStringLiteral("SymbolType"), QStringLiteral("Line")}}))) {
+    if (auto* leader = dynamic_cast<QgsGeometryGeneratorSymbolLayer*>(std::unique_ptr<QgsSymbolLayer>(
+            QgsGeometryGeneratorSymbolLayer::create({{QStringLiteral("SymbolType"), QStringLiteral("Line")}})).release())) {
       leader->setSymbolType(Qgis::SymbolType::Line);
       leader->setGeometryExpression(QStringLiteral(
           "if(distance($geometry, make_point(\"ox\",\"oy\")) > 0.5, "

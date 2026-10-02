@@ -259,10 +259,10 @@ private slots:
     geology->setName(QStringLiteral("지질 분류 검사"));
     QgsCategoryList categories;
     for (const auto& name : {QStringLiteral("도면 안 암석"), QStringLiteral("도면 밖 암석")})
-      categories.append(QgsRendererCategory(name, QgsSymbol::defaultSymbol(Qgis::GeometryType::Polygon), name));
+      categories.append(QgsRendererCategory(name, std::unique_ptr<QgsSymbol>(QgsSymbol::defaultSymbol(Qgis::GeometryType::Polygon)).release(), name));
     for (int i = 0; i < 60; ++i) {
       const QString name = QStringLiteral("다른 지역 암석 %1").arg(i);
-      categories.append(QgsRendererCategory(name, QgsSymbol::defaultSymbol(Qgis::GeometryType::Polygon), name));
+      categories.append(QgsRendererCategory(name, std::unique_ptr<QgsSymbol>(QgsSymbol::defaultSymbol(Qgis::GeometryType::Polygon)).release(), name));
     }
     geology->setRenderer(new QgsCategorizedSymbolRenderer(QStringLiteral("nm"), categories));
     project.addMapLayer(geology);
