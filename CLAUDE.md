@@ -71,7 +71,7 @@ How the superpowers skills fit this repo:
 
 Run the smoke, then repoint `C:\Users\kwonyoungin1\Desktop\Strata (개발).lnk` with WScript.Shell: TargetPath `<worktree>\scripts\start-ka-hgis.vbs`, WorkingDirectory `<worktree>`, IconLocation `<worktree>\build\Release\ka-hgis.exe,0`, Description `Strata 개발 빌드 (워크트리 <name>)`. Then call `SHChangeNotify(0x08000000)` so the icon refreshes, and tell the user which worktree it now opens. 「고고학 전용 HGIS.lnk」 runs `A:\qgis\build`: touch it only when asked. If the app is open, rename the running exe before rebuilding; close it only if its title has no " *".
 
-## Git (single branch: main = GitHub kwonyoungin11/hgis)
+## Git (single branch: main = GitHub http-www-dong-guk-or-kr/hgis)
 
 - Commit message: `type(scope): 한국어 요약`, a Korean body with one line of test results, and the Co-Authored-By trailer.
 - Work that exists only in a worktree is unsaved: deleting a desktop session wipes it. Commit verified work on the session branch (rule 3) and say it is saved there.
