@@ -116,6 +116,7 @@ add_library(ka_core STATIC
   src/core/TopographicSettings.cpp
   src/core/ChecklistEngine.cpp
   src/core/SurveyProjectFactory.cpp
+  src/core/SurveyHandles.cpp
   src/core/SurveySaveAs.cpp
   src/core/SurveyStorage.cpp
   src/core/SurveyBundle.cpp
@@ -229,6 +230,7 @@ add_library(ka_core STATIC
   src/core/CadDrawingLayers.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
+  src/core/SurveyHandles.h
   src/core/SurveySaveAs.h
   src/core/SurveyStorage.h
   src/core/SurveySession.h
@@ -1447,9 +1449,17 @@ if(KA_HGIS_BUILD_TESTS)
   add_executable(ka_storage_generation_tests tests/test_storage_generation.cpp)
   target_link_libraries(ka_storage_generation_tests PRIVATE ka_core Qt6::Test)
   ka_add_qtest(storage_generation ka_storage_generation_tests)
+  # 앱 안에 남은 손잡이 때문에 저장이 원본을 바꾸지 못하고 「-저장.gpkg」로 빠지던 일(R67).
+  add_executable(ka_save_handles_tests tests/test_save_handles.cpp)
+  target_include_directories(ka_save_handles_tests PRIVATE src ${KA_INCLUDES})
+  target_link_directories(ka_save_handles_tests PRIVATE ${KA_LIBDIRS})
+  target_link_libraries(ka_save_handles_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_save_handles_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(save_handles ka_save_handles_tests)
   # Six write-through generation saves take ~108 s alone on the field PC (13-23 s each);
   # 120 s left no room for a parallel ctest run.
   set_tests_properties(storage_generation PROPERTIES TIMEOUT 300)
+  set_tests_properties(save_handles PROPERTIES TIMEOUT 300)
 
   add_executable(ka_survey_durability_tests tests/test_survey_durability.cpp)
   target_link_libraries(ka_survey_durability_tests PRIVATE ka_core Qt6::Test)

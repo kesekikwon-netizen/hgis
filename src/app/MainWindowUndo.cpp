@@ -8,6 +8,7 @@
 #include "KaTrenchMoveTool.h"  // [pkg B2] F003 Delete removes the picked trench
 #include "core/EditHistory.h"
 #include "core/LayerOps.h"
+#include "core/SurveyHandles.h"
 
 #include <QAbstractSpinBox>
 #include <QApplication>
@@ -218,8 +219,7 @@ void MainWindow::removeLayersFromTree(QgsLayerTreeView* tree) {
     }
     if (auto* vector = qobject_cast<QgsVectorLayer*>(layer)) vector->removeSelection();
     const QString layerId = layer->id();
-    // takeMapLayer는 등록만 뺀다. 레이어 창 노드는 이름(글자)을 남긴 채 도형만 사라진다.
-    entry.layer.reset(project->takeMapLayer(layer));
+    entry.layer.reset(SurveyHandles::release(project->takeMapLayer(layer), m_surveyPath));  // 등록만 빼고 조사 파일 손잡이는 놓는다(R67)
     if (QgsLayerTreeLayer* live = root->findLayer(layerId)) {
       if (auto* parent = qobject_cast<QgsLayerTreeGroup*>(live->parent()))
         parent->removeChildNode(live);
@@ -367,7 +367,7 @@ void MainWindow::undoMapAction() {
     }
     for (auto& entry : action.removedLayers->entries) {
       if (!entry.layer) continue;
-      const QPointer<QgsMapLayer> layer(entry.layer.release());
+      const QPointer<QgsMapLayer> layer(SurveyHandles::reattach(entry.layer.release(), m_surveyPath));
       if (!project->addMapLayer(layer, false) || !layer) {
         if (layer && !project->mapLayer(layer->id())) entry.layer.reset(layer);
         error = QStringLiteral("레이어를 복원하지 못했습니다. 다시 Ctrl+Z를 눌러 보세요.");
