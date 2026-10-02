@@ -160,7 +160,7 @@ $stagedSummary
 ## Other PC checklist
 
 ``````powershell
-git clone https://github.com/http-www-dong-guk-or-kr/hgis.git
+git clone https://github.com/kesekikwon-netizen/hgis.git
 cd hgis
 git pull
 Get-Content docs\COMMIT_STATUS.md -Head 40
