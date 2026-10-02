@@ -1,15 +1,15 @@
-// 도면 좌표계 고르기 창은 그대로 두되, 맞으면 그 도면은 다음부터 창을 끌 수 있다(2026-10-03 사용자:
-// 「한번된것은 이런것으로 안막았으면한다」, 「잘되고있던게 왜 또이상해진것인가」, 「창을 유지하되 맞으면 창을 끌수있게하라」).
-// 창의 「다음부터 묻지 않기」를 켜면 고른 좌표계를 원본 파일 내용(SHA256)으로 기억한다. 이름만 다른 복사본도 같은 도면이다.
-// 04:01 에는 창을 없앤 앱이 첫 후보 5186 을 골라 부산 앞바다에 놓았다.
+// 좌표가 있는 도면은 묻지 않고 제자리에 올리고, 로컬 좌표 도면만 정합으로 보낸다(2026-10-03 사용자 목표:
+// 「사용자는 이도면의 위치 좌표계를 모른다는 가정」, 「좌표계가있는 도면이라면 이것은 자동으로 계산이 되게 해서 들어가야한다」).
+// 단서: 도면이 밝힌 좌표계 → 같은 파일 기억 → 조사 위치 → 지도 화면 → 지명 → 최근 좌표계 → 기본 순서.
+// 단서로 정하지 못한 자리는 알림이 「가장 그럴듯한 자리」라고 밝히고 「다른 위치로 바꾸기」를 둔다.
 #include <QDir>
 #include <QFile>
 #include <QMainWindow>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QToolButton>
 #include <QtTest>
 
-#include "app/KaCadCrsDialog.h"
 #include "app/KaCadImport.h"
 #include "cad_fixture.h"
 #include "core/HeritageImport.h"
@@ -18,13 +18,15 @@
 #include <qgslayertree.h>
 #include <qgsmapcanvas.h>
 #include <qgsmessagebar.h>
+#include <qgsmessagebaritem.h>
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
 
 namespace {
 
-const QgsPointXY kExpected(207440.79, 378546.00);  // 가수리 중심을 5174 → 5187
-const QgsRectangle kKoreaWide(0, 200000, 400000, 600000);  // 폭 400 km: 화면 중심을 조사 위치로 쓰지 않는다
+const QgsPointXY kExpected(207440.79, 378546.00);                // 가수리 중심을 5174 → 5187
+const QgsRectangle kKoreaWide(0, 200000, 400000, 600000);        // 한반도 전체: 자리를 정하지 못한다
+const QgsRectangle kYeongcheon(177000, 348000, 237000, 408000);  // 영천 둘레 60 km: 가수리 자리 하나만 든다
 
 // 가수리 지적선 30개(베셀 중부원점 보정 EPSG:5174 숫자). 5186 으로 읽으면 부산 쪽, 5174 면 경북 가수리다.
 QString writeGasuriDxf(const QString& dir, const QString& name) {
@@ -47,12 +49,13 @@ QgsVectorLayer* drawingLines(const QString& title) {
   return nullptr;
 }
 
-// 조사를 새로 연 것처럼: 프로젝트를 비우고 지도는 전국을 본다(위치 단서 없음).
+// 조사를 새로 연 것처럼 프로젝트를 비우고 지도는 view 를 본다. 조사구역은 없다.
 struct Fixture {
   QMainWindow window;
   QgsMapCanvas* canvas = new QgsMapCanvas();
   QgsMessageBar* bar = new QgsMessageBar(&window);
-  Fixture() {
+  int alignCalls = 0;
+  explicit Fixture(const QgsRectangle& view) {
     QgsProject::instance()->clear();
     QgsProject::instance()->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
     window.setAttribute(Qt::WA_DontShowOnScreen);
@@ -60,83 +63,114 @@ struct Fixture {
     window.resize(1000, 700);
     canvas->setRenderFlag(false);
     canvas->setDestinationCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
-    canvas->setExtent(kKoreaWide);
+    canvas->setExtent(view);
     window.show();
   }
-  KaCadImport::Hooks hooks(const QString& surveyPath) {
-    return {&window, canvas, bar, surveyPath, QStringLiteral("EPSG:5187"), [](QgsMapLayer*) {},
-            [](const QString&, const QString&) { return true; }};
+  bool run(const QString& file, const QString& forced = QString()) {
+    const KaCadImport::Hooks hooks{&window, canvas, bar, QString(), QStringLiteral("EPSG:5187"),
+                                   [this](QgsMapLayer*) { ++alignCalls; },
+                                   [](const QString&, const QString&) { return true; }};
+    return KaCadImport::run(hooks, file, forced);
   }
+  QString notice() const { return bar->currentItem() ? bar->currentItem()->text() : QString(); }
 };
+
+bool landsAtGasuri(const QString& file) {
+  QgsVectorLayer* lines = drawingLines(QFileInfo(file).completeBaseName() + QStringLiteral(" (도면)"));
+  return lines && lines->extent().center().distance(kExpected) < 30;
+}
 
 }  // namespace
 
 class TestCadImportAuto : public QObject {
   Q_OBJECT
  private slots:
-  void init() { QFile::remove(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + QStringLiteral("/cad-crs.ini")); }
-  void cleanup() { KaCadCrsDialog::setChooserForTests({}); }
-
-  void rememberedChoiceIsNotAskedAgainEvenForACopy() { QCOMPARE(importThreeTimes(true), 1); }
-  void withoutRememberTheWindowStaysEveryTime() { QCOMPARE(importThreeTimes(false), 3); }
-
-  // 「좌표 없음」은 기억하지 않는다: 기억하면 창도 알림도 없이 정합으로만 가서 좌표계를 다시 고를 길이 없다.
-  void noCrsIsNeverRemembered() {
-    QTemporaryDir tmp;
-    const QString dxf = writeGasuriDxf(tmp.path(), QStringLiteral("test1"));
-    const QString survey = tmp.filePath(QStringLiteral("조사/테스트.gpkg"));
-    int asked = 0;
-    KaCadCrsDialog::setChooserForTests([&](const CadCrsResult&) -> std::optional<int> { ++asked; return -1; }, true);
-    for (int i = 0; i < 2; ++i) {
-      Fixture fx;
-      QVERIFY(KaCadImport::run(fx.hooks(survey), dxf));
-    }
-    QCOMPARE(asked, 2);
+  void init() {
+    QFile::remove(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + QStringLiteral("/cad-crs.ini"));
   }
 
-  // 기억한 도면을 알림에서 「좌표 없는 도면으로 보기」로 바꾸면 기억을 지워 다음에 다시 묻는다.
-  void choosingNoCrsInTheNoticeForgetsTheDrawing() {
+  // 단서가 없어도 창 없이 올린다. 알림이 가장 그럴듯한 자리라고 밝히고 다른 자리로 바꿀 길을 둔다.
+  void withoutCluesTheLikeliestPlaceIsUsedAndOthersOffered() {
     QTemporaryDir tmp;
     const QString dxf = writeGasuriDxf(tmp.path(), QStringLiteral("test1"));
-    const QString survey = tmp.filePath(QStringLiteral("조사/테스트.gpkg"));
-    QCOMPARE(importThreeTimes(true), 1);
-    int asked = 0;
-    KaCadCrsDialog::setChooserForTests([&](const CadCrsResult&) -> std::optional<int> { ++asked; return -1; });
-    {
-      Fixture fx;
-      QVERIFY(KaCadImport::run(fx.hooks(survey), dxf, QString::fromLatin1(KaCadImport::kNoCrs)));
-    }
-    {
-      Fixture fx;
-      QVERIFY(KaCadImport::run(fx.hooks(survey), dxf));
-    }
-    QCOMPARE(asked, 1);
+    Fixture fx(kKoreaWide);
+    QVERIFY(fx.run(dxf));
+    QVERIFY(drawingLines(QStringLiteral("test1 (도면)")));
+    QCOMPARE(fx.alignCalls, 0);
+    QVERIFY2(fx.notice().contains(QStringLiteral("가장 그럴듯한")), qUtf8Printable(fx.notice()));
+    QToolButton* other = fx.bar->currentItem()->findChild<QToolButton*>(QStringLiteral("cadOtherCrs"));
+    QVERIFY(other);
+    QCOMPARE(other->text(), QStringLiteral("다른 위치로 바꾸기"));
   }
 
- private:
-  // 처음, 조사를 다시 연 뒤 같은 파일, 이름만 다른 복사본을 차례로 불러온다. 창이 뜬 횟수를 돌려준다.
-  int importThreeTimes(bool remember) {
+  // 가장 그럴듯한 자리에 둔 도면(화면도 거기로 간다)이 다음 도면의 단서가 되지 않는다(검토 2026-10-03).
+  void anUnsurePlacementIsNotAClueForTheNextDrawing() {
+    QTemporaryDir tmp;
+    const QString first = writeGasuriDxf(tmp.path(), QStringLiteral("test1"));
+    const QString second = writeGasuriDxf(tmp.path(), QStringLiteral("test2 다른 도면"));
+    QFile extra(second);
+    QVERIFY(extra.open(QIODevice::Append));
+    extra.write("\n");  // 내용이 달라야 같은 원본 기억을 쓰지 않는다
+    extra.close();
+    Fixture fx(kKoreaWide);
+    QVERIFY(fx.run(first));
+    QVERIFY(fx.run(second));
+    QVERIFY2(fx.notice().contains(QStringLiteral("가장 그럴듯한")), qUtf8Printable(fx.notice()));
+  }
+
+  // 조사구역이 없어도 지도 화면이 조사 지역을 보고 있으면 그 자리다.
+  void theMapViewPlacesTheDrawing() {
     QTemporaryDir tmp;
     const QString dxf = writeGasuriDxf(tmp.path(), QStringLiteral("test1"));
-    const QString copy = QDir(tmp.path()).filePath(QStringLiteral("test1 - 복사본.dxf"));
-    if (!QFile::copy(dxf, copy)) return -1;
-    const QString survey = tmp.filePath(QStringLiteral("조사/테스트.gpkg"));
-    int asked = 0;
-    KaCadCrsDialog::setChooserForTests(
-        [&](const CadCrsResult& guess) -> std::optional<int> {
-          ++asked;
-          for (int i = 0; i < guess.candidates.size(); ++i)
-            if (guess.candidates[i].authId == QStringLiteral("EPSG:5174")) return i;
-          return std::nullopt;
-        },
-        remember);
-    for (const QString& file : {dxf, dxf, copy}) {
-      Fixture fx;
-      if (!KaCadImport::run(fx.hooks(survey), file)) return -1;
-      QgsVectorLayer* lines = drawingLines(QFileInfo(file).completeBaseName() + QStringLiteral(" (도면)"));
-      if (!lines || lines->extent().center().distance(kExpected) >= 30) return -1;
+    Fixture fx(kYeongcheon);
+    QVERIFY(fx.run(dxf));
+    QVERIFY(landsAtGasuri(dxf));
+    QVERIFY2(!fx.notice().contains(QStringLiteral("가장 그럴듯한")), qUtf8Printable(fx.notice()));
+  }
+
+  // 한 번 제자리에 올린 도면은 지도가 어디를 보든, 이름만 다른 복사본이어도 같은 자리에 올린다.
+  void aPlacedDrawingIsRememberedEvenForACopy() {
+    QTemporaryDir tmp;
+    const QString dxf = writeGasuriDxf(tmp.path(), QStringLiteral("test1"));
+    const QString copy = tmp.filePath(QStringLiteral("test1 - 복사본.dxf"));
+    QVERIFY(QFile::copy(dxf, copy));
+    {
+      Fixture fx(kYeongcheon);
+      QVERIFY(fx.run(dxf));
     }
-    return asked;
+    for (const QString& file : {dxf, copy}) {
+      Fixture fx(kKoreaWide);
+      QVERIFY(fx.run(file));
+      QVERIFY2(landsAtGasuri(file), qUtf8Printable(file));
+      QVERIFY2(!fx.notice().contains(QStringLiteral("가장 그럴듯한")), qUtf8Printable(fx.notice()));
+    }
+  }
+
+  // 도면이 밝힌 좌표계(파일 이름의 번호)는 지도가 어디를 보든 쓴다.
+  void aCrsInTheFileNameIsUsedAnywhere() {
+    QTemporaryDir tmp;
+    const QString dxf = writeGasuriDxf(tmp.path(), QStringLiteral("가수리 면적산출_5174"));
+    Fixture fx(kKoreaWide);
+    QVERIFY(fx.run(dxf));
+    QVERIFY(landsAtGasuri(dxf));
+  }
+
+  // 기억한 도면을 알림에서 「좌표 없는 도면으로 보기」로 바꾸면 잊는다: 다음에는 다시 단서로 정한다.
+  void choosingNoCrsForgetsTheDrawing() {
+    QTemporaryDir tmp;
+    const QString dxf = writeGasuriDxf(tmp.path(), QStringLiteral("test1"));
+    {
+      Fixture fx(kYeongcheon);
+      QVERIFY(fx.run(dxf));
+    }
+    {
+      Fixture fx(kKoreaWide);
+      QVERIFY(fx.run(dxf, QString::fromLatin1(KaCadImport::kNoCrs)));
+      QCOMPARE(fx.alignCalls, 1);
+    }
+    Fixture fx(kKoreaWide);
+    QVERIFY(fx.run(dxf));
+    QVERIFY2(fx.notice().contains(QStringLiteral("가장 그럴듯한")), qUtf8Printable(fx.notice()));
   }
 };
 

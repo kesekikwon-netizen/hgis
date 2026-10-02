@@ -31,14 +31,14 @@ void dropNotices(QgsMessageBar* bar, const QString& title) {
 }
 
 void showNotice(const Hooks& hooks, const QString& title, const QString& drawingId, const QString& sourcePath,
-                const CadCrsResult& guess, const QString& usedAuthId, const QString& workAuthId) {
+                const CadCrsResult& guess, const QString& usedAuthId, const QString& workAuthId, bool likely) {
   if (!hooks.messageBar) return;
   auto* widget = new QWidget();
   auto* row = new QHBoxLayout(widget);
   row->setContentsMargins(0, 0, 0, 0);
   auto* other = new QToolButton(widget);
   other->setObjectName(QStringLiteral("cadOtherCrs"));
-  other->setText(QStringLiteral("다른 좌표계로 바꾸기"));
+  other->setText(QStringLiteral("다른 위치로 바꾸기"));
   other->setPopupMode(QToolButton::InstantPopup);
   auto* menu = new QMenu(other);
   const auto reimport = [hooks, sourcePath](const QString& authId) {
@@ -66,9 +66,14 @@ void showNotice(const Hooks& hooks, const QString& title, const QString& drawing
   });
   row->addWidget(other);
   row->addWidget(alignNow);
-  const QString text = QStringLiteral("도면을 %1(%2)로 읽어 %3로 바꿔 올렸습니다.")
-                           .arg(CadCrsGuess::label(usedAuthId), usedAuthId, workAuthId);
-  auto* item = new QgsMessageBarItem(QStringLiteral("도면"), text, widget, Qgis::MessageLevel::Info, 0);
+  QString place = QStringLiteral("%1(%2)").arg(CadCrsGuess::label(usedAuthId), usedAuthId);
+  for (const CadCrsCandidate& candidate : guess.candidates)
+    if (candidate.authId == usedAuthId) place = candidate.region + QStringLiteral(" 부근 · ") + place;
+  const QString text = likely ? QStringLiteral("위치 단서가 없어 가장 그럴듯한 자리(%1)에 올렸습니다. "
+                                               "다른 곳이면 「다른 위치로 바꾸기」를 누르세요.").arg(place)
+                              : QStringLiteral("도면을 %1로 읽어 %2로 바꿔 올렸습니다.").arg(place, workAuthId);
+  auto* item = new QgsMessageBarItem(QStringLiteral("도면"), text, widget,
+                                     likely ? Qgis::MessageLevel::Warning : Qgis::MessageLevel::Info, 0);
   item->setObjectName(noticeName(title));
   hooks.messageBar->pushItem(item);
 }

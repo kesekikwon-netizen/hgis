@@ -227,6 +227,8 @@ add_library(ka_core STATIC
   src/core/CadDwgConverter.cpp
   src/core/CadDrawingReader.cpp
   src/core/CadCrsGuess.cpp
+  src/core/CadCrsHints.cpp
+  src/core/LineMapStyle.cpp
   src/core/CadDrawingStore.cpp
   src/core/CadDrawingLayers.cpp
   src/core/ChecklistEngine.h
@@ -309,6 +311,8 @@ add_library(ka_core STATIC
   src/core/CadDwgConverter.h
   src/core/CadDrawingReader.h
   src/core/CadCrsGuess.h
+  src/core/CadCrsHints.h
+  src/core/LineMapStyle.h
   src/core/CadDrawingStore.h
   src/core/CadDrawingLayers.h
 )
@@ -476,8 +480,8 @@ add_executable(ka-hgis
   src/app/KaTrenchDialogPlan.cpp
   src/app/KaDemClassDialog.cpp
   src/app/KaSurveyContourDialog.cpp
-  src/app/KaCadCrsDialog.cpp
   src/app/KaCadImport.cpp
+  src/app/KaLineColorDialog.cpp
   src/app/KaCadImportNotice.cpp
   src/app/KaBlockingTask.cpp
   src/app/MainWindowSurveyContour.cpp
@@ -548,8 +552,8 @@ add_executable(ka-hgis
   src/app/KaTrenchDialog.h
   src/app/KaDemClassDialog.h
   src/app/KaSurveyContourDialog.h
-  src/app/KaCadCrsDialog.h
   src/app/KaCadImport.h
+  src/app/KaLineColorDialog.h
   src/app/KaCadImportNotice.h
   src/app/KaBlockingTask.h
   src/app/KaUndoGroup.h
@@ -727,6 +731,22 @@ if(KA_HGIS_BUILD_TESTS)
   target_compile_definitions(ka_cad_crs_tests PRIVATE ${KA_TEST_DEFS})
   set_target_properties(ka_cad_crs_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(cad_crs ka_cad_crs_tests)
+  # 도면 좌표계 판단의 단서: 도면이 밝힌 좌표계(.prj·파일 이름·글자), 지명이 가리키는 시·도, 파일마다의 기억.
+  add_executable(ka_cad_hints_tests tests/test_cad_hints.cpp)
+  target_link_libraries(ka_cad_hints_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_cad_hints_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_cad_hints_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_cad_hints_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_cad_hints_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(cad_hints ka_cad_hints_tests)
+  # 선으로 된 지도(도면 선·받은 지적도·등고선)의 선 색 바꾸기와 원래 색으로 되돌리기(LineMapStyle).
+  add_executable(ka_line_map_style_tests tests/test_line_map_style.cpp)
+  target_link_libraries(ka_line_map_style_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_line_map_style_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_line_map_style_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_line_map_style_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_line_map_style_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(line_map_style ka_line_map_style_tests)
 
   # 도면 한 장을 작업 좌표계 GPKG 변환본으로 쓰고 정합을 모든 표에 적용하는 CadDrawingStore.
   add_executable(ka_cad_store_tests tests/test_cad_store.cpp)
@@ -1091,29 +1111,22 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_gdal_log_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_gdal_log_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(gdal_error_log ka_gdal_log_tests)
-  # 좌표계 없는 CAD 도면의 좌표계 후보를 지역 이름과 함께 고르는 창.
-  add_executable(ka_cad_dialog_tests tests/test_cad_dialog.cpp src/app/KaCadCrsDialog.cpp src/app/KaCadCrsDialog.h)
-  target_include_directories(ka_cad_dialog_tests PRIVATE src ${KA_INCLUDES})
-  target_link_directories(ka_cad_dialog_tests PRIVATE ${KA_LIBDIRS})
-  target_link_libraries(ka_cad_dialog_tests PRIVATE ka_core Qt6::Test)
-  set_target_properties(ka_cad_dialog_tests PROPERTIES WIN32_EXECUTABLE FALSE)
-  ka_add_qtest(cad_dialog ka_cad_dialog_tests)
   # 도면을 좌표계를 알아내 참조 지도 제자리에 올리는 흐름(KaCadImport). 앱 창 대신 창·지도·알림 막대를 따로 만든다.
   add_executable(ka_cad_import_tests tests/test_cad_import.cpp
     src/app/KaCadImport.cpp src/app/KaCadImport.h src/app/KaCadImportNotice.cpp src/app/KaCadImportNotice.h
     src/app/KaBlockingTask.cpp src/app/KaBlockingTask.h
-    src/app/KaCadCrsDialog.cpp src/app/KaCadCrsDialog.h src/app/KaUserError.cpp src/app/KaUserError.h)
+    src/app/KaUserError.cpp src/app/KaUserError.h)
   target_include_directories(ka_cad_import_tests PRIVATE src ${KA_INCLUDES})
   target_link_directories(ka_cad_import_tests PRIVATE ${KA_LIBDIRS})
   target_link_libraries(ka_cad_import_tests PRIVATE ka_core Qt6::Test)
   target_compile_definitions(ka_cad_import_tests PRIVATE "KA_TEST_CAD_DATA=\"${CMAKE_SOURCE_DIR}/tests/data/cad\"")
   set_target_properties(ka_cad_import_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(cad_import ka_cad_import_tests)
-  # 도면 좌표계는 창으로 묻지 않고 정한다(2026-10-03).
+  # 도면 좌표계는 묻지 않고 단서로 정한다. 로컬 좌표 도면만 정합으로 간다(2026-10-03).
   add_executable(ka_cad_import_auto_tests tests/test_cad_import_auto.cpp
     src/app/KaCadImport.cpp src/app/KaCadImport.h src/app/KaCadImportNotice.cpp src/app/KaCadImportNotice.h
     src/app/KaBlockingTask.cpp src/app/KaBlockingTask.h
-    src/app/KaCadCrsDialog.cpp src/app/KaCadCrsDialog.h src/app/KaUserError.cpp src/app/KaUserError.h)
+    src/app/KaUserError.cpp src/app/KaUserError.h)
   target_include_directories(ka_cad_import_auto_tests PRIVATE src ${KA_INCLUDES})
   target_link_directories(ka_cad_import_auto_tests PRIVATE ${KA_LIBDIRS})
   target_link_libraries(ka_cad_import_auto_tests PRIVATE ka_core Qt6::Test)
@@ -1674,7 +1687,7 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(layer_roles layer_styles layer_edits layer_panel layer_tree_undo undo_group survey_save_as above_labels_names PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(georef_quality georef_backup align_tool align_image_view PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
-    set_tests_properties(cad_dwg cad_reader cad_crs cad_store cad_layers cad_dialog cad_import cad_import_auto cad_align blocking_task PROPERTIES
+    set_tests_properties(cad_dwg cad_reader cad_crs cad_hints cad_store cad_layers cad_import cad_import_auto cad_align blocking_task PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     set_tests_properties(dem_legend PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(topographic_catalog PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)

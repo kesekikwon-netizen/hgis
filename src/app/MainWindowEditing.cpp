@@ -6,6 +6,7 @@
 #include "KaEditErrors.h"
 #include "KaFeatureFormDialog.h"
 #include "KaFeatureSelectTool.h"
+#include "KaLineColorDialog.h"
 #include "KaVertexEditTool.h"
 #include "KaMeasureMapTool.h"
 #include "KaStatusBar.h"  // [P6] setSnapState
@@ -426,19 +427,18 @@ void MainWindow::startAttributeEditTool() {
 void MainWindow::editCurrentLayerStyle(QgsMapLayer* targetLayer) {
 #if KA_HGIS_HAS_QGIS
   auto* layer = qobject_cast<QgsVectorLayer*>(targetLayer);
-  if (!layer && m_layerTree) {
-    layer = qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer());
-  }
+  if (!layer && m_layerTree) layer = KaLineColorDialog::layerFor(m_layerTree);  // 도면 묶음이면 그 도면의 선
   if (!layer || !layer->isValid()) {
     QMessageBox::information(this, QStringLiteral("모양"),
                              QStringLiteral("벡터 레이어를 선택한 뒤 다시 실행하세요."));
     return;
   }
-  if (LayerOps::isCadastralLayer(layer) || LayerOps::isReferenceLayer(layer)) {
-    QMessageBox::information(this, QStringLiteral("모양"),
-                             QStringLiteral("지적도·배경 지도는 여기서 색을 바꾸지 않습니다.\n"
-                                            "조사 데이터 레이어(유구·구역 등)를 선택하세요."));
-    return;
+  if (LayerOps::isCadastralLayer(layer) || LayerOps::isReferenceLayer(layer)) {  // 선으로 된 지도는 선 색만 바꾼다
+    if (layer->customProperty(QStringLiteral("ka_hgis/cadastral")).toBool()) return configureCadastralStyle();  // 지번 색까지
+    return KaLineColorDialog::edit(this, layer, [this] {
+      LayerOps::refreshCanvasIfIdle(m_canvas);
+      if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
+    });
   }
 
   QColor fill, stroke;

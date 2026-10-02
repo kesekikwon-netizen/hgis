@@ -10,7 +10,6 @@
 #include <QToolButton>
 #include <QtTest>
 
-#include "app/KaCadCrsDialog.h"
 #include "app/KaCadImport.h"
 #include "cad_fixture.h"
 #include "core/CadDwgConverter.h"
@@ -134,6 +133,7 @@ class TestCadImport : public QObject {
   }
 
   void init() {
+    QFile::remove(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + QStringLiteral("/cad-crs.ini"));
     QgsProject::instance()->clear();
     QgsProject::instance()->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
   }
@@ -162,30 +162,6 @@ class TestCadImport : public QObject {
     QVERIFY(item->findChild<QToolButton*>(QStringLiteral("cadOtherCrs")));
     QVERIFY(item->findChild<QPushButton*>(QStringLiteral("cadAlignNow")));
     QCOMPARE(fx.alignCalls, 0);
-  }
-
-  void run_withoutSurveyAreaAsksWhichCrs() {
-    QTemporaryDir tmp;
-    const QString dxf = writeGasuriDxf(tmp.filePath(QStringLiteral("원본")), QStringLiteral("가수리"));
-    Fixture fx;
-    fx.canvas->setExtent(kKoreaWide);
-    int calls = 0;
-    qsizetype offered = 0;
-    KaCadCrsDialog::setChooserForTests([&](const CadCrsResult& guess) -> std::optional<int> {
-      ++calls;
-      offered = guess.candidates.size();
-      for (int i = 0; i < guess.candidates.size(); ++i)
-        if (guess.candidates[i].authId == QStringLiteral("EPSG:5174")) return i;
-      return std::nullopt;
-    });
-    const bool ok = KaCadImport::run(fx.hooks(tmp.filePath(QStringLiteral("조사/빈 조사.gpkg"))), dxf);
-    KaCadCrsDialog::setChooserForTests({});
-    QVERIFY(ok);
-    QCOMPARE(calls, 1);
-    QVERIFY(offered >= 2);
-    QgsVectorLayer* lines = layerIn(drawingGroup(QStringLiteral("가수리 (도면)")), QStringLiteral("선"));
-    QVERIFY(lines);
-    QVERIFY2(lines->extent().center().distance(kExpected) < 30, qUtf8Printable(lines->extent().center().toString(2)));
   }
 
   void run_dwgUsesTheBundledConverter() {
@@ -260,10 +236,7 @@ class TestCadImport : public QObject {
     const QString dxf = writeGasuriDxf(tmp.filePath(QStringLiteral("원본")), QStringLiteral("가수리 앱"));
     Fixture fx;
     fx.canvas->setExtent(kKoreaWide);
-    KaCadCrsDialog::setChooserForTests([](const CadCrsResult&) { return std::optional<int>(0); });
-    const bool ok = KaCadImport::run(fx.hooks(QString()), dxf);
-    KaCadCrsDialog::setChooserForTests({});
-    QVERIFY(ok);
+    QVERIFY(KaCadImport::run(fx.hooks(QString()), dxf));
     QgsVectorLayer* lines = layerIn(drawingGroup(QStringLiteral("가수리 앱 (도면)")), QStringLiteral("선"));
     QVERIFY(lines);
     const QString file = sourceFile(lines);

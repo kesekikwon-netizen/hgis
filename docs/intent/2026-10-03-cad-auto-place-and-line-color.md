@@ -1,7 +1,7 @@
 # 요청 기록: 좌표가 있는 도면은 자동으로 제자리에, 로컬 좌표 도면만 정합 · 선으로 된 지도 선 색 바꾸기
 
 - 날짜: 2026-10-03
-- 상태: 확정
+- 상태: 완료
 - 관련 문서: docs/superpowers/specs/2026-10-02-cad-crs-import-design.md (10-02 결정 2번 「조사 지역이 없거나 애매하면 목록에서 고른다」를 이 기록이 바꾼다)
 
 ## 요청 원문
@@ -57,4 +57,13 @@
 3. 참조 지도의 도면 「선」(또는 받은 지적도)을 우클릭 → 「면·외곽선 색」에서 색을 바꾸면 선 색이 바뀌고, 저장한 뒤 다시 열어도 그 색이다.
 
 ## 결과
-(아직)
+- 2026-10-03 끝남. 좌표계 고르기 창(KaCadCrsDialog)을 없앴다.
+  - 단서(CadCrsHints·CadCrsGuess)로 정한다. 정하지 못하면 「가장 그럴듯한 자리」에 올리고 경고 알림과 「다른 위치로 바꾸기」를 둔다.
+  - 기본 순서는 Jev 판단과 같다(GRS80 먼저 0.98).
+  - 선으로 된 지도는 「선 색」 창(LineMapStyle·KaLineColorDialog)에서 바꾼다. 받은 지적도는 기존 「지적도 선 색·지번」 창으로 간다.
+- 코드 검토 9건 가운데 9건을 고쳤다.
+  - 고친 것: 가장 그럴듯한 자리에 둔 도면은 단서가 아님, .prj 이름의 대괄호, 지적 색 이중 경로, 조사 위치에서 50 km 밖은 로컬, 지번 숫자, GRS80 2002 원점, 겹친 시·도 범위, 참조 지도 묶음, 지명 찾기 속도.
+  - Jev 판정 9건 · 진짜로 본 것 6건.
+- 확인한 것: 빌드 성공, cad_dwg·cad_reader·cad_crs·cad_hints·cad_store·cad_layers·cad_import·cad_import_auto·cad_align·align_tool·line_map_style·cadastral·blocking_task 13/13 통과, smoke 0.
+  - 확인 방법 1·2·3은 같은 상황의 자동 시험(theMapViewPlacesTheDrawing, aCrsInTheFileNameIsUsedAnywhere, theOriginalSurvivesSavingTheWorkspace)으로 확인했다.
+  - 실제 앱 화면의 알림·선 색 창은 화면 조작 허락을 받지 못해 찍지 못했다(앱 첫 화면만 확인).

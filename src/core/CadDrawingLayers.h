@@ -16,6 +16,7 @@ class QgsVectorLayer;
 namespace CadDrawingLayers {
 
 constexpr const char* kPropDrawing = "ka_hgis/cad_drawing";  // 값 = 도면 id (QUuid, 괄호 없음)
+constexpr const char* kPropUnsure = "ka_hgis/cad_unsure";    // true = 단서 없이 가장 그럴듯한 자리에 둔 도면
 
 QString groupTitle(const QString& sourcePath);  // "<completeBaseName> (도면)"
 // 같은 원본 파일에서 올린 묶음이 있으면 그 제목(다시 올리면 바꾼다), 없으면 비어 있는 「이름 (도면)」·「이름 (도면 2)」….
