@@ -1,10 +1,18 @@
 // 요청 기록(capture-intent) 전역 설치 / 제거.
 //
-// The global CLAUDE.md gets one rule line between two markers, so it can be added, updated and
-// removed again without touching the person's own lines. The original line ending (CRLF/LF) and a
-// leading BOM are kept.
+//   node scripts/claude-global/install-intent.mjs            설치 (다시 실행하면 새 원본으로 갱신)
+//   node scripts/claude-global/install-intent.mjs --remove   제거
+//
+// Install copies skills/capture-intent/ into <config>/skills/ and puts the one line from
+// intent-rule.md into <config>/CLAUDE.md between two markers, so it can be updated and removed
+// again without touching the person's own lines (their line ending and a leading BOM are kept).
+// <config> is CLAUDE_CONFIG_DIR, else ~/.claude. Before changing anything it copies the old
+// CLAUDE.md and skill folder to <config>/_reset_backup/<YYYY-MM-DD-HHMM>-intent/.
+// A broken source or broken markers stop it before any file changes (exit 1).
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const START = '<!-- capture-intent:start -->';
 export const END = '<!-- capture-intent:end -->';
@@ -82,3 +90,98 @@ export function removeBlock(text) {
   if (text.slice(0, from).endsWith(eol + eol)) from -= eol.length;
   return text.slice(0, from) + text.slice(to);
 }
+
+const readIfExists = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null);
+
+// <config>/_reset_backup/<stamp>-intent, or -2, -3 … when that name is already taken.
+function newBackupDir(configDir, stamp) {
+  const base = path.join(configDir, '_reset_backup', `${stamp}-intent`);
+  let dir = base;
+  for (let n = 2; fs.existsSync(dir); n++) dir = `${base}-${n}`;
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function backUp(backupDir, claudeMd, skillDir) {
+  if (fs.existsSync(claudeMd)) fs.copyFileSync(claudeMd, path.join(backupDir, 'CLAUDE.md'));
+  if (fs.existsSync(skillDir)) fs.cpSync(skillDir, path.join(backupDir, 'skills', SKILL), { recursive: true });
+}
+
+function writeAtomically(file, text) {
+  const tmp = `${file}.intent-tmp`;
+  fs.writeFileSync(tmp, text, 'utf8');
+  fs.renameSync(tmp, file);
+}
+
+export function installIntent({ configDir, sourceDir, stamp }) {
+  const { rule } = validateSource(sourceDir);
+  const claudeMd = path.join(configDir, 'CLAUDE.md');
+  const skillDir = path.join(configDir, 'skills', SKILL);
+  const next = applyBlock(readIfExists(claudeMd) ?? '', rule);
+
+  const backupDir = newBackupDir(configDir, stamp);
+  backUp(backupDir, claudeMd, skillDir);
+  fs.rmSync(skillDir, { recursive: true, force: true });
+  fs.mkdirSync(skillDir, { recursive: true });
+  for (const name of ['SKILL.md', 'template.md']) {
+    fs.copyFileSync(path.join(sourceDir, 'skills', SKILL, name), path.join(skillDir, name));
+  }
+  writeAtomically(claudeMd, next);
+  return { backupDir };
+}
+
+export function removeIntent({ configDir, stamp }) {
+  const claudeMd = path.join(configDir, 'CLAUDE.md');
+  const skillDir = path.join(configDir, 'skills', SKILL);
+  const old = readIfExists(claudeMd);
+  const next = old === null ? null : removeBlock(old);
+  const hasRule = old !== null && next !== old;
+  const hasSkill = fs.existsSync(skillDir);
+  if (!hasRule && !hasSkill) return { backupDir: null };
+
+  const backupDir = newBackupDir(configDir, stamp);
+  backUp(backupDir, claudeMd, skillDir);
+  if (hasRule) {
+    if (next.trim() === '') fs.rmSync(claudeMd);
+    else writeAtomically(claudeMd, next);
+  }
+  fs.rmSync(skillDir, { recursive: true, force: true });
+  return { backupDir };
+}
+
+function stampNow(date = new Date()) {
+  const two = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}-`
+    + `${two(date.getHours())}${two(date.getMinutes())}`;
+}
+
+function main(args) {
+  const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const sourceDir = path.dirname(fileURLToPath(import.meta.url));
+  try {
+    if (args.includes('--remove')) {
+      const { backupDir } = removeIntent({ configDir, stamp: stampNow() });
+      if (!backupDir) {
+        console.log('설치된 것이 없습니다.');
+        return 0;
+      }
+      console.log(`요청 기록 스킬과 전역 지침의 규칙 한 줄을 뺐습니다: ${configDir}`);
+      console.log(`백업: ${backupDir}`);
+    } else {
+      const { backupDir } = installIntent({ configDir, sourceDir, stamp: stampNow() });
+      console.log(`요청 기록 스킬을 설치했습니다: ${path.join(configDir, 'skills', SKILL)}`);
+      console.log(`전역 지침에 규칙 한 줄을 넣었습니다: ${path.join(configDir, 'CLAUDE.md')}`);
+      console.log(`백업: ${backupDir}`);
+    }
+    console.log('새 대화부터 적용됩니다.');
+    return 0;
+  } catch (error) {
+    console.error(`[중단] ${error.message}`);
+    return 1;
+  }
+}
+
+// Importing this module (the tests do) runs nothing; only `node install-intent.mjs` does.
+const invokedDirectly = Boolean(process.argv[1])
+  && path.resolve(process.argv[1]).toLowerCase() === path.resolve(fileURLToPath(import.meta.url)).toLowerCase();
+if (invokedDirectly) process.exitCode = main(process.argv.slice(2));
