@@ -168,6 +168,24 @@ class TestCadReader : public QObject {
     QVERIFY2(inside.contains(r.drawing.robustExtent), qUtf8Printable(r.drawing.robustExtent.toString()));
   }
 
+  // 2026-10-03 「…_5187.dxf」: 지적선은 제자리, 지번 글자 1,043개(거의 절반)는 파일 안에서 수백 km 떨어진 곳.
+  // 글자까지 섞어 범위를 잡으면 388 km 가 되어 「좌표 없는 도면」으로 판단하고 정합을 열었다. 선·면이 있으면 그것으로 잡는다.
+  void read_robustExtentFollowsLinesWhenTextsSitApart() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QByteArray entities;
+    for (int i = 0; i < 40; ++i) {
+      const double x = 207000 + (i % 10) * 10;
+      const double y = 378000 + (i / 10) * 25;
+      entities += CadFixture::line("JIJUK", 7, x, y, x + 5, y + 5);
+      entities += CadFixture::text("JIBUN", 7, -180270 + i, 98300 + i, 2, 0, "454");
+    }
+    const Read r = readBytes(dir, CadFixture::document("ANSI_1252", entities));
+    QVERIFY2(r.ok, qUtf8Printable(r.error + QLatin1Char(' ') + r.details));
+    const QgsRectangle inside(206990, 377990, 207110, 378110);
+    QVERIFY2(inside.contains(r.drawing.robustExtent), qUtf8Printable(r.drawing.robustExtent.toString()));
+  }
+
   void read_onlyPaperSpaceSaysSo() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());

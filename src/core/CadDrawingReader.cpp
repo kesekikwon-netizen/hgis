@@ -169,7 +169,7 @@ bool read(const QString& dxfPath, CadDrawing* out, QString* error, QString* deta
   const int layerField = definition->GetFieldIndex("Layer");
   const int textField = definition->GetFieldIndex("Text");
 
-  QVector<QgsPointXY> centres;
+  QVector<QgsPointXY> centres, textCentres;
   int seen = 0;
   layer->ResetReading();
   for (;;) {
@@ -209,7 +209,7 @@ bool read(const QString& dxfPath, CadDrawing* out, QString* error, QString* deta
         case Qgis::GeometryType::Polygon: entity.kind = CadKind::Fill; break;
         default: continue;
       }
-      centres << entity.geometry.boundingBox().center();
+      (entity.kind == CadKind::Text ? textCentres : centres) << entity.geometry.boundingBox().center();
       drawing.entities << entity;
     }
   }
@@ -218,7 +218,8 @@ bool read(const QString& dxfPath, CadDrawing* out, QString* error, QString* deta
                 drawing.paperSpaceSkipped > 0
                     ? QStringLiteral("종이 공간 도형 %1개만 있습니다.").arg(drawing.paperSpaceSkipped)
                     : QString());
-  drawing.robustExtent = robustExtent(centres);
+  // 좌표계 판단용 범위는 선·면·점으로 잡는다. 지번 글자만 수백 km 떨어진 곳에 적힌 도면이 있었다(2026-10-03).
+  drawing.robustExtent = robustExtent(centres.isEmpty() ? textCentres : centres);
   if (out) *out = drawing;
   return true;
 }

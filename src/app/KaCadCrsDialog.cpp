@@ -1,5 +1,6 @@
 #include "KaCadCrsDialog.h"
 
+#include <QCheckBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
@@ -11,6 +12,11 @@ namespace {
 std::function<std::optional<int>(const CadCrsResult&)>& testChooser() {
   static std::function<std::optional<int>(const CadCrsResult&)> chooser;
   return chooser;
+}
+
+bool& testRemember() {
+  static bool remember = false;
+  return remember;
 }
 
 }  // namespace
@@ -27,6 +33,11 @@ KaCadCrsDialog::KaCadCrsDialog(const CadCrsResult& guess, QWidget* parent) : QDi
   for (const CadCrsCandidate& candidate : guess.candidates) m_list->addItem(CadCrsGuess::describe(candidate));
   if (m_list->count() > 0) m_list->setCurrentRow(0);
   layout->addWidget(m_list);
+
+  // 창은 그대로 두고, 고른 좌표계가 맞으면 그 도면(이름만 다른 복사본도)은 다음부터 묻지 않게 끌 수 있다.
+  m_remember = new QCheckBox(QStringLiteral("맞으면 켜기: 이 도면은 다음부터 묻지 않고 고른 대로 올리기"), this);
+  m_remember->setObjectName(QStringLiteral("cadCrsRemember"));
+  layout->addWidget(m_remember);
 
   auto* acceptButton = new QPushButton(QStringLiteral("이 좌표계로 불러오기"), this);
   acceptButton->setObjectName(QStringLiteral("cadCrsAccept"));
@@ -57,13 +68,21 @@ KaCadCrsDialog::KaCadCrsDialog(const CadCrsResult& guess, QWidget* parent) : QDi
   });
 }
 
-std::optional<int> KaCadCrsDialog::choose(QWidget* parent, const CadCrsResult& guess) {
-  if (testChooser()) return testChooser()(guess);
+bool KaCadCrsDialog::remember() const { return m_remember->isChecked(); }
+
+std::optional<int> KaCadCrsDialog::choose(QWidget* parent, const CadCrsResult& guess, bool* remember) {
+  if (testChooser()) {
+    if (remember) *remember = testRemember();
+    return testChooser()(guess);
+  }
   KaCadCrsDialog dialog(guess, parent);
   dialog.exec();
+  if (remember) *remember = dialog.remember();
   return dialog.outcome();
 }
 
-void KaCadCrsDialog::setChooserForTests(std::function<std::optional<int>(const CadCrsResult&)> chooser) {
+void KaCadCrsDialog::setChooserForTests(std::function<std::optional<int>(const CadCrsResult&)> chooser,
+                                        bool remember) {
   testChooser() = std::move(chooser);
+  testRemember() = remember;
 }

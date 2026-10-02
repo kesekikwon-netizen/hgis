@@ -1,5 +1,6 @@
 // 좌표계 정보가 없는 CAD 도면의 좌표계 후보를 지역 이름과 함께 고르는 KaCadCrsDialog.
 #include <QApplication>
+#include <QCheckBox>
 #include <QListWidget>
 #include <QPushButton>
 #include <QStandardPaths>
@@ -45,6 +46,11 @@ class TestCadDialog : public QObject {
     QCOMPARE(list->count(), 3);
     for (int i = 0; i < 3; ++i) QCOMPARE(list->item(i)->text(), CadCrsGuess::describe(guess.candidates[i]));
     QCOMPARE(list->currentRow(), 0);
+    auto* remember = dialog.findChild<QCheckBox*>(QStringLiteral("cadCrsRemember"));
+    QVERIFY(remember);
+    QVERIFY(!remember->isChecked());  // 창은 그대로 두고, 맞을 때만 사용자가 켠다
+    remember->setChecked(true);
+    QVERIFY(dialog.remember());
   }
 
   void dialog_buttonsGiveIndexNoCrsOrCancel() {

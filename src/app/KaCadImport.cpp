@@ -19,6 +19,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMainWindow>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTemporaryDir>
@@ -46,6 +47,25 @@ QString sha256Of(const QString& path) {
   QCryptographicHash hash(QCryptographicHash::Sha256);
   hash.addData(&file);
   return QString::fromLatin1(hash.result().toHex());
+}
+
+// 창에서 「다음부터 묻지 않기」로 정한 도면 좌표계. 원본 내용(SHA256)으로 찾으므로 이름만 다른 복사본도 같다.
+// 「좌표 없음」은 기억하지 않는다: 창도 알림도 없이 정합으로만 가면 좌표계를 다시 고를 길이 없다.
+QString cadCrsFile() {
+  return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + QStringLiteral("/cad-crs.ini");
+}
+
+QString rememberedCrs(const QString& sha) {
+  if (sha.isEmpty()) return {};
+  const QString authId = QSettings(cadCrsFile(), QSettings::IniFormat).value(QStringLiteral("crs/") + sha).toString();
+  return QgsCoordinateReferenceSystem(authId).isValid() ? authId : QString();
+}
+
+void rememberCrs(const QString& sha, const QString& authId) {  // 빈 authId 면 기억을 지운다
+  if (sha.isEmpty()) return;
+  QSettings settings(cadCrsFile(), QSettings::IniFormat);
+  if (authId.isEmpty()) settings.remove(QStringLiteral("crs/") + sha);
+  else settings.setValue(QStringLiteral("crs/") + sha, authId);
 }
 
 void status(const Hooks& hooks, const QString& text) {
@@ -136,28 +156,34 @@ bool run(const Hooks& hooks, const QString& path, const QString& forcedAuthId) {
     return false;
   }
 
-  // 2. 좌표계. 지정이 없으면 도면 숫자와 조사 위치로 판단하고, 애매하면 고르게 한다.
+  // 2. 좌표계. 지정이 없으면 기억한 좌표계, 없으면 도면 숫자와 조사 위치로 판단하고, 애매하면 고르게 한다.
   const CadCrsResult guess = CadCrsGuess::guess(
       drawing.robustExtent, workCrs, CadCrsGuess::siteLocation(project, viewInWork(hooks.canvas, workCrs, context)),
       context);
   QString authId;  // 빈 값 = 좌표 없는 도면
   QString verdict = QStringLiteral("지정");
-  if (forcedAuthId.isEmpty()) {
+  const QString remembered = rememberedCrs(sha);
+  bool remember = false;  // 지도에 다 올리면 authId 를 이 도면의 좌표계로 기억한다(빈 값이면 기억을 지운다)
+  if (forcedAuthId.isEmpty() && !remembered.isEmpty()) {
+    verdict = QStringLiteral("기억");
+    authId = remembered;
+  } else if (forcedAuthId.isEmpty()) {
     verdict = guess.verdict == CadCrsVerdict::Certain ? QStringLiteral("확실")
               : guess.verdict == CadCrsVerdict::Choose ? QStringLiteral("고르기")
                                                         : QStringLiteral("좌표 없음");
     if (guess.verdict == CadCrsVerdict::Certain) {
       authId = guess.candidates.first().authId;
     } else if (guess.verdict == CadCrsVerdict::Choose) {
-      const std::optional<int> chosen = KaCadCrsDialog::choose(hooks.window, guess);
+      const std::optional<int> chosen = KaCadCrsDialog::choose(hooks.window, guess, &remember);
       if (!chosen) {
         status(hooks, kCanceled);
         return false;
       }
       if (*chosen >= 0 && *chosen < guess.candidates.size()) authId = guess.candidates[*chosen].authId;
     }
-  } else if (forcedAuthId != QLatin1String(kNoCrs)) {
-    authId = forcedAuthId;
+  } else {
+    if (forcedAuthId != QLatin1String(kNoCrs)) authId = forcedAuthId;
+    remember = !remembered.isEmpty();  // 기억한 것이 틀려 알림에서 다시 고르면 그것으로 바꾸거나 지운다
   }
 
   // 3. 변환본 GPKG. 조사가 열려 있으면 조사 폴더의 가져온자료/도면, 아니면 앱 관리 폴더.
@@ -206,6 +232,7 @@ bool run(const Hooks& hooks, const QString& path, const QString& forcedAuthId) {
       continue;
     FileCleanup::removeWhenFree(clean);  // 지도가 아직 읽고 있으면 잠시 뒤 다시 지운다(R89)
   }
+  if (remember) rememberCrs(sha, authId);
 
   // 5. 판단용 범위로 화면을 옮기고 알린다. 좌표 없는 도면은 정합 화면에서 보므로 지도 화면을 그대로 둔다.
   LayerOps::ensureOtfEnabled(project, hooks.canvas, workCrs.authid());
