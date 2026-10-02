@@ -761,7 +761,7 @@ void MainWindow::showSubToolsAlign() {
                                      QStringLiteral("맞춘 결과를 저장하지 못했습니다."), err);
                               return;
                             }
-                            hideAlignSplit();
+                            if (m_alignTool->hasSession()) hideAlignSplit(); else hideSubTools();  // 도면은 저장하며 끝난다
                             if (QgsMapLayer* aligned = m_alignTool->targetLayer()) {
                               LayerOps::setAlignPending(aligned, false);
                               if (QgsProject::instance() && QgsProject::instance()->layerTreeRoot()) {

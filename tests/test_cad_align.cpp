@@ -126,6 +126,7 @@ class TestCadAlign : public QObject {
     QString saved;
     QVERIFY2(tool.saveAligned(&saved, &err), qPrintable(err));
     QCOMPARE(QFileInfo(saved).absoluteFilePath(), QFileInfo(gpkg).absoluteFilePath());
+    QVERIFY(!tool.hasSession());  // 도면은 저장하며 끝난다: 앱은 이것을 보고 맞추기 줄을 닫는다
     QCOMPARE(cloneCount(), 0);
     QVERIFY(shown(lines) && shown(texts));
     QVERIFY(noAlignedCopy(dir));
