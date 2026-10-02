@@ -3,7 +3,8 @@
 //   node scripts/claude-global/install-intent.mjs            설치 (다시 실행하면 새 원본으로 갱신)
 //   node scripts/claude-global/install-intent.mjs --remove   제거
 //
-// Install copies skills/capture-intent/ into <config>/skills/ and puts the one line from
+// Install copies skills/capture-intent/SKILL.md (the record template is inside it) into
+// <config>/skills/capture-intent/, replacing that folder, and puts the one line from
 // intent-rule.md into <config>/CLAUDE.md between two markers, so it can be updated and removed
 // again without touching the person's own lines (their line ending and a leading BOM are kept).
 // <config> is CLAUDE_CONFIG_DIR, else ~/.claude. Before changing anything it copies the old
@@ -45,9 +46,11 @@ export function validateSource(sourceDir) {
   if (!description || description.length > 1024) throw new Error('SKILL.md: description 이 비었거나 1024자를 넘습니다');
   if (!description.includes('docs/intent')) throw new Error('SKILL.md: description 에 docs/intent 가 없습니다');
 
-  const template = readSource(sourceDir, `skills/${SKILL}/template.md`).split('\n').map((line) => line.trimEnd());
-  const missing = TEMPLATE_HEADINGS.filter((heading) => !template.includes(heading));
-  if (missing.length) throw new Error(`template.md: ${missing.join(', ')} 칸이 없습니다`);
+  // The record template sits inside SKILL.md, which reaches the model with the skill itself; a
+  // separate file under ~/.claude lies outside the project and reading it can be refused.
+  const lines = skill.split('\n').map((line) => line.trimEnd());
+  const missing = TEMPLATE_HEADINGS.filter((heading) => !lines.includes(heading));
+  if (missing.length) throw new Error(`SKILL.md: 양식에 ${missing.join(', ')} 칸이 없습니다`);
 
   const rule = readSource(sourceDir, 'intent-rule.md').split('\n').filter((line) => line.trim());
   if (rule.length !== 1 || !rule[0].startsWith('- ') || !rule[0].includes(`\`${SKILL}\``)) {
@@ -107,10 +110,29 @@ function backUp(backupDir, claudeMd, skillDir) {
   if (fs.existsSync(skillDir)) fs.cpSync(skillDir, path.join(backupDir, 'skills', SKILL), { recursive: true });
 }
 
-function writeAtomically(file, text) {
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const BUSY = ['EPERM', 'EACCES', 'EBUSY'];
+
+// Writes a temporary file and renames it over `file`. Windows refuses that rename for a moment
+// while another program (a virus scanner, a running Claude Code) has the file open, so it keeps
+// trying for about seven seconds; when it gives up, the temporary file is removed again.
+export function replaceFile(file, text, { rename = fs.renameSync, wait = sleep, tries = 20 } = {}) {
   const tmp = `${file}.intent-tmp`;
   fs.writeFileSync(tmp, text, 'utf8');
-  fs.renameSync(tmp, file);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      rename(tmp, file);
+      return;
+    } catch (error) {
+      const busy = BUSY.includes(error.code);
+      if (!busy || attempt >= tries) {
+        fs.rmSync(tmp, { force: true });
+        if (busy) throw new Error(`${path.basename(file)} 파일을 다른 프로그램이 쓰고 있어 바꾸지 못했습니다. 잠시 뒤 다시 실행하세요.`);
+        throw error;
+      }
+      wait(Math.min(50 * attempt, 500));
+    }
+  }
 }
 
 export function installIntent({ configDir, sourceDir, stamp }) {
@@ -121,12 +143,12 @@ export function installIntent({ configDir, sourceDir, stamp }) {
 
   const backupDir = newBackupDir(configDir, stamp);
   backUp(backupDir, claudeMd, skillDir);
+  // CLAUDE.md first: it is the step another program can block, and if it fails the skill folder
+  // has not been touched yet.
+  replaceFile(claudeMd, next);
   fs.rmSync(skillDir, { recursive: true, force: true });
   fs.mkdirSync(skillDir, { recursive: true });
-  for (const name of ['SKILL.md', 'template.md']) {
-    fs.copyFileSync(path.join(sourceDir, 'skills', SKILL, name), path.join(skillDir, name));
-  }
-  writeAtomically(claudeMd, next);
+  fs.copyFileSync(path.join(sourceDir, 'skills', SKILL, 'SKILL.md'), path.join(skillDir, 'SKILL.md'));
   return { backupDir };
 }
 
@@ -143,7 +165,7 @@ export function removeIntent({ configDir, stamp }) {
   backUp(backupDir, claudeMd, skillDir);
   if (hasRule) {
     if (next.trim() === '') fs.rmSync(claudeMd);
-    else writeAtomically(claudeMd, next);
+    else replaceFile(claudeMd, next);
   }
   fs.rmSync(skillDir, { recursive: true, force: true });
   return { backupDir };

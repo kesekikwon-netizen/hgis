@@ -8,7 +8,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  applyBlock, removeBlock, START, END, validateSource, installIntent, removeIntent,
+  applyBlock, removeBlock, START, END, validateSource, installIntent, removeIntent, replaceFile,
 } from './install-intent.mjs';
 
 const BOM = String.fromCharCode(0xfeff);
@@ -92,18 +92,19 @@ test('validateSource rejects a skill without its name', (t) => {
   assert.throws(() => validateSource(dir), /SKILL\.md/);
 });
 
-test('validateSource rejects a template missing a section', (t) => {
+// The template lives inside SKILL.md: a separate file under ~/.claude is outside the project, and
+// reading it was refused in the behaviour trials, so the record came out without the template.
+test('validateSource rejects a skill whose template misses a section', (t) => {
   const dir = copySourceToTemp(t);
-  replaceIn(dir, 'skills/capture-intent/template.md', '## 확인 방법', '## 기타');
-  assert.throws(() => validateSource(dir), /template\.md/);
+  replaceIn(dir, 'skills/capture-intent/SKILL.md', '## 확인 방법', '## 기타');
+  assert.throws(() => validateSource(dir), /SKILL\.md/);
 });
 
 test('installIntent copies the skill and keeps the old CLAUDE.md in the backup', (t) => {
-  const cfg = tempConfig(t, { 'CLAUDE.md': ORIGINAL });
+  const cfg = tempConfig(t, { 'CLAUDE.md': ORIGINAL, 'skills/capture-intent/template.md': 'old' });
   const { backupDir } = installIntent({ configDir: cfg, sourceDir: HERE, stamp: '2026-10-02-0900' });
-  for (const f of ['SKILL.md', 'template.md']) {
-    assert.equal(read(cfg, `skills/capture-intent/${f}`), read(HERE, `skills/capture-intent/${f}`));
-  }
+  assert.equal(read(cfg, 'skills/capture-intent/SKILL.md'), read(HERE, 'skills/capture-intent/SKILL.md'));
+  assert.equal(fs.existsSync(path.join(cfg, 'skills/capture-intent/template.md')), false);
   const rule = read(HERE, 'intent-rule.md').trim();
   assert.equal(read(cfg, 'CLAUDE.md'), `${ORIGINAL}\n${START}\n${rule}\n${END}\n`);
   assert.equal(read(backupDir, 'CLAUDE.md'), ORIGINAL);
@@ -142,6 +143,40 @@ test('a broken CLAUDE.md marker leaves everything untouched', (t) => {
   assert.equal(read(cfg, 'CLAUDE.md'), broken);
   assert.equal(fs.existsSync(path.join(cfg, 'skills/capture-intent')), false);
   assert.equal(fs.existsSync(path.join(cfg, '_reset_backup')), false);
+});
+
+// Seen on the real install: Windows refused the rename for a moment (EPERM) while another program
+// had CLAUDE.md open; the same rename worked a minute later.
+test('replaceFile retries while the file is busy', (t) => {
+  const dir = tempConfig(t, { 'CLAUDE.md': ORIGINAL });
+  const file = path.join(dir, 'CLAUDE.md');
+  let calls = 0;
+  const rename = (from, to) => {
+    calls += 1;
+    if (calls <= 2) throw Object.assign(new Error('busy'), { code: 'EPERM' });
+    fs.renameSync(from, to);
+  };
+  replaceFile(file, 'new', { rename, wait: () => {} });
+  assert.equal(calls, 3);
+  assert.equal(read(dir, 'CLAUDE.md'), 'new');
+  assert.equal(fs.existsSync(`${file}.intent-tmp`), false);
+});
+
+test('replaceFile gives up cleanly when the file stays busy', (t) => {
+  const dir = tempConfig(t, { 'CLAUDE.md': ORIGINAL });
+  const file = path.join(dir, 'CLAUDE.md');
+  const rename = () => { throw Object.assign(new Error('busy'), { code: 'EPERM' }); };
+  assert.throws(() => replaceFile(file, 'new', { rename, wait: () => {}, tries: 3 }), /다른 프로그램이 쓰고 있어/);
+  assert.equal(read(dir, 'CLAUDE.md'), ORIGINAL);
+  assert.equal(fs.existsSync(`${file}.intent-tmp`), false);
+});
+
+test('installIntent leaves the old skill in place when CLAUDE.md cannot be written', (t) => {
+  const cfg = tempConfig(t, { 'CLAUDE.md': ORIGINAL, 'skills/capture-intent/SKILL.md': 'old skill' });
+  fs.mkdirSync(path.join(cfg, 'CLAUDE.md.intent-tmp')); // the temporary file cannot be created
+  assert.throws(() => installIntent({ configDir: cfg, sourceDir: HERE, stamp: 'a' }));
+  assert.equal(read(cfg, 'skills/capture-intent/SKILL.md'), 'old skill');
+  assert.equal(read(cfg, 'CLAUDE.md'), ORIGINAL);
 });
 
 test('command line installs into CLAUDE_CONFIG_DIR and removes with --remove', (t) => {
