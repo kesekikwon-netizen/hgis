@@ -17,7 +17,7 @@ Run the smoke, then create or repoint `C:\Users\kwonyoungin1\Desktop\Strata (개
 
 ## Test baseline history
 
-- Baseline at a6eb712 (main 9f3992c, 71 tests) was 67/71 with the 4 known failures listed in CLAUDE.md.
+- Baseline at a6eb712 (main 9f3992c, 71 tests) was 67/71 with 4 known failures: workflow_engine `shapeEditing_livesInsideSelectTool`, cadastral `referenceLayerHasOutlineAndOptionalJibunLabels`, storage_safety `persistWorkspace_writeExceptionKeepsPreviousGeneration`, save_open_portable `oldVersionSurveysStillOpen`. On 2026-10-03 all four passed locally (ctest 4/4) and in CI (146/146), so CLAUDE.md and the commit gate stopped excusing them.
 - The 10-01 merge line (`claude/strata-merge-20261001`, de0414f, 124 tests) was measured 117-118/120 at -j4 on 09-30 (closeSave flake, memory `strata-visual-redesign.md`). It was fast-forwarded into main on 2026-10-03. Replace this with a fresh measurement when one is taken.
 
 ## Worktrees

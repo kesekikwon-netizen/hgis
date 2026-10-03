@@ -5,7 +5,7 @@
 975 src/app/KaApplication.cpp
 343 src/app/KaBeginnerRibbon.cpp
 464 src/app/KaCaptureMapTool.cpp
-3851 src/app/KaDrawingStudio.cpp
+3852 src/app/KaDrawingStudio.cpp
 499 src/app/KaFeatureSelectTool.cpp
 381 src/app/KaFileBrowserPanel.cpp
 1538 src/app/KaHeritageBrowser.cpp
@@ -19,7 +19,7 @@
 996 src/app/KaTopographicImportDialog.cpp
 632 src/app/KaTopographicScopePanel.cpp
 524 src/app/KaVertexEditTool.cpp
-3253 src/app/MainWindow.cpp
+3267 src/app/MainWindow.cpp
 652 src/app/MainWindow.h
 881 src/app/MainWindowAlign.cpp
 478 src/app/MainWindowContextMenus.cpp
@@ -73,13 +73,13 @@
 456 tests/test_heritage_flow.cpp
 508 tests/test_heritage_import.cpp
 2536 tests/test_heritage_style.cpp
-326 tests/test_layer_information.cpp
+468 tests/test_layer_information.cpp
 680 tests/test_layer_state.cpp
 524 tests/test_network_services.cpp
 564 tests/test_perf.cpp
 400 tests/test_polygon_erase.cpp
 802 tests/test_reference_download.cpp
-5842 tests/test_save_open.cpp
+5898 tests/test_save_open.cpp
 1314 tests/test_section_layout.cpp
 411 tests/test_section_studio.cpp
 1099 tests/test_storage_safety.cpp

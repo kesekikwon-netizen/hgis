@@ -161,6 +161,19 @@ test('a diff prefix setting in git config does not open the lock', (t) => {
   assert.match(ask(repo, 'git commit -m "x"') ?? '', /시험 변경:/);
 });
 
+// 2026-10-03: the four former baseline failures pass locally and in CI, so none is excused any more.
+test('a failure in a former baseline test blocks the commit', (t) => {
+  const repo = change(t, editTest('  }\n};', '  }\n  void more() { QVERIFY(1 < 2); }\n};'));
+  const log = path.join(repo, 'build', 'Testing', 'Temporary', 'LastTest.log');
+  fs.writeFileSync(log, '1/1 Test: workflow_engine\nTest Failed.\nEnd testing: now\n');
+  const later = Date.now() / 1000 + 120;
+  fs.utimesSync(log, later, later);
+  fs.mkdirSync(path.join(repo, 'build', 'test-logs'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'build', 'test-logs', 'workflow_engine.txt'),
+    'FAIL!  : TestWorkflow::shapeEditing_livesInsideSelectTool() wrong\nTotals: 1 passed, 1 failed\n');
+  assert.match(ask(repo, 'git commit -m "test: 시험 추가"') ?? '', /workflow_engine/);
+});
+
 test('moving or re-indenting an assertion unchanged is not weakening', (t) => {
   const repo = change(t, editTest('    QCOMPARE(1 + 1, 2);\n    QVERIFY(true);', '    QVERIFY(true);\n      QCOMPARE(1 + 1, 2);'));
   assert.equal(ask(repo, 'git commit -m "style: 순서"'), null);

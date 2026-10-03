@@ -201,7 +201,12 @@ jobs:
         timeout-minutes: 20
         shell: pwsh
         env:
-          QT_QPA_PLATFORM: offscreen:configfile=${{ github.workspace }}/cmake/offscreen-1920.json
+          # Relative to the workspace (the step's working directory): Qt splits the platform
+          # string at ':', so an absolute D:\... path became config file "D" and aborted the
+          # exe with 0xC0000409 before any test ran (docs/ERROR_REGRESSION.md).
+          QT_QPA_PLATFORM: offscreen:configfile=cmake/offscreen-1920.json
+          # A fatal Qt message (no console on the runner) goes to the step log, not the debugger.
+          QT_FORCE_STDERR_LOGGING: '1'
         run: |
           $ErrorActionPreference = 'Stop'
           . .\scripts\dev-env.ps1
@@ -214,7 +219,9 @@ jobs:
           Write-Host "TEMP=$env:TEMP"
           $exe = Join-Path (Resolve-Path .\build\Release).Path 'ka_workflow_tests.exe'
           if (-not (Test-Path -LiteralPath $exe)) { throw "missing $exe" }
-          $log = Join-Path $koreanTemp 'workflow_korean_temp.txt'
+          # The log path stays ASCII: on the runner's code page 1252 a Hangul path reaches
+          # the exe's argv as '????' and QtTest cannot open its log file.
+          $log = Join-Path $env:RUNNER_TEMP 'workflow_korean_temp.txt'
           & $exe -o "$log,txt"
           $code = $LASTEXITCODE
           Write-Output "korean_temp_exe_exit=$code"

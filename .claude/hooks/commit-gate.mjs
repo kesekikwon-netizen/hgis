@@ -12,16 +12,14 @@
 //       the copy next to the exe when one exists;
 //   (2) build/Testing/Temporary/LastTest.log was written after the newest exe
 //       and after every changed file, is complete ("End testing"), lists at
-//       least one test, and every listed test passed, except the 4 baseline
-//       failures and only in their known QtTest function.
+//       least one test, and every listed test passed (no baseline failures are
+//       excused since 2026-10-03: the former four pass locally and in CI).
 // No build/ at all -> deny with the first-build command.
 //
 // Evidence source: LastTest.log is rewritten by every ctest run, including a
 // run that matched zero tests (then it has no "Test:" block, so zero tests
 // never count as tested). LastTestsFailed.log is NOT used: ctest leaves a stale
 // copy when a later run matches zero tests and deletes it when all tests pass.
-// build/test-logs/<name>.txt (QtTest output) is read only to confirm that a
-// baseline test failed in its known function and nothing else.
 //
 // What counts as a commit and which files it contains:
 //   - `git [opts] commit ...` (also via cd/-C, cmd /c, sh -c, powershell
@@ -59,14 +57,6 @@ import path from 'node:path';
 
 const BUILD_RELEVANT_DIRS = ['src/', 'tests/', 'cmake/', 'data/'];
 const BUILD_RELEVANT_FILES = ['CMakeLists.txt'];
-
-// Known baseline failures (CLAUDE.md): ctest name -> QtTest functions allowed to fail.
-const BASELINE = {
-  workflow_engine: ['shapeEditing_livesInsideSelectTool'],
-  cadastral: ['referenceLayerHasOutlineAndOptionalJibunLabels'],
-  storage_safety: ['persistWorkspace_writeExceptionKeepsPreviousGeneration'],
-  save_open_portable: ['oldVersionSurveysStillOpen'],
-};
 
 const CMD_FIRST_BUILD = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-now.ps1';
 const CMD_BUILD =
@@ -708,22 +698,6 @@ function parseLastTestLog(text) {
   return { complete: /^End testing:/m.test(text), tests };
 }
 
-// For a baseline test: FAIL! functions in build/test-logs/<name>.txt other than the known one.
-function unexpectedFailures(top, testName) {
-  const log = path.join(top, 'build', 'test-logs', `${testName}.txt`);
-  let text;
-  try {
-    text = fs.readFileSync(log, 'latin1');
-  } catch {
-    return { missing: true, extra: [] };
-  }
-  if (!/^Totals:/m.test(text)) return { missing: true, extra: [] };
-  const allowed = new Set(BASELINE[testName]);
-  const extra = new Set();
-  for (const m of text.matchAll(/^FAIL!\s*:\s*\w+::(\w+)\(/gm)) if (!allowed.has(m[1])) extra.add(m[1]);
-  return { missing: false, extra: [...extra] };
-}
-
 function newest(list) {
   return list.reduce((a, b) => (a === null || b.ms > a.ms ? b : a), null);
 }
@@ -789,7 +763,7 @@ function evaluate(top, form) {
     problems.push(`빌드 결과가 바뀐 파일보다 오래됐다:\n    - ${stale.join('\n    - ')}\n  빌드:\n    ${CMD_BUILD}\n    ${CMD_BUILD_LOWMEM}`);
   }
 
-  // (2) ctest after the build, at least one test, all passed except the baseline
+  // (2) ctest after the build, at least one test, all passed
   const lastLog = path.join(buildDir, 'Testing', 'Temporary', 'LastTest.log');
   const logMs = statMs(lastLog);
   const testHint = `  테스트 (바꾼 영역의 그룹은 docs/testing-map.md):\n    ${CMD_TEST}`;
@@ -811,20 +785,10 @@ function evaluate(top, form) {
     } else if (!parsed.tests.length) {
       problems.push(`마지막 ctest 가 테스트를 하나도 돌리지 않았다 (-R 이 아무 이름과도 안 맞음, "No tests were found"). 0개 실행은 검증이 아니다. 실제 이름으로 다시:\n${testHint}`);
     } else {
-      const real = [];
-      for (const t of parsed.tests) {
-        if (t.result === 'passed') continue;
-        if (!(t.name in BASELINE)) {
-          real.push(`${t.name} (${t.result})`);
-          continue;
-        }
-        const u = unexpectedFailures(top, t.name);
-        if (u.missing) real.push(`${t.name} (기준선 실패 테스트지만 build/test-logs/${t.name}.txt 가 없거나 끝까지 쓰이지 않았다)`);
-        else if (u.extra.length) real.push(`${t.name} (기준선 ${BASELINE[t.name].join(', ')} 외에 ${u.extra.join(', ')} 도 실패)`);
-      }
+      const real = parsed.tests.filter((t) => t.result !== 'passed').map((t) => `${t.name} (${t.result})`);
       if (real.length) {
         problems.push(
-          `마지막 ctest 에서 실패한 테스트가 있다 (기준선 4개 제외):\n    - ${real.join('\n    - ')}\n  먼저 고치고, 빌드와 테스트를 다시 통과시킨 뒤 커밋한다. 결과: build/test-logs/<name>.txt\n${testHint}`,
+          `마지막 ctest 에서 실패한 테스트가 있다:\n    - ${real.join('\n    - ')}\n  먼저 고치고, 빌드와 테스트를 다시 통과시킨 뒤 커밋한다. 결과: build/test-logs/<name>.txt\n${testHint}`,
         );
       }
     }
