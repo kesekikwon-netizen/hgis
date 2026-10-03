@@ -12,13 +12,14 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const HOOK = resolve(here, 'superpowers-reminder.mjs');
 const INSTALL = resolve(here, 'install-superpowers-reminder.mjs');
+// 2026-10-03 (docs/intent/2026-10-03-dev-setup-cleanup.md): the first stage is named by the Jev stage
+// hint and CLAUDE.md rule 1, the last by the finish check, so the reminder keeps only the middle.
+// The debugging route stays: Jev shows no hint below 0.6 (2 of 7 debugging picks on 2026-10-03).
 const ROUTES = [
-  'superpowers:brainstorming',
   'superpowers:systematic-debugging',
   'superpowers:test-driven-development',
   'superpowers:requesting-code-review',
-  'superpowers:verification-before-completion',
-  'capture-intent', // 2026-10-02: new features start with the global request record (intent)
+  'superpowers:executing-plans',
 ];
 
 const tempDir = (t, prefix) => {
@@ -50,15 +51,21 @@ test('inside the Strata repo every message gets the skill routing', () => {
 // 2026-10-03 「가볍게 쓴다 문구수정하라 해당시 적극사용한다로」: a long conversation called no skill in 8 of the
 // 10 requests after its context was compacted, so the reminder says to call each skill again at its stage.
 test('skills are used actively at their stage, called again after a compaction', () => {
-  const text = reminderOf(runHook(JSON.stringify({ cwd: 'A:\qgis' })));
+  const text = reminderOf(runHook(JSON.stringify({ cwd: 'A:\\qgis' })));
   assert.ok(!text.includes('가볍게'), text);
   assert.ok(text.includes('적극 사용') && text.includes('Skill 도구'), text);
   assert.ok(text.includes('대화 요약') && text.includes('다시 부른다'), text);
-  assert.ok(text.includes('run-strata'), text);
+  assert.ok(text.includes('첫 동작 전에'), text);
+});
+
+test('the reminder stays short and points at CLAUDE.md for the full rules', () => {
+  const text = reminderOf(runHook(JSON.stringify({ cwd: 'A:\\qgis' })));
+  assert.ok(text.length <= 450, `${text.length} characters`);
+  assert.ok(text.includes('CLAUDE.md'), text);
 });
 
 test('the routing keeps the 2026-10-02 no-loop rule', () => {
-  const text = reminderOf(runHook(JSON.stringify({ cwd: 'A:\qgis' })));
+  const text = reminderOf(runHook(JSON.stringify({ cwd: 'A:\\qgis' })));
   assert.ok(text.includes('2026-10-02'), text);
   assert.ok(text.includes('superpowers:executing-plans'), text);
   assert.ok(!text.includes('superpowers:subagent-driven-development로 이어진다'), text);
@@ -76,7 +83,7 @@ test('a broken hook input never blocks the message', (t) => {
   assert.equal(reminderOf(runHook('not json', { cwd: outside })), '');
   // Without a readable cwd in the input, the process folder decides.
   const text = reminderOf(runHook('', { root: outside, cwd: outside }));
-  assert.ok(text.includes('superpowers:systematic-debugging'));
+  assert.ok(text.includes('Skill 도구'));
 });
 
 const freshConfig = (t, settingsText, prefix = 'sp-config-') => {

@@ -92,8 +92,8 @@ test('validateSource rejects a skill without its name', (t) => {
   assert.throws(() => validateSource(dir), /SKILL\.md/);
 });
 
-// The block also carries the skill-routing line (duplication check: engineering:* and productivity:*
-// skills do the same jobs as superpowers), so the rule file may hold several "- " lines.
+// The block also carries the skill-routing line (superpowers + capture-intent for the development
+// stages), so the rule file may hold several "- " lines.
 test('validateSource accepts several rule lines and checks each one', (t) => {
   const dir = copySourceToTemp(t);
   fs.writeFileSync(path.join(dir, 'intent-rule.md'), '- 첫 줄 `capture-intent`\r\n- 둘째 줄\r\n');
