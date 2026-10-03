@@ -69,6 +69,10 @@ if(NOT _ka_temp_now MATCHES "/ka-hgis-tests-[0-9a-f]+/")
   file(MAKE_DIRECTORY "${_ka_own_temp}")
   set(ENV{TEMP} "${_ka_own_temp}")
   set(ENV{TMP} "${_ka_own_temp}")
+else()
+  # CMake made that folder at configure time: a CI runner that got the build as an artifact never
+  # had it, and Storage Sense can empty TEMP. Without it QTemporaryDir fails.
+  file(MAKE_DIRECTORY "${_ka_temp_now}")
 endif()
 
 set(_ka_cmd "${KA_TEST_EXE}" -o "${KA_TEST_LOG},txt")

@@ -85,6 +85,7 @@ jobs:
     timeout-minutes: 330
     outputs:
       osgeo4w-key: ${{ steps.osgeo4w-cache.outputs.cache-primary-key }}
+      packed: ${{ steps.pack.outputs.artifact-id }}
     env:
       OSGEO4W_ROOT: C:\OSGeo4W
     steps:
@@ -153,7 +154,8 @@ jobs:
           Get-Content -LiteralPath 'C:\OSGeo4W\etc\setup\installed.db' |
             Select-String -Pattern '^(qgis-dev|gdal-dev|qt6-libs) '
 
-      # Same order as scripts/build-all.ps1: configure, build, CTest, start the app.
+      # Same order as scripts/build-all.ps1: configure, build, start the app (CTest runs in the
+      # CTest k/3 jobs below).
       - name: Configure (VS 2022 x64)
         timeout-minutes: 15
         shell: pwsh
@@ -173,6 +175,7 @@ jobs:
       # one job before 2026-10-03). They get the executables, data copies and CTestTestfile.cmake;
       # paths stay valid because every runner checks out to the same workspace.
       - name: Pack the build for the CTest jobs
+        id: pack
         uses: actions/upload-artifact@v7
         with:
           name: release-build
@@ -232,8 +235,8 @@ jobs:
             exit $code
           }
 
-      # CTest and the Korean-TEMP step already ran the test executables and "Start and quit the app"
-      # started the app; e2e-smoke only adds the rule-file and hard-coded-path checks here.
+      # The CTest k/3 jobs run the test executables and "Start and quit the app" started the app;
+      # e2e-smoke only adds the rule-file and hard-coded-path checks here.
       - name: E2E smoke
         timeout-minutes: 10
         shell: pwsh
@@ -257,6 +260,8 @@ jobs:
   tests:
     name: CTest ${{ matrix.shard }}/3
     needs: windows
+    # Runs once the build is packed, even when a later step of the build job failed.
+    if: ${{ !cancelled() && needs.windows.outputs.packed != '' }}
     runs-on: windows-2022
     timeout-minutes: 120
     strategy:
@@ -323,16 +328,21 @@ jobs:
   # Experiment that never decides the result (docs/intent/2026-10-03-dev-speed-and-flaky.md): the
   # same build with Ninja, ccache and /Z7 debug info (no compiler cache can keep /Zi), to measure
   # what a cache saves here. The job summary shows the build time and the ccache statistics.
+  # Pushes only, so pull requests do not add cache entries. ccache keeps precompiled-header
+  # compiles only with pch_defines,time_macros sloppiness; CCACHE_BASEDIR is left out (the
+  # workspace path never changes, and ccache before 4.14 mangles /Yu paths with it); the git hash
+  # define is fixed to "unknown" so it does not change every compile command on every commit.
   build-speed-experiment:
     name: Build speed experiment (Ninja + ccache)
     needs: windows
+    if: ${{ !cancelled() && needs.windows.outputs.packed != '' && github.event_name != 'pull_request' }}
     runs-on: windows-2022
     continue-on-error: true
     timeout-minutes: 150
     env:
       OSGEO4W_ROOT: C:\OSGeo4W
-      CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_COMPILERCHECK: content
+      CCACHE_SLOPPINESS: pch_defines,time_macros
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -364,7 +374,7 @@ jobs:
         shell: pwsh
         run: |
           . .\scripts\dev-env.ps1
-          cmake -S . -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Release -DKA_HGIS_BUILD_TESTS=ON "-DOSGEO4W_ROOT=$env:OSGEO4W_ROOT" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DKA_HGIS_EMBEDDED_DEBUG_INFO=ON
+          cmake -S . -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Release -DKA_HGIS_BUILD_TESTS=ON "-DOSGEO4W_ROOT=$env:OSGEO4W_ROOT" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DKA_HGIS_EMBEDDED_DEBUG_INFO=ON -DCMAKE_DISABLE_FIND_PACKAGE_Git=ON
 
       # Three compiles at a time keep the 16 GB runner clear of out-of-memory errors (C1060).
       - name: Build (timed)

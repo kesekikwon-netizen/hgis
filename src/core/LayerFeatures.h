@@ -18,11 +18,19 @@ inline QgsFeatureRequest idsOnly() {
   return request;
 }
 
+// One log line when the read finds what the count missed, so a log shows which path happened.
+inline void noteMissedCount(const QgsVectorLayer* layer, long long cached) {
+  qInfo("LayerFeatures: %s has features though its count says %lld", qUtf8Printable(layer->name()), cached);
+}
+
 inline bool any(QgsVectorLayer* layer) {
   if (!layer || !layer->isValid()) return false;
-  if (layer->featureCount() > 0) return true;
+  const long long cached = layer->featureCount();
+  if (cached > 0) return true;
   QgsFeature f;
-  return layer->getFeatures(idsOnly().setLimit(1)).nextFeature(f);
+  const bool found = layer->getFeatures(idsOnly().setLimit(1)).nextFeature(f);
+  if (found) noteMissedCount(layer, cached);
+  return found;
 }
 
 inline long long count(QgsVectorLayer* layer) {
@@ -33,6 +41,7 @@ inline long long count(QgsVectorLayer* layer) {
   QgsFeature f;
   long long n = 0;
   while (it.nextFeature(f)) ++n;
+  if (n > 0) noteMissedCount(layer, cached);
   return n;
 }
 
