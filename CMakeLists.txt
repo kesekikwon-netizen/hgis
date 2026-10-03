@@ -18,6 +18,10 @@ endif()
 if(NOT KA_HGIS_GIT_HASH MATCHES "^[0-9a-fA-F]+$")
   set(KA_HGIS_GIT_HASH "unknown")
 endif()
+# One generated file carries the hash (src/core/KaGitHash.h): configure_file rewrites it only when
+# the hash changes, so a commit recompiles this file instead of every file of ka_core and the tests.
+set(KA_HGIS_GIT_HASH_CPP "${CMAKE_BINARY_DIR}/generated/KaGitHash.cpp")
+configure_file("${CMAKE_SOURCE_DIR}/cmake/KaGitHash.cpp.in" "${KA_HGIS_GIT_HASH_CPP}" @ONLY)
 # F138: the hash above is read at configure time. Re-run configure when HEAD or the
 # checked-out branch moves, so a rebuilt EXE never carries an older commit's hash.
 if(GIT_FOUND)
@@ -104,6 +108,8 @@ set(KA_LIBDIRS
 )
 
 add_library(ka_core STATIC
+  ${KA_HGIS_GIT_HASH_CPP}
+  src/core/KaGitHash.h
   src/core/LayerLabelControls.cpp
   src/core/CadastralImport.cpp
   src/core/CadastralPortal.cpp
@@ -343,8 +349,7 @@ target_compile_definitions(ka_core PUBLIC
   KA_HGIS_HAS_QGIS=1
   "CORE_EXPORT=__declspec(dllimport)"
   "GUI_EXPORT=__declspec(dllimport)"
-  "KA_HGIS_VERSION=\"${PROJECT_VERSION}\""
-  "KA_HGIS_GIT_HASH=\"${KA_HGIS_GIT_HASH}\"")
+  "KA_HGIS_VERSION=\"${PROJECT_VERSION}\"")
 
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
   "${CMAKE_SOURCE_DIR}/data/theme/ka-hgis.qss")
@@ -587,8 +592,7 @@ target_compile_definitions(ka-hgis PRIVATE
   KA_HGIS_HAS_QGIS=1
   "CORE_EXPORT=__declspec(dllimport)"
   "GUI_EXPORT=__declspec(dllimport)"
-  "KA_HGIS_VERSION=\"${PROJECT_VERSION}\""
-  "KA_HGIS_GIT_HASH=\"${KA_HGIS_GIT_HASH}\"")
+  "KA_HGIS_VERSION=\"${PROJECT_VERSION}\"")
 # Desktop GUI. QGIS/Qt debug text must not open a console behind the window.
 set_target_properties(ka-hgis PROPERTIES WIN32_EXECUTABLE TRUE)
 
@@ -1203,12 +1207,12 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_shell_tests PRIVATE ka_core Qt6::Test Qt6::Widgets)
   set_target_properties(ka_shell_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(shell_chrome ka_shell_tests)
-  add_executable(ka_catch_log_tests tests/test_catch_log.cpp src/core/KaSessionLog.cpp)
+  add_executable(ka_catch_log_tests tests/test_catch_log.cpp src/core/KaSessionLog.cpp ${KA_HGIS_GIT_HASH_CPP})
   set_target_properties(ka_catch_log_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   target_include_directories(ka_catch_log_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
   target_link_libraries(ka_catch_log_tests PRIVATE Qt6::Test Qt6::Core)
   ka_add_qtest(catch_log ka_catch_log_tests)
-  add_executable(ka_log_session_tests tests/test_log_session.cpp src/core/KaSessionLog.cpp)
+  add_executable(ka_log_session_tests tests/test_log_session.cpp src/core/KaSessionLog.cpp ${KA_HGIS_GIT_HASH_CPP})
   set_target_properties(ka_log_session_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   target_include_directories(ka_log_session_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
   target_link_libraries(ka_log_session_tests PRIVATE Qt6::Test Qt6::Core)

@@ -2,6 +2,7 @@
 // re-opened SHP check, provenance in README and cancel without leftovers.
 #include "core/ExportService.h"
 #include "core/HeritageStyle.h"
+#include "core/KaGitHash.h"
 #include "core/LayerOps.h"
 #include "core/LayoutService.h"
 #include "core/SubmitReadme.h"
@@ -166,6 +167,9 @@ private slots:
     QVERIFY2(written.fields().indexOf(QStringLiteral("memo")) >= 0, "a field only the second layer has was dropped");
     const QString readme = readAll(QDir(out).filePath(QStringLiteral("README_submit.txt")));
     QVERIFY(readme.contains(QStringLiteral("app: Strata ")));
+    // The commit comes from one generated file (build/generated/KaGitHash.cpp), not a define on every file.
+    QVERIFY(QRegularExpression(QStringLiteral("^([0-9a-fA-F]{12}|unknown)$")).match(QString::fromLatin1(kaHgisGitHash())).hasMatch());
+    QVERIFY(readme.contains(QStringLiteral("(%1)").arg(QString::fromLatin1(kaHgisGitHash()))));
     QVERIFY(readme.contains(QStringLiteral("survey_name: 광령리")));
     QVERIFY(readme.contains(QStringLiteral("survey_file: 광령리.gpkg")));
     const QString sha = QString::fromLatin1(QCryptographicHash::hash("survey bytes", QCryptographicHash::Sha256).toHex());

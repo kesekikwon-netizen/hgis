@@ -1,4 +1,5 @@
 #include "SubmitReadme.h"
+#include "KaGitHash.h"
 #include "LayerLabelControls.h"
 #include "LayerOps.h"
 
@@ -20,9 +21,6 @@
 
 #ifndef KA_HGIS_VERSION
 #define KA_HGIS_VERSION "unknown"
-#endif
-#ifndef KA_HGIS_GIT_HASH
-#define KA_HGIS_GIT_HASH "unknown"
 #endif
 
 namespace SubmitReadme {
@@ -118,7 +116,7 @@ QString build(const Inputs& in) {
   t += QStringLiteral("created: %1\n").arg(nowWithOffset());
   t += QStringLiteral("timezone: %1\n").arg(QString::fromUtf8(QTimeZone::systemTimeZoneId()));
   t += QStringLiteral("app: Strata %1 (%2)\n")
-           .arg(QLatin1String(KA_HGIS_VERSION), QLatin1String(KA_HGIS_GIT_HASH));
+           .arg(QLatin1String(KA_HGIS_VERSION), QLatin1String(kaHgisGitHash()));
   t += QStringLiteral("crs: EPSG:5179\n");
   t += QStringLiteral("shp_encoding: %1\n").arg(in.encoding);
   t += QStringLiteral("survey_name: %1\n").arg(in.surveyName.isEmpty() ? QStringLiteral("-") : in.surveyName);

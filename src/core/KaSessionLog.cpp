@@ -1,4 +1,5 @@
 #include "KaSessionLog.h"
+#include "KaGitHash.h"
 #include "SecretMask.h"
 #include "app/KaHgisVersion.h"
 
@@ -145,7 +146,7 @@ void writeHeader(QTextStream& ts, const QString& note) {
 
 QString KaSessionLog::buildLabel() {
   return QStringLiteral("ka-hgis %1 · 커밋 %2 · QGIS %3")
-      .arg(QLatin1String(KA_HGIS_VERSION), QLatin1String(KA_HGIS_GIT_HASH), g_qgisVersion);
+      .arg(QLatin1String(KA_HGIS_VERSION), QLatin1String(kaHgisGitHash()), g_qgisVersion);
 }
 
 void KaSessionLog::setQgisVersion(const QString& version) {
