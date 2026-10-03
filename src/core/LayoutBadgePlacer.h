@@ -25,11 +25,11 @@ public:
 
   // Chosen centre for a badge of the given diameter; the result is occupied.
   QgsPointXY place(const QgsPointXY& origin, double badgeDiameterMm);
-  // Places every badge of the sheet at once, in the given (number) order. Sites
-  // chained closer than the clear distance form a crowd: the badges of a crowd of
-  // kBlockFrom or more stand on one square grid around its sites (aligned rows
-  // and columns, sites left uncovered), each on the free cell nearest its own
-  // site. Lone sites and smaller crowds use place().
+  // Places every badge of the sheet at once, in the given (number) order. A
+  // badge sits on its own site and moves only when it would cover another one,
+  // to the nearest free slot (place()). Lone sites go first so they keep their
+  // site. Sites chained closer than the clear distance form a crowd: its badges
+  // then trade places until no two leader lines of the crowd cross.
   QVector<QgsPointXY> placeAll(const QVector<QgsPointXY>& origins, const QVector<double>& badgeDiametersMm);
   // Occupy a position without searching (e.g. a site whose transform failed).
   void occupy(const QgsPointXY& point);
@@ -44,11 +44,8 @@ public:
 
   static constexpr int kBaseRings = 6;
   static constexpr int kMaxRings = 60;
-  static constexpr int kBlockFrom = 5;
 
 private:
-  void placeOnGrid(const QVector<int>& crowd, const QVector<QgsPointXY>& origins,
-                   const QVector<double>& badgeDiametersMm, QVector<QgsPointXY>& placed);
   bool isFree(const QgsPointXY& point) const;
   bool fits(const QgsPointXY& point, double badgeDiameterMm) const;
   quint64 cellKey(qint64 cx, qint64 cy) const;

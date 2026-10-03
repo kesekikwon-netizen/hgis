@@ -888,7 +888,7 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
     style.readFromLayer(drawing.get());
     overrides.insert(layer->id(), style.xmlData());
   }
-  // All badges of the sheet at once: crowded sites get an aligned grid around them.
+  // All badges of the sheet at once: each on its site, moved only to clear another.
   QVector<QgsPointXY> origins;
   QVector<double> sizes;
   for (const NumberPin& pin : pins) {

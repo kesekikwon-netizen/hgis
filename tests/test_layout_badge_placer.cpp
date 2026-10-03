@@ -10,7 +10,7 @@
 #include "core/LayoutBadgePlacer.h"
 
 // 요청 기록 docs/intent/2026-10-03-layout-number-cluster-rows.md:
-// 한곳에 몰린 유적의 번호는 뭉치 바로 옆에 줄 맞춰 서고, 떨어진 유적의 번호는 유적 위에 남는다.
+// 번호는 제 유적에 붙고, 겹칠 때만 가장 가까운 빈자리로 옮기며, 지시선은 서로 엇갈리지 않는다.
 class LayoutBadgePlacerTest : public QObject {
   Q_OBJECT
 
@@ -51,30 +51,36 @@ private slots:
     verifyClear(placed, kStep);
   }
 
-  // Every badge centre sits on one square grid (one step apart) and off the crowded sites.
-  static void verifyAlignedAroundSites(const QVector<QgsPointXY>& placed, const QVector<QgsPointXY>& sites, double step) {
-    for (const QgsPointXY& at : placed) {
-      const double col = (at.x() - placed.first().x()) / step, row = (at.y() - placed.first().y()) / step;
-      QVERIFY2(qAbs(col - std::round(col)) < 1e-6 && qAbs(row - std::round(row)) < 1e-6, "badges stand on aligned rows and columns");
-      for (const QgsPointXY& site : sites)
-        QVERIFY2(at.distance(site) >= step * 0.5 - 1e-6, "the grid leaves the crowded sites visible");
-    }
-  }
-
-  void crowdStandsOnAnAlignedGridAroundItsSites() {
+  void crowdBadgesStayAttachedToTheirSites() {
     LayoutBadgePlacer placer(QTransform(), QPainterPath(), kStep);
     const QgsPointXY hub(100., 100.);
     const QVector<QgsPointXY> sites = crowd(hub, 12);
     const QVector<QgsPointXY> placed = placer.placeAll(sites, QVector<double>(sites.size(), kBadgeMm));
     QCOMPARE(placed.size(), sites.size());
     verifyClear(placed, kStep);
-    verifyAlignedAroundSites(placed, sites, kStep);
-    // 8 grid cells touch the crowd and 4 more are two steps away: no badge goes farther.
-    for (const QgsPointXY& at : placed)
-      QVERIFY2(at.distance(hub) <= kStep * 2.3, "each badge takes the nearest grid cell to its site");
-    // The grid is centred on the middle of the crowd (sites span 100..102 x 100..101.5), whatever the order.
-    const double col = (placed.first().x() - 101.) / kStep, row = (placed.first().y() - 100.75) / kStep;
-    QVERIFY2(qAbs(col - std::round(col)) < 1e-6 && qAbs(row - std::round(row)) < 1e-6, "the grid is centred on the crowd");
+    int onSite = 0;
+    for (int i = 0; i < sites.size(); ++i) {
+      // One badge on the spot, six around it, the rest on the second ring: nothing farther.
+      QVERIFY2(placed.at(i).distance(sites.at(i)) <= kStep * 2.3, "a badge moves only as far as overlap forces it");
+      if (placed.at(i).distance(sites.at(i)) < 1e-6) ++onSite;
+    }
+    QVERIFY2(onSite >= 1, "the first badge stays on its own site");
+  }
+
+  void crowdAtThePaperCornerStaysOnThePaper() {
+    // Map units are millimetres here. Paper 100 x 100, crowd 3 mm from the corner.
+    QPainterPath paper;
+    paper.addRect(QRectF(0., 0., 100., 100.));
+    LayoutBadgePlacer placer(QTransform(), paper, 4.6);
+    const QVector<QgsPointXY> sites = crowd(QgsPointXY(95., 96.), 20);
+    const QVector<QgsPointXY> placed = placer.placeAll(sites, QVector<double>(sites.size(), kBadgeMm));
+    QCOMPARE(placed.size(), sites.size());
+    verifyClear(placed, 4.6);
+    for (const QgsPointXY& at : placed) {
+      QVERIFY2(paper.contains(QRectF(at.x() - 1.5, at.y() - 1.5, 3., 3.)), "every badge sits fully on the paper");
+      // A quarter disc of 20 badges around the corner reaches about five steps.
+      QVERIFY2(at.distance(QgsPointXY(96., 97.)) <= 4.6 * 6.5, "the badges stay next to the crowd at the corner");
+    }
   }
 
   void loneSiteNextToAFewStackedSitesKeepsItsOwnSite() {
@@ -87,20 +93,35 @@ private slots:
     verifyClear(placed, kStep);
   }
 
-  void crowdAtThePaperCornerKeepsItsGridOnThePaper() {
-    // Map units are millimetres here. Paper 100 x 100, crowd 3 mm from the corner.
+  // Proper crossing of two leader lines (site -> badge); shared end points do not count.
+  static bool crosses(const QgsPointXY& a, const QgsPointXY& b, const QgsPointXY& c, const QgsPointXY& d) {
+    auto side = [](const QgsPointXY& p, const QgsPointXY& q, const QgsPointXY& r) {
+      return (q.x() - p.x()) * (r.y() - p.y()) - (q.y() - p.y()) * (r.x() - p.x());
+    };
+    return side(a, b, c) * side(a, b, d) < -1e-9 && side(c, d, a) * side(c, d, b) < -1e-9;
+  }
+
+  void crowdLeaderLinesDoNotCrossEachOther() {
+    // 16 sites scattered over about one step and a half, numbered in no spatial order,
+    // next to the paper's right edge as in the 2026-10-04 screenshot.
     QPainterPath paper;
-    paper.addRect(QRectF(0., 0., 100., 100.));
+    paper.addRect(QRectF(0., 0., 100., 200.));
     LayoutBadgePlacer placer(QTransform(), paper, 4.6);
-    const QVector<QgsPointXY> sites = crowd(QgsPointXY(95., 96.), 20);
+    QVector<QgsPointXY> sites;
+    quint32 seed = 7;
+    for (int i = 0; i < 16; ++i) {
+      seed = seed * 1664525u + 1013904223u;
+      const double x = 90. + (seed >> 8) % 700 / 100.;
+      seed = seed * 1664525u + 1013904223u;
+      sites.append(QgsPointXY(x, 97. + (seed >> 8) % 700 / 100.));
+    }
     const QVector<QgsPointXY> placed = placer.placeAll(sites, QVector<double>(sites.size(), kBadgeMm));
-    QCOMPARE(placed.size(), sites.size());
     verifyClear(placed, 4.6);
-    verifyAlignedAroundSites(placed, sites, 4.6);
-    for (const QgsPointXY& at : placed) {
-      QVERIFY2(paper.contains(QRectF(at.x() - 1.5, at.y() - 1.5, 3., 3.)), "every badge sits fully on the paper");
-      // A quarter disc of 20 cells around the corner reaches about five steps.
-      QVERIFY2(at.distance(QgsPointXY(96., 97.)) <= 4.6 * 6.5, "the grid stays next to the crowd at the corner");
+    for (int i = 0; i < sites.size(); ++i) {
+      QVERIFY2(paper.contains(QRectF(placed.at(i).x() - 1.5, placed.at(i).y() - 1.5, 3., 3.)), "every badge sits fully on the paper");
+      for (int j = i + 1; j < sites.size(); ++j)
+        QVERIFY2(!crosses(sites.at(i), placed.at(i), sites.at(j), placed.at(j)),
+                 qPrintable(QStringLiteral("leader lines %1 and %2 cross").arg(i).arg(j)));
     }
   }
 

@@ -2,9 +2,7 @@
 
 #include <QLineF>
 #include <QList>
-#include <QPoint>
 #include <QRectF>
-#include <QSet>
 
 #include <qgslayout.h>
 #include <qgslayoutitemlegend.h>
@@ -140,90 +138,32 @@ QVector<QgsPointXY> LayoutBadgePlacer::placeAll(const QVector<QgsPointXY>& origi
   }
   QVector<QVector<int>> crowds(n);
   for (int i = 0; i < n; ++i) crowds[find(i)].append(i);
-  // Lone sites first, so no crowd takes a site's own place; then the small
-  // crowds on short rings, then each big crowd on its grid, in number order.
+  // Lone sites first, so no crowd takes a site's own place; then the crowded
+  // ones in number order, each on its site or the nearest free slot around it.
   for (int i = 0; i < n; ++i)
     if (crowds.at(find(i)).size() == 1) placed[i] = place(origins.at(i), badgeDiametersMm.value(i));
-  for (int i = 0; i < n; ++i) {
-    const int size = crowds.at(find(i)).size();
-    if (size > 1 && size < kBlockFrom) placed[i] = place(origins.at(i), badgeDiametersMm.value(i));
-  }
-  for (int i = 0; i < n; ++i) {
-    const QVector<int>& crowd = crowds.at(find(i));
-    if (crowd.size() >= kBlockFrom && crowd.first() == i) placeOnGrid(crowd, origins, badgeDiametersMm, placed);
-  }
-  return placed;
-}
-
-void LayoutBadgePlacer::placeOnGrid(const QVector<int>& crowd, const QVector<QgsPointXY>& origins,
-                                    const QVector<double>& badgeDiametersMm, QVector<QgsPointXY>& placed) {
-  // The grid is laid out on the paper (scene), so it stays upright on a rotated map.
-  const QTransform toMap = m_toScene.inverted();
-  const double step = QLineF(m_toScene.map(QPointF(0.0, 0.0)), m_toScene.map(QPointF(m_step, 0.0))).length();
-  QVector<QPointF> sites;
-  QPointF low, high;
-  for (int i : crowd) {
-    const QPointF site = m_toScene.map(QPointF(origins.at(i).x(), origins.at(i).y()));
-    low = sites.isEmpty() ? site : QPointF(std::min(low.x(), site.x()), std::min(low.y(), site.y()));
-    high = sites.isEmpty() ? site : QPointF(std::max(high.x(), site.x()), std::max(high.y(), site.y()));
-    sites.append(site);
-  }
-  // Anchored on the middle of the crowd's box: the same grid whatever the number order.
-  const QPointF centre = (low + high) * 0.5;
-  auto cellOf = [&](const QPointF& p) {
-    return QPoint(qRound((p.x() - centre.x()) / step), qRound((p.y() - centre.y()) / step));
-  };
-  auto cellPoint = [&](const QPoint& cell) {
-    return QPointF(centre.x() + cell.x() * step, centre.y() + cell.y() * step);
-  };
-  // Cells whose badge would sit on a crowded site stay empty, so the sites stay visible.
-  QSet<quint64> closed;
-  for (const QPointF& site : sites) {
-    if (step <= 1e-9) break;
-    const QPoint base = cellOf(site);
-    for (int dx = -1; dx <= 1; ++dx) {
-      for (int dy = -1; dy <= 1; ++dy) {
-        const QPoint cell(base.x() + dx, base.y() + dy);
-        if (QLineF(cellPoint(cell), site).length() < step * 0.5) closed.insert(cellKey(cell.x(), cell.y()));
-      }
-    }
-  }
-  const int rings = step > 1e-9 ? std::min(kMaxRings, std::max(kBaseRings + int(crowd.size()), m_reachRings)) : -1;
-  for (int k = 0; k < crowd.size(); ++k) {
-    const int i = crowd.at(k);
-    const QPoint base = rings >= 0 ? cellOf(sites.at(k)) : QPoint();
-    bool found = false;
-    double nearest = 0.0;
-    QPoint cellTaken;
-    QgsPointXY chosen;
-    // A cell on square ring n is at least (n - 0.5) steps from the site.
-    for (int ring = 0; ring <= rings && !(found && (ring - 0.5) * step > nearest); ++ring) {
-      for (int dx = -ring; dx <= ring; ++dx) {
-        for (int dy = -ring; dy <= ring; ++dy) {
-          if (std::max(std::abs(dx), std::abs(dy)) != ring) continue;
-          const QPoint cell(base.x() + dx, base.y() + dy);
-          if (closed.contains(cellKey(cell.x(), cell.y()))) continue;
-          const double away = QLineF(cellPoint(cell), sites.at(k)).length();
-          if (found && away >= nearest) continue;
-          const QPointF mapPoint = toMap.map(cellPoint(cell));
-          const QgsPointXY candidate(mapPoint.x(), mapPoint.y());
-          if (!isFree(candidate) || !fits(candidate, badgeDiametersMm.value(i))) continue;
-          found = true;
-          nearest = away;
-          cellTaken = cell;
-          chosen = candidate;
+  for (int i = 0; i < n; ++i)
+    if (crowds.at(find(i)).size() > 1) placed[i] = place(origins.at(i), badgeDiametersMm.value(i));
+  // Two badges of a crowd trade places whenever that shortens their leader
+  // lines. Crossing lines always get shorter by trading, so none stay crossed.
+  for (const QVector<int>& crowd : crowds) {
+    bool traded = crowd.size() > 1;
+    for (int pass = 0; traded && pass < kMaxRings; ++pass) {
+      traded = false;
+      for (int a : crowd) {
+        for (int b : crowd) {
+          if (a >= b) continue;
+          const double now = origins.at(a).distance(placed.at(a)) + origins.at(b).distance(placed.at(b));
+          const double then = origins.at(a).distance(placed.at(b)) + origins.at(b).distance(placed.at(a));
+          if (then >= now - m_step * 1e-6) continue;
+          if (!fits(placed.at(b), badgeDiametersMm.value(a)) || !fits(placed.at(a), badgeDiametersMm.value(b))) continue;
+          std::swap(placed[a], placed[b]);
+          traded = true;
         }
       }
     }
-    if (!found) {
-      // No grid cell on the paper within reach: the nearest free slot on rings.
-      placed[i] = place(origins.at(i), badgeDiametersMm.value(i));
-      continue;
-    }
-    closed.insert(cellKey(cellTaken.x(), cellTaken.y()));
-    placed[i] = chosen;
-    occupy(chosen);
   }
+  return placed;
 }
 
 QVector<QPolygonF> LayoutBadgePlacer::legendBlocks(QgsLayoutItemMap* map, bool exporting) {
