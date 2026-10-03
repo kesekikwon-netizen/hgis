@@ -125,6 +125,32 @@ private slots:
     }
   }
 
+  void leaderLinesOfNeighbouringGroupsDoNotCross() {
+    // 2026-10-04 screenshot: about 16 sites spread over 1-3 cm at the paper's right edge. They are
+    // not all chained into one crowd, and the spilled badges of one group crossed another's lines.
+    QPainterPath paper;
+    paper.addRect(QRectF(0., 0., 100., 200.));
+    for (quint32 round = 1; round <= 60; ++round) {
+      LayoutBadgePlacer placer(QTransform(), paper, 4.6);
+      QVector<QgsPointXY> sites;
+      quint32 seed = round;
+      const int spread = 1000 * (1 + round % 3);
+      for (int i = 0; i < 16; ++i) {
+        seed = seed * 1664525u + 1013904223u;
+        const double x = 96. - (seed >> 8) % spread / 100.;
+        seed = seed * 1664525u + 1013904223u;
+        sites.append(QgsPointXY(x, 80. + (seed >> 8) % (spread * 13 / 10) / 100.));
+      }
+      const QVector<QgsPointXY> placed = placer.placeAll(sites, QVector<double>(sites.size(), kBadgeMm));
+      verifyClear(placed, 4.6);
+      for (int i = 0; i < sites.size(); ++i) {
+        for (int j = i + 1; j < sites.size(); ++j)
+          QVERIFY2(!crosses(sites.at(i), placed.at(i), sites.at(j), placed.at(j)),
+                   qPrintable(QStringLiteral("round %1: leader lines %2 and %3 cross").arg(round).arg(i).arg(j)));
+      }
+    }
+  }
+
   void loneSiteNextToACrowdKeepsItsOwnSite() {
     LayoutBadgePlacer placer(QTransform(), QPainterPath(), kStep);
     QVector<QgsPointXY> sites = crowd(QgsPointXY(100., 100.), 9);

@@ -144,22 +144,21 @@ QVector<QgsPointXY> LayoutBadgePlacer::placeAll(const QVector<QgsPointXY>& origi
     if (crowds.at(find(i)).size() == 1) placed[i] = place(origins.at(i), badgeDiametersMm.value(i));
   for (int i = 0; i < n; ++i)
     if (crowds.at(find(i)).size() > 1) placed[i] = place(origins.at(i), badgeDiametersMm.value(i));
-  // Two badges of a crowd trade places whenever that shortens their leader
-  // lines. Crossing lines always get shorter by trading, so none stay crossed.
-  for (const QVector<int>& crowd : crowds) {
-    bool traded = crowd.size() > 1;
-    for (int pass = 0; traded && pass < kMaxRings; ++pass) {
-      traded = false;
-      for (int a : crowd) {
-        for (int b : crowd) {
-          if (a >= b) continue;
-          const double now = origins.at(a).distance(placed.at(a)) + origins.at(b).distance(placed.at(b));
-          const double then = origins.at(a).distance(placed.at(b)) + origins.at(b).distance(placed.at(a));
-          if (then >= now - m_step * 1e-6) continue;
-          if (!fits(placed.at(b), badgeDiametersMm.value(a)) || !fits(placed.at(a), badgeDiametersMm.value(b))) continue;
-          std::swap(placed[a], placed[b]);
-          traded = true;
-        }
+  // Two badges trade places whenever that shortens their leader lines. Crossing
+  // lines always get shorter by trading, so none stay crossed; a badge on its
+  // own site never gains from a trade, so it stays there.
+  bool traded = true;
+  for (int pass = 0; traded && pass < kMaxRings; ++pass) {
+    traded = false;
+    for (int a = 0; a < n; ++a) {
+      for (int b = a + 1; b < n; ++b) {
+        const double now = origins.at(a).distance(placed.at(a)) + origins.at(b).distance(placed.at(b));
+        if (now <= m_step * 1e-6) continue;
+        const double then = origins.at(a).distance(placed.at(b)) + origins.at(b).distance(placed.at(a));
+        if (then >= now - m_step * 1e-6) continue;
+        if (!fits(placed.at(b), badgeDiametersMm.value(a)) || !fits(placed.at(a), badgeDiametersMm.value(b))) continue;
+        std::swap(placed[a], placed[b]);
+        traded = true;
       }
     }
   }

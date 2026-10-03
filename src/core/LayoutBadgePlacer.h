@@ -28,8 +28,8 @@ public:
   // Places every badge of the sheet at once, in the given (number) order. A
   // badge sits on its own site and moves only when it would cover another one,
   // to the nearest free slot (place()). Lone sites go first so they keep their
-  // site. Sites chained closer than the clear distance form a crowd: its badges
-  // then trade places until no two leader lines of the crowd cross.
+  // site (sites chained closer than the clear distance are the crowded ones).
+  // Badges then trade places until no two leader lines on the sheet cross.
   QVector<QgsPointXY> placeAll(const QVector<QgsPointXY>& origins, const QVector<double>& badgeDiametersMm);
   // Occupy a position without searching (e.g. a site whose transform failed).
   void occupy(const QgsPointXY& point);
