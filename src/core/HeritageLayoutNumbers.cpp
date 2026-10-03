@@ -209,8 +209,6 @@ struct Site {
   double labelX = 0.;
   double labelY = 0.;
   double labelWeight = -1.;
-  double mapX = 0.;
-  double mapY = 0.;
   double originX = 0.;
   double originY = 0.;
   int index = 0;
@@ -799,29 +797,16 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
       }
     }
     {
+      // Each site's own spot in map coordinates; the badges are placed together below.
       QgsCoordinateTransform toMap(layer->crs(), map->crs(), project->transformContext());
-      QgsCoordinateTransform toLayer(map->crs(), layer->crs(), project->transformContext());
-      // Numbers below follow this same site order, so the badge size is known here.
-      int number = counters.value(datasetName);
       for (auto it = sites.begin(); it != sites.end(); ++it) {
-        ++number;
-        if (it->labelId.isEmpty()) continue;
+        it->originX = it->labelX;
+        it->originY = it->labelY;
         try {
           const QgsPointXY origin = toMap.transform(QgsPointXY(it->labelX, it->labelY));
-          const QgsPointXY nudged = placer.place(origin, circleSize(number));
           it->originX = origin.x();
           it->originY = origin.y();
-          it->mapX = nudged.x();
-          it->mapY = nudged.y();
-          const QgsPointXY layerPos = toLayer.transform(nudged);
-          it->labelX = layerPos.x();
-          it->labelY = layerPos.y();
         } catch (const QgsCsException&) {
-          it->originX = it->labelX;
-          it->originY = it->labelY;
-          it->mapX = it->labelX;
-          it->mapY = it->labelY;
-          placer.occupy(QgsPointXY(it->labelX, it->labelY));
         }
       }
     }
@@ -864,8 +849,8 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
       QSet<qint64> featureIds;
       for (const auto& id : site.ids) featureIds.insert(id.toLongLong());
       entries.append({layer->id(), datasetName, site.name, number, index, site.color, featureIds});
-      // 같은 이름은 번호 하나. 자리와 색은 이미 정해 두었으므로 점 하나로 그린다.
-      pins.append(NumberPin{site.mapX, site.mapY, site.originX, site.originY, circleSize(number),
+      // 같은 이름은 번호 하나. 점 하나로 그리고, 번호 자리는 아래에서 한꺼번에 정한다.
+      pins.append(NumberPin{site.originX, site.originY, site.originX, site.originY, circleSize(number),
                             number, site.labelId.toLongLong(), site.name, layer->id(),
                             site.color.name(QColor::HexArgb), inkFor(site.color).name()});
       if (single) fallbackCategories.append(QgsRendererCategory(site.values, site.symbol->clone(), site.name));
@@ -902,6 +887,18 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
     QgsMapLayerStyle style;
     style.readFromLayer(drawing.get());
     overrides.insert(layer->id(), style.xmlData());
+  }
+  // All badges of the sheet at once: crowded sites get an aligned grid around them.
+  QVector<QgsPointXY> origins;
+  QVector<double> sizes;
+  for (const NumberPin& pin : pins) {
+    origins.append(QgsPointXY(pin.originX, pin.originY));
+    sizes.append(pin.size);
+  }
+  const QVector<QgsPointXY> placed = placer.placeAll(origins, sizes);
+  for (int i = 0; i < pins.size(); ++i) {
+    pins[i].x = placed.at(i).x();
+    pins[i].y = placed.at(i).y();
   }
   m_entries = std::move(entries);
   m_overrides = std::move(overrides);
