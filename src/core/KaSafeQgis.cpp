@@ -1,3 +1,4 @@
+#include "CadPendingCopies.h"
 #include "KaSessionLog.h"
 #include "KaLogExcept.h"
 #include "KaSafeQgis.h"
@@ -78,6 +79,7 @@ bool kaWriteQgisProjectAtomic(QgsProject* project, const QString& path, QString*
     return false;
   };
   if (!project || path.isEmpty()) return fail(QStringLiteral("저장 경로가 없습니다."));
+  CadPendingCopies::markSaved(project);  // 이 작업공간이 쓰는 도면 변환본은 이제 지우지 않는다
   const QString originalFileName = project->fileName();
   const bool originalDirty = project->isDirty();
   bool completed = false;

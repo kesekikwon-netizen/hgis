@@ -14,6 +14,7 @@
 #include "KaTopographicBrowser.h"
 #include "KaUserError.h"
 #include "core/BasemapDsm.h"
+#include "core/CadPendingCopies.h"
 #include "core/DemPresentation.h"
 #include "core/KaSafeQgis.h"
 #include "core/LayerOps.h"
@@ -161,6 +162,7 @@ void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sou
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
 
   LayerOps::repairPersistedFileSources(QgsProject::instance());
+  CadPendingCopies::removeUnsaved(QgsProject::instance(), gpkgPath);  // 저장 없이 닫아 남은 도면 변환본
   LayerOps::restoreMissingLayerTreeNodes(QgsProject::instance());
   // [pkg E1] F020: store roles for layers saved before roles existed; titles stop deciding.
   LayerRole::persistLegacyRoles(QgsProject::instance());

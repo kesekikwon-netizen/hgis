@@ -20,6 +20,8 @@ bool removeNow(const QString& path) {
 
 }  // namespace
 
+bool removeIfFree(const QString& path) { return removeNow(QFileInfo(path).absoluteFilePath()); }
+
 bool removeWhenFree(const QString& path) {
   const QString clean = QFileInfo(path).absoluteFilePath();
   if (removeNow(clean)) return true;

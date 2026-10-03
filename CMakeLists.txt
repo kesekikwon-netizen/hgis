@@ -228,6 +228,7 @@ add_library(ka_core STATIC
   src/core/CadDrawingReader.cpp
   src/core/CadCrsGuess.cpp
   src/core/CadCrsHints.cpp
+  src/core/CadPendingCopies.cpp
   src/core/LineMapStyle.cpp
   src/core/CadDrawingStore.cpp
   src/core/CadDrawingLayers.cpp
@@ -312,6 +313,7 @@ add_library(ka_core STATIC
   src/core/CadDrawingReader.h
   src/core/CadCrsGuess.h
   src/core/CadCrsHints.h
+  src/core/CadPendingCopies.h
   src/core/LineMapStyle.h
   src/core/CadDrawingStore.h
   src/core/CadDrawingLayers.h
@@ -750,6 +752,14 @@ if(KA_HGIS_BUILD_TESTS)
   target_compile_definitions(ka_cad_hints_tests PRIVATE ${KA_TEST_DEFS})
   set_target_properties(ka_cad_hints_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(cad_hints ka_cad_hints_tests)
+  # 한 번도 저장된 적 없는 도면 변환본만 지우기(CadPendingCopies).
+  add_executable(ka_cad_pending_copies_tests tests/test_cad_pending_copies.cpp)
+  target_link_libraries(ka_cad_pending_copies_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_cad_pending_copies_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_cad_pending_copies_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_cad_pending_copies_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_cad_pending_copies_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(cad_pending_copies ka_cad_pending_copies_tests)
   # 선으로 된 지도(도면 선·받은 지적도·등고선)의 선 색 바꾸기와 원래 색으로 되돌리기(LineMapStyle).
   add_executable(ka_line_map_style_tests tests/test_line_map_style.cpp)
   target_link_libraries(ka_line_map_style_tests PRIVATE ${KA_TEST_LIBS})
@@ -1699,7 +1709,7 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(layer_roles layer_styles layer_edits layer_panel layer_tree_undo undo_group survey_save_as above_labels_names PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     set_tests_properties(georef_quality georef_backup align_tool align_image_view PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
-    set_tests_properties(cad_dwg cad_reader cad_crs cad_hints cad_store cad_layers cad_import cad_import_auto cad_align blocking_task PROPERTIES
+    set_tests_properties(cad_dwg cad_reader cad_crs cad_hints cad_pending_copies cad_store cad_layers cad_import cad_import_auto cad_align blocking_task PROPERTIES
       ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     set_tests_properties(dem_legend PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(topographic_catalog PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)

@@ -1,3 +1,4 @@
+#include "CadPendingCopies.h"
 #include "KaSessionLog.h"
 #include "KaLogExcept.h"
 #include "SurveyStorage.h"
@@ -1185,6 +1186,7 @@ bool writeEmbedded(QgsProject* project, const QString& gpkgPath, QString* errorO
     if (errorOut) *errorOut = QStringLiteral("조사 파일이 없습니다: %1").arg(gpkgPath);
     return false;
   }
+  CadPendingCopies::markSaved(project);  // 이 작업공간이 쓰는 도면 변환본은 이제 지우지 않는다
   const QString abs = QFileInfo(gpkgPath).absoluteFilePath();
   const QString previousFileName = project->fileName();
   const QString previousHome = project->presetHomePath();

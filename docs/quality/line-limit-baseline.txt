@@ -42,7 +42,7 @@
 1228 src/core/HeritageLayoutNumbers.cpp
 353 src/core/HeritageRegionResolver.cpp
 393 src/core/KaPortableRuntime.cpp
-355 src/core/KaSafeQgis.cpp
+357 src/core/KaSafeQgis.cpp
 2920 src/core/LayerOps.cpp
 469 src/core/LayerOps.h
 1666 src/core/LayoutService.cpp
@@ -52,7 +52,7 @@
 431 src/core/RiverMapService.cpp
 1160 src/core/SectionLayoutService.cpp
 431 src/core/SoilMapService.cpp
-1269 src/core/SurveyStorage.cpp
+1270 src/core/SurveyStorage.cpp
 515 src/core/Terrain3dLayoutService.cpp
 664 src/core/Terrain3dService.cpp
 487 src/core/TilePrint.cpp

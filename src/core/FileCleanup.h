@@ -9,5 +9,7 @@ namespace FileCleanup {
 
 // 지금 지웠으면 true. 못 지웠으면 다시 지우기를 예약하고 false.
 bool removeWhenFree(const QString& path);
+// 지금 지울 수 있을 때만 지운다(다시 시도하지 않는다). 지웠거나 원래 없으면 true.
+bool removeIfFree(const QString& path);
 
 }  // namespace FileCleanup

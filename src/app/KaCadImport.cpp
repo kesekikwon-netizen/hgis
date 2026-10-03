@@ -9,10 +9,10 @@
 #include "core/CadDrawingReader.h"
 #include "core/CadDrawingStore.h"
 #include "core/CadDwgConverter.h"
+#include "core/CadPendingCopies.h"
 #include "core/FileCleanup.h"
 #include "core/KaSessionLog.h"
 #include "core/LayerOps.h"
-#include "core/SurveyBundle.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -192,7 +192,7 @@ bool run(const Hooks& hooks, const QString& path, const QString& forcedAuthId) {
   }
 
   // 4. 지도에 올린다. 같은 원본에서 올린 묶음은 새것으로 바꾸고(이름만 같은 다른 도면은 「(도면 2)」로 따로 둔다),
-  //    앱이 만든 옛 변환본 파일은 지울 수 있으면 지운다.
+  //    앱 폴더의 옛 변환본과 한 번도 저장되지 않은 옛 변환본은 지울 수 있으면 지운다. 저장된 조사가 쓰는 것은 남긴다.
   const QString title = CadDrawingLayers::titleFor(project, path);
   QStringList oldFiles;
   for (QgsVectorLayer* layer : CadDrawingLayers::layersOf(project, CadDrawingLayers::drawingIdOfGroup(project, title)))
@@ -205,14 +205,14 @@ bool run(const Hooks& hooks, const QString& path, const QString& forcedAuthId) {
                                      QStringLiteral("변환본 파일을 다른 프로그램이 열고 있지 않은지 확인해 주세요.")});
     return false;
   }
+  if (!surveyDir.isEmpty()) CadPendingCopies::add(out);  // 작업공간에 저장되기 전까지는 지워도 되는 변환본
   for (QgsVectorLayer* layer : added)  // 가장 그럴듯한 자리에 둔 도면은 다음 도면의 위치 단서가 아니다
     layer->setCustomProperty(QString::fromLatin1(CadDrawingLayers::kPropUnsure), likely);
   const QString appDrawings = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) +
                               QStringLiteral("/cad-drawings/");
-  const QString collected = QStringLiteral("/") + SurveyBundle::collectedFolderName() + QStringLiteral("/도면/");
   for (const QString& file : oldFiles) {
     const QString clean = QFileInfo(file).absoluteFilePath();
-    if (clean == QFileInfo(out).absoluteFilePath() || !(clean.contains(collected) || clean.startsWith(appDrawings)))
+    if (clean == QFileInfo(out).absoluteFilePath() || !(clean.startsWith(appDrawings) || CadPendingCopies::isPending(clean)))
       continue;
     FileCleanup::removeWhenFree(clean);  // 지도가 아직 읽고 있으면 잠시 뒤 다시 지운다(R89)
   }

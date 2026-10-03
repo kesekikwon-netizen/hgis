@@ -13,7 +13,9 @@
 #include "app/KaCadImport.h"
 #include "cad_fixture.h"
 #include "core/CadDwgConverter.h"
+#include "core/CadPendingCopies.h"
 #include "core/HeritageImport.h"
+#include "core/KaSafeQgis.h"
 #include "core/LayerOps.h"
 #include "core/SurveyBundle.h"
 
@@ -189,6 +191,39 @@ class TestCadImport : public QObject {
     QCOMPARE(drawingGroup(QStringLiteral("가수리 (도면)"))->findLayers().size(), 2);
     // 옛 변환본은 남기지 않는다(새것은 「가수리 (2).gpkg」로 생긴다): 도면 폴더에 변환본은 하나뿐이다(R89).
     QCOMPARE(QDir(tmp.filePath(QStringLiteral("조사/가져온자료/도면"))).entryList({QStringLiteral("*.gpkg")}, QDir::Files).size(), 1);
+  }
+
+  // 저장 없이 닫은 조사를 다시 열면 그때 만든 변환본을 지운다(2026-10-03 사용자 「테스트」 조사의 test1 (2)~(7)).
+  void run_unsavedCopyIsRemovedWhenTheSurveyOpensAgain() {
+    QTemporaryDir tmp;
+    addYeongcheonSurveyArea();
+    const QString dxf = writeGasuriDxf(tmp.filePath(QStringLiteral("원본")), QStringLiteral("가수리"));
+    const QString survey = tmp.filePath(QStringLiteral("조사/영천 조사.gpkg"));
+    Fixture fx;
+    QVERIFY(KaCadImport::run(fx.hooks(survey), dxf));
+    const QString copy = tmp.filePath(QStringLiteral("조사/가져온자료/도면/가수리.gpkg"));
+    QVERIFY(QFileInfo::exists(copy));
+    QgsProject::instance()->clear();  // 저장하지 않고 닫는다
+    QTest::qWait(200);
+    QCOMPARE(CadPendingCopies::removeUnsaved(QgsProject::instance(), survey), 1);
+    QVERIFY(!QFileInfo::exists(copy));
+  }
+
+  // 저장에 들어간 옛 변환본은 다시 불러와도 지우지 않는다. 저장하지 않고 닫으면 저장된 조사가 그것을 쓴다.
+  void run_reimportKeepsTheOldCopyASaveUses() {
+    QTemporaryDir tmp;
+    addYeongcheonSurveyArea();
+    const QString dxf = writeGasuriDxf(tmp.filePath(QStringLiteral("원본")), QStringLiteral("가수리"));
+    const QString survey = tmp.filePath(QStringLiteral("조사/영천 조사.gpkg"));
+    Fixture fx;
+    QVERIFY(KaCadImport::run(fx.hooks(survey), dxf));
+    QString error;
+    QVERIFY2(kaWriteQgisProjectAtomic(QgsProject::instance(), tmp.filePath(QStringLiteral("조사/영천 조사.qgz")), &error),
+             qUtf8Printable(error));
+    QVERIFY(KaCadImport::run(fx.hooks(survey), dxf));
+    QTest::qWait(6000);  // 지금 못 지운 파일을 5초 뒤 다시 지우는 것까지 기다린다
+    QVERIFY(QFileInfo::exists(tmp.filePath(QStringLiteral("조사/가져온자료/도면/가수리.gpkg"))));
+    QVERIFY(QFileInfo::exists(tmp.filePath(QStringLiteral("조사/가져온자료/도면/가수리 (2).gpkg"))));
   }
 
   // 다른 폴더의 같은 이름 도면은 바꾸지 않고 「(도면 2)」로 둘 다 둔다. 먼저 올린 변환본도 그대로다.
