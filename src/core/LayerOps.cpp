@@ -2875,8 +2875,8 @@ void LayerOps::applySnapSettings(QgsProject* project, const SnapSettings& settin
                       settings.target == SnapTarget::CurrentLayer ? QStringLiteral("current")
                                                                   : QStringLiteral("survey"));
   project->setTopologicalEditing(settings.topological);
-  project->writeEntry(QStringLiteral("ka_hgis"), QStringLiteral("topological"),
-                      settings.topological ? QStringLiteral("1") : QStringLiteral("0"));
+  project->writeEntry(QStringLiteral("ka_hgis"), QStringLiteral("topological"), settings.topological ? QStringLiteral("1") : QStringLiteral("0"));
+  project->writeEntry(QStringLiteral("ka_hgis"), QStringLiteral("snap_chosen"), QStringLiteral("1"));  // from here on the stored on/off is this survey's own
   project->setSnappingConfig(cfg);
 }
 
@@ -2884,7 +2884,7 @@ LayerOps::SnapSettings LayerOps::readSnapSettings(const QgsProject* project) {
   SnapSettings settings;
   if (!project) return settings;
   const QgsSnappingConfig cfg = project->snappingConfig();
-  settings.enabled = cfg.enabled();
+  settings.enabled = cfg.enabled() || project->readEntry(QStringLiteral("ka_hgis"), QStringLiteral("snap_chosen")).isEmpty();  // never chosen: 자석 starts on (QGIS's default is off)
   settings.tolerancePx = cfg.tolerance() > 0.0 ? cfg.tolerance() : 16.0;
   const QString target = project->readEntry(QStringLiteral("ka_hgis"), QStringLiteral("snap_target"),
                                             QStringLiteral("survey"));

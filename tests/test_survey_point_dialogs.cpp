@@ -65,6 +65,7 @@ private slots:
   void surveyAreaDialogIsCompact();
   void surveyAreaStartIsTheThemedMainButton();
   void surveyAreaToContinueIsTheSurveysOwn();
+  void magnetIsOnUntilTheUserTurnsItOff();
   void demDialogOffersTheViewFit();
   void gridOriginButtonMovesTheGrid();
 };
@@ -173,6 +174,17 @@ void TestSurveyPointDialogs::surveyAreaStartIsTheThemedMainButton() {
   dialog.show();
   QApplication::processEvents();
   QVERIFY2(start->x() < cancel->x(), qPrintable(QStringLiteral("%1 %2").arg(start->x()).arg(cancel->x())));
+}
+
+// 자석 starts checked in a survey that never stored a choice (QGIS's own default is off, which read as
+// 「자석 끔」 at the first 그리기); once it is turned off, the survey remembers that.
+void TestSurveyPointDialogs::magnetIsOnUntilTheUserTurnsItOff() {
+  QgsProject project;
+  QVERIFY(LayerOps::readSnapSettings(&project).enabled);
+  LayerOps::SnapSettings off = LayerOps::readSnapSettings(&project);
+  off.enabled = false;
+  LayerOps::applySnapSettings(&project, off);
+  QVERIFY(!LayerOps::readSnapSettings(&project).enabled);
 }
 
 // Without a window only the survey's own area is continued: never a user's file named 조사구역 opened
