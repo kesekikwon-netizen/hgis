@@ -261,17 +261,25 @@ QToolBar#subToolbar {
 }
 /* Same label size and ink as the ribbon chips. The 13 px labels are wider than the old 12 px ones,
    so the side padding is 7 px (was 10) to keep the whole drawing row on screen at 1920. */
+/* 새 모양 makes each tool a button (face, thin rounded edge, clay wash when chosen); the @sub…@ values
+   of the stock look resolve to the flat row it always had (KaThemeSheet.cpp). Edge, gap and side
+   padding together are no wider than the stock row's, and a chosen tool is as wide as an unchosen one. */
 QToolBar#subToolbar QToolButton {
   color: @ribbonLabelInk@;
   font-size: @ribbonFontSize@px;
-  padding: 6px 7px;
+  padding: 6px @subPadSide@px;
+  margin: 0 @subGap@px;
+  background: @subFace@;
+  border: @subEdgeWidth@px solid @subEdge@;
+  border-radius: @subRadius@px;
 }
+QToolBar#subToolbar QToolButton:enabled:hover { background: @hover@; }
 QToolBar#subToolbar QToolButton:enabled:checked {
-  background: transparent;
+  background: @subCheckedFace@;
   color: @ribbonActiveInk@;
   font-weight: 700;
-  border: 2px solid transparent;
-  border-bottom: 2px solid @ribbonActiveInk@;
+  border: @subCheckedEdgeWidth@px solid @subCheckedEdge@;
+  border-bottom: @subUnderline@;
 }
 QToolBar#mainToolbar {
   spacing: @buttonSpacing@px;

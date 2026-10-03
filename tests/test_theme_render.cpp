@@ -13,6 +13,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QToolBar>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -54,6 +55,7 @@ private slots:
   void progressBarTextReadableOnChunk();
   void radioIndicatorUsesAccent();
   void paperLook_mainButtonIsSlateAndBandIsPaper();
+  void paperLook_drawingRowToolsAreButtons();
 };
 
 void TestThemeRender::initTestCase() {
@@ -193,6 +195,42 @@ void TestThemeRender::paperLook_mainButtonIsSlateAndBandIsPaper() {
   QVERIFY2(near(slate, t.primary), qPrintable(slate.name()));
   QVERIFY2(near(band, t.rail), qPrintable(band.name()));
   QVERIFY2(contrast(titleInk, band) >= 4.5, qPrintable(titleInk.name()));
+}
+
+// 새 모양: the tools of the drawing row (#subToolbar) are buttons — a face with a thin rounded edge,
+// and the chosen tool in the clay wash with a clay edge (user 2026-10-04 「이것들도 버튼 형태로
+// 엔트로픽스타일로」). The stock look keeps its flat row.
+void TestThemeRender::paperLook_drawingRowToolsAreButtons() {
+  QToolBar row;
+  row.setObjectName(QStringLiteral("subToolbar"));
+  row.setToolButtonStyle(Qt::ToolButtonTextOnly);
+  QAction* plain = row.addAction(QStringLiteral("유구 그리기"));
+  row.addAction(QStringLiteral("폴리곤 묶기"));
+  QAction* chosen = row.addAction(QStringLiteral("도형선택"));
+  chosen->setCheckable(true);
+  chosen->setChecked(true);
+  row.setGeometry(300, 300, 400, 44);  // away from the pointer: a hovered tool shows the hover wash
+  row.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&row));
+  // Left edge and face of a tool, half-way down: x = 1 is the edge (after the 1 px gap), x = 5 the face.
+  const auto sample = [&row](QAction* action, int x) {
+    QWidget* button = row.widgetForAction(action);
+    return at(button->grab().toImage(), x, button->height() / 2);
+  };
+  QCOMPARE(sample(plain, 1), sample(plain, 5));  // stock: no edge around a tool
+  KaTheme::DisplayOptions paper;
+  paper.paperLook = true;
+  KaTheme::setDisplayOptions(qApp, paper);
+  const KaTheme::Tokens t = KaTheme::tokens();
+  QCoreApplication::processEvents();
+  const QColor edge = sample(plain, 1), face = sample(plain, 5), chosenEdge = sample(chosen, 1), chosenFace = sample(chosen, 5);
+  if (const QString out = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR"); !out.isEmpty() && QDir(out).exists())
+    row.grab().save(QDir(out).filePath(QStringLiteral("theme-paper-drawing-row.png")));
+  KaTheme::setDisplayOptions(qApp, KaTheme::DisplayOptions());  // restore before any check can return early
+  QVERIFY2(near(edge, t.border), qPrintable(edge.name()));
+  QVERIFY2(near(face, t.surface), qPrintable(face.name()));
+  QVERIFY2(near(chosenEdge, t.accent), qPrintable(chosenEdge.name()));
+  QVERIFY2(near(chosenFace, t.selected), qPrintable(chosenFace.name()));
 }
 
 QTEST_MAIN(TestThemeRender)

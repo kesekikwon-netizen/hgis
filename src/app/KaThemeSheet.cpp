@@ -72,6 +72,19 @@ QHash<QString, QString> replacementTable() {
   values.insert(QStringLiteral("buttonEdge"), QString::number(buttonEdgeWidth()));
   values.insert(QStringLiteral("nameSize"), paper ? QStringLiteral("19") : QStringLiteral("15"));
   values.insert(QStringLiteral("bigNameSize"), paper ? QStringLiteral("24") : QStringLiteral("20"));
+  // The drawing row's tools (QToolBar#subToolbar): buttons in 새 모양, the flat row in the stock look.
+  const QString none = QStringLiteral("transparent");
+  values.insert(QStringLiteral("subFace"), c.surface.name());
+  values.insert(QStringLiteral("subEdge"), paper ? c.border.name() : none);
+  values.insert(QStringLiteral("subEdgeWidth"), paper ? QStringLiteral("1") : QStringLiteral("2"));
+  values.insert(QStringLiteral("subRadius"), paper ? QStringLiteral("8") : QStringLiteral("0"));
+  values.insert(QStringLiteral("subGap"), paper ? QStringLiteral("1") : QStringLiteral("0"));
+  values.insert(QStringLiteral("subPadSide"), paper ? QStringLiteral("6") : QStringLiteral("7"));
+  values.insert(QStringLiteral("subCheckedFace"), paper ? c.selected.name() : none);
+  values.insert(QStringLiteral("subCheckedEdge"), paper ? c.accent.name() : none);
+  values.insert(QStringLiteral("subCheckedEdgeWidth"), paper ? QStringLiteral("1") : QStringLiteral("2"));
+  values.insert(QStringLiteral("subUnderline"),
+                paper ? QStringLiteral("1px solid ") + c.accent.name() : QStringLiteral("2px solid ") + c.ribbonActiveInk.name());
   return values;
 }
 
