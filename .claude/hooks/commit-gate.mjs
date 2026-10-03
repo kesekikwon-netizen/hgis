@@ -46,8 +46,9 @@
 //   - Fallback: if nothing above matched but the raw text names
 //     commit/commit-tree/update-ref together with git or an indirection
 //     ($, eval, iex, xargs, &, alias), it is gated as a whole-worktree commit
-//     in cwd. Such a deny still needs unverified build-relevant changes, so a
-//     docs-only worktree passes.
+//     in cwd. Such a deny still needs unverified build-relevant changes or a
+//     line-limit problem, so a docs-only worktree passes unless it raises the
+//     line-limit baseline.
 //
 // Fast path: a command with none of git/commit/update-ref, an encoded
 // PowerShell command, eval/iex/xargs, or a script runner / script-like file
@@ -101,19 +102,18 @@ function emitDeny(reason) {
   );
 }
 
-function git(args, cwd, raw = false) {
-  const out = execFileSync('git', args, {
+function git(args, cwd) {
+  return execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
     maxBuffer: 16 * 1024 * 1024,
-  });
-  return raw ? out : out.trim();
+  }).trim();
 }
-function tryGit(args, cwd, raw = false) {
+function tryGit(args, cwd) {
   try {
-    return git(args, cwd, raw);
+    return git(args, cwd);
   } catch {
     return null;
   }
@@ -581,16 +581,50 @@ function changedFiles(top, form) {
   return [...set];
 }
 
-// A file's content in the commit: the index for a plain commit, the work tree when -a, pathspecs or
-// an earlier `git add` in the chain take it from there. Untrimmed, so blank lines still count; null
-// when the commit deletes the file.
-function committedText(top, form, f) {
-  if (!(form.all || form.untracked || form.pathspecs.length || (form.stageGroups || []).length)) return tryGit(['show', `:${f}`], top, true);
-  try {
-    return fs.readFileSync(path.join(top, f), 'utf8');
-  } catch {
-    return null;
+// Files' content in the commit -> Map(file -> text): the index for a plain commit, the work tree when
+// -a, pathspecs or an earlier `git add` in the chain take it from there. Untrimmed, so blank lines
+// still count; null when the commit deletes the file. The index is read by one `git cat-file --batch`
+// (a git per file made big commits run into the hook timeout, which lets the commit through), and a
+// read that fails for any other reason throws, so the gate blocks instead of skipping the file.
+function committedTexts(top, form, files) {
+  const texts = new Map();
+  if (form.all || form.untracked || form.pathspecs.length || (form.stageGroups || []).length) {
+    for (const f of files) {
+      try {
+        texts.set(f, fs.readFileSync(path.join(top, f), 'utf8'));
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+        texts.set(f, null);
+      }
+    }
+    return texts;
   }
+  if (!files.length) return texts;
+  const out = execFileSync('git', ['cat-file', '--batch'], {
+    cwd: top,
+    input: files.map((f) => `:${f}\n`).join(''),
+    windowsHide: true,
+    maxBuffer: 512 * 1024 * 1024,
+  });
+  let at = 0;
+  for (const f of files) {
+    const end = out.indexOf(10, at);
+    if (end < 0) throw new Error(`git cat-file 이 ${f} 를 읽지 못했다 (출력이 끊겼다)`);
+    const header = out.toString('utf8', at, end);
+    at = end + 1;
+    if (header === `:${f} missing`) {
+      texts.set(f, null);
+      continue;
+    }
+    const m = /^[0-9a-f]+ blob (\d+)$/.exec(header);
+    if (!m) throw new Error(`git cat-file 이 ${f} 를 읽지 못했다: ${header}`);
+    texts.set(f, out.toString('utf8', at, at + Number(m[1])));
+    at += Number(m[1]) + 1;
+  }
+  return texts;
+}
+function committedText(top, form, f) {
+  return committedTexts(top, form, [f]).get(f);
 }
 
 // Test lock (user decision 2026-10-03, docs/intent/2026-10-03-dev-setup-gaps.md): a commit that
@@ -695,16 +729,21 @@ function lineLimitProblems(top, form, files, message) {
   const baseBaseline = () => (base === null ? null : tryGit(['show', `${base}:${LINE_LIMIT_BASELINE}`], top));
   const baselineChanged = files.includes(LINE_LIMIT_BASELINE);
   const allowed = parseBaseline(baselineChanged ? committedText(top, form, LINE_LIMIT_BASELINE) : baseBaseline());
+  const old = baselineChanged ? parseBaseline(baseBaseline()) : allowed;
+  // A lowered or dropped entry (or a deleted baseline) is checked too, though its file is not in the commit.
+  const lowered = [...old].filter(([f, lines]) => !allowed.has(f) || allowed.get(f) < lines).map(([f]) => f);
+  const cpp = [...new Set([...files, ...lowered])].filter((x) => /^(?:src|tests)\/.+\.(?:cpp|h|hpp)$/i.test(x));
+  const texts = committedTexts(top, form, cpp);
   const problems = [];
 
   const over = [];
-  for (const f of files.filter((x) => /^(?:src|tests)\/.+\.(?:cpp|h|hpp)$/i.test(x))) {
-    const text = committedText(top, form, f);
+  for (const f of cpp) {
+    const text = texts.get(f);
     if (text === null) continue; // deleted in this commit
     const lines = countLines(text);
     if (lines <= LINE_LIMIT) continue;
     if (!allowed.has(f)) over.push(`${f}: ${lines}줄 (기준 파일에 없는 파일은 ${LINE_LIMIT}줄까지)`);
-    else if (lines > allowed.get(f)) over.push(`${f}: ${lines}줄, 기준 ${allowed.get(f)}줄보다 늘었다`);
+    else if (lines > allowed.get(f)) over.push(`${f}: ${lines}줄, 기준 ${allowed.get(f)}줄보다 많다`);
   }
   if (over.length) {
     problems.push(
@@ -714,7 +753,6 @@ function lineLimitProblems(top, form, files, message) {
   }
 
   if (baselineChanged && !LIMIT_REASON_RE.test(message)) {
-    const old = parseBaseline(baseBaseline());
     const raised = [];
     for (const [f, lines] of allowed) {
       if (!old.has(f)) raised.push(`${f}: ${lines}줄로 새로 넣음`);
@@ -936,7 +974,7 @@ function main() {
       `[commit-gate] 커밋 차단 (${top}${c.note ? `; ${c.note}` : ''}${c.form.amend ? '; --amend' : ''})\n` +
         (r.gated ? `빌드 대상 파일이 커밋에 들어 있다: ${shown}\n` : '') +
         `막은 이유:\n- ${problems.join('\n- ')}\n` +
-        `모두 갖춘 뒤 같은 git commit 을 다시 실행한다. 이 게이트를 건너뛰는 옵션은 없다. 문서(.md)·.claude/·scripts/ 만 바꾼 커밋은 막지 않는다.`,
+        `모두 갖춘 뒤 같은 git commit 을 다시 실행한다. 이 게이트를 건너뛰는 옵션은 없다. 문서(.md)·.claude/·scripts/ 만 바꾼 커밋에는 빌드·테스트를 요구하지 않는다.`,
     );
   }
   if (reasons.length) emitDeny(reasons.join('\n\n'));
