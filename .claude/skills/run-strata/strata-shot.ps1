@@ -63,7 +63,9 @@ if (-not $copy) {
 } else {
   # launch.ps1 only knows ka-hgis.exe, so do what it does for the copy: dev-env + detached via WMI.
   $cmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ". ''' + (Join-Path $Root "scripts\dev-env.ps1") + '''; Start-Process -FilePath ''' + $runExe + ''' -WorkingDirectory ''' + $rel + '''"'
-  ([wmiclass]"Win32_Process").Create($cmd, $Root) | Out-Null
+  $startup = ([wmiclass]"Win32_ProcessStartup").CreateInstance()
+  $startup.ShowWindow = 0  # hidden, as in launch.ps1: no console window on the person's screen
+  ([wmiclass]"Win32_Process").Create($cmd, $Root, $startup) | Out-Null
 }
 
 $proc = $null; $h = [IntPtr]::Zero

@@ -14,7 +14,10 @@ if ($env:KA_HGIS_DETACHED -ne "1") {
   $ps = Join-Path $PSHOME "powershell.exe"
   if (-not (Test-Path -LiteralPath $ps)) { $ps = "powershell.exe" }
   $cmd = 'cmd.exe /c set KA_HGIS_DETACHED=1&& "' + $ps + '" -NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '"'
-  $r = ([wmiclass]"Win32_Process").Create($cmd, $here)
+  # Hidden: without this the cmd.exe console (a Windows Terminal tab) shows on every start.
+  $startup = ([wmiclass]"Win32_ProcessStartup").CreateInstance()
+  $startup.ShowWindow = 0
+  $r = ([wmiclass]"Win32_Process").Create($cmd, $here, $startup)
   if ($r.ReturnValue -eq 0) {
     Write-LaunchLog "detached via WMI child=$($r.ProcessId)"
     exit 0
