@@ -769,8 +769,8 @@ int KaApplication::run(int argc, char** argv) {
   if (!autoQa) {
     splash = std::make_unique<KaStartupSplash>();
     splash->show();
-    // Present the notice before the synchronous SDK initialization. The reading
-    // gauge starts only once initialization has returned to the event loop.
+    // Present the notice before the synchronous SDK initialization. Its 3 s reading
+    // time counts from here; the main window opens once both are done.
     app.processEvents(QEventLoop::ExcludeUserInputEvents);
   }
 

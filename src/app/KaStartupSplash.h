@@ -12,10 +12,12 @@ class QTimer;
 // a contoured mound; every line of text sits in the lower left: the Strata
 // title, the status with progress dots flowing left to right, the copyright and
 // the data sources. Only the dots move. Clicking never closes the notice early.
+// The reading time counts from when the notice appears (user 2026-10-03
+// 「로딩화면을 3초로 줄이라」); the main window opens once it and the app are ready.
 class KaStartupSplash final : public QWidget {
   Q_OBJECT
 public:
-  static constexpr int ReadingDurationMs = 5000;
+  static constexpr int ReadingDurationMs = 3000;
   explicit KaStartupSplash(QWidget* parent = nullptr,
                            int readingDurationMs = ReadingDurationMs);
   ~KaStartupSplash() override;
@@ -26,6 +28,8 @@ public:
   void markReady();
   // 0..1000, the share of the reading interval that has passed.
   int readingProgress() const { return m_progress; }
+  // Seconds of the progress-dot animation, counted from readiness so the dots enter from the left.
+  double flowSeconds() const { return m_ready ? (m_readingClock.elapsed() - m_readyAtMs) / 1000.0 : 0.0; }
   // The blue card inside the transparent shadow margin.
   QRectF cardRect() const;
   // The lane the progress dots cross.
@@ -54,6 +58,8 @@ private:
   QPixmap m_icon;
   QPixmap m_static;
   int m_progress = 0;
+  bool m_ready = false;
+  qint64 m_readyAtMs = 0;
   bool m_completed = false;
   bool m_reducedMotion = false;
 };

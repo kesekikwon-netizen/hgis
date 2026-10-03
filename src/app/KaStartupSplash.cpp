@@ -108,6 +108,7 @@ KaStartupSplash::KaStartupSplash(QWidget* parent, int readingDurationMs)
   m_timer->setTimerType(Qt::PreciseTimer);
   connect(m_timer, &QTimer::timeout, this, &KaStartupSplash::tick);
   placeWindow();
+  m_readingClock.start();
 }
 
 KaStartupSplash::~KaStartupSplash() = default;
@@ -153,21 +154,22 @@ QImage KaStartupSplash::backdropImage() const {
 }
 
 void KaStartupSplash::markReady() {
-  if (m_readingClock.isValid())
+  if (m_ready)
     return;
-  m_readingClock.start();
+  m_ready = true;
+  m_readyAtMs = m_readingClock.elapsed();
   update();  // the status line changes
   m_timer->start();
 }
 
 QString KaStartupSplash::statusText() const {
-  if (!m_readingClock.isValid()) return kPreparing;
+  if (!m_ready) return kPreparing;
   if (m_completed) return QStringLiteral("준비 완료");
   return kOpening;
 }
 
 void KaStartupSplash::tick() {
-  if (!m_readingClock.isValid() || m_completed)
+  if (!m_ready || m_completed)
     return;
   const qint64 elapsed = m_readingClock.elapsed();
   m_progress = int(qMin<qint64>(1000, elapsed * 1000 / m_readingDurationMs));
@@ -210,7 +212,6 @@ void KaStartupSplash::paintEvent(QPaintEvent*) {
   painter.setFont(uiFont(12.5 * l.unit));
   painter.setPen(withAlpha(kInk, 0.90));
   painter.drawText(l.status, statusText());
-  const bool still = m_reducedMotion || !m_readingClock.isValid();
-  const double seconds = m_readingClock.isValid() ? m_readingClock.elapsed() / 1000.0 : 0.0;
-  KaSplashArt::paintFlowDots(painter, l.dots, seconds, still);
+  const bool still = m_reducedMotion || !m_ready;
+  KaSplashArt::paintFlowDots(painter, l.dots, flowSeconds(), still);
 }

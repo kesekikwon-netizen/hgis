@@ -46,6 +46,9 @@ double inkContrast(const QColor& ink, const QColor& background) {
 class StartupSplashTest : public QObject {
   Q_OBJECT
 private slots:
+  // The interval counts from when the notice appears (user 2026-10-03 「로딩화면을 3초로 줄이라」).
+  // A slow initialization still never reveals the main window early, and once it is ready after the
+  // interval has passed the home screen opens at once instead of waiting another interval.
   void readinessAndReadingIntervalGateMainWindow() {
     KaStartupSplash splash(nullptr, 240);
     QWidget mainWindow;
@@ -63,12 +66,9 @@ private slots:
     QElapsedTimer elapsed;
     elapsed.start();
     splash.markReady();
-    splash.markReady();  // Repeated readiness must not restart the reading interval.
-    QTest::qWait(100);
-    QVERIFY(splash.readingProgress() > 0 && splash.readingProgress() < 1000);
-    QVERIFY(!mainWindow.isVisible());
+    splash.markReady();  // Repeated readiness must not open the main window twice.
     QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 1000);
-    QVERIFY(elapsed.elapsed() >= 240);
+    QVERIFY(elapsed.elapsed() < 200);  // the interval already passed while preparing
     QVERIFY(mainWindow.isVisible());
     QVERIFY(!splash.isVisible());
     QCOMPARE(splash.readingProgress(), 1000);
@@ -76,13 +76,16 @@ private slots:
     QCOMPARE(ready.count(), 1);
   }
 
-  void defaultFiveSecondsStayResponsiveAndKeepNoticesVisible() {
-    QCOMPARE(KaStartupSplash::ReadingDurationMs, 5000);
+  // The home screen opens 3 s after the notice appears; initialization (measured about 1.4 s on
+  // 2026-10-03) ends inside that time.
+  void defaultThreeSecondsFromShowStayResponsiveAndKeepNoticesVisible() {
+    QCOMPARE(KaStartupSplash::ReadingDurationMs, 3000);
+    QElapsedTimer elapsed;
+    elapsed.start();
     KaStartupSplash splash;
     QSignalSpy ready(&splash, &KaStartupSplash::readyToShow);
     splash.show();
-    QElapsedTimer elapsed;
-    elapsed.start();
+    QTest::qWait(1400);  // initialization
     splash.markReady();
     int beats = 0;
     QTimer heartbeat;
@@ -115,13 +118,25 @@ private slots:
                                   QStringLiteral("GEOS"), QStringLiteral("SQLite"),
                                   QStringLiteral("Chromium")})
       QVERIFY(attribution.contains(library));
-    QTest::qWait(qMax(1, 4000 - int(elapsed.elapsed())));
+    QTest::qWait(qMax(1, 2600 - int(elapsed.elapsed())));
     QCOMPARE(ready.count(), 0);
     QVERIFY(splash.isVisible());
-    QVERIFY(beats > 20);
-    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 2500);
-    QVERIFY(elapsed.elapsed() >= 5000);
-    QVERIFY(elapsed.elapsed() < 8000);
+    QVERIFY(beats > 10);
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 1500);
+    QVERIFY(elapsed.elapsed() >= 3000);
+    QVERIFY(elapsed.elapsed() < 4000);
+  }
+
+  // The 3 s count from the notice's appearance, but the dots start flowing from the left when the
+  // app is ready instead of jumping to the middle of the lane (code review 2026-10-03).
+  void dotsStartFlowingWhenReady() {
+    KaStartupSplash splash(nullptr, 3000);
+    splash.show();
+    QTest::qWait(700);  // a slow initialization
+    splash.markReady();
+    QTest::qWait(50);
+    QVERIFY2(splash.flowSeconds() < 0.3, qPrintable(QString::number(splash.flowSeconds())));
+    QVERIFY(splash.readingProgress() > 200);  // the reading time still counts from the notice
   }
 
   void cardIsRoundedOpaqueAndOnlyTheDotsMove() {
