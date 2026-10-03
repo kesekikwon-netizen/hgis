@@ -42,4 +42,6 @@
 - Claude가 시험을 돌리고 나면 그 줄의 시험 숫자가 바뀐다.
 
 ## 결과
-(완료 때 적는다)
+- 2026-10-03: mod를 `scripts/claude-mods/strata-status-band/`에 만들었다. `claude plugin test` 16개 통과, `claude plugin validate` 통과(경고: 작성자 정보 없음).
+- 아직 화면에서 보지 못했다: 이 대화의 hot reload는 사용자가 「Not now」를 골랐고, 앞으로의 대화에 싣는 전역 설정(`~/.claude/settings.json` env `CLAUDE_CODE_PLUGIN_DIRS`) 변경은 자동 모드가 막아 사용자 결정을 기다린다.
+- 남긴 것(검토 지적 중 고치지 않음): 명령 글에 `cmake --build`·`ctest`가 들어 있기만 해도(예: 그 글자를 grep) 결과로 읽는다. `| tail`로 종료 코드가 사라진 빌드는 ✓로 보일 수 있다.

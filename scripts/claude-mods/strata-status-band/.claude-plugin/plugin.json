@@ -1,0 +1,6 @@
+{
+  "name": "strata-status-band",
+  "version": "0.1.0",
+  "description": "Strata 대화에서 입력칸 위에 지금 단계와 마지막 빌드·시험 결과를 한 줄로 보인다",
+  "types": "./types/index.d.ts"
+}
