@@ -183,7 +183,7 @@ test('the installed finish check stops a code turn that skipped the before-done 
   assert.equal(JSON.parse(out).decision, 'block');
 });
 
-// 2026-10-03 docs/intent/2026-10-03-jev-skill-routing.md: the Jev stage hint runs in every project.
+// 2026-10-03 docs/intent/2026-10-03-jev-stage-hint.md: the Jev stage hint runs in every project.
 test('the Jev stage hint is installed for every project with its helper, and removed with it', (t) => {
   const dir = freshConfig(t, JSON.stringify(ORIGINAL));
   assert.equal(install(dir).status, 0);

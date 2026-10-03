@@ -2,7 +2,7 @@
 // Installs the Strata Claude hooks in the Claude Code user settings, or takes them out with
 // --remove: the per-message superpowers reminder (UserPromptSubmit) and the closing-step check
 // (finish-check.mjs on Stop, docs/intent/2026-10-03-finish-check.md), plus, for every project, the Jev
-// stage hint (jev-skill-route.mjs with its helper jev-ask.mjs, docs/intent/2026-10-03-jev-skill-routing.md). Copies each script to
+// stage hint (jev-skill-route.mjs with its helper jev-ask.mjs, docs/intent/2026-10-03-jev-stage-hint.md). Copies each script to
 // <config>/hooks/ (so it survives the worktree) and keeps exactly one hook entry for each. Every other setting and every other tool's
 // hook stays as it was, and settings.json is backed up to
 // <config>/_reset_backup/<stamp>-superpowers-reminder/ before a change.

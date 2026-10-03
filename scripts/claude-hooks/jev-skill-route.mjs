@@ -6,7 +6,7 @@
 // the process ends within 2.4 s, and the exit code is always 0.
 // Each pick is logged next to this script without the message text, with the transcript path so the
 // skills Claude really called can be counted later.
-// User decision 2026-10-03 「skills선택에 jev활용」「전역으로 설정진행」, docs/intent/2026-10-03-jev-skill-routing.md.
+// User decision 2026-10-03 「skills선택에 jev활용」「전역으로 설정진행」, docs/intent/2026-10-03-jev-stage-hint.md.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
