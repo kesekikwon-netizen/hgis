@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Installs the Strata Claude hooks in the Claude Code user settings, or takes them out with
 // --remove: the per-message superpowers reminder (UserPromptSubmit) and the closing-step check
-// (finish-check.mjs on Stop, docs/intent/2026-10-03-finish-check.md). Copies each script to
+// (finish-check.mjs on Stop, docs/intent/2026-10-03-finish-check.md), plus, for every project, the Jev
+// stage hint (jev-skill-route.mjs with its helper jev-ask.mjs, docs/intent/2026-10-03-jev-skill-routing.md). Copies each script to
 // <config>/hooks/ (so it survives the worktree) and keeps exactly one hook entry for each. Every other setting and every other tool's
 // hook stays as it was, and settings.json is backed up to
 // <config>/_reset_backup/<stamp>-superpowers-reminder/ before a change.
@@ -17,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 const HOOKS = [
   { mark: 'superpowers-reminder.mjs', event: 'UserPromptSubmit' },
   { mark: 'finish-check.mjs', event: 'Stop' },
+  { mark: 'jev-skill-route.mjs', event: 'UserPromptSubmit', everyProject: true, helper: { name: 'jev-ask.mjs', from: '../jev/jev-ask.mjs' } },
 ];
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argValue = (name) => {
@@ -57,24 +59,29 @@ const without = (mark) => (entry) => {
   return kept.length ? { ...entry, hooks: kept } : null;
 };
 const root = remove ? null : slashes(path.resolve(argValue('--root') || repoRoot()));
-for (const { mark, event } of HOOKS) {
+for (const { mark, event, everyProject } of HOOKS) {
   const others = (hooks[event] ?? []).map(without(mark)).filter(Boolean);
   if (remove) {
     if (others.length) hooks[event] = others;
     else delete hooks[event];
   } else {
-    const command = `node "${slashes(hookFileOf(mark))}" --root "${root}"`;
-    hooks[event] = [...others, { hooks: [{ type: 'command', command, timeout: 10 }] }];
+    const command = `node "${slashes(hookFileOf(mark))}"` + (everyProject ? '' : ` --root "${root}"`);
+    hooks[event] = [...others, { hooks: [{ type: 'command', command, timeout: everyProject ? 3 : 10 }] }];
   }
 }
 if (Object.keys(hooks).length) settings.hooks = hooks;
 else delete settings.hooks;
 
-const current = ({ mark }) => fs.existsSync(hookFileOf(mark))
-  && fs.readFileSync(hookFileOf(mark), 'utf8') === fs.readFileSync(path.join(here, mark), 'utf8');
+// Each installed file and where it comes from in the repo.
+const files = HOOKS.flatMap(({ mark, helper }) => [
+  { name: mark, from: path.join(here, mark) },
+  ...(helper ? [{ name: helper.name, from: path.join(here, helper.from) }] : []),
+]);
+const current = ({ name, from }) => fs.existsSync(hookFileOf(name))
+  && fs.readFileSync(hookFileOf(name), 'utf8') === fs.readFileSync(from, 'utf8');
 const settingsChanged = JSON.stringify(settings) !== before || (text === null && !remove);
-if (!settingsChanged && (remove ? HOOKS.every(({ mark }) => !fs.existsSync(hookFileOf(mark))) : HOOKS.every(current))) {
-  console.log(remove ? '알림과 마무리 직전 확인 장치가 이미 없습니다. 바꾼 것이 없습니다.' : '알림과 마무리 직전 확인 장치가 이미 설치되어 있습니다. 바꾼 것이 없습니다.');
+if (!settingsChanged && (remove ? files.every(({ name }) => !fs.existsSync(hookFileOf(name))) : files.every(current))) {
+  console.log(remove ? '알림, 마무리 직전 확인, Jev 단계 추천 장치가 이미 없습니다. 바꾼 것이 없습니다.' : '알림, 마무리 직전 확인, Jev 단계 추천 장치가 이미 설치되어 있습니다. 바꾼 것이 없습니다.');
   process.exit(0);
 }
 
@@ -93,7 +100,7 @@ if (text !== null && settingsChanged) {
 if (!remove) {
   // The hook files go in before settings point at them, and come out only after they stop.
   fs.mkdirSync(path.join(configDir, 'hooks'), { recursive: true });
-  for (const { mark } of HOOKS) fs.copyFileSync(path.join(here, mark), hookFileOf(mark));
+  for (const { name, from } of files) fs.copyFileSync(from, hookFileOf(name));
 }
 if (settingsChanged) {
   fs.mkdirSync(configDir, { recursive: true });
@@ -102,7 +109,7 @@ if (settingsChanged) {
   fs.writeFileSync(temporary, `${JSON.stringify(settings, null, 2)}\n`);
   fs.renameSync(temporary, settingsFile);
 }
-if (remove) for (const { mark } of HOOKS) fs.rmSync(hookFileOf(mark), { force: true });
+if (remove) for (const { name } of files) fs.rmSync(hookFileOf(name), { force: true });
 console.log(remove
-  ? '메시지마다 붙던 슈퍼파워 알림과 마무리 직전 확인 장치를 뺐습니다. 새로 여는 대화부터 확실히 적용됩니다.'
-  : '메시지마다 슈퍼파워 알림과 마무리 직전 확인 장치를 설치했습니다. 새로 여는 대화부터 확실히 적용됩니다.');
+  ? '메시지마다 붙던 슈퍼파워 알림, 마무리 직전 확인, Jev 단계 추천 장치를 뺐습니다. 새로 여는 대화부터 확실히 적용됩니다.'
+  : '메시지마다 슈퍼파워 알림, 마무리 직전 확인, Jev 단계 추천(모든 프로젝트) 장치를 설치했습니다. 새로 여는 대화부터 확실히 적용됩니다.');

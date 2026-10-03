@@ -17,7 +17,7 @@ function readWindowsUserEnv(name) {
   if (process.platform !== 'win32') return '';
   try {
     const out = execFileSync('reg', ['query', 'HKCU\\Environment', '/v', name],
-                             { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+                             { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 500 });
     const m = out.match(new RegExp(`${name}\\s+REG_(?:EXPAND_)?SZ\\s+(.*)`));
     return m ? m[1] : '';
   } catch {

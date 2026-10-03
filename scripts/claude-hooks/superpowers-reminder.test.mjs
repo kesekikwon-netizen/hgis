@@ -92,6 +92,8 @@ const ourHooks = (settings) =>
 
 const finishHooks = (settings) =>
   (settings.hooks?.Stop ?? []).flatMap((e) => e.hooks).filter((h) => h.command.includes('finish-check.mjs'));
+const routeHooks = (settings) =>
+  (settings.hooks?.UserPromptSubmit ?? []).flatMap((e) => e.hooks).filter((h) => h.command.includes('jev-skill-route.mjs'));
 
 const SNAPSHOT_STOP = [{ hooks: [{ type: 'command', command: 'node "C:/x/.claude/hooks/worktree-snapshot.mjs"' }] }];
 const ORIGINAL = {
@@ -128,7 +130,7 @@ test('other tools that also listen to every message keep their entries', (t) => 
   assert.equal(install(dir).status, 0);
   let prompt = settingsOf(dir).hooks.UserPromptSubmit;
   assert.deepEqual(prompt.slice(0, 2), FOREIGN_PROMPT_HOOKS);
-  assert.equal(prompt.length, 3);
+  assert.equal(prompt.length, 4);
   assert.equal(install(dir, '--remove').status, 0);
   prompt = settingsOf(dir).hooks.UserPromptSubmit;
   assert.deepEqual(prompt, FOREIGN_PROMPT_HOOKS);
@@ -179,6 +181,24 @@ test('the installed finish check stops a code turn that skipped the before-done 
   ].map((l) => JSON.stringify(l)).join('\n'));
   const out = execSync(command, { input: JSON.stringify({ cwd, transcript_path: transcript, stop_hook_active: false }), encoding: 'utf8' });
   assert.equal(JSON.parse(out).decision, 'block');
+});
+
+// 2026-10-03 docs/intent/2026-10-03-jev-skill-routing.md: the Jev stage hint runs in every project.
+test('the Jev stage hint is installed for every project with its helper, and removed with it', (t) => {
+  const dir = freshConfig(t, JSON.stringify(ORIGINAL));
+  assert.equal(install(dir).status, 0);
+  const hooks = routeHooks(settingsOf(dir));
+  assert.equal(hooks.length, 1);
+  assert.doesNotMatch(hooks[0].command, /--root/);
+  assert.ok(hooks[0].timeout <= 3, 'it runs on every message in every project');
+  assert.ok(existsSync(join(dir, 'hooks', 'jev-skill-route.mjs')));
+  assert.ok(existsSync(join(dir, 'hooks', 'jev-ask.mjs')));
+  const out = execSync(hooks[0].command, { input: 'not json', encoding: 'utf8' });
+  assert.equal(out.trim(), '');
+  assert.equal(install(dir, '--remove').status, 0);
+  assert.equal(routeHooks(settingsOf(dir)).length, 0);
+  assert.ok(!existsSync(join(dir, 'hooks', 'jev-skill-route.mjs')));
+  assert.ok(!existsSync(join(dir, 'hooks', 'jev-ask.mjs')));
 });
 
 test('remove with no settings file creates nothing', (t) => {
