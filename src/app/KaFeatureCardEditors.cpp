@@ -100,6 +100,16 @@ void KaFeatureCard::buildEditors() {
       if (!next.isEmpty()) setValue(m_numberField, next);
     });
   }
+  // A survey area has no number, kind or period: its record is 조사명·유적명 (user 2026-10-03).
+  const std::pair<const char*, const char*> nameRows[] = {{"survey_name", "조사명"}, {"site_name", "유적명"}, {"name", "이름"}};
+  if (LayerOps::layerKeyOf(m_layer) == QLatin1String("survey_area"))
+    for (const auto& [field, label] : nameRows)
+      if (has(field)) {
+        auto* edit = new QLineEdit(m_body);
+        m_form->addRow(QString::fromUtf8(label), edit);
+        watch(QString::fromLatin1(field), edit);
+        m_nameEdits.append({QString::fromLatin1(field), edit});
+      }
   if (has("kind")) {
     m_kind = KaFeatureFormDialog::createValueEditor(m_body, m_layer, QStringLiteral("kind"), QString());
     m_form->addRow(QStringLiteral("종류"), m_kind);
@@ -129,6 +139,7 @@ void KaFeatureCard::buildEditors() {
   for (QWidget* editor : {static_cast<QWidget*>(m_number), static_cast<QWidget*>(m_nextNumber), m_kind, m_period,
                           static_cast<QWidget*>(m_note)})
     if (editor) editor->setEnabled(!m_readOnly);
+  for (const auto& [field, edit] : std::as_const(m_nameEdits)) edit->setEnabled(!m_readOnly);
 }
 
 bool KaFeatureCard::eventFilter(QObject* watched, QEvent* event) {

@@ -1,6 +1,6 @@
 // 제출 패키지가 같은 layer_key 를 가진 레이어를 모두 내보내는지 검증한다.
-// 조사구역 대화상자의 「새 조사구역 레이어 만들기」는 survey_area_2, _3 을
-// 같은 키로 만든다. 예전에는 첫 레이어 하나만 내보내 제출물에서 구역이 빠졌다.
+// 예전 조사구역 대화상자의 「새 조사구역 레이어 만들기」가 survey_area_2, _3 을 같은 키로
+// 만들었다(옛 조사에 남아 있다). 예전에는 첫 레이어 하나만 내보내 제출물에서 구역이 빠졌다.
 #include "core/ChecklistEngine.h"
 #include "core/ExportService.h"
 #include "core/LayerOps.h"

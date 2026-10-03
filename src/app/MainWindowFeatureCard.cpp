@@ -1,7 +1,9 @@
 // 「선택한 유구」 card in the inspector panel (evaluation F044; P6 moved it from the layer panel).
 // The card shows exactly ONE selected feature. It is part of the right panel, never a popup.
 // While the drawing tool is active the card keeps its record but is disabled, and the
-// inspector says so in one sentence; nothing single selected shows the inspector's sentence.
+// inspector says so in one sentence; a shape just drawn is shown at once without being selected
+// (user 2026-10-03 「속성도 안나오고」; erase/split/Delete act on selections). Nothing single
+// selected shows the inspector's sentence.
 // Every card edit is one undoable command in the layer's edit buffer; Ctrl+S stays the only save.
 #include "MainWindow.h"
 
@@ -74,9 +76,11 @@ void MainWindow::syncFeatureCard(QgsMapLayer* layer) {
     if (QWidget* focus = QApplication::focusWidget(); focus && m_featureCard->isAncestorOf(focus)) focus->clearFocus();
   m_featureCard->setEnabled(!drawing);
   if (drawing) return;
-  // Another layer's selection emptying must not clear the card showing this layer's feature.
+  // Another layer's selection emptying must not clear the card showing this layer's feature,
+  // nor an empty selection the record of a shape just drawn.
   auto* vector = qobject_cast<QgsVectorLayer*>(layer);
-  if (vector && (vector->selectedFeatureCount() == 1 || vector == m_featureCard->layer()))
+  if (vector && (vector->selectedFeatureCount() == 1 ||
+                 (vector == m_featureCard->layer() && m_featureCard->followsSelection())))
     m_featureCard->showSelection(vector);
   if (m_inspector) m_inspector->setSelectionCount(vector ? int(vector->selectedFeatureCount()) : 0);
   m_featureCard->setVisible(m_featureCard->hasFeature());

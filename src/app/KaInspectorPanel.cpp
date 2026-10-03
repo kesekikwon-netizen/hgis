@@ -3,10 +3,10 @@
 #include "KaChip.h"
 #include "KaFeatureCard.h"
 #include "KaIcons.h"
+#include "KaInspectorStyle.h"
 
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QPushButton>
 #include <QScrollArea>
 #include <QStackedWidget>
 #include <QTabBar>
@@ -66,7 +66,6 @@ KaInspectorPanel::KaInspectorPanel(QWidget* parent) : QFrame(parent) {
   m_tabs->setIconSize(QSize(16, 16));
   m_tabs->addTab(KaIcons::icon(QStringLiteral("list")), QStringLiteral("속성"));
   m_tabs->addTab(KaIcons::icon(QStringLiteral("brush")), QStringLiteral("스타일"));
-  m_tabs->addTab(KaIcons::icon(QStringLiteral("photo")), QStringLiteral("사진"));
   column->addWidget(m_tabs);
 
   m_stack = new QStackedWidget(this);
@@ -90,28 +89,9 @@ KaInspectorPanel::KaInspectorPanel(QWidget* parent) : QFrame(parent) {
   attribute->addStretch(1);
   scroll->setWidget(m_attributePage);
   m_stack->addWidget(scroll);
-  // 스타일: the settings live elsewhere; one button opens the full style dialog.
-  auto* stylePage = new QWidget(m_stack);
-  auto* style = new QVBoxLayout(stylePage);
-  style->setContentsMargins(0, 0, 0, 0);
-  style->setSpacing(8);
-  style->addWidget(sentenceLabel(
-      QStringLiteral("선택한 레이어의 글자·투명도는 왼쪽 「표시 설정」과 지도 위 투명도 막대에 있습니다."), stylePage));
-  m_styleEdit = new QPushButton(QStringLiteral("레이어 스타일 편집…"), stylePage);
-  m_styleEdit->setObjectName(QStringLiteral("inspectorStyleEdit"));
-  m_styleEdit->setMinimumHeight(36);
-  connect(m_styleEdit, &QPushButton::clicked, this, &KaInspectorPanel::styleEditRequested);
-  style->addWidget(m_styleEdit);
-  style->addStretch(1);
-  m_stack->addWidget(stylePage);
-  // 사진: a sentence, not a disabled control.
-  auto* photoPage = new QWidget(m_stack);
-  auto* photo = new QVBoxLayout(photoPage);
-  photo->setContentsMargins(0, 0, 0, 0);
-  photo->addWidget(sentenceLabel(
-      QStringLiteral("이 판에는 사진 첨부가 없습니다. 조사카드 메모에 사진 파일 이름을 적어 두세요."), photoPage));
-  photo->addStretch(1);
-  m_stack->addWidget(photoPage);
+  // 스타일: the chosen layer's colour and width, changed right here.
+  m_style = new KaInspectorStyle(m_stack);
+  m_stack->addWidget(m_style);
   connect(m_tabs, &QTabBar::currentChanged, m_stack, &QStackedWidget::setCurrentIndex);
   column->addWidget(m_stack, 1);
 

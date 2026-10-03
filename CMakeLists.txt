@@ -1622,7 +1622,8 @@ if(KA_HGIS_BUILD_TESTS)
     layerDeleteKeyRemovesReferenceFromMap
     layerDeleteKeyRemovesCadastralAndKeepsItGone
     cadastralGroupDeleteKeyRemovesChildren
-    surveyAreaDialogContinuesTheExistingArea
+    surveyAreaDrawingContinuesTheExistingAreaWithoutAWindow
+    drawnShapeShowsItsRecordInTheInspector
     cadastralGroupContextMenuCanRemove
     referenceGroupMenuRemovesEveryRowAndCtrlZRestores
     emptyGroupDeleteKeyRemovesRowAndCtrlZRestores
@@ -1883,6 +1884,8 @@ set(_ka_p4_card_sources ${CMAKE_SOURCE_DIR}/src/app/KaFeatureCardEditors.cpp)
 set(_ka_p4_panel_sources
   ${CMAKE_SOURCE_DIR}/src/app/KaLayerListChrome.cpp ${CMAKE_SOURCE_DIR}/src/app/KaLayerListChrome.h
   ${CMAKE_SOURCE_DIR}/src/app/KaInspectorPanel.cpp ${CMAKE_SOURCE_DIR}/src/app/KaInspectorPanel.h
+  ${CMAKE_SOURCE_DIR}/src/app/KaInspectorStyle.cpp ${CMAKE_SOURCE_DIR}/src/app/KaInspectorStyle.h
+  ${CMAKE_SOURCE_DIR}/src/app/KaStylePalette.h
   ${CMAKE_SOURCE_DIR}/src/app/KaBasemapQuickCard.cpp ${CMAKE_SOURCE_DIR}/src/app/KaBasemapQuickCard.h)
 # The view methods and configureView moved out of KaLayerInformation.cpp, buildEditors out of
 # KaFeatureCard.cpp: every target that compiles the original file gets the split-off files.
@@ -1921,6 +1924,7 @@ if(KA_HGIS_BUILD_TESTS)
   # The right panel with the hosted feature card and the basemap card.
   add_executable(ka_inspector_panel_tests tests/test_inspector_panel.cpp
     src/app/KaInspectorPanel.cpp src/app/KaInspectorPanel.h
+    src/app/KaInspectorStyle.cpp src/app/KaInspectorStyle.h
     src/app/KaBasemapQuickCard.cpp src/app/KaBasemapQuickCard.h
     src/app/KaFeatureCard.cpp src/app/KaFeatureCard.h src/app/KaFeatureCardEdit.cpp ${_ka_p4_card_sources}
     src/app/KaFeatureFormDialog.cpp src/app/KaFeatureFormDialog.h

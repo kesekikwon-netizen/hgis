@@ -7,9 +7,11 @@
 
 #include "KaBasemapQuickCard.h"
 #include "KaDrawGuideBand.h"
+#include "KaDrawingStudio.h"
 #include "KaFeatureCard.h"  // KaInspectorPanel.h's inline featureCard() needs the complete type
 #include "KaIcons.h"
 #include "KaInspectorPanel.h"
+#include "KaInspectorStyle.h"
 #include "KaLayerOpacityRail.h"
 #include "KaShellFocus.h"
 #include "KaStartPage.h"
@@ -31,6 +33,7 @@
 #include <QVBoxLayout>
 #if KA_HGIS_HAS_QGIS
 #include <qgslayertree.h>
+#include <qgslayertreeview.h>
 #include <qgsmapcanvas.h>
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
@@ -84,7 +87,20 @@ void MainWindow::setupStrataShell() {
   m_mainSplit->setSizes({348, 932 - KaShellFocus::kDefaultRightWidth, KaShellFocus::kDefaultRightWidth});
   setupFeatureCard(m_inspector->attributeHost(), m_inspector->attributeLayout());
   m_inspector->setFeatureCard(m_featureCard);
-  connect(m_inspector, &KaInspectorPanel::styleEditRequested, this, [this] { editCurrentLayerStyle(); });
+  // 스타일 tab: the most recent choice wins, a record on the card or a layer picked in the list (user 2026-10-03).
+  const auto styleListLayer = [this] {
+    m_inspector->styleEditor()->setLayer(qobject_cast<QgsVectorLayer*>(m_layerTree ? m_layerTree->currentLayer() : nullptr));
+  };
+  connect(m_featureCard, &KaFeatureCard::featureChanged, this, [this, styleListLayer] {
+    if (m_featureCard->hasFeature()) m_inspector->styleEditor()->setLayer(m_featureCard->layer());
+    else styleListLayer();
+  });
+  if (m_layerTree) connect(m_layerTree, &QgsLayerTreeView::currentLayerChanged, this, styleListLayer);
+  connect(m_inspector->styleEditor(), &KaInspectorStyle::styleApplied, this, [this](QgsVectorLayer*) {
+    QgsProject::instance()->setDirty(true);  // the title gets ' *'; 저장 keeps the colour
+    if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
+  });
+  styleListLayer();
   connect(m_inspector, &KaInspectorPanel::collapseRequested, this,
           [this] { if (m_shellFocus) m_shellFocus->setRightPanelCollapsed(true); });
   auto* foldRight = new QShortcut(QKeySequence(KaShellFocus::rightPanelKey()), this);

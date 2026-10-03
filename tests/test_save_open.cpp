@@ -41,6 +41,7 @@
 #include "app/MainWindow.h"
 #include "app/KaWindowGeometry.h"
 #include "app/KaCaptureMapTool.h"
+#include "app/KaFeatureCard.h"
 #include "app/KaAttributeMapTool.h"
 #include "app/KaFeatureSelectTool.h"
 #include "app/KaVertexEditTool.h"
@@ -53,7 +54,6 @@
 #include "folder_dialog_fixture.h"
 #include <QPdfDocument>
 #include "app/KaRegionLocator.h"
-#include "app/KaSurveyAreaDialog.h"
 #include "app/KaTopographicBrowser.h"
 #include "app/KaTopographicImportDialog.h"
 #include "app/KaTopographicScopePanel.h"
@@ -2806,22 +2806,42 @@ private slots:
     QVERIFY(project->mapLayer(otherId));
   }
 
-  void surveyAreaDialogContinuesTheExistingArea() {
-    {
-      // No area yet: a new layer, named without a number.
-      KaSurveyAreaDialog first(nullptr, nullptr, QString());
-      QVERIFY(first.isNewLayer());
-      QCOMPARE(first.layerName(), QStringLiteral("조사구역"));
-    }
+  // A shape just drawn shows its record in the right panel at once (user 2026-10-03 「속성도 안나오고」).
+  void drawnShapeShowsItsRecordInTheInspector() {
+    const QString path = makeSurvey(QStringLiteral("drawn_record"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    QVERIFY(QMetaObject::invokeMethod(&window, "startEditFeaturePoly", Qt::DirectConnection));
+    auto* capture = window.findChild<KaCaptureMapTool*>();
+    auto* poly = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("feature_poly"));
+    auto* card = window.findChild<KaFeatureCard*>();
+    QVERIFY(capture && poly && card);
+    captureAndDismissForm(capture, QgsGeometry::fromRect(QgsRectangle(190070, 560010, 190090, 560030)));
+    QCOMPARE(poly->featureCount(), 1);
+    QVERIFY2(card->hasFeature() && card->layer() == poly, "그린 도형의 기록이 오른쪽 속성에 나와야 합니다.");
+    // Shown, not selected: 겹친 곳 지우기·폴리곤 나누기·Delete must not pick it up (code review).
+    QVERIFY(poly->selectedFeatureIds().isEmpty());
+    QVERIFY(QMetaObject::invokeMethod(&window, "startSelectTool", Qt::DirectConnection));
+    QVERIFY2(card->hasFeature(), "그리기를 내려놓아도 방금 그린 기록이 남아야 합니다.");
+  }
+  // An area that is already there is continued without a window (user 2026-10-03 「추천진행」).
+  void surveyAreaDrawingContinuesTheExistingAreaWithoutAWindow() {
     const QString path = makeSurvey(QStringLiteral("survey_area_default"));
     QVERIFY(!path.isEmpty());
     MainWindow window;
     disableRendering(window);
     QVERIFY(window.openSurveyGpkg(path));
-    QVERIFY(!LayerOps::surveyAreaLayers(QgsProject::instance()).isEmpty());
-    KaSurveyAreaDialog again(&window, QgsProject::instance(), path);
-    QVERIFY2(!again.isNewLayer(), "조사구역이 있으면 기존 구역에 이어 그리는 것이 기본이어야 합니다.");
-    QVERIFY(again.selectedExistingLayer());
+    const QList<QgsVectorLayer*> areas = LayerOps::surveyAreaLayers(QgsProject::instance());
+    QVERIFY(!areas.isEmpty());
+    bool windowShown = false;
+    QTimer::singleShot(300, &window, [&] {
+      if (auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget())) windowShown = dialog->close();
+    });
+    QVERIFY(QMetaObject::invokeMethod(&window, "startEditSurveyArea", Qt::DirectConnection));
+    QTest::qWait(400);
+    QVERIFY2(!windowShown && areas.first()->isEditable(), "조사구역이 있으면 창 없이 이어 그려야 합니다.");
   }
 
   void cadastralGroupContextMenuCanRemove() {

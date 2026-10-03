@@ -2,8 +2,11 @@
 #include "app/KaDemClassDialog.h"
 #include "app/KaGridOriginButton.h"
 #include "app/KaSurveyAreaDialog.h"
+#include "app/KaTheme.h"
+#include "core/LayerOps.h"
 #include "app/KaSurveyContourDialog.h"
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
@@ -25,11 +28,10 @@
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
 #include <qgsapplication.h>
-#include <qgsgeometry.h>
 #include <qgsmapcanvas.h>
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
-#include <qgsvectordataprovider.h>
+#include <qgsvectorfilewriter.h>
 #include <qgsvectorlayer.h>
 
 namespace {
@@ -60,7 +62,8 @@ private slots:
   void contourDialogShowsDiagnosticsAndHandsOverPoints();
   void fileCrsChoiceMovesThePoints();
   void surveyAreaSwatchesAreReadable();
-  void surveyAreaLayerIsFoundById();
+  void surveyAreaDialogIsCompact();
+  void surveyAreaToContinueIsTheSurveysOwn();
   void demDialogOffersTheViewFit();
   void gridOriginButtonMovesTheGrid();
 };
@@ -118,7 +121,7 @@ void TestSurveyPointDialogs::fileCrsChoiceMovesThePoints() {
 }
 
 void TestSurveyPointDialogs::surveyAreaSwatchesAreReadable() {
-  KaSurveyAreaDialog dialog(nullptr, nullptr, QString());
+  KaSurveyAreaDialog dialog(nullptr);
   const auto swatches = dialog.findChildren<QPushButton*>(QStringLiteral("surveyAreaColor"));
   QCOMPARE(swatches.size(), 8);
   const QRegularExpression background(QStringLiteral("background-color:\\s*(#[0-9a-fA-F]{6})"));
@@ -134,24 +137,54 @@ void TestSurveyPointDialogs::surveyAreaSwatchesAreReadable() {
   QVERIFY(start && !start->styleSheet().contains(QStringLiteral("#0284C7"), Qt::CaseInsensitive));
 }
 
-void TestSurveyPointDialogs::surveyAreaLayerIsFoundById() {
+// The window for the first survey area stays small: name, one row of colours, one row of widths and the two
+// buttons (user 2026-10-03 「창이 너무 크게 나타나는것 같지않나?」, docs/intent/2026-10-03-draw-dialog-and-inspector-tabs.md).
+void TestSurveyPointDialogs::surveyAreaDialogIsCompact() {
+  KaSurveyAreaDialog dialog(nullptr);
+  QCOMPARE(dialog.layerName(), QStringLiteral("조사구역"));  // the first area, named without a number
+  dialog.setStyleSheet(KaTheme::applicationStyleSheet());  // as in the app: every button is taller there
+  const QSize size = dialog.sizeHint();
+  QVERIFY2(size.height() < 320 && size.width() < 640, qPrintable(QStringLiteral("%1x%2").arg(size.width()).arg(size.height())));
+  dialog.setAttribute(Qt::WA_DontShowOnScreen);
+  dialog.show();
+  QApplication::processEvents();
+  const auto swatches = dialog.findChildren<QPushButton*>(QStringLiteral("surveyAreaColor"));
+  QCOMPARE(swatches.size(), 8);
+  for (QPushButton* swatch : swatches) QCOMPARE(swatch->y(), swatches.first()->y());  // one row
+  const QString out = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+  if (!out.isEmpty()) QVERIFY(dialog.grab().save(QDir(out).filePath(QStringLiteral("survey-area-dialog.png"))));
+}
+
+// Without a window only the survey's own area is continued: never a user's file named 조사구역 opened
+// for tracing (it would be written on 저장), and the area picked in the layer list first (code review).
+void TestSurveyPointDialogs::surveyAreaToContinueIsTheSurveysOwn() {
+  QTemporaryDir dir;
+  const QString survey = dir.filePath(QStringLiteral("조사.gpkg"));
+  const QString outside = dir.filePath(QStringLiteral("조사구역.gpkg"));
+  QgsVectorLayer shape(QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("area"), QStringLiteral("memory"));
+  const auto write = [&shape](const QString& path, const QString& table, bool addTable) {
+    QgsVectorFileWriter::SaveVectorOptions options;
+    options.driverName = QStringLiteral("GPKG");
+    options.layerName = table;
+    options.actionOnExistingFile = addTable ? QgsVectorFileWriter::CreateOrOverwriteLayer : QgsVectorFileWriter::CreateOrOverwriteFile;
+    return QgsVectorFileWriter::writeAsVectorFormatV3(&shape, path, QgsCoordinateTransformContext(), options) ==
+           QgsVectorFileWriter::NoError;
+  };
+  QVERIFY(write(survey, QStringLiteral("survey_area"), false) && write(survey, QStringLiteral("survey_area_2"), true));
+  QVERIFY(write(outside, QStringLiteral("조사구역"), false));
   QgsProject project;
-  auto* layer = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("조사구역"),
-                                   QStringLiteral("memory"));
-  QVERIFY(layer->isValid());
-  layer->setCustomProperty(QStringLiteral("ka_hgis/layer_key"), QStringLiteral("survey_area"));
-  QgsFeature feature(layer->fields());
-  feature.setGeometry(QgsGeometry::fromWkt(QStringLiteral("POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))")));
-  QVERIFY(layer->dataProvider()->addFeature(feature));
-  QVERIFY(project.addMapLayer(layer));
-  KaSurveyAreaDialog dialog(nullptr, &project, QString());
-  QVERIFY(!dialog.isNewLayer());
-  QCOMPARE(dialog.selectedExistingLayer(), layer);
-  auto* combo = dialog.findChild<QComboBox*>(QStringLiteral("surveyAreaExisting"));
-  QVERIFY(combo);
-  QVERIFY2(combo->currentText().contains(QStringLiteral("100 ㎡")), qPrintable(combo->currentText()));
-  project.removeMapLayer(layer->id());
-  QCOMPARE(dialog.selectedExistingLayer(), static_cast<QgsVectorLayer*>(nullptr));
+  auto* own = new QgsVectorLayer(survey + QStringLiteral("|layername=survey_area"), QStringLiteral("조사구역"), QStringLiteral("ogr"));
+  auto* second = new QgsVectorLayer(survey + QStringLiteral("|layername=survey_area_2"), QStringLiteral("조사구역 2"), QStringLiteral("ogr"));
+  auto* traced = new QgsVectorLayer(outside, QStringLiteral("조사구역"), QStringLiteral("ogr"));
+  LayerOps::markSurveyLayer(own, QStringLiteral("survey_area"));
+  LayerOps::markSurveyLayer(second, QStringLiteral("survey_area"));
+  QVERIFY(own->isValid() && second->isValid() && traced->isValid());
+  project.addMapLayers({traced, own, second});
+  QgsVectorLayer* chosen = KaSurveyAreaDialog::layerToContinue(&project, survey, traced);
+  QVERIFY2(chosen == own || chosen == second, "사용자가 연 「조사구역」 파일에 이어 그리면 안 됩니다.");
+  QCOMPARE(KaSurveyAreaDialog::layerToContinue(&project, survey, second), second);  // the one picked in the list
+  QCOMPARE(KaSurveyAreaDialog::layerToContinue(&project, dir.filePath(QStringLiteral("다른 조사.gpkg")), nullptr),
+           static_cast<QgsVectorLayer*>(nullptr));  // none of this survey's own: ask with the window
 }
 
 void TestSurveyPointDialogs::demDialogOffersTheViewFit() {

@@ -41,6 +41,8 @@ QString KaFeatureCard::rowText(const QString& row) const {
   if (row == QLatin1String("perimeter")) return shownText(m_perimeter);
   if (row == QLatin1String("state")) return shownText(m_state);
   if (row == QLatin1String("note_number")) return m_numberNote && !m_numberNote->isHidden() ? m_numberNote->text() : QString();
+  for (const auto& [field, edit] : m_nameEdits)
+    if (row == field) return shownText(edit);
   return {};
 }
 

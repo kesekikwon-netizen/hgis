@@ -1287,7 +1287,6 @@ QLabel#inspectorSentence { color: @inkMuted@; font-size: 12px; padding: 16px 12p
 QToolButton#inspectorCollapse { border: none; background: transparent; padding: 4px; }
 QToolButton#inspectorCollapse:enabled:hover { background: @hover@; border-radius: 6px; }
 QToolButton#inspectorCollapse:enabled:focus { border: 1px solid @focusRing@; border-radius: 6px; }
-QPushButton#inspectorStyleEdit { min-height: 36px; }
 QLabel#kaFeatureCardName { font-size: 15px; font-weight: 700; color: @ink@; }
 QLabel#kaFeatureCardKind { font-size: 12px; color: @inkMuted@; }
 QFrame#kaMeasureField { background: @altRow@; border: 1px solid @border@; border-radius: 6px; min-height: 32px; }

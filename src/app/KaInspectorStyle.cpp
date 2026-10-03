@@ -1,0 +1,155 @@
+#include "KaInspectorStyle.h"
+
+#include "KaStylePalette.h"
+#include "KaTheme.h"
+#include "core/FeaturePresets.h"
+#include "core/LayerOps.h"
+#include "core/LayerStyleKinds.h"
+
+#include <QDoubleSpinBox>
+#include <QFormLayout>
+#include <QGridLayout>
+#include <QLabel>
+#include <QPushButton>
+#include <QSignalBlocker>
+#include <QVBoxLayout>
+
+#include <qgsvectorlayer.h>
+
+namespace {
+constexpr int kFillAlpha = 50;  // the same see-through fill as a new survey area
+}  // namespace
+
+KaInspectorStyle::KaInspectorStyle(QWidget* parent) : QWidget(parent) {
+  setObjectName(QStringLiteral("inspectorStyle"));
+  auto* column = new QVBoxLayout(this);
+  column->setContentsMargins(0, 0, 0, 0);
+  column->setSpacing(8);
+  m_sentence = new QLabel(this);
+  m_sentence->setObjectName(QStringLiteral("inspectorSentence"));
+  m_sentence->setWordWrap(true);
+  m_sentence->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+  column->addWidget(m_sentence);
+
+  m_controls = new QWidget(this);
+  auto* form = new QFormLayout(m_controls);
+  form->setContentsMargins(0, 0, 0, 0);
+  form->setVerticalSpacing(8);
+  form->setRowWrapPolicy(QFormLayout::WrapAllRows);  // labels above: the swatches fit the 272 px panel
+  m_layerName = new QLabel(m_controls);
+  m_layerName->setWordWrap(true);
+  QFont bold = m_layerName->font();
+  bold.setBold(true);
+  m_layerName->setFont(bold);
+  form->addRow(m_layerName);
+  auto* grid = new QGridLayout;
+  grid->setSpacing(4);
+  const QList<QColor> colors = KaStylePalette::colors();
+  const QStringList names = KaStylePalette::names();
+  for (int i = 0; i < colors.size(); ++i) {
+    auto* swatch = new QPushButton(m_controls);
+    swatch->setObjectName(QStringLiteral("inspectorStyleSwatch"));
+    swatch->setFixedSize(44, 24);
+    swatch->setCursor(Qt::PointingHandCursor);
+    swatch->setToolTip(names.at(i));
+    swatch->setAccessibleName(names.at(i));
+    connect(swatch, &QPushButton::clicked, this, [this, color = colors.at(i)] { pickColor(color); });
+    grid->addWidget(swatch, i / 4, i % 4);
+    m_swatches << swatch;
+  }
+  form->addRow(QStringLiteral("색"), grid);
+  m_widthLabel = new QLabel(m_controls);
+  m_width = new QDoubleSpinBox(m_controls);
+  m_width->setObjectName(QStringLiteral("inspectorStyleWidth"));
+  m_width->setRange(0.2, 12.0);
+  m_width->setSingleStep(0.2);
+  m_width->setDecimals(1);
+  m_width->setSuffix(QStringLiteral(" mm"));
+  connect(m_width, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &KaInspectorStyle::setWidth);
+  form->addRow(m_widthLabel, m_width);
+  m_note = new QLabel(m_controls);
+  m_note->setWordWrap(true);
+  m_note->setStyleSheet(QStringLiteral("color: %1;").arg(KaTheme::tokens().inkMuted.name()));
+  form->addRow(m_note);
+  column->addWidget(m_controls);
+  column->addStretch(1);
+  setLayer(nullptr);
+}
+
+bool KaInspectorStyle::isPoint() const {
+  return m_layer && m_layer->geometryType() == Qgis::GeometryType::Point;
+}
+
+void KaInspectorStyle::setLayer(QgsVectorLayer* layer) {
+  const bool lineMap = layer && (LayerOps::isReferenceLayer(layer) || LayerOps::isCadastralLayer(layer));
+  m_layer = layer && layer->isValid() && !lineMap ? layer : nullptr;
+  if (!m_layer) {
+    m_sentence->setText(lineMap ? QStringLiteral("선으로 된 지도의 선 색은 왼쪽 목록에서 그 레이어를 오른쪽 클릭해 「면·외곽선 색」으로 바꿉니다.")
+                                : QStringLiteral("지도에서 도형을 고르거나 왼쪽 목록에서 레이어를 고르면 그 레이어의 색과 굵기를 여기서 바로 바꿉니다."));
+    m_sentence->show();
+    m_controls->hide();
+    return;
+  }
+  m_sentence->hide();
+  m_controls->show();
+  readLayerStyle();
+  m_layerName->setText(m_layer->name());
+  const bool line = m_layer->geometryType() == Qgis::GeometryType::Line;
+  m_widthLabel->setText(isPoint() ? QStringLiteral("점 크기") : line ? QStringLiteral("선 굵기") : QStringLiteral("외곽선 굵기"));
+  {
+    const QSignalBlocker quiet(m_width);
+    m_width->setValue(isPoint() ? m_markerMm : m_widthMm);
+  }
+  const bool automatic = FeaturePresets::isPresetStyled(m_layer) || LayerStyleKinds::isByKind(m_layer);
+  m_note->setText(automatic ? QStringLiteral("지금은 종류·시대별 색입니다. 여기서 색이나 굵기를 바꾸면 한 가지 색으로 바뀝니다.") : QString());
+  m_note->setVisible(automatic);
+  markSwatches();
+}
+
+void KaInspectorStyle::readLayerStyle() {
+  LayerOps::readSimpleVectorStyle(m_layer, &m_fill, &m_stroke, &m_widthMm, &m_markerMm, &m_noFill, &m_noStroke,
+                                  &m_dashed);
+}
+
+void KaInspectorStyle::pickColor(const QColor& color) {
+  if (!m_layer) return;
+  readLayerStyle();
+  if (isPoint()) {
+    m_fill = color;
+  } else {
+    m_stroke = color;
+    m_noStroke = false;
+    m_fill = QColor(color.red(), color.green(), color.blue(), kFillAlpha);
+  }
+  apply();
+}
+
+void KaInspectorStyle::setWidth(double value) {
+  if (!m_layer) return;
+  readLayerStyle();
+  (isPoint() ? m_markerMm : m_widthMm) = value;
+  apply();
+}
+
+void KaInspectorStyle::apply() {
+  if (!LayerOps::applySimpleVectorStyle(m_layer, m_fill, m_stroke, m_widthMm, m_markerMm, m_noFill, m_noStroke,
+                                        m_dashed))
+    return;
+  m_note->hide();  // one colour now: the automatic look is gone
+  markSwatches();
+  emit styleApplied(m_layer.data());
+}
+
+void KaInspectorStyle::markSwatches() {
+  const QColor current = isPoint() ? m_fill : m_stroke;
+  const KaTheme::Tokens& theme = KaTheme::tokens();
+  const QList<QColor> colors = KaStylePalette::colors();
+  for (int i = 0; i < m_swatches.size(); ++i) {
+    const bool chosen = colors.at(i).rgb() == current.rgb();
+    m_swatches.at(i)->setStyleSheet(
+        QStringLiteral("QPushButton { background-color: %1; border: %2 solid %3; border-radius: 4px; "
+                       "min-height: 0px; padding: 0px; }")
+            .arg(colors.at(i).name(), chosen ? QStringLiteral("3px") : QStringLiteral("1px"),
+                 (chosen ? theme.ink : theme.border).name()));
+  }
+}

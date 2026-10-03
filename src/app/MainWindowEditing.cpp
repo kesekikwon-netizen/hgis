@@ -4,6 +4,7 @@
 #include "KaCrashGuard.h"
 #include "KaDrawingStudio.h"
 #include "KaEditErrors.h"
+#include "KaFeatureCard.h"
 #include "KaFeatureFormDialog.h"
 #include "KaFeatureSelectTool.h"
 #include "KaLineColorDialog.h"
@@ -860,6 +861,7 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
       }
     }
 
+    if (!erased && m_featureCard) m_featureCard->setFeature(layer, feat.id());  // 속성 shows it, unselected (2026-10-03)
     const QString drawnKey = LayerOps::layerKeyOf(layer);
     const bool domain = drawnKey == QLatin1String("survey_area")
                         || drawnKey == QLatin1String("feature_poly")
@@ -1082,17 +1084,12 @@ void MainWindow::startEditSurveyArea() {
     if (m_surveyPath.isEmpty()) return;
   }
 
-  KaSurveyAreaDialog dlg(this, QgsProject::instance(), m_surveyPath);
-  if (dlg.exec() != QDialog::Accepted) {
-    return;
-  }
-
-  QgsVectorLayer* targetLayer = nullptr;
-  if (!dlg.isNewLayer()) {
-    targetLayer = dlg.selectedExistingLayer();
-  }
-
+  // An area already drawn is continued without a window (user 2026-10-03 「추천진행」).
+  QgsVectorLayer* targetLayer = KaSurveyAreaDialog::layerToContinue(
+      QgsProject::instance(), m_surveyPath, m_layerTree ? m_layerTree->currentLayer() : nullptr);
   if (!targetLayer) {
+    KaSurveyAreaDialog dlg(this);
+    if (dlg.exec() != QDialog::Accepted) return;
     QString err;
     targetLayer = LayerOps::createSurveyAreaLayer(
         QgsProject::instance(), m_surveyPath, dlg.layerName(),
@@ -1103,7 +1100,7 @@ void MainWindow::startEditSurveyArea() {
           QStringLiteral("새 조사구역 레이어를 만들지 못했습니다."),
           QStringLiteral("조사 파일에 새 표를 쓰지 못했습니다. 파일이 다른 프로그램에서 열려 있거나 "
                          "폴더에 쓸 권한이 없을 수 있습니다."),
-          QStringLiteral("같은 파일을 연 프로그램을 닫고, 기존 조사구역에 이어 그리기로 다시 해 보세요."),
+          QStringLiteral("같은 파일을 연 프로그램을 닫고 다시 해 보세요."),
       }, err, true);
       return;
     }

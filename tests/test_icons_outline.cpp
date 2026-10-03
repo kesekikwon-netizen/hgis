@@ -27,7 +27,7 @@ const char* const ribbonIds[] = {
 const char* const uiIds[] = {
     "home",  "map",  "search", "undo",   "redo",         "check",         "warn",  "missing", "survey_thumb",
     "clock", "folder", "lock", "note",   "pencil",       "chevron_left",  "chevron_right", "snap", "layer",
-    "satellite", "list", "brush", "photo",
+    "satellite", "list", "brush",
 };
 // Used by the app but drawn only in the legacy table: they take the flat ink fallback.
 const char* const fallbackIds[] = {"crs", "web", "old_topo", "terrain_3d", "layout_legend"};

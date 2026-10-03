@@ -206,18 +206,6 @@ void oBrush(QPainter& p) {
   p.drawPath(head);
 }
 
-// 사진 탭: a picture frame with a sun and hills.
-void oPhoto(QPainter& p) {
-  stroke(p);
-  const QRectF frame(12, 16, 40, 32);
-  p.drawRoundedRect(frame, 3, 3);
-  p.save();
-  p.setClipRect(frame.adjusted(1, 1, -1, -1));
-  p.drawPolyline(QPolygonF{QPointF(13, 46), QPointF(27, 31), QPointF(35, 39), QPointF(41, 33), QPointF(51, 46)});
-  p.restore();
-  dot(p, QPointF(22, 25), 3.0);
-}
-
 }  // namespace
 
 Glyph outlineGlyphUi(const QString& id) {
@@ -249,7 +237,6 @@ Glyph outlineGlyphUi(const QString& id) {
       {QStringLiteral("vworld_sat"), oSatellite},
       {QStringLiteral("list"), oList},
       {QStringLiteral("brush"), oBrush},
-      {QStringLiteral("photo"), oPhoto},
   };
   return glyphs.value(id, nullptr);
 }

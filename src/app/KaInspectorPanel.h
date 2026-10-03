@@ -6,20 +6,21 @@
 
 class KaChip;
 class KaFeatureCard;
+class KaInspectorStyle;
 class QLabel;
-class QPushButton;
 class QStackedWidget;
 class QTabBar;
 class QToolButton;
 class QVBoxLayout;
 
 // The always-present right panel of the map tab: 「선택한 유구」 with 「n개 선택」, a fold
-// button, three tabs (속성 · 스타일 · 사진) and a footer slot for the 「배경 지도」 card.
+// button, two tabs (속성 · 스타일) and a footer slot for the 「배경 지도」 card.
 // 속성 hosts the existing KaFeatureCard (reparented, its own title hidden) and says in
 // one sentence when nothing is chosen or while drawing (the card is never hidden for
-// drawing). 스타일 is a sentence plus 「레이어 스타일 편집…」; 사진 is a sentence only.
+// drawing). 스타일 changes the chosen layer's colour and width in place (KaInspectorStyle).
+// 사진 was dropped: nothing in the app stores photos (user 2026-10-03 「추천진행」).
 // The panel decides nothing about layers: P6 attaches it to the splitter, feeds the
-// selection count, the drawing flag and the card, and answers the two signals.
+// selection count, the drawing flag, the card and the style layer.
 class KaInspectorPanel : public QFrame {
   Q_OBJECT
  public:
@@ -41,6 +42,7 @@ class KaInspectorPanel : public QFrame {
   QVBoxLayout* footerLayout() const { return m_footer; }
 
   QTabBar* tabs() const { return m_tabs; }
+  KaInspectorStyle* styleEditor() const { return m_style; }
   QWidget* page(int index) const;
 
   void setDrawing(bool drawing);
@@ -52,7 +54,6 @@ class KaInspectorPanel : public QFrame {
   QString sentence() const;
 
  signals:
-  void styleEditRequested();
   void collapseRequested();
 
  private:
@@ -66,7 +67,7 @@ class KaInspectorPanel : public QFrame {
   QWidget* m_attributePage = nullptr;
   QLabel* m_sentence = nullptr;
   QVBoxLayout* m_cardSlot = nullptr;
-  QPushButton* m_styleEdit = nullptr;
+  KaInspectorStyle* m_style = nullptr;
   QVBoxLayout* m_footer = nullptr;
   QPointer<KaFeatureCard> m_card;
   bool m_drawing = false;

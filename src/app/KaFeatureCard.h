@@ -35,6 +35,8 @@ public:
   void setFeature(QgsVectorLayer* layer, QgsFeatureId fid);
   // Follows the layer's selection: exactly one selected feature is shown, else cleared.
   void showSelection(QgsVectorLayer* layer);
+  // False for a record shown directly (a shape just drawn): emptying the selection keeps it.
+  bool followsSelection() const { return m_followsSelection; }
   void clear();
 
   QgsVectorLayer* layer() const;
@@ -81,6 +83,7 @@ private:
   QList<QMetaObject::Connection> m_connections;
   QString m_numberField;
   bool m_readOnly = false;  // reference/cadastral layer: the editors show the record, never write it
+  bool m_followsSelection = false;
 
   QLabel* m_title = nullptr;
   QWidget* m_header = nullptr;
@@ -95,6 +98,7 @@ private:
   QWidget* m_kind = nullptr;
   QWidget* m_period = nullptr;
   QPlainTextEdit* m_note = nullptr;
+  QList<QPair<QString, QLineEdit*>> m_nameEdits;  // survey area: 조사명·유적명 (a separate area layer: 이름)
   QLabel* m_area = nullptr;
   QLabel* m_perimeter = nullptr;
   KaChip* m_state = nullptr;

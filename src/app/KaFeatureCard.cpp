@@ -143,9 +143,11 @@ void KaFeatureCard::showSelection(QgsVectorLayer* layer) {
     return;
   }
   setFeature(layer, *layer->selectedFeatureIds().cbegin());
+  m_followsSelection = true;
 }
 
 void KaFeatureCard::setFeature(QgsVectorLayer* layer, QgsFeatureId fid) {
+  m_followsSelection = false;
   if (!layer || !layer->isValid() || fid == FID_NULL || !layer->getFeature(fid).isValid()) {
     clear();
     return;
@@ -200,6 +202,7 @@ void KaFeatureCard::dropEditors() {
   m_numberNote = nullptr;
   m_kind = m_period = nullptr;
   m_note = nullptr;
+  m_nameEdits.clear();
   m_area = m_perimeter = nullptr;
 }
 
@@ -223,7 +226,11 @@ void KaFeatureCard::refresh() {
   };
   const QString kind = value(QStringLiteral("kind"));
   const QString number = m_numberField.isEmpty() ? QString() : value(m_numberField);
-  const QString header = number.isEmpty() ? kind : kind.isEmpty() ? number : number + QLatin1Char(' ') + kind;
+  QString header = number.isEmpty() ? kind : kind.isEmpty() ? number : number + QLatin1Char(' ') + kind;
+  for (const auto& [field, edit] : std::as_const(m_nameEdits)) {
+    showText(edit, value(field));
+    if (header.isEmpty()) header = value(field);  // a survey area is named by its 조사명
+  }
   m_name->setText(header.isEmpty() ? QStringLiteral("이름 없음") : header);
   showText(m_number, number);
   showText(m_kind, kind);

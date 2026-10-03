@@ -1,13 +1,12 @@
-// P4 map-panels, right side: the 「선택한 유구」 panel (three tabs, the hosted feature card,
-// the empty/drawing sentences, its width) and the 「배경 지도」 card that only asks and shows.
+// P4 map-panels, right side: the 「선택한 유구」 panel (two tabs, the hosted feature card,
+// the empty/drawing sentences, the in-tab style editor, its width) and the 「배경 지도」 card.
 // KA_HGIS_QA_OUTPUT_DIR saves inspector-panel.png.
 #include <QtTest>
 
-#include <QAbstractButton>
 #include <QDir>
+#include <QDoubleSpinBox>
 #include <QFocusEvent>
 #include <QLabel>
-#include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalSpy>
@@ -28,6 +27,7 @@
 #include "app/KaChip.h"
 #include "app/KaFeatureCard.h"
 #include "app/KaInspectorPanel.h"
+#include "app/KaInspectorStyle.h"
 #include "app/KaTheme.h"
 #include "core/FeaturePresets.h"
 #include "core/LayerOps.h"
@@ -59,15 +59,15 @@ QLabel* sentenceOf(QWidget* page) { return page->findChild<QLabel*>(QStringLiter
 class TestInspectorPanel : public QObject {
   Q_OBJECT
  private slots:
-  void tabs_areAttrStyleAndPhoto() {
+  // 사진 is gone: nothing in the app stores photos (user 2026-10-03 「추천진행」).
+  void tabs_areAttrAndStyle() {
     KaInspectorPanel panel;
     QTabBar* tabs = panel.tabs();
     QCOMPARE(tabs->objectName(), QStringLiteral("inspectorTabs"));
-    QCOMPARE(tabs->count(), 3);
+    QCOMPARE(tabs->count(), 2);
     QCOMPARE(tabs->tabText(0), QStringLiteral("속성"));
     QCOMPARE(tabs->tabText(1), QStringLiteral("스타일"));
-    QCOMPARE(tabs->tabText(2), QStringLiteral("사진"));
-    for (int i = 0; i < 3; ++i) QVERIFY(!tabs->tabIcon(i).isNull());
+    for (int i = 0; i < 2; ++i) QVERIFY(!tabs->tabIcon(i).isNull());
     QCOMPARE(panel.objectName(), QStringLiteral("inspectorPanel"));
     QCOMPARE(panel.title(), QStringLiteral("선택한 유구"));
   }
@@ -139,29 +139,73 @@ class TestInspectorPanel : public QObject {
     layer->rollBack();
   }
 
-  void styleTab_buttonEmits() {
+  // 스타일 changes the chosen layer right in the tab: no extra button, no window (user 2026-10-03
+  // 「바로 수정 편집할수있는거도 아니고」). Without a layer it says how to pick one.
+  void styleTab_editsTheChosenLayerInPlace() {
     KaInspectorPanel panel;
-    QSignalSpy asked(&panel, &KaInspectorPanel::styleEditRequested);
-    auto* button = panel.findChild<QPushButton*>(QStringLiteral("inspectorStyleEdit"));
-    QVERIFY(button);
-    QCOMPARE(button->text(), QStringLiteral("레이어 스타일 편집…"));
-    QVERIFY(sentenceOf(panel.page(1))->text().contains(QStringLiteral("표시 설정")));
-    button->click();
-    QCOMPARE(asked.count(), 1);
+    KaInspectorStyle* style = panel.styleEditor();
+    QVERIFY(style && panel.page(1)->isAncestorOf(style));
+    QVERIFY(!panel.findChild<QPushButton*>(QStringLiteral("inspectorStyleEdit")));
+    QVERIFY(sentenceOf(style) && !sentenceOf(style)->isHidden());
+    auto layer = houseLayer();
+    style->setLayer(layer.get());
+    QVERIFY(sentenceOf(style)->isHidden());
+    const auto swatches = style->findChildren<QPushButton*>(QStringLiteral("inspectorStyleSwatch"));
+    QCOMPARE(swatches.size(), 8);
+    QSignalSpy applied(style, &KaInspectorStyle::styleApplied);
+    swatches.at(4)->click();  // 파랑
+    QColor fill, stroke;
+    double width = 0, marker = 0;
+    QVERIFY(LayerOps::readSimpleVectorStyle(layer.get(), &fill, &stroke, &width, &marker));
+    QCOMPARE(stroke.name(), QStringLiteral("#2563eb"));
+    QVERIFY(fill.rgb() == stroke.rgb() && fill.alpha() < 255);  // a see-through fill of the same colour
+    auto* spin = style->findChild<QDoubleSpinBox*>(QStringLiteral("inspectorStyleWidth"));
+    QVERIFY(spin);
+    spin->setValue(2.4);
+    QCOMPARE(layer->customProperty(QStringLiteral("ka_hgis/style_width_mm")).toDouble(), 2.4);  // remembered
+    QCOMPARE(applied.count(), 2);
+    // A colour set elsewhere (right-click 「면·외곽선 색」) is not undone by a later width change here.
+    LayerOps::applySimpleVectorStyle(layer.get(), QColor(QStringLiteral("#dc2626")), QColor(QStringLiteral("#dc2626")), 2.4);
+    spin->setValue(3.0);
+    QVERIFY(LayerOps::readSimpleVectorStyle(layer.get(), &fill, &stroke, &width, &marker));
+    QCOMPARE(stroke.name(), QStringLiteral("#dc2626"));
+    QVERIFY2(style->minimumSizeHint().width() <= 272 - 24, qPrintable(QString::number(style->minimumSizeHint().width())));
+    const QString out = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if (!out.isEmpty()) {
+      panel.resize(300, 640);
+      panel.tabs()->setCurrentIndex(1);
+      panel.show();
+      QTest::qWait(50);
+      QVERIFY(panel.grab().save(QDir(out).filePath(QStringLiteral("inspector-style.png"))));
+    }
+    style->setLayer(nullptr);
+    QVERIFY(!sentenceOf(style)->isHidden());
+    layer->setCustomProperty(QString::fromLatin1(LayerOps::kPropLayerRole), QString::fromLatin1(LayerOps::kRoleReference));
+    style->setLayer(layer.get());  // a line map: its colour is the right-click 「면·외곽선 색」 row
+    QVERIFY(sentenceOf(style)->text().contains(QStringLiteral("「면·외곽선 색」")));
     QSignalSpy fold(&panel, &KaInspectorPanel::collapseRequested);
     panel.findChild<QToolButton*>(QStringLiteral("inspectorCollapse"))->click();
     QCOMPARE(fold.count(), 1);
   }
 
-  void photoTab_isSentenceNotControl() {
-    KaInspectorPanel panel;
-    QWidget* photo = panel.page(2);
-    QVERIFY(sentenceOf(photo));
-    QCOMPARE(sentenceOf(photo)->text(),
-             QStringLiteral("이 판에는 사진 첨부가 없습니다. 조사카드 메모에 사진 파일 이름을 적어 두세요."));
-    QVERIFY(photo->findChildren<QAbstractButton*>().isEmpty());
-    QVERIFY(photo->findChildren<QLineEdit*>().isEmpty());
-    QVERIFY(photo->findChildren<QPlainTextEdit*>().isEmpty());
+  // A survey area shows and edits 조사명·유적명 instead of 「이름 없음」 (user 2026-10-03 「속성도 안나오고」).
+  void surveyAreaCardShowsSurveyAndSiteNames() {
+    QgsVectorLayer layer(QStringLiteral("Polygon?crs=EPSG:5187&field=survey_name:string&field=site_name:string&field=note:string"),
+                         QStringLiteral("조사구역"), QStringLiteral("memory"));
+    LayerOps::markSurveyLayer(&layer, QStringLiteral("survey_area"));
+    QgsFeature f(layer.fields());
+    f.setAttribute(QStringLiteral("survey_name"), QStringLiteral("영천 시굴조사"));
+    f.setAttribute(QStringLiteral("site_name"), QStringLiteral("가수리 유적"));
+    f.setGeometry(QgsGeometry::fromRect(QgsRectangle(200000, 450000, 200010, 450005)));
+    QVERIFY(layer.dataProvider()->addFeature(f));
+    KaFeatureCard card;
+    card.setFeature(&layer, firstId(&layer));
+    QCOMPARE(card.rowText(QStringLiteral("header")), QStringLiteral("영천 시굴조사"));
+    QCOMPARE(card.rowText(QStringLiteral("survey_name")), QStringLiteral("영천 시굴조사"));
+    QCOMPARE(card.rowText(QStringLiteral("site_name")), QStringLiteral("가수리 유적"));
+    QVERIFY(layer.startEditing());
+    QVERIFY(card.setValue(QStringLiteral("site_name"), QStringLiteral("가수리 유적 2지점")));
+    QCOMPARE(card.rowText(QStringLiteral("site_name")), QStringLiteral("가수리 유적 2지점"));
   }
 
   void preferredWidth_1366And1920() {
