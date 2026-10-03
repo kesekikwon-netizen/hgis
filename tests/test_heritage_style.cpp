@@ -956,8 +956,8 @@ private slots:
     auto* pinLayer = numbers.numberLayer();
     QVERIFY(pinLayer);
     const double scale = map->scale() > 0. ? map->scale() : 50000.;
-    const double minSep = (4.6 / 1000.0) * scale * 0.96 - 1.;
-    const double maxSep = (4.6 / 1000.0) * scale * 3.0 + 1.;
+    const double minSep = (3.49 / 1000.0) * scale * 0.96 - 1.;
+    const double maxSep = (3.49 / 1000.0) * scale * 3.0 + 1.;
     QVector<QgsPointXY> pins;
     int onSite = 0;
     QgsFeature feature;
@@ -1003,7 +1003,7 @@ private slots:
         ->addLayer(layer);
     QgsPrintLayout layout(&project);
     // 160 mm map over 4000 m → 1:25000. 40 m is 1.6 mm on paper, inside a
-    // 4.6 mm badge, so the circles move apart instead of stacking.
+    // 3 mm badge, so the circles move apart instead of stacking.
     auto* map = makeLayoutMap(layout, {layer}, QgsRectangle(188040., 548040., 192040., 552040.));
     HeritageLayoutNumbers numbers;
     numbers.update(map, true);
@@ -1012,8 +1012,8 @@ private slots:
     auto* pinLayer = numbers.numberLayer();
     QVERIFY(pinLayer);
     const double scale = map->scale() > 0. ? map->scale() : 25000.;
-    const double minSep = (4.6 / 1000.0) * scale * 0.96 - 1.;
-    const double maxLeader = (4.6 / 1000.0) * scale * 6.0 + 1.;
+    const double minSep = (3.29 / 1000.0) * scale * 0.96 - 1.;
+    const double maxLeader = (3.29 / 1000.0) * scale * 6.0 + 1.;
     QVector<QgsPointXY> pins;
     QgsFeature feature;
     auto features = pinLayer->getFeatures();

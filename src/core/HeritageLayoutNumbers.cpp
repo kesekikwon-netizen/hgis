@@ -170,10 +170,10 @@ QVariant classAttributeValue(QgsVectorLayer* layer, const QString& attribute, co
 }
 
 // A one-digit badge is about 3 mm and a three-digit badge about 4.2 mm.
-// Badge centres stay this far apart on paper; LayoutBadgePlacer moves a badge
-// to a free ring slot inside the visible frame and off the legend card.
-// https://docs.qgis.org/3.44/en/docs/user_manual/style_library/label_settings.html
-constexpr double kNumberClearMm = 4.6;
+// Badge centres stay the sheet's largest badge plus this gap apart on paper
+// (circles may nearly touch, never cover); LayoutBadgePlacer moves a badge to
+// a free ring slot inside the visible frame and off the legend card.
+constexpr double kNumberGapMm = 0.3;
 
 void applyHeritageNumberCallout(QgsPalLayerSettings& labels) {
   labels.geometryGeneratorEnabled = true;
@@ -664,16 +664,6 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
       overrides.remove(layer->id());
   }
   QMap<QString, int> counters;
-  // One placer for the whole sheet: badges of different layers never cover
-  // each other, and all stay on the visible map paper and off the legend card.
-  const double badgeStep = (kNumberClearMm / 1000.0) * (map->scale() > 0. ? map->scale() : 5000.);
-  bool invertible = false;
-  const QTransform mapToScene = map->layoutToMapCoordsTransform().inverted(&invertible);
-  LayoutBadgePlacer placer(
-      invertible ? mapToScene : QTransform(),
-      invertible ? LayoutBadgePlacer::withoutBlocks(visibleMapOnPaper(map, m_exporting), legendBlocks)
-                 : QPainterPath(),
-      badgeStep);
   // Project tree order is stable and agrees with the user's layer panel.
   for (QgsLayerTreeLayer* treeLayer : project->layerTreeRoot()->findLayers()) {
     auto* layer = qobject_cast<QgsVectorLayer*>(treeLayer->layer());
@@ -891,10 +881,21 @@ bool HeritageLayoutNumbers::update(QgsLayoutItemMap* map, bool force) {
   // All badges of the sheet at once: each on its site, moved only to clear another.
   QVector<QgsPointXY> origins;
   QVector<double> sizes;
+  double widestMm = 0.;
   for (const NumberPin& pin : pins) {
     origins.append(QgsPointXY(pin.originX, pin.originY));
     sizes.append(pin.size);
+    widestMm = std::max(widestMm, pin.size);
   }
+  // One placer for the whole sheet: badges of different layers never cover
+  // each other, and all stay on the visible map paper and off the legend card.
+  bool invertible = false;
+  const QTransform mapToScene = map->layoutToMapCoordsTransform().inverted(&invertible);
+  LayoutBadgePlacer placer(
+      invertible ? mapToScene : QTransform(),
+      invertible ? LayoutBadgePlacer::withoutBlocks(visibleMapOnPaper(map, m_exporting), legendBlocks)
+                 : QPainterPath(),
+      ((widestMm + kNumberGapMm) / 1000.0) * (map->scale() > 0. ? map->scale() : 5000.));
   const QVector<QgsPointXY> placed = placer.placeAll(origins, sizes);
   for (int i = 0; i < pins.size(); ++i) {
     pins[i].x = placed.at(i).x();
