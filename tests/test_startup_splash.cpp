@@ -207,9 +207,10 @@ private slots:
     saveFrame(splash, QStringLiteral("startup-final.png"));
   }
 
-  // 새 모양 notice: the app is busy until it is ready, so the strata, the name and the two notice
-  // lines are in the first frame, and the notice ink reads on the bedrock.
-  void strataNoticeShowsSectionAndReadableNoticesFromTheFirstFrame() {
+  // 새 모양 notice: the app is busy until it is ready, so the bedrock, the name and the two notice
+  // lines are in the first frame, and the notice ink reads on the bedrock. The strata above it
+  // stack up only once the app is ready (user 2026-10-04: 지층이 아래부터 한 겹씩 쌓인다).
+  void strataNoticeShowsBedrockAndReadableNoticesFromTheFirstFrame() {
     KaStartupSplash splash(nullptr, 3000, true);
     splash.show();
     QVERIFY(QTest::qWaitForWindowExposed(&splash));
@@ -222,18 +223,22 @@ private slots:
     QCOMPARE(at(672, 380), KaSplashStrata::bedrock());  // beside the notice lines
     QVERIFY(inkContrast(KaSplashStrata::noticeInk(), KaSplashStrata::bedrock()) >= 4.5);
     QCOMPARE(at(350, 20), KaSplashStrata::paper());
-    QVERIFY2(at(350, 300) != KaSplashStrata::paper() && at(350, 300) != KaSplashStrata::bedrock(), "a stratum between them");
+    QCOMPARE(at(350, 300), KaSplashStrata::paper());  // the strata have not stacked yet
   }
 
-  // Once the app is ready the pit, the ground line and the control point come in that order and
-  // stay; reduced motion shows the finished picture without waiting.
+  // Once the app is ready the strata stack from the bedrock up, then the pit, the ground line and
+  // the control point come in that order and stay; reduced motion shows the finished picture at once.
   void strataTimelineRunsInOrderAndReducedMotionSkipsIt() {
-    QCOMPARE(KaSplashStrata::pitReveal(0.0), 0.0);
-    QCOMPARE(KaSplashStrata::groundLineReveal(0.2), 0.0);
-    QCOMPARE(KaSplashStrata::markerReveal(0.9), 0.0);
-    QVERIFY(KaSplashStrata::pitReveal(0.5) == 1.0 && KaSplashStrata::groundLineReveal(0.5) < 1.0);
-    QVERIFY(KaSplashStrata::groundLineReveal(1.0) == 1.0 && KaSplashStrata::markerReveal(1.0) < 1.0);
-    QCOMPARE(KaSplashStrata::markerReveal(1.3), 1.0);
+    QCOMPARE(KaSplashStrata::stratumReveal(0, 0.0), 1.0);  // the bedrock carries the notices
+    for (int i = 1; i < 5; ++i) {
+      QCOMPARE(KaSplashStrata::stratumReveal(i, 0.0), 0.0);
+      QVERIFY(KaSplashStrata::stratumReveal(i, 1.0) <= KaSplashStrata::stratumReveal(i - 1, 1.0));
+    }
+    QVERIFY(KaSplashStrata::stratumReveal(4, 1.0) < 1.0 && KaSplashStrata::stratumReveal(4, 1.9) == 1.0);
+    QCOMPARE(KaSplashStrata::pitReveal(1.9), 0.0);
+    QVERIFY(KaSplashStrata::pitReveal(2.4) == 1.0 && KaSplashStrata::groundLineReveal(2.2) == 0.0);
+    QVERIFY(KaSplashStrata::groundLineReveal(3.0) == 1.0 && KaSplashStrata::markerReveal(3.0) == 0.0);
+    QCOMPARE(KaSplashStrata::markerReveal(KaSplashStrata::kTimelineSeconds), 1.0);
     // The control point's lower edge at (610, 219) is slate once it has landed, paper before.
     const auto markerEdge = [](const char* reduced) {
       qputenv("KA_HGIS_REDUCED_MOTION", reduced);

@@ -18,6 +18,8 @@ namespace {
 constexpr double kWidth = 700.0, kHeight = 400.0;
 // A notice shrunk for a small screen has a card wider than 700:400; the strata run on past the edge.
 constexpr double kOverhang = 120.0;
+// A stacking stratum starts this far down, hidden behind the stratum below it.
+constexpr double kRise = 44.0;
 
 const QColor kPaper(0xFA, 0xF9, 0xF5);
 const QColor kSlate(0x14, 0x14, 0x13);
@@ -72,14 +74,17 @@ void drawFitted(QPainter& painter, QFont font, const QString& text, const QPoint
 }
 
 void paintSection(QPainter& painter, double seconds) {
-  // Topsoil first, so each lower stratum covers the foot of the one above it.
+  // Topsoil first, so each lower stratum covers the foot of the one above it. A stratum that is
+  // still stacking rises from behind the one below it.
   for (int i = int(kStrata.size()) - 1; i >= 0; --i) {
+    const double risen = stratumReveal(i, seconds);
+    if (risen <= 0.0) continue;
     QPainterPath body = edgePath(kStrata[size_t(i)].edge);
     body.lineTo(kWidth + kOverhang, body.currentPosition().y());
     body.lineTo(kWidth + kOverhang, kHeight);
     body.lineTo(0, kHeight);
     body.closeSubpath();
-    painter.fillPath(body, kStrata[size_t(i)].fill);
+    painter.fillPath(body.translated(0, kRise * (1.0 - risen)), kStrata[size_t(i)].fill);
   }
   if (const double shown = pitReveal(seconds); shown > 0.0) {
     QPainterPath cut(QPointF(452, 231));
@@ -139,9 +144,12 @@ void paintSection(QPainter& painter, double seconds) {
 
 }  // namespace
 
-double pitReveal(double seconds) { return ease(seconds / 0.45); }
-double groundLineReveal(double seconds) { return ease((seconds - 0.25) / 0.75); }
-double markerReveal(double seconds) { return ease((seconds - 0.95) / 0.3); }
+double stratumReveal(int index, double seconds) {
+  return index <= 0 ? 1.0 : ease((seconds - 0.35 * (index - 1)) / 0.8);
+}
+double pitReveal(double seconds) { return ease((seconds - 1.9) / 0.5); }
+double groundLineReveal(double seconds) { return ease((seconds - 2.2) / 0.8); }
+double markerReveal(double seconds) { return ease((seconds - 3.0) / 0.4); }
 
 QColor paper() { return kPaper; }
 QColor bedrock() { return kBedrock; }

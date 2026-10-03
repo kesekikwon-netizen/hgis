@@ -216,7 +216,9 @@ void KaStartupSplash::paintStrata() {
   painter.setRenderHint(QPainter::Antialiasing);
   KaSplashArt::paintShadow(painter, l.card, kRadius);
   KaSplashStrata::Frame frame;
-  frame.seconds = flowSeconds();
+  // The stacking timeline is stretched or squeezed to end just before the home screen opens.
+  const double left = (m_readingDurationMs - m_readyAtMs) / 1000.0 * 0.92;
+  frame.seconds = flowSeconds() * KaSplashStrata::kTimelineSeconds / std::max(1.0, left);
   frame.still = m_reducedMotion;
   frame.progress = m_progress / 1000.0;
   frame.status = statusText();

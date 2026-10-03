@@ -9,12 +9,16 @@ class QPixmap;
 
 // 새 모양 startup notice (design canvas board 4): a paper card whose lower part is a section through
 // the ground — five strata with the two notice lines on the bedrock. The app is busy until it is
-// ready, so the strata, the name and the notices are there from the first frame; once it is ready a
-// pit appears in the section, the ground line is drawn from left to right and a control point lands
-// on it. With reduced motion the finished picture is shown at once.
+// ready, so the bedrock, the name and the notices are there from the first frame; once it is ready
+// the strata stack up one by one from the bedrock, a pit is dug into the section, the ground line
+// is drawn from left to right and a control point lands on it (user 2026-10-04: 지층이 아래부터 한
+// 겹씩 쌓이고 → 구덩이 → 지표선·기준점, 시작 화면 내내 천천히). With reduced motion the finished
+// picture is shown at once.
 namespace KaSplashStrata {
 
 // Timeline, in seconds since the app became ready. Each value runs 0..1 and stays at 1.
+constexpr double kTimelineSeconds = 3.4;  // the control point has landed
+double stratumReveal(int index, double seconds);  // 0 = bedrock (always there) .. 4 = topsoil
 double pitReveal(double seconds);
 double groundLineReveal(double seconds);
 double markerReveal(double seconds);
