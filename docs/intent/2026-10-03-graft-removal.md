@@ -1,7 +1,7 @@
 # 요청 기록: 쓰이지 않는 Graft 코드 검색 도구와 Cursor 시절 설명 지우기
 
 - 날짜: 2026-10-03
-- 상태: 확정
+- 상태: 완료
 - 관련 문서: docs/developer-tools.md, README.md
 
 ## 요청 원문
@@ -45,4 +45,7 @@
 - GitHub 저장소 첫 화면(README)에 Cursor·AGENTS.md 이야기가 없다.
 
 ## 결과
-(완료 때: 실제로 확인한 것과 커밋. 취소 때: 이유 한 줄)
+- 2026-10-03 완료. 커밋: 33f31ba(Graft 스크립트 4개와 그 설명 정리), 97b7cbf(developer-tools.md·README의 Cursor 시절 설명 정리). 기록 b197d78, 2421a12.
+- 확인한 것: A:\qgis\build\tooling 에 graft-source·graft-index 없음(지우기 전 안의 연결 0개 확인, 553MB), 같은 폴더의 다른 파일은 그대로. 저장소 node 시험 101/101 통과(Graft 시험 실패 없음). dev-env-lock.ps1 출력은 Graft 경고 두 줄만 빠짐. README·developer-tools.md 에 Cursor 시절 표현 0줄(걷어 낸 사실 한 줄 제외), 없는 파일을 가리키는 링크 0개.
+- 바꾼 시험: scripts/graft-mcp.test.mjs(시험 2개)를 시험 대상 graft-mcp.mjs 와 함께 지웠다(커밋 메시지에 「시험 변경:」 줄).
+- 남긴 것(사용자 확인 필요): build/qa/tooling-validation-20260914 의 옛 Graft 사본(약 0.9GB, 09-14 검증 기록)과 build/tooling/tmp 의 Graft 시험 임시 폴더 7개(약 0.5MB). 요청한 두 파일 밖의 Cursor 언급(PROJECT.md, docs/README.md 등).
