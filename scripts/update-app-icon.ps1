@@ -2,7 +2,10 @@
 [CmdletBinding()]
 param(
     [string]$SourcePath = (Join-Path $PSScriptRoot '..\data\theme\ka-hgis-app.png'),
-    [switch]$UpdateDesktopShortcut
+    [switch]$UpdateDesktopShortcut,
+    # Optional thin outline along the artwork's outer edge in the .ico frames only (e.g. '#6B4226').
+    # The PNG master is not changed.
+    [string]$BorderColor = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,9 +28,25 @@ namespace KaHgis {
         public static extern IntPtr LoadImage(IntPtr instance, string name, uint type, int cx, int cy, uint flags);
         [DllImport("user32.dll")]
         public static extern bool DestroyIcon(IntPtr icon);
+        // Paints every opaque pixel that lies within `thickness` pixels of the transparent outside.
+        public static void Outline(System.Drawing.Bitmap bitmap, int thickness, System.Drawing.Color color) {
+            int w = bitmap.Width, h = bitmap.Height;
+            bool[,] solid = new bool[w, h];
+            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) solid[x, y] = bitmap.GetPixel(x, y).A >= 128;
+            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+                if (!solid[x, y]) continue;
+                bool edge = false;
+                for (int dy = -thickness; dy <= thickness && !edge; dy++) for (int dx = -thickness; dx <= thickness && !edge; dx++) {
+                    if (dx * dx + dy * dy > thickness * thickness) continue;
+                    int nx = x + dx, ny = y + dy;
+                    edge = nx < 0 || ny < 0 || nx >= w || ny >= h || !solid[nx, ny];
+                }
+                if (edge) bitmap.SetPixel(x, y, System.Drawing.Color.FromArgb(bitmap.GetPixel(x, y).A, color));
+            }
+        }
     }
 }
-'@
+'@ -ReferencedAssemblies System.Drawing
 }
 $master = [Drawing.Image]::FromFile($sourceFile)
 try {
@@ -59,6 +78,11 @@ try {
             $graphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
             $graphics.Clear([Drawing.Color]::Transparent)
             $graphics.DrawImage($master, [Drawing.Rectangle]::new(0, 0, $size, $size))
+            if ($BorderColor) {
+                $graphics.Flush()
+                $thickness = if ($size -ge 256) { 3 } elseif ($size -ge 128) { 2 } else { 1 }
+                [KaHgis.IconDecoder]::Outline($bitmap, $thickness, [Drawing.ColorTranslator]::FromHtml($BorderColor))
+            }
             $bitmap.Save($stream, [Drawing.Imaging.ImageFormat]::Png)
             $frames.Add($stream.ToArray())
         } finally {
