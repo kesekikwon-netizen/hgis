@@ -231,32 +231,11 @@ if (-not $OsgeoOnly) {
   if (-not (Compare-Entry "Windows SDK" $lock.required.windowsSdk $snapshot.required.windowsSdk 4)) { $failed = $true }
   if (-not (Compare-Entry "CMake" $lock.required.cmake $snapshot.required.cmake 2)) { $failed = $true }
 
-  # Helper tools only warn: Graft needs the same Node major, the rest rarely matter.
+  # Helper tools only warn: they rarely matter.
   [void](Compare-Entry "Git" $lock.tools.git $snapshot.tools.git 2 -WarnOnly)
   [void](Compare-Entry "Node" $lock.tools.node $snapshot.tools.node 1 -WarnOnly)
   [void](Compare-Entry "Python" $lock.tools.python $snapshot.tools.python 2 -WarnOnly)
   [void](Compare-Entry "clangd" $lock.tools.clangd $snapshot.tools.clangd 1 -WarnOnly)
-
-  # Cursor loads Graft from the USER-level MCP config, which holds this PC's paths.
-  $userHome = [Environment]::GetFolderPath('UserProfile')
-  $mcpFile = Join-Path $userHome ".cursor\mcp.json"
-  $graftCwd = $null
-  if (Test-Path -LiteralPath $mcpFile) {
-    try {
-      $mcp = Get-Content -LiteralPath $mcpFile -Raw -Encoding UTF8 | ConvertFrom-Json
-      if ($mcp.mcpServers -and $mcp.mcpServers.hgis_graft) { $graftCwd = [string]$mcp.mcpServers.hgis_graft.cwd }
-    } catch { }
-  }
-  if ($graftCwd -and ((Get-NormalizedPath $graftCwd) -ieq (Get-NormalizedPath $Repo))) {
-    Write-Host ("[같음] Cursor MCP hgis_graft -> {0}" -f $graftCwd) -ForegroundColor Green
-  } else {
-    if ($graftCwd) {
-      Write-Host ("[경고] Cursor MCP hgis_graft 가 다른 폴더를 가리킨다: {0}" -f $graftCwd) -ForegroundColor Yellow
-    } else {
-      Write-Host ("[경고] Cursor MCP 에 hgis_graft 가 없다: {0}" -f $mcpFile) -ForegroundColor Yellow
-    }
-    Write-Host "    이 체크아웃 경로로 넣는다: .\scripts\setup-dev-paths.ps1"
-  }
 
   if ($lock.paths -and $lock.paths.osgeo4wRoot -and
       ((Get-NormalizedPath $lock.paths.osgeo4wRoot) -ine (Get-NormalizedPath $snapshot.paths.osgeo4wRoot))) {

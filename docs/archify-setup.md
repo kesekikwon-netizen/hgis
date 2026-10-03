@@ -44,4 +44,4 @@ helper는 기존 설치를 덮어쓰지 않는다. 재설치가 필요하면 위
 - Windows의 짧은 8.3 임시 경로와 Git 정규 경로 비교 문제를 피하기 위해 wrapper가 프로세스 실행 중 정규 TEMP/TMP를 사용한다.
 - 이 버전의 Windows preview 테스트는 SIGTERM 종료 반환값 검사에서 실패했다. 검증된 기본 경로는 `validate` → `deliver` → `visual-check`다. preview의 정상 종료·정리는 보장하지 않는다.
 - `visual-check`에는 Chrome/Chromium이 필요하다. 실행 실패·생략을 성공으로 기록하지 않는다. 직접 확인하지 않은 전체 Viewer 기능까지 검증됐다고 표현하지 않는다.
-- 자동 C++ 코드 인덱싱이나 Graft 연동은 이 스킬의 설치로 생기지 않는다. 기존 AGENTS.md와 컴파일 DB·clangd·저장소 검증 절차를 따른다.
+- 자동 C++ 코드 인덱싱은 이 스킬의 설치로 생기지 않는다. 기존 AGENTS.md와 컴파일 DB·clangd·저장소 검증 절차를 따른다.

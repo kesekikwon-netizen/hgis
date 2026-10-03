@@ -18,7 +18,6 @@ git clone https://github.com/kesekikwon-netizen/hgis.git
 cd hgis
 # 기준 PC와 같은 OSGeo4W 판을 복사해 온다 (install-deps 는 설치한 날의 qgis-dev 를 받는다)
 .\scripts\osgeo4w-bundle.ps1 -Import E:\ka-hgis-sdk
-.\scripts\setup-dev-paths.ps1    # Graft 경로를 이 체크아웃으로
 
 .\scripts\bootstrap-dev-pc.ps1   # dev-env.lock.json 비교 + build + ctest + smoke
 .\scripts\run-ka-hgis.ps1
@@ -28,7 +27,7 @@ cd hgis
 - **개발:** 클론 + OSGeo4W(`qgis-dev`) + VS2022 + CMake → `bootstrap-dev-pc.ps1` 또는 `build-all.ps1`
 - **실행만:** 개발 PC에서 `.\scripts\make-portable.ps1` 후 `dist\ka-hgis-portable\` 폴더 전체를 복사 → `start.bat` (OSGeo4W 설치 불필요)
 - 조사 GPKG/SHP는 git에 없음 → 별도 복사
-- 규칙: `AGENTS.md` (Cursor 하네스: Cursor Agent + AGENTS.md + clangd + Graft + Archify + CMake/CTest) · `.codex/NOW.md`(현재 상태 파일, 이름만 예전 것) · `docs/HANDOFF.md`
+- 규칙: `AGENTS.md` (Cursor 하네스: Cursor Agent + AGENTS.md + clangd + Archify + CMake/CTest) · `.codex/NOW.md`(현재 상태 파일, 이름만 예전 것) · `docs/HANDOFF.md`
 
 ## 환경 (검증된 구성)
 - CMake는 `dev-env.lock.json`의 앞 두 자리 (`C:\Program Files\CMake\bin`, `C:\CMake\bin` 또는 PATH)
@@ -40,12 +39,11 @@ cd hgis
 ## 원클릭 빌드·검증
 ```powershell
 cd <클론한 폴더>
-.\scripts\setup-dev-paths.ps1
 .\scripts\build-all.ps1
 ```
 포함: cmake build → ctest → smoke-quit → e2e. 포터블 생성은 별도 요청 시에만 실행한다.
 clangd용 컴파일 DB(`build\compile_commands.json`)는 빌드가 만든다(`scripts/compile-commands.mjs`).
-clangd 탐색·Graft 검색·Archify 구조도 설정과 사용 범위는 [`docs/developer-tools.md`](docs/developer-tools.md)를 따른다(하네스는 Cursor, `.cursor/hooks.json`).
+clangd 탐색·Archify 구조도 설정과 사용 범위는 [`docs/developer-tools.md`](docs/developer-tools.md)를 따른다(하네스는 Cursor, `.cursor/hooks.json`).
 
 ## 수동 빌드
 ```powershell

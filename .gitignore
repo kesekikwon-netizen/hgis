@@ -56,7 +56,7 @@ Desktop.ini
 CLAUDE.local.md
 .repowise/
 .mcp.json
-# Per-checkout Graft paths. scripts/setup-dev-paths.ps1 writes this file.
+# Per-checkout Codex config with this PC's paths. Not committed.
 .codex/config.toml
 .grok/.state/
 .cursor/.state/

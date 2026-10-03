@@ -1,6 +1,6 @@
 # C++ 선언·정의 위치 확인
 
-`scripts/clangd-definition.py`는 선택한 코드 위치를 실제 clangd에 질의한다. Graft가 찾은 후보에서 호출 대상을 확인하거나 동명 메서드를 구별할 때 사용한다. 결과는 선언 또는 정의 위치이며 전체 호출자나 변경 영향 범위를 보장하지 않는다.
+`scripts/clangd-definition.py`는 선택한 코드 위치를 실제 clangd에 질의한다. 검색으로 찾은 후보에서 호출 대상을 확인하거나 동명 메서드를 구별할 때 사용한다. 결과는 선언 또는 정의 위치이며 전체 호출자나 변경 영향 범위를 보장하지 않는다.
 
 Python 3.9 이상과 설치된 clangd가 필요하다. Python 추가 패키지는 사용하지 않는다. 컴파일 DB(`build/compile_commands.json`)는 2026-10-03부터 빌드가 만든다(`scripts/compile-commands.mjs`, CMake file API). 없으면 `cmake -S . -B build`를 한 번 돌린 뒤 빌드한다.
 

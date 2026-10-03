@@ -13,8 +13,8 @@ DLL 미포함 → 대상 PC에 **OSGeo4W `qgis-dev`** 필요.
 |------|------|
 | OSGeo4W (qgis-dev, Qt, GDAL, PROJ …) | 기준 PC 폴더를 `osgeo4w-bundle.ps1`로 복사. 패키지 판까지 비교 |
 | MSVC 도구 모음 · Windows SDK · CMake | 같은 판을 설치. MSVC·CMake는 `dev-env.lock.json`의 앞 두 자리, SDK는 전체 판 |
-| Git · Node · Python · clangd | 경고만. Graft는 Node 주 판이 같아야 한다 |
-| Cursor | 모델 Grok 4.7. `.\scripts\setup-dev-paths.ps1`이 USER MCP `hgis_graft`를 이 체크아웃으로 쓴다 |
+| Git · Node · Python · clangd | 경고만 |
+| Cursor | 모델 Grok 4.7 |
 | 계정·API 키 | PC마다 앱에서 입력(DPAPI). git 에는 절대 넣지 않는다. 배포 번들 기본값도 미포함(아래 개인용 포터블 예외만 다름) |
 | 조사 GPKG·SHP | git에 없음. OneDrive/NAS 별도 |
 
@@ -34,7 +34,6 @@ git clone https://github.com/kesekikwon-netizen/hgis.git
 cd hgis
 git checkout 20260922-1                               # 지금 작업 브랜치
 .\scripts\osgeo4w-bundle.ps1 -Import E:\ka-hgis-sdk  # 잠금의 OSGeo 경로. 없으면 -Root
-.\scripts\setup-dev-paths.ps1                         # Graft 경로를 이 체크아웃으로
 .\scripts\dev-env-lock.ps1                            # [다름]이 없어야 한다
 .\scripts\bootstrap-dev-pc.ps1                        # 같은 비교 후 빌드·ctest·smoke
 ```
@@ -131,10 +130,9 @@ ctest --test-dir build -C Release --output-on-failure
 
 ### 이 PC 경로와 clangd
 
-스크립트는 클론한 폴더에서 실행한다. `dev-env.ps1`이 SDK와 CMake를 찾는다. Graft 경로는 `setup-dev-paths.ps1`이 이 폴더로 쓴다.
+스크립트는 클론한 폴더에서 실행한다. `dev-env.ps1`이 SDK와 CMake를 찾는다.
 
 ```powershell
-.\scripts\setup-dev-paths.ps1
 .\scripts\build-now.ps1
 ```
 
