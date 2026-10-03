@@ -48,7 +48,7 @@ double inkContrast(const QColor& ink, const QColor& background) {
 class StartupSplashTest : public QObject {
   Q_OBJECT
 private slots:
-  // The interval counts from when the notice appears (user 2026-10-03 「로딩화면을 3초로 줄이라」).
+  // The interval counts from when the notice appears (user 2026-10-04 「첫 로딩화면을 5초로 하라」).
   // A slow initialization still never reveals the main window early, and once it is ready after the
   // interval has passed the home screen opens at once instead of waiting another interval.
   void readinessAndReadingIntervalGateMainWindow() {
@@ -78,10 +78,10 @@ private slots:
     QCOMPARE(ready.count(), 1);
   }
 
-  // The home screen opens 3 s after the notice appears; initialization (measured about 1.4 s on
+  // The home screen opens 5 s after the notice appears; initialization (measured about 1.4 s on
   // 2026-10-03) ends inside that time.
-  void defaultThreeSecondsFromShowStayResponsiveAndKeepNoticesVisible() {
-    QCOMPARE(KaStartupSplash::ReadingDurationMs, 3000);
+  void defaultFiveSecondsFromShowStayResponsiveAndKeepNoticesVisible() {
+    QCOMPARE(KaStartupSplash::ReadingDurationMs, 5000);
     QElapsedTimer elapsed;
     elapsed.start();
     KaStartupSplash splash;
@@ -120,13 +120,13 @@ private slots:
                                   QStringLiteral("GEOS"), QStringLiteral("SQLite"),
                                   QStringLiteral("Chromium")})
       QVERIFY(attribution.contains(library));
-    QTest::qWait(qMax(1, 2600 - int(elapsed.elapsed())));
+    QTest::qWait(qMax(1, 4600 - int(elapsed.elapsed())));
     QCOMPARE(ready.count(), 0);
     QVERIFY(splash.isVisible());
     QVERIFY(beats > 10);
     QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 1500);
-    QVERIFY(elapsed.elapsed() >= 3000);
-    QVERIFY(elapsed.elapsed() < 4000);
+    QVERIFY(elapsed.elapsed() >= 5000);
+    QVERIFY(elapsed.elapsed() < 6000);
   }
 
   // The 3 s count from the notice's appearance, but the dots start flowing from the left when the

@@ -12,12 +12,12 @@ class QTimer;
 // a contoured mound; every line of text sits in the lower left: the Strata
 // title, the status with progress dots flowing left to right, the copyright and
 // the data sources. Only the dots move. Clicking never closes the notice early.
-// The reading time counts from when the notice appears (user 2026-10-03
-// 「로딩화면을 3초로 줄이라」); the main window opens once it and the app are ready.
+// The reading time counts from when the notice appears (user 2026-10-04
+// 「첫 로딩화면을 5초로 하라」); the main window opens once it and the app are ready.
 class KaStartupSplash final : public QWidget {
   Q_OBJECT
 public:
-  static constexpr int ReadingDurationMs = 3000;
+  static constexpr int ReadingDurationMs = 5000;
   // strata: the 새 모양 notice (KaSplashStrata) instead of the blue card.
   explicit KaStartupSplash(QWidget* parent = nullptr,
                            int readingDurationMs = ReadingDurationMs, bool strata = false);
