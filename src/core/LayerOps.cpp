@@ -1277,7 +1277,7 @@ bool LayerOps::isReferenceLayer(const QgsMapLayer* layer) {
 bool LayerOps::isSnapSourceLayer(const QgsVectorLayer* layer) {
   if (!layer || !layer->isValid()) return false;
   if (isCadastralLayer(layer)) return true;
-  return !isReferenceLayer(layer);
+  return layer->customProperty(QStringLiteral("ka_hgis/cad_drawing")).isValid() ? layer->geometryType() != Qgis::GeometryType::Point : !isReferenceLayer(layer);  // a drawing brought in to trace: its lines, not its text points
 }
 
 bool LayerOps::isBasemapLayer(const QgsMapLayer* layer) {

@@ -90,6 +90,13 @@ private slots:
     QVERIFY(notice.contains(QStringLiteral("receipts")));
     QVERIFY(notice.contains(lines.at(0)));
     QVERIFY(HeritagePledge::noticeAfterAgreement(QString()).contains(QStringLiteral("원문을 확인")));
+    // The site's page text can arrive without a single space; the notice must still wrap inside the
+    // 680 px download window instead of stretching it (2026-10-03 「창이 너무 크지않나」): no run of more
+    // than 20 characters without a break point, and the visible characters stay verbatim.
+    const QString packed = QStringLiteral("국가유산공간정보원본자료를신청한목적외에는사용하지않고외부로반출하지않을것을서약합니다.");
+    const QString wrapped = HeritagePledge::noticeAfterAgreement(packed);
+    for (const QString& run : wrapped.split(QRegularExpression(QStringLiteral("[\\s\\x{200B}]")))) QVERIFY2(run.size() <= 20, qPrintable(run));
+    QVERIFY(QString(wrapped).remove(QChar(0x200B)).contains(packed));
     QVERIFY(HeritagePledge::preDisclosure().contains(QStringLiteral("자동으로 동의")));
   }
 
