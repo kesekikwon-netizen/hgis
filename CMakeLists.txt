@@ -1934,6 +1934,16 @@ if(KA_HGIS_BUILD_TESTS)
   target_compile_definitions(ka_inspector_panel_tests PRIVATE ${KA_TEST_DEFS})
   set_target_properties(ka_inspector_panel_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   ka_add_qtest(inspector_panel ka_inspector_panel_tests)
+  # The 스타일 tab alone: both check boxes, point layers, a change made elsewhere.
+  add_executable(ka_inspector_style_tests tests/test_inspector_style.cpp
+    src/app/KaInspectorStyle.cpp src/app/KaInspectorStyle.h ${_ka_p4_theme_sources})
+  target_link_libraries(ka_inspector_style_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_inspector_style_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
+  target_compile_definitions(ka_inspector_style_tests PRIVATE ${KA_TEST_DEFS})
+  set_target_properties(ka_inspector_style_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  ka_add_qtest(inspector_style ka_inspector_style_tests)
+  set_tests_properties(inspector_style PROPERTIES
+    ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
   set_tests_properties(inspector_panel PROPERTIES
     ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
 endif()

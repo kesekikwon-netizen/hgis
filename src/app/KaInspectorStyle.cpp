@@ -6,6 +6,7 @@
 #include "core/LayerOps.h"
 #include "core/LayerStyleKinds.h"
 
+#include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGridLayout>
@@ -58,6 +59,15 @@ KaInspectorStyle::KaInspectorStyle(QWidget* parent) : QWidget(parent) {
     m_swatches << swatch;
   }
   form->addRow(QStringLiteral("색"), grid);
+  // 「채우기 없음 (선만)」·「선 없음」 (user 2026-10-03 「선채우기없음도 나와야한다」).
+  m_noFillCheck = new QCheckBox(QStringLiteral("채우기 없음 (선만)"), m_controls);
+  m_noFillCheck->setObjectName(QStringLiteral("inspectorStyleNoFill"));
+  m_noStrokeCheck = new QCheckBox(QStringLiteral("선 없음"), m_controls);
+  m_noStrokeCheck->setObjectName(QStringLiteral("inspectorStyleNoStroke"));
+  for (QCheckBox* check : {m_noFillCheck, m_noStrokeCheck}) {
+    connect(check, &QCheckBox::toggled, this, [this, check](bool on) { setOff(check == m_noFillCheck, on); });
+    form->addRow(check);
+  }
   m_widthLabel = new QLabel(m_controls);
   m_width = new QDoubleSpinBox(m_controls);
   m_width->setObjectName(QStringLiteral("inspectorStyleWidth"));
@@ -81,6 +91,7 @@ bool KaInspectorStyle::isPoint() const {
 }
 
 void KaInspectorStyle::setLayer(QgsVectorLayer* layer) {
+  disconnect(m_watch);
   const bool lineMap = layer && (LayerOps::isReferenceLayer(layer) || LayerOps::isCadastralLayer(layer));
   m_layer = layer && layer->isValid() && !lineMap ? layer : nullptr;
   if (!m_layer) {
@@ -92,16 +103,29 @@ void KaInspectorStyle::setLayer(QgsVectorLayer* layer) {
   }
   m_sentence->hide();
   m_controls->show();
-  readLayerStyle();
   m_layerName->setText(m_layer->name());
   const bool line = m_layer->geometryType() == Qgis::GeometryType::Line;
+  m_noFillCheck->setVisible(!line);  // a line has no fill, and no line would hide it
+  m_noStrokeCheck->setVisible(!line);
   m_widthLabel->setText(isPoint() ? QStringLiteral("점 크기") : line ? QStringLiteral("선 굵기") : QStringLiteral("외곽선 굵기"));
+  m_watch = connect(m_layer, &QgsMapLayer::rendererChanged, this, &KaInspectorStyle::refresh);  // e.g. 「면·외곽선 색」
+  refresh();
+}
+
+void KaInspectorStyle::refresh() {
+  if (!m_layer) return;
+  readLayerStyle();
+  const bool automatic = FeaturePresets::isPresetStyled(m_layer) || LayerStyleKinds::isByKind(m_layer);
   {
-    const QSignalBlocker quiet(m_width);
+    const QSignalBlocker quietFill(m_noFillCheck);
+    const QSignalBlocker quietStroke(m_noStrokeCheck);
+    const QSignalBlocker quietWidth(m_width);
+    m_noFillCheck->setChecked(m_noFill && !automatic);  // a kind/period look is always filled and outlined
+    m_noStrokeCheck->setChecked(m_noStroke && !automatic);
     m_width->setValue(isPoint() ? m_markerMm : m_widthMm);
   }
-  const bool automatic = FeaturePresets::isPresetStyled(m_layer) || LayerStyleKinds::isByKind(m_layer);
-  m_note->setText(automatic ? QStringLiteral("지금은 종류·시대별 색입니다. 여기서 색이나 굵기를 바꾸면 한 가지 색으로 바뀝니다.") : QString());
+  m_note->setText(automatic ? QStringLiteral("지금은 종류·시대별 색입니다. 여기서 색·굵기나 채우기·선을 바꾸면 한 가지 색으로 바뀝니다.")
+                            : QString());
   m_note->setVisible(automatic);
   markSwatches();
 }
@@ -116,11 +140,25 @@ void KaInspectorStyle::pickColor(const QColor& color) {
   readLayerStyle();
   if (isPoint()) {
     m_fill = color;
+    m_noFill = false;  // a colour picked for an empty point fills it
   } else {
-    m_stroke = color;
-    m_noStroke = false;
+    m_stroke = color;  // a box turned on stays on: 「선 없음」 keeps the area without outline
     m_fill = QColor(color.red(), color.green(), color.blue(), kFillAlpha);
   }
+  apply();
+}
+
+void KaInspectorStyle::setOff(bool fill, bool on) {
+  if (!m_layer) return;
+  readLayerStyle();
+  (fill ? m_noFill : m_noStroke) = on;
+  if (on) (fill ? m_noStroke : m_noFill) = false;  // never both: the shape would vanish (a grey hairline instead)
+  // Turned off earlier, a stored colour is see-through: bring back a visible one.
+  const QColor base = m_stroke.alpha() > 0 ? QColor(m_stroke.rgb())
+                      : m_fill.alpha() > 0 ? QColor(m_fill.rgb())
+                                           : KaStylePalette::colors().value(1);
+  if (!m_noFill && m_fill.alpha() == 0) m_fill = isPoint() ? base : QColor(base.red(), base.green(), base.blue(), kFillAlpha);
+  if (!m_noStroke && m_stroke.alpha() == 0) m_stroke = isPoint() ? base.darker(160) : base;  // a point keeps a ring
   apply();
 }
 
@@ -135,13 +173,12 @@ void KaInspectorStyle::apply() {
   if (!LayerOps::applySimpleVectorStyle(m_layer, m_fill, m_stroke, m_widthMm, m_markerMm, m_noFill, m_noStroke,
                                         m_dashed))
     return;
-  m_note->hide();  // one colour now: the automatic look is gone
-  markSwatches();
+  refresh();  // one colour now: the automatic look is gone
   emit styleApplied(m_layer.data());
 }
 
 void KaInspectorStyle::markSwatches() {
-  const QColor current = isPoint() ? m_fill : m_stroke;
+  const QColor current = isPoint() || m_noStroke ? m_fill : m_stroke;
   const KaTheme::Tokens& theme = KaTheme::tokens();
   const QList<QColor> colors = KaStylePalette::colors();
   for (int i = 0; i < m_swatches.size(); ++i) {

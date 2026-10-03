@@ -3,6 +3,7 @@
 // KA_HGIS_QA_OUTPUT_DIR saves inspector-panel.png.
 #include <QtTest>
 
+#include <QCheckBox>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFocusEvent>
@@ -206,6 +207,26 @@ class TestInspectorPanel : public QObject {
     QVERIFY(layer.startEditing());
     QVERIFY(card.setValue(QStringLiteral("site_name"), QStringLiteral("가수리 유적 2지점")));
     QCOMPARE(card.rowText(QStringLiteral("site_name")), QStringLiteral("가수리 유적 2지점"));
+  }
+
+  // 「채우기 없음 (선만)」 and 「선 없음」 are in the tab too (user 2026-10-03 「선채우기없음도 나와야한다」).
+  void styleTab_fillAndOutlineCanBeTurnedOff() {
+    KaInspectorStyle style;
+    auto layer = houseLayer();
+    style.setLayer(layer.get());
+    auto* noFill = style.findChild<QCheckBox*>(QStringLiteral("inspectorStyleNoFill"));
+    auto* noStroke = style.findChild<QCheckBox*>(QStringLiteral("inspectorStyleNoStroke"));
+    QVERIFY(noFill && noStroke && !noFill->isHidden() && !noStroke->isHidden());
+    QColor fill, stroke;
+    double width = 0, marker = 0;
+    bool fillOff = false, strokeOff = false;
+    noFill->click();  // outline only, at once and remembered
+    QVERIFY(LayerOps::readSimpleVectorStyle(layer.get(), &fill, &stroke, &width, &marker, &fillOff, &strokeOff));
+    QVERIFY(fillOff && !strokeOff);
+    noFill->click();
+    noStroke->click();
+    QVERIFY(LayerOps::readSimpleVectorStyle(layer.get(), &fill, &stroke, &width, &marker, &fillOff, &strokeOff));
+    QVERIFY(!fillOff && strokeOff);
   }
 
   void preferredWidth_1366And1920() {
