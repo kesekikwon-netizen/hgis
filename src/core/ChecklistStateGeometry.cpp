@@ -1,4 +1,5 @@
 #include "ChecklistStateChecks.h"
+#include "LayerFeatures.h"
 #include "LayerOps.h"
 
 #include <cmath>
@@ -140,7 +141,7 @@ DomainExtents scanGeometry(QgsProject* project, QJsonObject& st, Offenders& off)
 
   for (const QString& key : LayerOps::domainLayerKeys()) {
     for (QgsVectorLayer* layer : LayerOps::domainLayersForKey(project, key)) {
-      if (!layer || layer->featureCount() <= 0) continue;
+      if (!LayerFeatures::any(layer)) continue;
       if (!layer->crs().isValid()) {
         exportCrsOk = false;
         off.add(QStringLiteral("export_crs_valid"), layer, -1, layer->name());

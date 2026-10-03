@@ -1,4 +1,5 @@
 #include "ChecklistStateChecks.h"
+#include "LayerFeatures.h"
 #include "LayerOps.h"
 
 #include <cmath>
@@ -39,7 +40,7 @@ bool mapHasRealData(QgsLayoutItemMap* map) {
     if (LayerOps::isReferenceLayer(l) || LayerOps::isCadastralLayer(l) || LayerOps::isBasemapLayer(l))
       continue;
     if (auto* vl = qobject_cast<QgsVectorLayer*>(l)) {
-      if (vl->featureCount() > 0) return true;
+      if (LayerFeatures::any(vl)) return true;
     } else if (auto* rl = qobject_cast<QgsRasterLayer*>(l)) {
       if (rl->width() > 0 && rl->height() > 0 && !rl->extent().isEmpty()) return true;
     }

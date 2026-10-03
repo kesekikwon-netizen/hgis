@@ -114,6 +114,23 @@ private slots:
     QVERIFY(LayoutService::isComposedStudioSheet(&project));
   }
 
+  // Deleting one of two survey areas without saving leaves the other on the sheet
+  // (QgsVectorLayer::hasFeatures() only answers "maybe" for an edited layer with deletions).
+  void sheetSeesSurveyAreaWithAnUnsavedDeletion() {
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+    auto* area = surveyLayer(project, QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("조사구역"));
+    QVERIFY(area);
+    addSquare(area, 200000, 450000);
+    addSquare(area, 200100, 450100);
+    QVERIFY(composeSheet(project, {area}));
+    QVERIFY(area->startEditing());
+    QgsFeature first;
+    QVERIFY(area->getFeatures().nextFeature(first));
+    QVERIFY(area->deleteFeature(first.id()));
+    QVERIFY(LayoutService::isComposedStudioSheet(&project));
+  }
+
   void mergeKeepsFieldsOfEveryLayerAndReadmeRecordsProvenance() {
     QTemporaryDir temp;
     QgsProject project;

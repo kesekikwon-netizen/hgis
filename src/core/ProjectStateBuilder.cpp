@@ -3,6 +3,7 @@
 #include "ChecklistStateChecks.h"
 #include "FeatureNumbering.h"
 #include "LayerOps.h"
+#include "LayerFeatures.h"
 #include "LayoutService.h"
 #include "SectionLayoutService.h"
 #include <QJsonObject>
@@ -66,7 +67,7 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
   const auto total = [project](const char* key) {
     int count = 0;
     for (auto* layer : LayerOps::domainLayersForKey(project, QString::fromLatin1(key)))
-      count += int(layer->featureCount());
+      count += int(LayerFeatures::count(layer));
     return count;
   };
   const int saCount = total("survey_area");

@@ -1,5 +1,6 @@
 #include "ControlPointCsv.h"
 #include "FeatureRecord.h"
+#include "LayerFeatures.h"
 #include "LayerOps.h"
 
 #include <QFile>
@@ -313,7 +314,7 @@ QgsRectangle surveyExtentFor(QgsProject* project, const QgsCoordinateReferenceSy
   QgsRectangle box;
   if (!project) return box;
   for (QgsVectorLayer* layer : LayerOps::surveyAreaLayers(project)) {
-    if (!layer || layer->hasFeatures() != Qgis::FeatureAvailability::FeaturesAvailable) continue;
+    if (!LayerFeatures::any(layer)) continue;
     QgsRectangle extent = featureExtent(layer);
     if (!extent.isFinite() || extent.isEmpty()) continue;
     if (layer->crs().isValid() && dest.isValid() && layer->crs() != dest) {

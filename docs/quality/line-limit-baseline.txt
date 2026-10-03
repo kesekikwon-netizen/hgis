@@ -33,7 +33,7 @@
 2554 src/core/BasemapOps.cpp
 340 src/core/CadastralImport.cpp
 352 src/core/CadastralPortal.cpp
-584 src/core/ControlPointCsv.cpp
+585 src/core/ControlPointCsv.cpp
 305 src/core/DemDownloadService.cpp
 959 src/core/GeologyMapService.cpp
 633 src/core/GeorefService.cpp
@@ -45,7 +45,7 @@
 357 src/core/KaSafeQgis.cpp
 2920 src/core/LayerOps.cpp
 469 src/core/LayerOps.h
-1666 src/core/LayoutService.cpp
+1667 src/core/LayoutService.cpp
 411 src/core/LocationSearch.cpp
 382 src/core/PaleoLandformService.cpp
 348 src/core/PolygonErase.cpp

@@ -31,6 +31,12 @@ test('a quarantine entry past its review date no longer excuses the test', () =>
   assert.match(r.lines.join('\n'), /2027-01-01/);
 });
 
+test('a failed first run with no test names cannot pass on the rerun', () => {
+  const r = decide({ failed: [], rerunPassed: true, quarantine: parseQuarantine(QUARANTINE), today: '2026-10-03' });
+  assert.equal(r.exitCode, 1);
+  assert.match(r.lines.join('\n'), /::error/);
+});
+
 test('the failed list is read from LastTestsFailed.log lines', () => {
   assert.deepEqual(parseFailedLog('2:workflow_engine\r\n136:save_open_saveas\r\n'), ['workflow_engine', 'save_open_saveas']);
 });

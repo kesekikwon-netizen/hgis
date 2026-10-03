@@ -4,6 +4,7 @@
 #include "HeritageLayoutNumbers.h"
 #include "DemColorRampLegend.h"
 #include "GeologyMapService.h"
+#include "LayerFeatures.h"
 #include "LayerOps.h"
 #include "LayerLabelControls.h"
 #include "PdfExportSettings.h"
@@ -1238,7 +1239,7 @@ bool LayoutService::isComposedStudioSheet(QgsProject* project, const QString& la
       continue;
 
     if (auto* vl = qobject_cast<QgsVectorLayer*>(l)) {
-      if (vl->hasFeatures() == Qgis::FeatureAvailability::FeaturesAvailable || (target == QLatin1String("section_sheet") && n == QLatin1String("ka_section_blank"))) {
+      if (LayerFeatures::any(vl) || (target == QLatin1String("section_sheet") && n == QLatin1String("ka_section_blank"))) {
         hasValidLayer = true;
         break;
       }

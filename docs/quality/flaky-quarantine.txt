@@ -7,3 +7,4 @@ heritage_download_retry|2027-01-01|부하에서 흔들린다(작업 지침의 �
 topographic_browser|2027-01-01|부하에서 흔들린다(작업 지침의 흔들림 목록)
 survey_contour|2027-01-01|부하에서 흔들린다(작업 지침의 흔들림 목록)
 startup_splash|2027-01-01|부하에서 흔들린다(작업 지침의 흔들림 목록)
+topographic_merge|2027-01-01|지도가 다 그려진 뒤에 도엽이 도착하면 「the rewrite path did not run」으로 실패하는 시험 쪽 시간 경쟁(CI 37099282570)

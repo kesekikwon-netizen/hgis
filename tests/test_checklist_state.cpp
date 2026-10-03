@@ -6,12 +6,14 @@
 #include "core/LayerOps.h"
 #include "core/LayoutService.h"
 #include "core/ProjectStateBuilder.h"
+#include "core/SurveyProjectFactory.h"
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QTemporaryDir>
 #include <QtTest>
 
 #include <qgsapplication.h>
@@ -168,6 +170,41 @@ private slots:
     const QJsonObject st = ProjectStateBuilder::fromProject(&project);
     QVERIFY(!st.value(QStringLiteral("required_fields_filled")).toBool());
     QVERIFY(st.value(QStringLiteral("notes")).toObject().value(QStringLiteral("required_fields_filled")).toString().contains(QStringLiteral("kind")));
+  }
+
+  // QGIS can fail its own GeoPackage count and a count goes stale when another layer object saves
+  // (CI 2026-10-03); the submit state must still count the survey area and see its polygon.
+  void staleCountStillCountsTheSurveyArea() {
+    QTemporaryDir temp;
+    QString error;
+    const QString gpkg = SurveyProjectFactory::createNewSurvey(temp.path(), QStringLiteral("count"), &error);
+    QVERIFY2(!gpkg.isEmpty(), qPrintable(error));
+    const QString uri = gpkg + QStringLiteral("|layername=survey_area");
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+    auto* shown = new QgsVectorLayer(uri, QStringLiteral("survey_area"), QStringLiteral("ogr"));
+    QVERIFY(shown->isValid());
+    project.addMapLayer(shown);
+    QCOMPARE(shown->featureCount(), 0LL);  // counted while empty
+    {
+      QgsVectorLayer writer(uri, QStringLiteral("writer"), QStringLiteral("ogr"));
+      addFeature(&writer, QStringLiteral("Polygon((200000 450000, 200100 450000, 200100 450100, 200000 450100, 200000 450000))"));
+    }
+    QVERIFY(!LayoutService::createBlankSheet(&project, 297.0, 210.0, QStringLiteral("user_sheet"), &error).isEmpty());
+    auto* ly = dynamic_cast<QgsPrintLayout*>(project.layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+    QVERIFY(ly);
+    auto* map = new QgsLayoutItemMap(ly);
+    map->setId(QStringLiteral("ka_map"));
+    map->attemptSetSceneRect(QRectF(20.0, 20.0, 120.0, 80.0));
+    map->setCrs(project.crs());
+    map->setKeepLayerSet(true);
+    map->setLayers({shown});
+    map->zoomToExtent(QgsRectangle(199990.0, 449990.0, 200110.0, 450110.0));
+    ly->addLayoutItem(map);
+    const QJsonObject st = ProjectStateBuilder::fromProject(&project);
+    QCOMPARE(st.value(QStringLiteral("survey_area_count")).toInt(), 1);
+    QVERIFY(st.value(QStringLiteral("survey_is_polygon")).toBool());
+    QVERIFY(st.value(QStringLiteral("layout_exists:site_location")).toBool());
   }
 
   void sheetOfAnotherPlaceDoesNotPass() {

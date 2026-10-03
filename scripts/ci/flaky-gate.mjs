@@ -36,6 +36,9 @@ export function parseQuarantine(text) {
 }
 
 export function decide({ failed, rerunPassed, quarantine, today }) {
+  if (!failed.length) {
+    return { exitCode: 1, lines: ['::error title=흔들림 판정 실패::첫 실행이 실패했는데 실패한 시험 이름을 읽지 못했다. 위 ctest 출력에서 확인한다.'] };
+  }
   if (!rerunPassed) {
     return {
       exitCode: 1,
