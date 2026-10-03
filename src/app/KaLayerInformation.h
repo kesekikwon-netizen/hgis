@@ -32,6 +32,7 @@ public:
   static int baseRowHeightOf(const QgsLayerTreeView* tree);
   static void protectSidebarList(QSplitter* split, QgsLayerTreeView* tree, QToolButton* filesToggle,
                                  QWidget* filesPane, class KaLayerInformationPanel* panel);
+  static void openSidebarFiles(QSplitter* split, QWidget* filesPane);
 protected:
   void resizeEvent(QResizeEvent* event) override;
   void drawBranches(QPainter* painter, const QRect& rect, const QModelIndex& index) const override;

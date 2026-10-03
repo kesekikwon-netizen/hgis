@@ -50,9 +50,13 @@ void KaLayerInformationView::protectSidebarList(QSplitter* split, QgsLayerTreeVi
   tree->setMinimumHeight(need);
   if (split->count() > 1) split->setCollapsible(1, true);
   if (filesPane) filesPane->setMinimumHeight(0);
+  // A sidebar not shown yet (the 지도 tab is not the start page) has a stale size; its
+  // Show event judges it again.
+  if (!split->isVisible()) return;
   const int chrome = 48;
   const int handle = split->handleWidth();
-  const int treeH = tree->viewport() ? tree->viewport()->height() : tree->height();
+  // With no layers the list hides behind the empty-state text; its stale size is no squeeze.
+  const int treeH = tree->isHidden() ? 0 : tree->viewport() ? tree->viewport()->height() : tree->height();
   const bool filesOpen = filesToggle && filesToggle->isChecked();
   const bool tight = split->height() < need + chrome ||
                      (filesOpen && split->height() < need + chrome + 160) ||
@@ -64,6 +68,18 @@ void KaLayerInformationView::protectSidebarList(QSplitter* split, QgsLayerTreeVi
     const int layers = qMax(need + chrome, split->height() - handle);
     split->setSizes({layers, 0});
   }
+}
+
+// A 파일함 shut to 0 px (protectSidebarList, or MainWindow/leftSplit saved that way) came
+// back as a 0 px strip: it opens at the 3:2 share the sidebar starts with. The splitter
+// still keeps the layers card at its minimum, so a short window gives the 파일함 less.
+void KaLayerInformationView::openSidebarFiles(QSplitter* split, QWidget* filesPane) {
+  if (!split || !filesPane || split->count() < 2) return;
+  filesPane->show();
+  const QList<int> sizes = split->sizes();
+  const int total = sizes.at(0) + sizes.at(1);
+  const int files = total * 2 / 5;
+  if (sizes.at(1) < files / 2) split->setSizes({total - files, files});
 }
 
 void KaLayerInformationView::resizeEvent(QResizeEvent* event) {

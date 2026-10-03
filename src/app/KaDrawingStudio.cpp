@@ -3272,7 +3272,8 @@ void KaDrawingStudio::removeSelectedLayers() {
 }
 
 bool KaDrawingStudio::eventFilter(QObject* watched, QEvent* event) {
-  if (event && event->type() == QEvent::Resize && watched->objectName() == QLatin1String("studioLeftSplit")) {
+  if (event && (event->type() == QEvent::Resize || event->type() == QEvent::Show) &&
+      watched->objectName() == QLatin1String("studioLeftSplit")) {
     if (auto* splitter = qobject_cast<QSplitter*>(watched)) {
       KaLayerInformationView::protectSidebarList(
           splitter, m_layerTree, findChild<QToolButton*>(QStringLiteral("sidebarFilesToggle")),

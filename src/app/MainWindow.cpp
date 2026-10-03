@@ -300,6 +300,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     const QByteArray leftState = st.value(QStringLiteral("MainWindow/leftSplit")).toByteArray();
     if (m_leftSplit && !leftState.isEmpty())
       m_leftSplit->restoreState(leftState);
+    // 처음 켜면 파일함이 보인다. 그다음부터는 사용자가 파일함 단추로 고른 상태를 따른다.
+    if (auto* filesToggle = findChild<QToolButton*>(QStringLiteral("sidebarFilesToggle")))
+      filesToggle->setChecked(st.value(QStringLiteral("MainWindow/filesOpen"), true).toBool());
     if (m_leftSplit) {
       QTimer::singleShot(0, this, [this]() {
         KaLayerInformationView::protectSidebarList(
@@ -922,7 +925,14 @@ void MainWindow::buildUi() {
   filesPanel->setMinimumHeight(0);
   filesScroll->setWidget(filesPanel);
   m_filesCard = filesScroll;
-  connect(filesToggle, &QToolButton::toggled, filesScroll, &QWidget::setVisible);
+  connect(filesToggle, &QToolButton::toggled, filesScroll, [leftSplit, filesScroll](bool on) {
+    if (on) KaLayerInformationView::openSidebarFiles(leftSplit, filesScroll);
+    else filesScroll->hide();
+  });
+  // Only a press is the user's choice; a short window shuts the 파일함 without asking.
+  connect(filesToggle, &QToolButton::clicked, this, [](bool on) {
+    RecentSurveys::userSettings().setValue(QStringLiteral("MainWindow/filesOpen"), on);
+  });
   leftSplit->addWidget(layersCard);
   leftSplit->addWidget(filesScroll);
   leftSplit->setStretchFactor(0, 3);
@@ -2228,10 +2238,15 @@ void MainWindow::applyMapGrid(bool announce) {
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
 #if KA_HGIS_HAS_QGIS
   if (!event) return QMainWindow::eventFilter(watched, event);
-  if (watched == m_leftSplit && event->type() == QEvent::Resize) {
+  // The first size reaches the sidebar before the 지도 tab is visible; Show has the real one.
+  if (watched == m_leftSplit && (event->type() == QEvent::Resize || event->type() == QEvent::Show)) {
+    auto* filesToggle = findChild<QToolButton*>(QStringLiteral("sidebarFilesToggle"));
+    auto* filesScroll = findChild<QWidget*>(QStringLiteral("sidebarFilesScroll"));
+    // A 파일함 saved shut opens when the tab shows; a short window shuts it again below.
+    if (event->type() == QEvent::Show && filesToggle && filesToggle->isChecked())
+      KaLayerInformationView::openSidebarFiles(m_leftSplit, filesScroll);
     KaLayerInformationView::protectSidebarList(
-        m_leftSplit, m_layerTree, findChild<QToolButton*>(QStringLiteral("sidebarFilesToggle")),
-        findChild<QWidget*>(QStringLiteral("sidebarFilesScroll")),
+        m_leftSplit, m_layerTree, filesToggle, filesScroll,
         findChild<KaLayerInformationPanel*>(QStringLiteral("layerInformationPanel")));
   }
   if (m_mapSplitter && watched == m_mapSplitter && event->type() == QEvent::Resize)

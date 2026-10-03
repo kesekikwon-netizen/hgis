@@ -651,7 +651,7 @@ void MainWindow::buildMenus() {
   moreMenu->addSeparator();
   moreMenu->addAction(QStringLiteral("파일함 보이기/숨기기"), this, [this]() {
     if (auto* toggle = findChild<QToolButton*>(QStringLiteral("sidebarFilesToggle")))
-      toggle->toggle();
+      toggle->click();
   });
   // 작은 화면에서 지도를 넓히는 선택 기능. 창 단축키라 리본이 숨어 있어도 듣는다.
   auto* actMapFocus = new QAction(QStringLiteral("지도 넓게 보기"), this);

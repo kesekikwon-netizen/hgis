@@ -10,6 +10,7 @@
 #include <QScrollBar>
 #include <QScrollArea>
 #include <QSplitter>
+#include <QTabWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QDir>
@@ -31,6 +32,57 @@ QgsVectorLayer* add(QgsProject& project, QgsLayerTreeGroup* group, const QString
   layer->setLabelsEnabled(on);
   project.addMapLayer(layer, false); group->addLayer(layer); return layer;
 }
+
+// The 지도 tab sidebar as MainWindow builds it: the layers card over the 파일함 scroll area,
+// the list hidden behind the empty-state text while the project has no layers.
+struct Sidebar {
+  explicit Sidebar(QgsProject& project) : model(&project, false) {
+    split = new QSplitter(Qt::Vertical, &host);
+    split->setChildrenCollapsible(false);
+    auto* layers = new QFrame(split);
+    auto* layersLay = new QVBoxLayout(layers);
+    layersLay->setContentsMargins(6, 6, 6, 6);
+    toggle = new QToolButton(layers);
+    toggle->setCheckable(true);
+    toggle->setChecked(true);
+    tree = new KaLayerInformationView(layers);
+    tree->setModel(&model);
+    KaLayerInformationModel::configureView(tree);
+    panel = new KaLayerInformationPanel(&model, tree, layers);
+    auto* empty = new QLabel(QStringLiteral("레이어가 없습니다."), layers);
+    layersLay->addWidget(toggle);
+    layersLay->addWidget(tree, 1);
+    layersLay->addWidget(panel);
+    layersLay->addWidget(empty, 1);
+    const bool none = project.mapLayers().isEmpty();  // MainWindow::refreshLayerEmptyState
+    tree->setVisible(!none);
+    empty->setVisible(none);
+    files = new QScrollArea(split);
+    files->setWidgetResizable(true);
+    files->setMinimumHeight(0);
+    files->setWidget(new QLabel(QStringLiteral("파일함")));
+    split->addWidget(layers);
+    split->addWidget(files);
+    split->setCollapsible(1, true);
+    split->setSizes({380, 260});
+    QObject::connect(toggle, &QToolButton::toggled, files, [this](bool on) {
+      if (on) KaLayerInformationView::openSidebarFiles(split, files);
+      else files->hide();
+    });
+    auto* hostLay = new QVBoxLayout(&host);
+    hostLay->setContentsMargins(0, 0, 0, 0);
+    hostLay->addWidget(split, 1);
+    host.resize(360, 900);
+  }
+  void protect() { KaLayerInformationView::protectSidebarList(split, tree, toggle, files, panel); }
+  KaLayerInformationModel model;
+  QWidget host;
+  QSplitter* split = nullptr;
+  QToolButton* toggle = nullptr;
+  KaLayerInformationView* tree = nullptr;
+  KaLayerInformationPanel* panel = nullptr;
+  QScrollArea* files = nullptr;
+};
 }
 class LayerInformationTest : public QObject {
   Q_OBJECT
@@ -244,6 +296,96 @@ private slots:
                             .arg(row)
                             .arg(window.width())
                             .arg(window.height())));
+  }
+
+  // A tall window with no layers yet: the hidden list's stale size must not count as a
+  // squeezed list, or the 파일함 is shut on every start and saved shut.
+  void emptyListKeepsFilesOpenAtStartup() {
+    QgsProject project;
+    Sidebar bar(project);
+    bar.host.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&bar.host));
+    bar.protect();
+    QVERIFY(bar.toggle->isChecked());
+    QTRY_VERIFY2(bar.files->height() >= bar.split->height() / 4,
+                 qPrintable(QStringLiteral("files=%1 split=%2").arg(bar.files->height()).arg(bar.split->height())));
+  }
+
+  // The 지도 tab is not the start page: its sidebar keeps a stale small size until the tab
+  // shows, and judging that size shut the 파일함 before anyone saw it.
+  void hiddenSidebarKeepsFilesOpen() {
+    QgsProject project;
+    auto* group = project.layerTreeRoot()->addGroup(QStringLiteral("조사 데이터"));
+    for (int i = 0; i < 3; ++i) add(project, group, QStringLiteral("행%1").arg(i));
+    Sidebar bar(project);
+    bar.split->resize(360, 280);
+    bar.protect();
+    QVERIFY(bar.toggle->isChecked());
+    QVERIFY(!bar.files->isHidden());
+  }
+
+  // The sidebar on a tab that shows later, in a short window, filtered like MainWindow and
+  // KaDrawingStudio do: the first size it gets arrives before it is visible, so the five-row
+  // protection must still run when the tab appears.
+  void shortSidebarOnALaterTabIsProtectedWhenShown() {
+    QgsProject project;
+    auto* group = project.layerTreeRoot()->addGroup(QStringLiteral("조사 데이터"));
+    for (int i = 0; i < 3; ++i) add(project, group, QStringLiteral("행%1").arg(i));
+    Sidebar bar(project);
+    struct Filter : QObject {
+      Sidebar* bar = nullptr;
+      bool eventFilter(QObject*, QEvent* event) override {
+        if (event->type() == QEvent::Resize || event->type() == QEvent::Show) bar->protect();
+        return false;
+      }
+    } filter;
+    filter.bar = &bar;
+    bar.split->installEventFilter(&filter);
+    QTabWidget tabs;
+    tabs.addTab(new QLabel(QStringLiteral("홈")), QStringLiteral("홈"));
+    auto* page = new QWidget;
+    auto* pageLay = new QVBoxLayout(page);
+    pageLay->setContentsMargins(0, 0, 0, 0);
+    pageLay->addWidget(bar.split);
+    tabs.addTab(page, QStringLiteral("지도"));
+    tabs.resize(360, 300);
+    tabs.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&tabs));
+    QVERIFY(bar.toggle->isChecked());
+    tabs.setCurrentIndex(1);
+    QTRY_VERIFY2(!bar.toggle->isChecked(), qPrintable(QStringLiteral("split=%1").arg(bar.split->height())));
+    QVERIFY(bar.files->isHidden());
+  }
+
+  // MainWindow/leftSplit saved with the 파일함 at 0 px: opening it (at start or with the
+  // 파일함 button) must give it room, not a 0 px strip that has to be dragged up.
+  void filesPaneSavedShutOpensWithRoom() {
+    QgsProject project;
+    auto* group = project.layerTreeRoot()->addGroup(QStringLiteral("조사 데이터"));
+    for (int i = 0; i < 3; ++i) add(project, group, QStringLiteral("행%1").arg(i));
+    Sidebar bar(project);
+    bar.split->setSizes({792, 0});
+    bar.host.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&bar.host));
+    KaLayerInformationView::openSidebarFiles(bar.split, bar.files);
+    QTRY_VERIFY2(bar.files->height() >= bar.split->height() / 4,
+                 qPrintable(QStringLiteral("start files=%1 split=%2").arg(bar.files->height()).arg(bar.split->height())));
+    bar.toggle->setChecked(false);
+    QTRY_VERIFY(!bar.files->isVisible());
+    bar.split->setSizes({792, 0});  // protectSidebarList shuts it this way in a short window
+    bar.toggle->setChecked(true);
+    QTRY_VERIFY2(bar.files->height() >= bar.split->height() / 4,
+                 qPrintable(QStringLiteral("button files=%1 split=%2").arg(bar.files->height()).arg(bar.split->height())));
+    QVERIFY(bar.tree->viewport()->height() >= bar.tree->baseRowHeight() * KaLayerInformationView::kMinVisibleRows);
+    // A height the user dragged comes back after closing and opening the 파일함.
+    const int half = bar.split->height() / 2;
+    bar.split->setSizes({bar.split->height() - half, half});
+    QTRY_VERIFY(qAbs(bar.files->height() - half) <= 12);
+    bar.toggle->setChecked(false);
+    QTRY_VERIFY(!bar.files->isVisible());
+    bar.toggle->setChecked(true);
+    QTRY_VERIFY2(qAbs(bar.files->height() - half) <= 12,
+                 qPrintable(QStringLiteral("dragged=%1 reopened=%2").arg(half).arg(bar.files->height())));
   }
 
   void heritageNamesUseDatasetColor() {

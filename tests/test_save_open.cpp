@@ -16,6 +16,7 @@
 #include <QSpinBox>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QScopeGuard>
 #include <QSplitter>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -931,6 +932,72 @@ private slots:
     auto* sub = reopened.findChild<QToolBar*>(QStringLiteral("subToolbar"));
     QVERIFY(sub);
     QVERIFY2(!sub->isVisible(), "복원한 창 배치가 빈 그리기 도구 줄을 다시 띄웠습니다.");
+  }
+  // The app starts on 홈; the 지도 tab and its sidebar are sized only when it is first shown.
+  static void showMapAfterHome(MainWindow& window, const QSize& size) {
+    disableRendering(window);
+    window.resize(size);
+    window.show();
+    QCoreApplication::processEvents();
+    if (auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("viewTabs")))
+      for (int i = 0; i < tabs->count(); ++i)
+        if (tabs->tabText(i) == QStringLiteral("지도")) tabs->setCurrentIndex(i);
+    QCoreApplication::processEvents();
+  }
+  static QStringList windowLayoutKeys() {
+    return {QStringLiteral("MainWindow/filesOpen"), QStringLiteral("MainWindow/leftSplit"),
+            QStringLiteral("MainWindow/geometry"), QStringLiteral("MainWindow/state"),
+            QStringLiteral("MainWindow/mainSplit"), QStringLiteral("MainWindow/mainSplitPanes")};
+  }
+  static void forgetWindowLayout() {
+    QSettings st = RecentSurveys::userSettings();
+    for (const QString& key : windowLayoutKeys()) st.remove(key);
+  }
+  // 처음 켜면 파일함이 보이고, 파일함 단추로 닫거나 연 상태가 다음 실행까지 남는다.
+  void filesBoxStartsOpenAndKeepsTheChosenState() {
+    forgetWindowLayout();
+    const auto cleanup = qScopeGuard([] { forgetWindowLayout(); });
+    {
+      QSettings st = RecentSurveys::userSettings();
+      // The 파일함 squeezed to 0 px, as earlier starts saved it.
+      QSplitter shut(Qt::Vertical);
+      shut.addWidget(new QWidget);
+      shut.addWidget(new QWidget);
+      shut.setSizes({792, 0});
+      st.setValue(QStringLiteral("MainWindow/leftSplit"), shut.saveState());
+    }
+    const auto filesShown = [](MainWindow& window) {
+      auto* files = window.findChild<QWidget*>(QStringLiteral("sidebarFilesScroll"));
+      auto* split = window.findChild<QSplitter*>(QStringLiteral("leftSplit"));
+      return files && split && files->isVisible() && files->height() >= split->height() * 7 / 20;
+    };
+    const auto toggleOf = [](MainWindow& window) {
+      return window.findChild<QToolButton*>(QStringLiteral("sidebarFilesToggle"));
+    };
+    {
+      MainWindow window;
+      showMapAfterHome(window, QSize(1600, 900));
+      QVERIFY(toggleOf(window) && toggleOf(window)->isChecked());
+      QTRY_VERIFY2(filesShown(window), "처음 켠 지도 탭에 파일함이 보이지 않습니다.");
+      toggleOf(window)->click();
+      QVERIFY(!toggleOf(window)->isChecked());
+      QVERIFY(window.close());
+    }
+    {
+      MainWindow window;
+      showMapAfterHome(window, QSize(1600, 900));
+      QVERIFY2(!toggleOf(window)->isChecked(), "닫고 끝낸 파일함이 다시 열렸습니다.");
+      QVERIFY(!window.findChild<QWidget*>(QStringLiteral("sidebarFilesScroll"))->isVisible());
+      toggleOf(window)->click();
+      QTRY_VERIFY2(filesShown(window), "파일함 단추를 눌러도 파일함이 보이지 않습니다.");
+      QVERIFY(window.close());
+    }
+    {
+      MainWindow window;
+      showMapAfterHome(window, QSize(1600, 900));
+      QVERIFY(toggleOf(window)->isChecked());
+      QTRY_VERIFY2(filesShown(window), "열어 두고 끝낸 파일함이 다음 실행에 보이지 않습니다.");
+    }
   }
   void narrowWindowKeepsSearchOnTheRibbonRow() {
     for (const QSize size : {QSize(1024, 768), QSize(1280, 720), QSize(1904, 1000)}) {
