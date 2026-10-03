@@ -167,8 +167,9 @@ jobs:
           . .\scripts\dev-env.ps1
           cmake --build build --config Release --parallel -- /p:CL_MPCount=2
 
-      # Two tests at a time keep the timing-sensitive groups steady on a 4-core runner;
-      # a failing test gets one more try before the job fails. perf budgets scale against the
+      # Two tests at a time keep the timing-sensitive groups steady on a 4-core runner. Failed
+      # tests get one more run; scripts/ci/flaky-gate.mjs names any that pass it and keeps the job
+      # red unless docs/quality/flaky-quarantine.txt lists them. perf budgets scale against the
       # reference PC's calibration (TEST_INFRA.md).
       - name: CTest
         timeout-minutes: 150
@@ -181,7 +182,13 @@ jobs:
           KA_PERF_BUDGET_A3_PDF_EXPORT: '160'
         run: |
           . .\scripts\dev-env.ps1
-          ctest --test-dir build -C Release -j2 --output-on-failure --repeat until-pass:2
+          ctest --test-dir build -C Release -j2 --output-on-failure
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          $failed = Join-Path $env:RUNNER_TEMP 'first-run-failed.log'
+          Copy-Item -LiteralPath build/Testing/Temporary/LastTestsFailed.log -Destination $failed
+          ctest --test-dir build -C Release --output-on-failure --rerun-failed
+          node scripts/ci/flaky-gate.mjs --failed $failed --rerun-exit $LASTEXITCODE --quarantine docs/quality/flaky-quarantine.txt
+          exit $LASTEXITCODE
 
       - name: Start and quit the app
         timeout-minutes: 5

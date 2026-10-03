@@ -13,6 +13,9 @@
 #include <qgsapplication.h>
 #include <qgsfeature.h>
 #include <qgsfeatureiterator.h>
+#include <qgsgeometry.h>
+#include <qgsproject.h>
+#include <qgsvectordataprovider.h>
 #include <qgsvectorlayer.h>
 
 namespace {
@@ -40,6 +43,7 @@ private slots:
   void headerless_numericFourthColumnIsZ();
   void shortRowsAndMissingXY();
   void import_readsZAndSkipsReimportedPoints();
+  void swapSuggestion_findsSurveyAreaTheLayerCountMissed();
 };
 
 void TestControlPointCsv::koreanHeaders_mapToColumns() {
@@ -147,6 +151,37 @@ void TestControlPointCsv::import_readsZAndSkipsReimportedPoints() {
   QVERIFY2(renamed.summary.contains(QStringLiteral("이름은 같은데 위치가 다른 점이 1개")), qPrintable(renamed.summary));
   QCOMPARE(LayerOps::importControlPointsCsv(&cp, moved, &error, false), 1);
   QCOMPARE(cp.featureCount(), 3LL);
+}
+
+// A GeoPackage count can fail in GDAL ("unable to open database file", CI 2026-10-03) and goes stale
+// when another layer object saves; the X·Y check must still find the saved survey area.
+void TestControlPointCsv::swapSuggestion_findsSurveyAreaTheLayerCountMissed() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  QString error;
+  const QString gpkg = SurveyProjectFactory::createNewSurvey(dir.path(), QStringLiteral("csvxy"), &error,
+                                                             QStringLiteral("EPSG:5186"));
+  QVERIFY2(!gpkg.isEmpty(), qPrintable(error));
+  const QString uri = gpkg + QStringLiteral("|layername=survey_area");
+  QgsProject project;
+  auto* area = new QgsVectorLayer(uri, QStringLiteral("조사구역"), QStringLiteral("ogr"));
+  QVERIFY(area->isValid());
+  project.addMapLayer(area);
+  QCOMPARE(area->featureCount(), 0LL);  // counted while empty
+  {
+    QgsVectorLayer writer(uri, QStringLiteral("writer"), QStringLiteral("ogr"));
+    QgsFeature zone(writer.fields());
+    zone.setGeometry(QgsGeometry::fromRect(QgsRectangle(148078, 98110, 148110, 98134)));
+    QgsFeatureList list{zone};
+    QVERIFY(writer.dataProvider()->addFeatures(list));
+  }
+  QgsVectorLayer cp(gpkg + QStringLiteral("|layername=control_points"), QStringLiteral("control_points"),
+                    QStringLiteral("ogr"));
+  const QString csv = QDir(dir.path()).filePath(QStringLiteral("korean-xy.csv"));
+  QVERIFY(writeCsv(csv, QStringLiteral("point_id,X,Y\nK1,98120,148100\n")));
+  const LayerOps::ControlCsvPreview preview = LayerOps::previewControlPointsCsv(&cp, csv, &project, &error);
+  QVERIFY2(preview.ok, qPrintable(error));
+  QVERIFY2(preview.swapSuggested, qPrintable(preview.summary));
 }
 
 #include "test_control_point_csv.moc"

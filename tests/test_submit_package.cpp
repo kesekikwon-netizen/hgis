@@ -6,6 +6,7 @@
 #include "core/LayoutService.h"
 #include "core/SubmitReadme.h"
 #include "core/SubmitShp.h"
+#include "core/SurveyProjectFactory.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -89,6 +90,28 @@ private slots:
                                                    true, false, &error).isEmpty());
     QVERIFY2(error.contains(QStringLiteral("좌표계")), qPrintable(error));
     QVERIFY(!QFileInfo::exists(out));
+  }
+
+  // A GeoPackage count can fail in GDAL ("unable to open database file", CI 2026-10-03) and goes
+  // stale when another layer object saves; the sheet check must still see the saved survey area.
+  void sheetSeesSurveyAreaTheLayerCountMissed() {
+    QTemporaryDir temp;
+    QString error;
+    const QString gpkg = SurveyProjectFactory::createNewSurvey(temp.path(), QStringLiteral("count"), &error);
+    QVERIFY2(!gpkg.isEmpty(), qPrintable(error));
+    const QString uri = gpkg + QStringLiteral("|layername=survey_area");
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+    auto* shown = new QgsVectorLayer(uri, QStringLiteral("survey_area"), QStringLiteral("ogr"));
+    QVERIFY(shown->isValid());
+    project.addMapLayer(shown);
+    QCOMPARE(shown->featureCount(), 0LL);  // counted while empty
+    {
+      QgsVectorLayer writer(uri, QStringLiteral("writer"), QStringLiteral("ogr"));
+      addSquare(&writer, 200000, 450000);
+    }
+    QVERIFY(composeSheet(project, {shown}));
+    QVERIFY(LayoutService::isComposedStudioSheet(&project));
   }
 
   void mergeKeepsFieldsOfEveryLayerAndReadmeRecordsProvenance() {

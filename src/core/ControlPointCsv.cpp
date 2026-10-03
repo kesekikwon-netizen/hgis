@@ -294,12 +294,27 @@ QString formatMeters(double meters) {
   return QStringLiteral("%1km").arg(meters / 1000.0, 0, 'f', 1);
 }
 
+// The layer's own extent follows its cached feature count, which a failed GDAL count or a save
+// through another layer object leaves at zero (CI 2026-10-03); then the shapes are read instead.
+QgsRectangle featureExtent(QgsVectorLayer* layer) {
+  QgsRectangle box = layer->extent();
+  if (!box.isEmpty()) return box;
+  QgsFeatureIterator it = layer->getFeatures(QgsFeatureRequest().setNoAttributes());
+  QgsFeature f;
+  while (it.nextFeature(f)) {
+    if (!f.hasGeometry()) continue;
+    if (box.isEmpty()) box = f.geometry().boundingBox();
+    else box.combineExtentWith(f.geometry().boundingBox());
+  }
+  return box;
+}
+
 QgsRectangle surveyExtentFor(QgsProject* project, const QgsCoordinateReferenceSystem& dest) {
   QgsRectangle box;
   if (!project) return box;
   for (QgsVectorLayer* layer : LayerOps::surveyAreaLayers(project)) {
-    if (!layer || layer->featureCount() <= 0) continue;
-    QgsRectangle extent = layer->extent();
+    if (!layer || layer->hasFeatures() != Qgis::FeatureAvailability::FeaturesAvailable) continue;
+    QgsRectangle extent = featureExtent(layer);
     if (!extent.isFinite() || extent.isEmpty()) continue;
     if (layer->crs().isValid() && dest.isValid() && layer->crs() != dest) {
       try {

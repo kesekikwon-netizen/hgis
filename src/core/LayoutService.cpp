@@ -1238,7 +1238,7 @@ bool LayoutService::isComposedStudioSheet(QgsProject* project, const QString& la
       continue;
 
     if (auto* vl = qobject_cast<QgsVectorLayer*>(l)) {
-      if (vl->featureCount() > 0 || (target == QLatin1String("section_sheet") && n == QLatin1String("ka_section_blank"))) {
+      if (vl->hasFeatures() == Qgis::FeatureAvailability::FeaturesAvailable || (target == QLatin1String("section_sheet") && n == QLatin1String("ka_section_blank"))) {
         hasValidLayer = true;
         break;
       }
