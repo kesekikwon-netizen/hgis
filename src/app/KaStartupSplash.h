@@ -18,8 +18,9 @@ class KaStartupSplash final : public QWidget {
   Q_OBJECT
 public:
   static constexpr int ReadingDurationMs = 3000;
+  // strata: the 새 모양 notice (KaSplashStrata) instead of the blue card.
   explicit KaStartupSplash(QWidget* parent = nullptr,
-                           int readingDurationMs = ReadingDurationMs);
+                           int readingDurationMs = ReadingDurationMs, bool strata = false);
   ~KaStartupSplash() override;
   static QString attributionText();
   // Full credit text (name, copyright, data sources and licences), for
@@ -51,6 +52,7 @@ private:
   QString statusText() const;
   const QPixmap& staticLayer();
   void paintBackdrop(QPainter& painter, qreal dpr) const;
+  void paintStrata();
 
   int m_readingDurationMs;
   QElapsedTimer m_readingClock;
@@ -62,4 +64,5 @@ private:
   qint64 m_readyAtMs = 0;
   bool m_completed = false;
   bool m_reducedMotion = false;
+  bool m_strata = false;
 };

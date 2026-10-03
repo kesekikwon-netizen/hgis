@@ -162,6 +162,10 @@ void setGroup(QPalette& pal, QPalette::ColorGroup g, const Tokens& t, bool disab
   pal.setColor(g, QPalette::Mid, t.border);
   pal.setColor(g, QPalette::Dark, t.borderStrong);
   pal.setColor(g, QPalette::Shadow, t.border);
+  if (displayOptions().paperLook) {  // text links in clay; the stock look keeps Qt's blue
+    pal.setColor(g, QPalette::Link, t.ribbonActiveInk);
+    pal.setColor(g, QPalette::LinkVisited, t.ribbonActiveInk);
+  }
 }
 
 }  // namespace

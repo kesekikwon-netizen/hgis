@@ -6,16 +6,18 @@
 #include <QFrame>
 #include <QMetaType>
 
+class QHBoxLayout;
 class QLabel;
+class QLayout;
 class QNetworkAccessManager;
 class QPushButton;
 class QVBoxLayout;
 
 Q_DECLARE_METATYPE(AccountStatus::Source)
 
-// 「연결 상태」 card of the home page: one row per data source (dot · name · 설정됨 / 설정
-// 필요 · 「설정」), problem sentences for proj.db and the survey folder only when something
-// is wrong, and the click-only internet check. No secret value is ever shown; the state
+// 「연결 상태」 strip under the home cards: one cell per data source, side by side (dot · name ·
+// 설정됨 / 설정 필요 · 「설정」), so all five are in view without scrolling; problem sentences for
+// proj.db and the survey folder only when something is wrong, and the click-only internet check. No secret value is ever shown; the state
 // says only whether a key or account exists on this PC (「연결됨」 would be a claim about the
 // network, which nothing here tests). 「설정」 emits configureRequested for the owner to open
 // the matching dialog. Nothing runs on the network until the user presses 「인터넷 확인」.
@@ -35,9 +37,9 @@ signals:
 
 private:
   void checkInternet();
-  void clear(QVBoxLayout* layout);
+  void clear(QLayout* layout);
 
-  QVBoxLayout* m_rows = nullptr;
+  QHBoxLayout* m_rows = nullptr;
   QVBoxLayout* m_problems = nullptr;
   QLabel* m_internet = nullptr;
   QPushButton* m_internetButton = nullptr;

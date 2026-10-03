@@ -91,6 +91,7 @@ private slots:
   void hoverTileIsDarker();
   void pixmapHonoursDevicePixelRatio();
   void paperLook_tilesFollowTokens();
+  void paperLook_appIconKeepsItsShape();
   void mockupIconIsCrispAtDpr150();
   void paintIsCrispAtDpr150();
   void kaIconsUsesMockupAndFallsBackToOutline();
@@ -256,6 +257,22 @@ void TestIconsMockup::paperLook_tilesFollowTokens() {
   VERIFY_NEAR(on, 1, 16, QColor(0xB5, 0x57, 0x3A), 10);
   VERIFY_NEAR(on, 4, 16, QColor(0xF4, 0xE3, 0xDA), 6);
   VERIFY_NEAR(tileOf(QIcon::Off), 4, 16, kTile, 6);
+}
+
+// 새 모양 shows the same app icon (trowel over contours) in clay; the stock look keeps the navy one.
+void TestIconsMockup::paperLook_appIconKeepsItsShape() {
+  const auto card = [] { return KaIcons::appIcon().pixmap(QSize(64, 64), 1.0).toImage().pixelColor(10, 10); };
+  const QColor navy = card();
+  KaTheme::DisplayOptions paper;
+  paper.paperLook = true;
+  KaTheme::setDisplayOptions(nullptr, paper);
+  const QColor clay = card();
+  KaTheme::setDisplayOptions(nullptr, KaTheme::DisplayOptions());
+  QVERIFY2(navy.blue() > navy.red() + 40, qPrintable(navy.name()));
+  QVERIFY2(clay.red() > clay.blue() + 60, qPrintable(clay.name()));
+  const QImage stock(QStringLiteral(":/ka-hgis/app-icon.png")), recoloured(QStringLiteral(":/ka-hgis/app-icon-paper.png"));
+  QVERIFY(!stock.isNull() && !recoloured.isNull());
+  QCOMPARE(recoloured.convertToFormat(QImage::Format_Alpha8), stock.convertToFormat(QImage::Format_Alpha8));
 }
 
 QTEST_MAIN(TestIconsMockup)

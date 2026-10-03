@@ -2,5 +2,7 @@
   <!-- Approved transparent master: D33E7D2385EF2E16464962A3DF905639C7300D8BCA8ACFAB801E462B8E978EB3 -->
   <qresource prefix="/ka-hgis">
     <file alias="app-icon.png">ka-hgis-app.png</file>
+    <!-- 새 모양: the same picture recoloured pixel by pixel (clay card, ivory blade, slate handle). -->
+    <file alias="app-icon-paper.png">ka-hgis-app-paper.png</file>
   </qresource>
 </RCC>

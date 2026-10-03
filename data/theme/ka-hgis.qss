@@ -1262,9 +1262,11 @@ QLabel#startStepDone { color: @ok@; }
 QLabel#startStepTodo { color: @inkMuted@; }
 QFrame#startSubmitReady { background: @altRow@; border: 1px solid @border@; border-radius: 8px; padding: 6px 12px; }
 QLabel#startConnName { color: @ink@; font-size: 13px; }
+QLabel#startConnState { font-size: 12px; }
 QLabel#startConnState[ready="true"] { color: @ok@; font-weight: 700; }
 QLabel#startConnState[ready="false"] { color: @inkMuted@; }
-QWidget#startConnRow { border-bottom: 1px solid @desk@; }
+QPushButton#startEnvInternet { min-height: 32px; padding: 0 12px; }
+QFrame#startConnRow { background: @altRow@; border-radius: 8px; }
 QPushButton#startConnectionSetup { min-height: 32px; min-width: 56px; padding: 0 12px; font-weight: 700;
   border: 1px solid @border@; border-radius: 6px; background: @surface@; }
 QPushButton#startConnectionSetup:enabled:hover { background: @hover@; border-color: @borderStrong@; }

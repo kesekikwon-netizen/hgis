@@ -3,6 +3,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QEvent>
+#include <QIcon>
 #include <QMenu>
 #include <QSettings>
 #include <QWidget>
@@ -59,6 +60,15 @@ private:
   }
 };
 
+// The window icon follows the look: the application's, and every window that set its own.
+void refreshWindowIcons() {
+  const QIcon icon(appIconPath());
+  QApplication::setWindowIcon(icon);
+  for (QWidget* window : QApplication::topLevelWidgets())
+    if (window->testAttribute(Qt::WA_SetWindowIcon))
+      window->setWindowIcon(icon);
+}
+
 }  // namespace
 
 DisplayOptions savedDisplayOptions() {
@@ -91,6 +101,8 @@ void applySavedDisplayOptions(QApplication* app) {
   if (options == displayOptions())
     return;  // stock look: keep the sheet apply() installed
   setDisplayOptions(app, options);
+  if (app)
+    refreshWindowIcons();
 }
 
 QMenu* createDisplayOptionsMenu(QWidget* parent) {
@@ -124,6 +136,7 @@ QMenu* createDisplayOptionsMenu(QWidget* parent) {
     options.largeText = large->isChecked();
     saveDisplayOptions(options);
     setDisplayOptions(application(), options);
+    refreshWindowIcons();
   };
   QObject::connect(paper, &QAction::triggered, menu, choose);
   QObject::connect(contrast, &QAction::triggered, menu, choose);

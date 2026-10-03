@@ -115,6 +115,8 @@ QString titleFontFamilies();
 int titleFontWeight();
 // Width of a push button's lower edge: 2 px in the stock look, 1 px (flat) in 새 모양.
 int buttonEdgeWidth();
+// Resource path of the app icon in the look's colours (the same trowel over contours in both).
+QString appIconPath();
 // WCAG 2 contrast between two opaque colors: 1.0 (same) to 21.0 (black on white).
 double contrastRatio(const QColor& first, const QColor& second);
 

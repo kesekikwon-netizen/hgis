@@ -63,6 +63,7 @@ private slots:
   void fileCrsChoiceMovesThePoints();
   void surveyAreaSwatchesAreReadable();
   void surveyAreaDialogIsCompact();
+  void surveyAreaStartIsTheThemedMainButton();
   void surveyAreaToContinueIsTheSurveysOwn();
   void demDialogOffersTheViewFit();
   void gridOriginButtonMovesTheGrid();
@@ -153,6 +154,23 @@ void TestSurveyPointDialogs::surveyAreaDialogIsCompact() {
   for (QPushButton* swatch : swatches) QCOMPARE(swatch->y(), swatches.first()->y());  // one row
   const QString out = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
   if (!out.isEmpty()) QVERIFY(dialog.grab().save(QDir(out).filePath(QStringLiteral("survey-area-dialog.png"))));
+}
+
+// The start button is the window's main button like every other window's: no colours of its own (the
+// theme's main-button rule paints it, so it follows 새 모양) and it stands before 「취소」.
+void TestSurveyPointDialogs::surveyAreaStartIsTheThemedMainButton() {
+  KaSurveyAreaDialog dialog(nullptr);
+  auto* start = dialog.findChild<QPushButton*>(QStringLiteral("surveyAreaStart"));
+  QVERIFY(start && start->isDefault());
+  QVERIFY2(start->styleSheet().isEmpty(), qPrintable(start->styleSheet()));
+  QPushButton* cancel = nullptr;
+  for (QPushButton* button : dialog.findChildren<QPushButton*>())
+    if (button->text() == QStringLiteral("취소")) cancel = button;
+  QVERIFY(cancel);
+  dialog.setAttribute(Qt::WA_DontShowOnScreen);
+  dialog.show();
+  QApplication::processEvents();
+  QVERIFY2(start->x() < cancel->x(), qPrintable(QStringLiteral("%1 %2").arg(start->x()).arg(cancel->x())));
 }
 
 // Without a window only the survey's own area is continued: never a user's file named 조사구역 opened

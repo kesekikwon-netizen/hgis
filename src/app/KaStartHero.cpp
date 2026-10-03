@@ -5,6 +5,7 @@
 #include "KaSplashPalette.h"
 #include "KaTheme.h"
 
+#include <QLabel>
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
@@ -30,14 +31,16 @@ void KaStartHero::resizeEvent(QResizeEvent* event) {
   m_texture = QPixmap();
 }
 
-// A look chosen in 「화면 보기」 arrives as a palette change: the band, its contour lines and the two
-// start buttons' glyphs are painted from tokens, so they are redone here.
+// A look chosen in 「화면 보기」 arrives as a palette change: the band, its contour lines, the logo and
+// the two start buttons' glyphs are painted from tokens, so they are redone here.
 void KaStartHero::changeEvent(QEvent* event) {
   QWidget::changeEvent(event);
   if (event->type() != QEvent::PaletteChange)
     return;
   m_texture = QPixmap();
   const auto& t = KaTheme::tokens();
+  if (auto* logo = findChild<QLabel*>(QStringLiteral("startHeroLogo")))
+    logo->setPixmap(KaIcons::appIcon().pixmap(QSize(48, 48), devicePixelRatioF()));
   if (auto* start = findChild<QPushButton*>(QStringLiteral("startNewBtn")))
     start->setIcon(KaIcons::icon(QStringLiteral("new"), t.heroButtonText));
   if (auto* open = findChild<QPushButton*>(QStringLiteral("startOpenBtn")))

@@ -85,4 +85,8 @@ int titleFontWeight() { return displayOptions().paperLook ? 500 : 700; }
 
 int buttonEdgeWidth() { return displayOptions().paperLook ? 1 : 2; }
 
+QString appIconPath() {
+  return displayOptions().paperLook ? QStringLiteral(":/ka-hgis/app-icon-paper.png") : QStringLiteral(":/ka-hgis/app-icon.png");
+}
+
 }  // namespace KaTheme

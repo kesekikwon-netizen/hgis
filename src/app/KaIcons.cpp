@@ -1037,8 +1037,8 @@ QPixmap glyphPixmap(const QString& id, const QColor& ink, int px, qreal dpr) {
 }
 
 QIcon appIcon() {
-  static const QIcon cached(QStringLiteral(":/ka-hgis/app-icon.png"));
-  return cached;
+  static const QIcon stock(QStringLiteral(":/ka-hgis/app-icon.png")), paper(QStringLiteral(":/ka-hgis/app-icon-paper.png"));
+  return KaTheme::displayOptions().paperLook ? paper : stock;  // the same picture in the look's colours
 }
 
 QIcon icon(const QString& id) {

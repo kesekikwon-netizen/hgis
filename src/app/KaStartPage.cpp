@@ -66,6 +66,9 @@ KaStartPage::KaStartPage(QWidget* parent) : QWidget(parent) {
   lower->addWidget(m_recentCard, 1);
   lower->addWidget(buildRightColumn(), 0);
   root->addLayout(lower, 1);
+  m_connection = new KaHomeConnectionCard(this);  // one row under both cards: the five sources in view at once
+  connect(m_connection, &KaHomeConnectionCard::configureRequested, this, &KaStartPage::configureRequested);
+  root->addWidget(m_connection);
   applyWindowMetrics();
   reload();
 }
@@ -178,8 +181,8 @@ QWidget* KaStartPage::buildHero() {
 }
 
 QWidget* KaStartPage::buildRightColumn() {
-  // 작업 순서 (≈200) + 연결 상태 5행 (≈250) exceed the 320 px left under a compact hero:
-  // the whole column scrolls (vertical bar only) instead of squeezing the cards.
+  // 작업 순서 (≈200) fits under a compact hero; on a shorter window the column scrolls
+  // (vertical bar only) instead of squeezing the card.
   auto* scroll = new QScrollArea(this);
   scroll->setObjectName(QStringLiteral("startRightColumn"));
   scroll->setWidgetResizable(true);
@@ -194,9 +197,6 @@ QWidget* KaStartPage::buildRightColumn() {
   col->setSpacing(16);
   m_guide = new KaHomeGuideCard(inner);
   col->addWidget(m_guide);
-  m_connection = new KaHomeConnectionCard(inner);
-  connect(m_connection, &KaHomeConnectionCard::configureRequested, this, &KaStartPage::configureRequested);
-  col->addWidget(m_connection);
   col->addStretch(1);
   scroll->setWidget(inner);
   scroll->setFixedWidth(kRightNarrow);

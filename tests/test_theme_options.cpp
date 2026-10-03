@@ -200,6 +200,7 @@ void TestThemeOptions::paperLook_isOptInAndKeepsStock() {
   QCOMPARE(stock.primary, stock.accent);
   QCOMPARE(stock.chrome, stock.surface);
   QCOMPARE(stock.tile, QColor(0xE4, 0xEA, 0xED));
+  const QColor stockLink = qApp->palette().color(QPalette::Link);
   KaTheme::DisplayOptions paper;
   paper.paperLook = true;
   KaTheme::setDisplayOptions(qApp, paper);
@@ -212,7 +213,9 @@ void TestThemeOptions::paperLook_isOptInAndKeepsStock() {
   QCOMPARE(t.tile, QColor(0xF0, 0xEE, 0xE6));
   QCOMPARE(t.sky1, t.accent);  // the legacy aliases follow the look
   QVERIFY(qApp->styleSheet().contains(t.chrome.name()));
+  QCOMPARE(qApp->palette().color(QPalette::Link), t.ribbonActiveInk);  // text links in clay, not Qt's blue
   KaTheme::setDisplayOptions(qApp, KaTheme::DisplayOptions());
+  QCOMPARE(qApp->palette().color(QPalette::Link), stockLink);
   QCOMPARE(KaTheme::tokens().accent, stock.accent);
   QCOMPARE(KaTheme::tokens().tile, stock.tile);
   QVERIFY(!qApp->styleSheet().contains(t.chrome.name()));

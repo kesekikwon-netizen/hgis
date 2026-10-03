@@ -763,11 +763,11 @@ int KaApplication::run(int argc, char** argv) {
   app.setStyle(QStringLiteral("Fusion"));
   app.setWindowIcon(KaIcons::appIcon());
   KaTheme::apply(&app);
-  KaTheme::applySavedDisplayOptions(&app);  // opt-in 고대비·큰 글씨 from 「화면 보기」; the default stays stock Strata
+  KaTheme::applySavedDisplayOptions(&app);  // the saved 「화면 보기」 choices; 새 모양 is on until the user picks
 
   std::unique_ptr<KaStartupSplash> splash;
   if (!autoQa) {
-    splash = std::make_unique<KaStartupSplash>();
+    splash = std::make_unique<KaStartupSplash>(nullptr, KaStartupSplash::ReadingDurationMs, KaTheme::displayOptions().paperLook);
     splash->show();
     // Present the notice before the synchronous SDK initialization. Its 3 s reading
     // time counts from here; the main window opens once both are done.
