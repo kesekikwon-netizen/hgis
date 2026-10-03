@@ -434,6 +434,8 @@ add_executable(ka-hgis
   src/app/KaApplication.cpp
   src/app/KaStartupSplash.cpp
   src/app/KaStartupSplash.h
+  src/app/KaSplashStrata.cpp
+  src/app/KaSplashStrata.h
   src/app/KaSplashPalette.h
   src/app/KaSplashCredits.cpp
   src/app/KaSplashCredits.h
@@ -1108,6 +1110,7 @@ if(KA_HGIS_BUILD_TESTS)
     src/app/KaThemeStyle.cpp
   )
   add_executable(ka_icon_mockup_tests
+    data/theme/icons.qrc
     tests/test_icons_mockup.cpp
     src/app/KaIcons.cpp
     src/app/KaTheme.cpp
@@ -1426,7 +1429,8 @@ if(KA_HGIS_BUILD_TESTS)
   add_executable(ka_startup_splash_tests tests/test_startup_splash.cpp
     data/theme/icons.qrc
     src/app/KaStartupSplash.cpp src/app/KaStartupSplash.h
-    src/app/KaSplashPalette.h src/app/KaSplashCredits.cpp src/app/KaSplashCredits.h src/app/KaSplashArt.cpp src/app/KaSplashArt.h)
+    src/app/KaSplashPalette.h src/app/KaSplashCredits.cpp src/app/KaSplashCredits.h src/app/KaSplashArt.cpp src/app/KaSplashArt.h
+    src/app/KaSplashStrata.cpp src/app/KaSplashStrata.h)
   target_include_directories(ka_startup_splash_tests PRIVATE src)
   target_link_libraries(ka_startup_splash_tests PRIVATE Qt6::Test Qt6::Widgets)
   set_target_properties(ka_startup_splash_tests PROPERTIES WIN32_EXECUTABLE FALSE)
@@ -1798,7 +1802,9 @@ endif()
 
 # ---- [P1 design-system] KaChip + KaThemeFonts (append-only block; design section 3, P1) ----
 set(_ka_p1_chip_sources ${CMAKE_SOURCE_DIR}/src/app/KaChip.cpp ${CMAKE_SOURCE_DIR}/src/app/KaChip.h)
-set(_ka_p1_font_sources ${CMAKE_SOURCE_DIR}/src/app/KaThemeFonts.cpp ${CMAKE_SOURCE_DIR}/src/app/KaThemeFonts.h)
+# KaThemePaper (새 모양 tokens) rides along: every target that compiles KaTheme.cpp needs it too.
+set(_ka_p1_font_sources ${CMAKE_SOURCE_DIR}/src/app/KaThemeFonts.cpp ${CMAKE_SOURCE_DIR}/src/app/KaThemeFonts.h
+  ${CMAKE_SOURCE_DIR}/src/app/KaThemePaper.cpp ${CMAKE_SOURCE_DIR}/src/app/KaThemePaper.h)
 target_sources(ka-hgis PRIVATE ${_ka_p1_chip_sources} ${_ka_p1_font_sources})
 # Bundled IBM Plex (OFL) travels next to the executable like the QSS copy; only files that exist.
 file(GLOB _ka_p1_font_files "${CMAKE_SOURCE_DIR}/data/fonts/*.ttf" "${CMAKE_SOURCE_DIR}/data/fonts/LICENSE-*.txt")

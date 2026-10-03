@@ -6,16 +6,19 @@
 #include <QFrame>
 #include <QMetaType>
 
+class QBoxLayout;
+class QHBoxLayout;
 class QLabel;
+class QLayout;
 class QNetworkAccessManager;
 class QPushButton;
 class QVBoxLayout;
 
 Q_DECLARE_METATYPE(AccountStatus::Source)
 
-// 「연결 상태」 card of the home page: one row per data source (dot · name · 설정됨 / 설정
-// 필요 · 「설정」), problem sentences for proj.db and the survey folder only when something
-// is wrong, and the click-only internet check. No secret value is ever shown; the state
+// 「연결 상태」 strip under the home cards: one cell per data source, side by side (dot · name ·
+// 설정됨 / 설정 필요 · 「설정」), so all five are in view without scrolling; problem sentences for
+// proj.db and the survey folder only when something is wrong, and the click-only internet check. No secret value is ever shown; the state
 // says only whether a key or account exists on this PC (「연결됨」 would be a claim about the
 // network, which nothing here tests). 「설정」 emits configureRequested for the owner to open
 // the matching dialog. Nothing runs on the network until the user presses 「인터넷 확인」.
@@ -26,6 +29,9 @@ public:
   // Runs the local checks again (cheap; no network).
   void refresh();
   void setInputs(const KaHomeStatus::Inputs& inputs);
+  // Moves the card into layout: as the strip (one row of five cells, the last item), or for a short
+  // window into the narrow column with the cells stacked (second item, under 작업 순서).
+  void placeIn(QBoxLayout* layout, bool strip);
   // Row wording: 「VWorld 키」, 「수치지형도 계정」, 「문화재 인트라넷」; the rest keep Entry::label.
   static QString displayName(const AccountStatus::Entry& entry);
   static QString stateText(bool ready);  // 「설정됨」 / 「설정 필요」
@@ -35,9 +41,12 @@ signals:
 
 private:
   void checkInternet();
-  void clear(QVBoxLayout* layout);
+  void clear(QLayout* layout);
 
-  QVBoxLayout* m_rows = nullptr;
+  QHBoxLayout* m_rows = nullptr;
+  QBoxLayout* m_home = nullptr;
+  QLabel* m_lock = nullptr;
+  QLabel* m_privacy = nullptr;
   QVBoxLayout* m_problems = nullptr;
   QLabel* m_internet = nullptr;
   QPushButton* m_internetButton = nullptr;

@@ -10,6 +10,7 @@
 #include "core/CadDrawingStore.h"
 #include "core/GeorefService.h"
 #include "core/HeritageImport.h"
+#include "core/LayerOps.h"
 #include "core/LayerRole.h"
 
 #include <qgsapplication.h>
@@ -115,6 +116,8 @@ class TestCadLayers : public QObject {
       QCOMPARE(LayerRole::stored(layer), LayerRole::Kind::Reference);
       QVERIFY(layer->customProperty(QStringLiteral("ka_hgis/imported_reference")).toBool());
       QCOMPARE(layer->customProperty(drawingProperty()).toString(), kId);
+      // 자석: a drawing is brought in to be traced, so its lines take the magnet; its text points do not.
+      QCOMPARE(LayerOps::isSnapSourceLayer(layer), layer->geometryType() != Qgis::GeometryType::Point);
     }
     QVERIFY(project.mapLayersByName(QStringLiteral("entities")).isEmpty());
   }

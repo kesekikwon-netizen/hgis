@@ -3,6 +3,7 @@
 #include "KaSplashArt.h"
 #include "KaSplashCredits.h"
 #include "KaSplashPalette.h"
+#include "KaSplashStrata.h"
 
 #include <QCoreApplication>
 #include <QFontMetricsF>
@@ -92,11 +93,12 @@ QString KaStartupSplash::creditsText() {
          QStringLiteral("\n자세한 저작권 안내는 앱의 더보기 → 정보에서 다시 볼 수 있습니다.");
 }
 
-KaStartupSplash::KaStartupSplash(QWidget* parent, int readingDurationMs)
+KaStartupSplash::KaStartupSplash(QWidget* parent, int readingDurationMs, bool strata)
     : QWidget(parent, Qt::SplashScreen | Qt::FramelessWindowHint),
       m_readingDurationMs(qMax(1, readingDurationMs)),
-      m_icon(QStringLiteral(":/ka-hgis/app-icon.png")),
-      m_reducedMotion(reducedMotionRequested()) {
+      m_icon(strata ? QStringLiteral(":/ka-hgis/app-icon-paper.png") : QStringLiteral(":/ka-hgis/app-icon.png")),
+      m_reducedMotion(reducedMotionRequested()),
+      m_strata(strata) {
   setObjectName(QStringLiteral("startupSplash"));
   setWindowTitle(QStringLiteral("Strata · 필드고고학 GIS 시작 안내"));
   setAttribute(Qt::WA_TranslucentBackground);
@@ -173,7 +175,9 @@ void KaStartupSplash::tick() {
     return;
   const qint64 elapsed = m_readingClock.elapsed();
   m_progress = int(qMin<qint64>(1000, elapsed * 1000 / m_readingDurationMs));
-  if (!m_reducedMotion) {
+  if (!m_reducedMotion && m_strata) {
+    update();  // the section draws itself in, then the progress line fills
+  } else if (!m_reducedMotion) {
     const Layout l = layoutFor(QRectF(rect()));
     update(l.dots.toAlignedRect().adjusted(-4, -4, 4, 4));
   }
@@ -201,7 +205,30 @@ const QPixmap& KaStartupSplash::staticLayer() {
   return m_static;
 }
 
+// 새 모양: the whole card is one picture (KaSplashStrata). Nothing is cached, because the section
+// draws itself in once the app is ready.
+void KaStartupSplash::paintStrata() {
+  const Layout l = layoutFor(QRectF(rect()));
+  QPainter painter(this);
+  painter.setCompositionMode(QPainter::CompositionMode_Source);
+  painter.fillRect(rect(), Qt::transparent);
+  painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+  painter.setRenderHint(QPainter::Antialiasing);
+  KaSplashArt::paintShadow(painter, l.card, kRadius);
+  KaSplashStrata::Frame frame;
+  frame.seconds = flowSeconds();
+  frame.still = m_reducedMotion;
+  frame.progress = m_progress / 1000.0;
+  frame.status = statusText();
+  frame.version = QCoreApplication::applicationVersion();
+  KaSplashStrata::paint(painter, l.card, kRadius, m_icon, frame);
+}
+
 void KaStartupSplash::paintEvent(QPaintEvent*) {
+  if (m_strata) {
+    paintStrata();
+    return;
+  }
   const QPixmap& layer = staticLayer();
   const Layout l = layoutFor(QRectF(rect()));
   QPainter painter(this);

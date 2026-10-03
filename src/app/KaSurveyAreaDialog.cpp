@@ -67,7 +67,6 @@ KaSurveyAreaDialog::KaSurveyAreaDialog(QWidget* parent) : QDialog(parent) {
 }
 
 void KaSurveyAreaDialog::setupUi() {
-  const KaTheme::Tokens& theme = KaTheme::tokens();
   auto* mainLayout = new QVBoxLayout(this);
   mainLayout->setSpacing(12);
   mainLayout->setContentsMargins(16, 16, 16, 16);
@@ -83,6 +82,7 @@ void KaSurveyAreaDialog::setupUi() {
   for (int i = 0; i < m_paletteColors.size(); ++i) {
     auto* btn = new QPushButton(m_colorNames[i], this);
     btn->setObjectName(QStringLiteral("surveyAreaColor"));
+    btn->setAutoDefault(false);  // Enter and the main-button paint stay with 「그리기 시작」
     btn->setFixedSize(52, 28);
     btn->setCursor(Qt::PointingHandCursor);
     connect(btn, &QPushButton::clicked, this, [this, i]() { selectColorIndex(i); });
@@ -98,6 +98,7 @@ void KaSurveyAreaDialog::setupUi() {
   for (const auto& p : presets) {
     auto* btn = new QPushButton(p.first, this);
     btn->setFixedHeight(28);
+    btn->setAutoDefault(false);
     btn->setStyleSheet(QStringLiteral("QPushButton { min-height: 0px; padding: 2px 8px; }"));
     btn->setCheckable(true);
     btn->setChecked(p.second == 1.5);
@@ -122,21 +123,18 @@ void KaSurveyAreaDialog::setupUi() {
 
   auto* btnLayout = new QHBoxLayout();
   btnLayout->addStretch();
+  // The main button first, then 「취소」, like the other windows' button rows.
+  auto* btnStart = new QPushButton(QStringLiteral("그리기 시작 (Enter)"), this);
+  btnStart->setObjectName(QStringLiteral("surveyAreaStart"));
+  btnStart->setDefault(true);  // the theme's main-button rule colours it
+  btnStart->setMinimumSize(130, 36);
+  btnStart->setMaximumHeight(36);
+  connect(btnStart, &QPushButton::clicked, this, &QDialog::accept);
+  btnLayout->addWidget(btnStart);
   auto* btnCancel = new QPushButton(QStringLiteral("취소"), this);
   btnCancel->setFixedSize(80, 36);
   connect(btnCancel, &QPushButton::clicked, this, &QDialog::reject);
   btnLayout->addWidget(btnCancel);
-  auto* btnStart = new QPushButton(QStringLiteral("그리기 시작 (Enter)"), this);
-  btnStart->setObjectName(QStringLiteral("surveyAreaStart"));
-  btnStart->setDefault(true);
-  btnStart->setMinimumSize(130, 36);
-  btnStart->setMaximumHeight(36);
-  btnStart->setStyleSheet(QStringLiteral(
-      "QPushButton { background-color: %1; color: %2; font-weight: bold; font-size: 13px; border-radius: 4px; }"
-      "QPushButton:hover { background-color: %3; }")
-                              .arg(theme.sky1.name(), theme.railText.name(), theme.sky2.name()));
-  connect(btnStart, &QPushButton::clicked, this, &QDialog::accept);
-  btnLayout->addWidget(btnStart);
   mainLayout->addLayout(btnLayout);
 }
 

@@ -41,6 +41,10 @@ private slots:
   void displayMenuSavesAndRestyles();
   void loaderPrefersEmbeddedAndRejectsUnknownTokens();
   void sheetHygiene();
+  void paperLook_isOptInAndKeepsStock();
+  void paperLook_inksStayReadable();
+  void paperLook_sheetResolves();
+  void paperLook_menuEntryAndStartupDefault();
 
 private:
   QTemporaryDir m_settings;
@@ -186,6 +190,108 @@ void TestThemeOptions::sheetHygiene() {
   QVERIFY(sheet.contains(QStringLiteral("QProgressBar::chunk")));
   QVERIFY(KaTheme::unresolvedTokens(KaTheme::resolvedStyleSheet(sheet)).isEmpty());
   QVERIFY(!sheet.contains(QStringLiteral("url(")));
+}
+
+// 새 모양 (docs/intent/2026-10-03-ui-redesign-dialogs-color-motion.md): paper ground, slate ink and one
+// clay accent. It is an option like 고대비: off, every stock token keeps its value.
+void TestThemeOptions::paperLook_isOptInAndKeepsStock() {
+  QVERIFY(!KaTheme::DisplayOptions().paperLook);
+  const KaTheme::Tokens stock = KaTheme::tokens();
+  QCOMPARE(stock.primary, stock.accent);
+  QCOMPARE(stock.chrome, stock.surface);
+  QCOMPARE(stock.tile, QColor(0xE4, 0xEA, 0xED));
+  const QColor stockLink = qApp->palette().color(QPalette::Link);
+  KaTheme::DisplayOptions paper;
+  paper.paperLook = true;
+  KaTheme::setDisplayOptions(qApp, paper);
+  const KaTheme::Tokens t = KaTheme::tokens();  // a copy: the active set changes below
+  QCOMPARE(t.accent, QColor(0xB5, 0x57, 0x3A));
+  QCOMPARE(t.ink, QColor(0x14, 0x14, 0x13));
+  QCOMPARE(t.desk, QColor(0xF5, 0xF4, 0xED));
+  QCOMPARE(t.primary, QColor(0x14, 0x14, 0x13));
+  QCOMPARE(t.chrome, QColor(0xFA, 0xF9, 0xF5));
+  QCOMPARE(t.tile, QColor(0xF0, 0xEE, 0xE6));
+  QCOMPARE(t.sky1, t.accent);  // the legacy aliases follow the look
+  QVERIFY(qApp->styleSheet().contains(t.chrome.name()));
+  QCOMPARE(qApp->palette().color(QPalette::Link), t.ribbonActiveInk);  // text links in clay, not Qt's blue
+  KaTheme::setDisplayOptions(qApp, KaTheme::DisplayOptions());
+  QCOMPARE(qApp->palette().color(QPalette::Link), stockLink);
+  QCOMPARE(KaTheme::tokens().accent, stock.accent);
+  QCOMPARE(KaTheme::tokens().tile, stock.tile);
+  QVERIFY(!qApp->styleSheet().contains(t.chrome.name()));
+  KaTheme::DisplayOptions glare;  // 고대비 alone: the home button still follows that profile's hover and pressed
+  glare.highContrast = true;
+  KaTheme::setDisplayOptions(qApp, glare);
+  QVERIFY(KaTheme::tokens().heroButtonHover == KaTheme::tokens().hover && KaTheme::tokens().heroButtonPressed == KaTheme::tokens().pressed);
+}
+
+void TestThemeOptions::paperLook_inksStayReadable() {
+  for (const bool high : {false, true}) {
+    KaTheme::DisplayOptions options;
+    options.paperLook = true;
+    options.highContrast = high;
+    const KaTheme::Tokens t = KaTheme::tokensFor(options);
+    QVERIFY(luminance(t.hover) > luminance(t.selected));
+    QVERIFY(luminance(t.selected) > luminance(t.pressed));
+    for (const QColor& wash : {t.hover, t.selected, t.pressed, t.stripe, t.altRow, t.chrome, t.desk}) {
+      QVERIFY2(contrast(t.ink, wash) >= 4.5, qPrintable(wash.name()));
+      QVERIFY2(contrast(t.inkMuted, wash) >= 4.5, qPrintable(wash.name()));
+    }
+    QVERIFY(contrast(t.inkDisabled, t.disabledSurface) >= 4.5);
+    QVERIFY2(contrast(t.primaryText, t.primary) >= 4.5, "the main button's label");
+    QVERIFY2(contrast(t.surface, t.accent) >= 4.5, "white text on the clay accent");
+    QVERIFY2(contrast(t.ribbonActiveInk, t.chrome) >= 4.5, "chosen ribbon label");
+    QVERIFY2(contrast(t.ribbonGroupInk, t.chrome) >= 4.5, "ribbon group names");
+    QVERIFY2(contrast(t.glyph, t.tile) >= 4.5, "ribbon glyph on its tile");
+    QVERIFY2(contrast(t.glyphOn, t.tileOn) >= 4.5, "chosen glyph on its tile");
+    QVERIFY2(contrast(t.tileOnBorder, t.tile) >= 3.0, "the chosen tile's border against a plain tile");
+    QVERIFY(contrast(t.ok, t.successSurface) >= 4.5);
+    QVERIFY(contrast(t.warn, t.warnSurface) >= 4.5);
+    QVERIFY(contrast(t.danger, t.dangerSurface) >= 4.5);
+    QVERIFY2(contrast(t.railText, t.rail) >= 4.5 && contrast(t.railMuted, t.rail) >= 4.5, "home hero text");
+    QVERIFY2(contrast(t.ink, t.progressFill) >= 4.5 && contrast(t.progressFill, t.surface) >= 3.0, "progress");
+    if (high) QVERIFY(contrast(t.border, t.surface) >= 3.0);
+  }
+}
+
+void TestThemeOptions::paperLook_sheetResolves() {
+  QCOMPARE(KaTheme::titleFontWeight(), 700);
+  QCOMPARE(KaTheme::buttonEdgeWidth(), 2);
+  KaTheme::DisplayOptions paper;
+  paper.paperLook = true;
+  KaTheme::setDisplayOptions(qApp, paper);
+  QVERIFY(KaTheme::unresolvedTokens(qApp->styleSheet()).isEmpty());
+  QCOMPARE(KaTheme::titleFontWeight(), 500);
+  QCOMPARE(KaTheme::buttonEdgeWidth(), 1);
+  QVERIFY(KaTheme::titleFontFamilies().startsWith(QStringLiteral("\"Noto Serif KR\"")));
+  QVERIFY(KaTheme::titleFontFamilies().endsWith(QStringLiteral("\"Malgun Gothic\"")));
+  // A main button's keyboard-focus ring is never the button's own colour.
+  const QString ringRule = QStringLiteral("QPushButton#btnAdjustDone:enabled:focus:!default { border-color: ");
+  const int ringAt = qApp->styleSheet().indexOf(ringRule);
+  QVERIFY(ringAt >= 0);
+  QVERIFY(KaTheme::contrastRatio(QColor(qApp->styleSheet().mid(ringAt + ringRule.size(), 7)), KaTheme::tokens().primary) >= 3.0);
+}
+
+// 「화면 보기」 carries the look as a third tick. Until the user has ticked or unticked it once, the
+// app starts in 새 모양 (the look on trial); an explicit choice is remembered either way.
+void TestThemeOptions::paperLook_menuEntryAndStartupDefault() {
+  QSettings().remove(QStringLiteral("ui/paperLook"));
+  QVERIFY(!KaTheme::savedDisplayOptions().paperLook);  // nothing saved: the stored options stay stock
+  KaTheme::applySavedDisplayOptions(qApp);
+  QVERIFY2(KaTheme::displayOptions().paperLook, "first start shows the new look");
+  QWidget host;
+  QMenu* menu = KaTheme::createDisplayOptionsMenu(&host);
+  auto* look = menu->findChild<QAction*>(QStringLiteral("actionPaperLook"));
+  QVERIFY(look && look->isCheckable());
+  emit menu->aboutToShow();
+  QVERIFY(look->isChecked());
+  look->trigger();  // untick
+  QVERIFY(!KaTheme::displayOptions().paperLook);
+  QVERIFY(QSettings().contains(QStringLiteral("ui/paperLook")));
+  KaTheme::applySavedDisplayOptions(qApp);
+  QVERIFY2(!KaTheme::displayOptions().paperLook, "an explicit off survives the next start");
+  look->trigger();  // tick again
+  QVERIFY(KaTheme::displayOptions().paperLook && KaTheme::savedDisplayOptions().paperLook);
 }
 
 QTEST_MAIN(TestThemeOptions)

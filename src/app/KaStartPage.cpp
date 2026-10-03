@@ -66,6 +66,8 @@ KaStartPage::KaStartPage(QWidget* parent) : QWidget(parent) {
   lower->addWidget(m_recentCard, 1);
   lower->addWidget(buildRightColumn(), 0);
   root->addLayout(lower, 1);
+  m_connection = new KaHomeConnectionCard(this);  // applyWindowMetrics puts it under both cards or into the column
+  connect(m_connection, &KaHomeConnectionCard::configureRequested, this, &KaStartPage::configureRequested);
   applyWindowMetrics();
   reload();
 }
@@ -110,7 +112,7 @@ QWidget* KaStartPage::buildHero() {
   actions->setSpacing(12);
   auto* btnNew = new QPushButton(QStringLiteral("새 조사"), hero);
   btnNew->setObjectName(QStringLiteral("startNewBtn"));
-  btnNew->setIcon(KaIcons::icon(QStringLiteral("new"), t.rail));
+  btnNew->setIcon(KaIcons::icon(QStringLiteral("new"), t.heroButtonText));
   btnNew->setIconSize(QSize(18, 18));
   auto* btnOpen = new QPushButton(QStringLiteral("조사 열기"), hero);
   btnOpen->setObjectName(QStringLiteral("startOpenBtn"));
@@ -178,8 +180,7 @@ QWidget* KaStartPage::buildHero() {
 }
 
 QWidget* KaStartPage::buildRightColumn() {
-  // 작업 순서 (≈200) + 연결 상태 5행 (≈250) exceed the 320 px left under a compact hero:
-  // the whole column scrolls (vertical bar only) instead of squeezing the cards.
+  // 작업 순서, and 연결 상태 on a short window: the column scrolls (vertical bar only) instead of squeezing them.
   auto* scroll = new QScrollArea(this);
   scroll->setObjectName(QStringLiteral("startRightColumn"));
   scroll->setWidgetResizable(true);
@@ -194,9 +195,6 @@ QWidget* KaStartPage::buildRightColumn() {
   col->setSpacing(16);
   m_guide = new KaHomeGuideCard(inner);
   col->addWidget(m_guide);
-  m_connection = new KaHomeConnectionCard(inner);
-  connect(m_connection, &KaHomeConnectionCard::configureRequested, this, &KaStartPage::configureRequested);
-  col->addWidget(m_connection);
   col->addStretch(1);
   scroll->setWidget(inner);
   scroll->setFixedWidth(kRightNarrow);
@@ -207,6 +205,8 @@ QWidget* KaStartPage::buildRightColumn() {
 void KaStartPage::applyWindowMetrics() {
   if (m_hero) m_hero->setFixedHeight(heroHeightFor(window()->height()));
   if (m_rightColumn) m_rightColumn->setFixedWidth(rightColumnWidthFor(window()->width()));
+  const bool strip = window()->height() >= kCompactWindowHeight;  // 연결 상태: one row under both cards; a short window (1366x768) keeps 최근 조사 its rows
+  if (m_connection && m_rightColumn) m_connection->placeIn(qobject_cast<QBoxLayout*>(strip ? layout() : m_rightColumn->widget()->layout()), strip);
 }
 
 void KaStartPage::resizeEvent(QResizeEvent* event) {

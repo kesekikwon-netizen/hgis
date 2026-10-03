@@ -18,6 +18,24 @@ namespace {
 const char* const kUseWords[] = {"목적", "외부", "반출", "제3자", "제공", "배포", "공개",
                                  "복제", "유출", "게재", "인쇄", "도면", "보고서", "상업"};
 
+// The site's text can arrive without a single space, and a label cannot wrap such a line: it widened
+// the 680 px download window to fit it. A zero-width break after every 16 characters of an unbroken
+// run lets it wrap; the visible characters stay verbatim.
+QString breakable(const QString& text) {
+  QString out;
+  int run = 0;
+  for (const QChar c : text) {
+    if (c.isSpace()) {
+      run = 0;
+    } else if (++run > 16) {
+      out += QChar(0x200B);
+      run = 1;
+    }
+    out += c;
+  }
+  return out;
+}
+
 }  // namespace
 
 QString HeritagePledge::preDisclosure() {
@@ -51,7 +69,7 @@ QString HeritagePledge::noticeAfterAgreement(const QString& termsText) {
   QString text = QStringLiteral("서약서에 자동 동의했습니다. 원문은 조사폴더 주변유적/receipts 에 남습니다.");
   if (lines.isEmpty())
     return text + QStringLiteral(" 이용 범위 문장을 찾지 못했으니 원문을 확인하세요.");
-  return text + QStringLiteral("\n서약 요지(원문 그대로): ") + lines.join(QStringLiteral(" / "));
+  return text + QStringLiteral("\n서약 요지(원문 그대로): ") + breakable(lines.join(QStringLiteral(" / ")));
 }
 
 void HeritagePledge::markIntranetLayer(QgsMapLayer* layer, HeritageDataset dataset,

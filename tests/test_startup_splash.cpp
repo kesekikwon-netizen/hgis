@@ -1,10 +1,12 @@
 #include "app/KaSplashCredits.h"
+#include "app/KaSplashStrata.h"
 #include "app/KaStartupSplash.h"
 
 #include <QApplication>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QImage>
+#include <QPainter>
 #include <QSignalSpy>
 #include <QTimer>
 #include <QtTest>
@@ -203,6 +205,63 @@ private slots:
     QCOMPARE(ready.count(), 0);
     QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 4000);
     saveFrame(splash, QStringLiteral("startup-final.png"));
+  }
+
+  // 새 모양 notice: the app is busy until it is ready, so the strata, the name and the two notice
+  // lines are in the first frame, and the notice ink reads on the bedrock.
+  void strataNoticeShowsSectionAndReadableNoticesFromTheFirstFrame() {
+    KaStartupSplash splash(nullptr, 3000, true);
+    splash.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&splash));
+    saveFrame(splash, QStringLiteral("startup-strata-first.png"));
+    const QImage frame = splash.grab().toImage();
+    const QRectF card = splash.cardRect();
+    const double unit = card.height() / 400.0;
+    const double dpr = frame.devicePixelRatio();
+    const auto at = [&](double x, double y) { return frame.pixelColor(int((card.left() + x * unit) * dpr), int((card.top() + y * unit) * dpr)); };
+    QCOMPARE(at(672, 380), KaSplashStrata::bedrock());  // beside the notice lines
+    QVERIFY(inkContrast(KaSplashStrata::noticeInk(), KaSplashStrata::bedrock()) >= 4.5);
+    QCOMPARE(at(350, 20), KaSplashStrata::paper());
+    QVERIFY2(at(350, 300) != KaSplashStrata::paper() && at(350, 300) != KaSplashStrata::bedrock(), "a stratum between them");
+  }
+
+  // Once the app is ready the pit, the ground line and the control point come in that order and
+  // stay; reduced motion shows the finished picture without waiting.
+  void strataTimelineRunsInOrderAndReducedMotionSkipsIt() {
+    QCOMPARE(KaSplashStrata::pitReveal(0.0), 0.0);
+    QCOMPARE(KaSplashStrata::groundLineReveal(0.2), 0.0);
+    QCOMPARE(KaSplashStrata::markerReveal(0.9), 0.0);
+    QVERIFY(KaSplashStrata::pitReveal(0.5) == 1.0 && KaSplashStrata::groundLineReveal(0.5) < 1.0);
+    QVERIFY(KaSplashStrata::groundLineReveal(1.0) == 1.0 && KaSplashStrata::markerReveal(1.0) < 1.0);
+    QCOMPARE(KaSplashStrata::markerReveal(1.3), 1.0);
+    // The control point's lower edge at (610, 219) is slate once it has landed, paper before.
+    const auto markerEdge = [](const char* reduced) {
+      qputenv("KA_HGIS_REDUCED_MOTION", reduced);
+      KaStartupSplash splash(nullptr, 3000, true);
+      splash.show();
+      if (!QTest::qWaitForWindowExposed(&splash)) return QColor();
+      saveFrame(splash, QStringLiteral("startup-strata-motion-%1.png").arg(QLatin1String(reduced)));
+      const QRectF card = splash.cardRect();
+      const double unit = card.height() / 400.0;
+      const QImage frame = splash.grab().toImage();
+      return frame.pixelColor(int((card.left() + 610 * unit) * frame.devicePixelRatio()), int((card.top() + 219 * unit) * frame.devicePixelRatio()));
+    };
+    const QColor waiting = markerEdge("0");
+    const QColor finished = markerEdge("1");
+    qunsetenv("KA_HGIS_REDUCED_MOTION");
+    QCOMPARE(waiting, KaSplashStrata::paper());
+    QVERIFY2(finished.isValid() && finished.lightness() < 110, qPrintable(finished.name()));
+  }
+
+  // A small screen shrinks the notice and its card becomes wider than 700:400: the strata still reach
+  // the right edge (no stripe of paper beside the bedrock).
+  void strataReachTheRightEdgeOfAWiderCard() {
+    QImage image(760, 400, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    KaSplashStrata::paint(painter, QRectF(0, 0, 760, 400), 16, QPixmap(), KaSplashStrata::Frame());
+    painter.end();
+    QCOMPARE(image.pixelColor(750, 372), KaSplashStrata::bedrock());
   }
 
   void reducedMotionKeepsTheDotsStill() {

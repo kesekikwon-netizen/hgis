@@ -90,6 +90,8 @@ private slots:
   void disabledIsFaded();
   void hoverTileIsDarker();
   void pixmapHonoursDevicePixelRatio();
+  void paperLook_tilesFollowTokens();
+  void paperLook_appIconKeepsItsShape();
   void mockupIconIsCrispAtDpr150();
   void paintIsCrispAtDpr150();
   void kaIconsUsesMockupAndFallsBackToOutline();
@@ -234,6 +236,43 @@ void TestIconsMockup::kaIconsUsesMockupAndFallsBackToOutline() {
   // The legacy style keeps its look behind the switch.
   KaIcons::setGlyphStyle(KaIcons::GlyphStyle::Outline);
   QCOMPARE(IconPixels::render(QStringLiteral("new")).pixelColor(8, 32).alpha(), 0);
+}
+
+// 새 모양 changes the tile and glyph colours through the theme tokens, and an icon made before the
+// switch repaints in the new colours (the engine's cache is keyed by them).
+void TestIconsMockup::paperLook_tilesFollowTokens() {
+  KaIcons::setGlyphStyle(KaIcons::GlyphStyle::Mockup);
+  const QIcon icon = KaIconsMockup::mockupIcon(QStringLiteral("save"), false);
+  const auto tileOf = [&icon](QIcon::State state) {
+    return icon.pixmap(QSize(32, 32), 1.0, QIcon::Normal, state).toImage().convertToFormat(QImage::Format_ARGB32);
+  };
+  VERIFY_NEAR(tileOf(QIcon::Off), 4, 16, kTile, 6);
+  KaTheme::DisplayOptions paper;
+  paper.paperLook = true;
+  KaTheme::setDisplayOptions(nullptr, paper);
+  const QImage off = tileOf(QIcon::Off);
+  const QImage on = tileOf(QIcon::On);
+  KaTheme::setDisplayOptions(nullptr, KaTheme::DisplayOptions());  // restore before a check can return early
+  VERIFY_NEAR(off, 4, 16, QColor(0xF0, 0xEE, 0xE6), 6);
+  VERIFY_NEAR(on, 1, 16, QColor(0xB5, 0x57, 0x3A), 10);
+  VERIFY_NEAR(on, 4, 16, QColor(0xF4, 0xE3, 0xDA), 6);
+  VERIFY_NEAR(tileOf(QIcon::Off), 4, 16, kTile, 6);
+}
+
+// 새 모양 shows the same app icon (trowel over contours) in clay; the stock look keeps the navy one.
+void TestIconsMockup::paperLook_appIconKeepsItsShape() {
+  const auto card = [] { return KaIcons::appIcon().pixmap(QSize(64, 64), 1.0).toImage().pixelColor(10, 10); };
+  const QColor navy = card();
+  KaTheme::DisplayOptions paper;
+  paper.paperLook = true;
+  KaTheme::setDisplayOptions(nullptr, paper);
+  const QColor clay = card();
+  KaTheme::setDisplayOptions(nullptr, KaTheme::DisplayOptions());
+  QVERIFY2(navy.blue() > navy.red() + 40, qPrintable(navy.name()));
+  QVERIFY2(clay.red() > clay.blue() + 60, qPrintable(clay.name()));
+  const QImage stock(QStringLiteral(":/ka-hgis/app-icon.png")), recoloured(QStringLiteral(":/ka-hgis/app-icon-paper.png"));
+  QVERIFY(!stock.isNull() && !recoloured.isNull());
+  QCOMPARE(recoloured.convertToFormat(QImage::Format_Alpha8), stock.convertToFormat(QImage::Format_Alpha8));
 }
 
 QTEST_MAIN(TestIconsMockup)

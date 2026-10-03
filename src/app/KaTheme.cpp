@@ -1,5 +1,6 @@
 #include "KaTheme.h"
 #include "KaThemeFonts.h"
+#include "KaThemePaper.h"
 
 #include <QAbstractScrollArea>
 #include <QApplication>
@@ -85,6 +86,27 @@ Tokens strataTokens() {
   t.ribbonLabelInk = QColor(0x20, 0x28, 0x30);   // 14.9:1 on white, 13.5:1 on the hover wash
   t.ribbonActiveInk = QColor(0x10, 0x50, 0x88);  // 8.3:1 on white, 7.5:1 on the hover wash
   t.ribbonGroupInk = QColor(0x5E, 0x66, 0x70);   // 5.8:1 on white
+  t.primary = t.accent;
+  t.primaryHover = t.accentHover;
+  t.primaryPressed = t.accentDeep;
+  t.primaryText = t.surface;
+  t.primaryFocus = t.ink;
+  t.chrome = t.surface;
+  t.heroButton = t.surface;
+  t.heroButtonText = t.rail;
+  t.heroButtonHover = t.hover;
+  t.heroButtonPressed = t.pressed;
+  t.heroGhostHover = t.accentDeep;
+  t.heroGhostPressed = t.rail;
+  t.band = t.accentDeep;
+  t.tile = QColor(0xE4, 0xEA, 0xED);
+  t.tileHover = QColor(0xD9, 0xE2, 0xE7);
+  t.tileOn = QColor(0xE0, 0xEC, 0xF8);
+  t.tileOnBorder = QColor(0x1A, 0x68, 0xB0);
+  t.tileDisabled = QColor(0xEE, 0xF1, 0xF3);
+  t.tileStrong = QColor(0x20, 0x6C, 0xB0);
+  t.glyph = QColor(0x2B, 0x48, 0x58);
+  t.glyphOn = QColor(0x10, 0x50, 0x88);
   fillLegacyAliases(t);
   return t;
 }
@@ -99,6 +121,8 @@ Tokens highContrastTokens() {
   t.hover = QColor(0xE6, 0xF0, 0xFA);
   t.selected = QColor(0xD6, 0xE6, 0xF6);
   t.pressed = QColor(0xCC, 0xDF, 0xF2);
+  t.heroButtonHover = t.hover;
+  t.heroButtonPressed = t.pressed;
   t.border = QColor(0x7D, 0x8A, 0x96);
   t.borderStrong = QColor(0x6B, 0x78, 0x85);
   t.warn = QColor(0x5C, 0x37, 0x00);         // 9.2:1 on warnSurface
@@ -141,6 +165,10 @@ void setGroup(QPalette& pal, QPalette::ColorGroup g, const Tokens& t, bool disab
   pal.setColor(g, QPalette::Mid, t.border);
   pal.setColor(g, QPalette::Dark, t.borderStrong);
   pal.setColor(g, QPalette::Shadow, t.border);
+  if (displayOptions().paperLook) {  // text links in clay; the stock look keeps Qt's blue
+    pal.setColor(g, QPalette::Link, t.ribbonActiveInk);
+    pal.setColor(g, QPalette::LinkVisited, t.ribbonActiveInk);
+  }
 }
 
 }  // namespace
@@ -148,7 +176,12 @@ void setGroup(QPalette& pal, QPalette::ColorGroup g, const Tokens& t, bool disab
 const Tokens& tokens() { return activeTokens(); }
 
 Tokens tokensFor(const DisplayOptions& options) {
-  return options.highContrast ? highContrastTokens() : strataTokens();
+  Tokens t = options.highContrast ? highContrastTokens() : strataTokens();
+  if (options.paperLook) {
+    applyPaperLook(t, options.highContrast);
+    fillLegacyAliases(t);
+  }
+  return t;
 }
 
 const DisplayOptions& displayOptions() { return activeOptions(); }

@@ -167,7 +167,7 @@ void paintCard(QPainter& painter, const QRectF& card, double radius, const QImag
 }
 
 QImage contours(const QSizeF& size, qreal devicePixelRatio, const QPointF& summit, double unit,
-                double clearRadius) {
+                double clearRadius, const QColor& ink) {
   const qreal dpr = devicePixelRatio > 0 ? devicePixelRatio : 1.0;
   QImage image((size * dpr).toSize(), QImage::Format_ARGB32_Premultiplied);
   image.setDevicePixelRatio(dpr);
@@ -194,7 +194,7 @@ QImage contours(const QSizeF& size, qreal devicePixelRatio, const QPointF& summi
   for (int k = 0; first + k * gap < peak; ++k) {
     const bool index = k % 5 == 4;
     painter.strokePath(isoline(field, nx, ny, step, first + k * gap),
-                       QPen(QColor(255, 255, 255, index ? 50 : 24), index ? 1.2 : 0.9,
+                       QPen(QColor(ink.red(), ink.green(), ink.blue(), index ? 50 : 24), index ? 1.2 : 0.9,
                             Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
   }
 

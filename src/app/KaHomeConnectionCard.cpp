@@ -17,7 +17,7 @@
 
 namespace {
 
-constexpr int kRowHeight = 40;
+constexpr int kRowHeight = 48;
 constexpr int kDotPx = 8;
 
 QLabel* label(const QString& text, const char* name, QWidget* parent) {
@@ -49,26 +49,19 @@ KaHomeConnectionCard::KaHomeConnectionCard(QWidget* parent) : QFrame(parent) {
   qRegisterMetaType<AccountStatus::Source>();  // signal argument for queued and spied connections
   setObjectName(QStringLiteral("startConnectionCard"));
   auto* col = new QVBoxLayout(this);
-  col->setContentsMargins(16, 16, 16, 16);
+  col->setContentsMargins(16, 12, 16, 12);
   col->setSpacing(8);
   auto* head = new QHBoxLayout;
   head->setSpacing(6);
   head->addWidget(label(QStringLiteral("연결 상태"), "startRecentTitle", this));
+  head->addSpacing(8);
+  m_lock = new QLabel(this);
+  m_lock->setPixmap(KaIcons::glyphPixmap(QStringLiteral("lock"), KaTheme::tokens().inkMuted, 14, devicePixelRatioF()));
+  m_lock->setFixedSize(14, 14);
+  head->addWidget(m_lock, 0, Qt::AlignVCenter);
+  m_privacy = label(QStringLiteral("비밀값은 표시되지 않습니다"), "startPrivacyNote", this);
+  head->addWidget(m_privacy, 0, Qt::AlignVCenter);
   head->addStretch(1);
-  auto* lock = new QLabel(this);
-  lock->setPixmap(KaIcons::glyphPixmap(QStringLiteral("lock"), KaTheme::tokens().inkMuted, 14, devicePixelRatioF()));
-  lock->setFixedSize(14, 14);
-  head->addWidget(lock, 0, Qt::AlignVCenter);
-  head->addWidget(label(QStringLiteral("비밀값은 표시되지 않습니다"), "startPrivacyNote", this), 0, Qt::AlignVCenter);
-  col->addLayout(head);
-  m_rows = new QVBoxLayout;
-  m_rows->setSpacing(0);
-  col->addLayout(m_rows);
-  m_problems = new QVBoxLayout;
-  m_problems->setSpacing(6);
-  col->addLayout(m_problems);
-  auto* internetRow = new QHBoxLayout;
-  internetRow->setSpacing(8);
   m_internet = label(QStringLiteral("인터넷 · 확인 안 함"), "startStepBody", this);
   m_internet->setTextFormat(Qt::RichText);
   m_internetButton = new QPushButton(QStringLiteral("인터넷 확인"), this);
@@ -76,9 +69,30 @@ KaHomeConnectionCard::KaHomeConnectionCard(QWidget* parent) : QFrame(parent) {
   m_internetButton->setCursor(Qt::PointingHandCursor);
   m_internetButton->setToolTip(QStringLiteral("VWorld 서버에 한 번 접속해 봅니다. 누를 때만 확인합니다."));
   connect(m_internetButton, &QPushButton::clicked, this, [this]() { checkInternet(); });
-  internetRow->addWidget(m_internet, 1);
-  internetRow->addWidget(m_internetButton);
-  col->addLayout(internetRow);
+  head->addWidget(m_internet, 0, Qt::AlignVCenter);
+  head->addWidget(m_internetButton, 0, Qt::AlignVCenter);
+  col->addLayout(head);
+  m_rows = new QHBoxLayout;  // the five sources side by side
+  m_rows->setSpacing(8);
+  col->addLayout(m_rows);
+  m_problems = new QVBoxLayout;
+  m_problems->setSpacing(6);
+  col->addLayout(m_problems);
+}
+
+void KaHomeConnectionCard::placeIn(QBoxLayout* layout, bool strip) {
+  if (!layout || m_home == layout)
+    return;
+  if (m_home)
+    m_home->removeWidget(this);
+  m_home = layout;
+  if (strip)
+    layout->addWidget(this);
+  else
+    layout->insertWidget(1, this);
+  m_rows->setDirection(strip ? QBoxLayout::LeftToRight : QBoxLayout::TopToBottom);
+  m_lock->setVisible(strip);  // the column is too narrow for the note beside the internet check
+  m_privacy->setVisible(strip);
 }
 
 QString KaHomeConnectionCard::displayName(const AccountStatus::Entry& entry) {
@@ -97,7 +111,7 @@ QString KaHomeConnectionCard::stateText(bool ready) {
 
 void KaHomeConnectionCard::refresh() { setInputs(KaHomeStatus::collectLocal()); }
 
-void KaHomeConnectionCard::clear(QVBoxLayout* layout) {
+void KaHomeConnectionCard::clear(QLayout* layout) {
   while (QLayoutItem* item = layout->takeAt(0)) {
     delete item->widget();
     delete item;
@@ -109,24 +123,29 @@ void KaHomeConnectionCard::setInputs(const KaHomeStatus::Inputs& inputs) {
   clear(m_problems);
   const qreal dpr = devicePixelRatioF();
   for (const AccountStatus::Entry& entry : inputs.accounts) {
-    auto* row = new QWidget(this);
+    auto* row = new QFrame(this);
     row->setObjectName(QStringLiteral("startConnRow"));
     row->setMinimumHeight(kRowHeight);
     auto* line = new QHBoxLayout(row);
-    line->setContentsMargins(0, 4, 0, 4);
-    line->setSpacing(10);
+    line->setContentsMargins(10, 4, 4, 4);
+    line->setSpacing(8);
     auto* dot = new QLabel(row);
     dot->setFixedSize(kDotPx, kDotPx);
     dot->setPixmap(dotPixmap(entry.ready, dpr));
     line->addWidget(dot, 0, Qt::AlignVCenter);
+    // The name over its state, so a 250 px cell (1366 px window) still shows both whole.
+    auto* words = new QVBoxLayout;
+    words->setSpacing(0);
     auto* name = label(displayName(entry), "startConnName", row);
-    name->setToolTip(QStringLiteral("%1 — %2").arg(entry.usedFor, entry.menuPath));
-    line->addWidget(name, 1, Qt::AlignVCenter);
+    name->setToolTip(QStringLiteral("%1 — %2 · %3").arg(displayName(entry), entry.usedFor, entry.menuPath));
+    name->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);  // a narrower window clips the name, never the button
+    words->addWidget(name);
     auto* state = label(stateText(entry.ready), "startConnState", row);
     state->setProperty("ready", entry.ready ? QStringLiteral("true") : QStringLiteral("false"));
     state->setProperty("kaStatusOk", entry.ready);
     state->setToolTip(entry.ready ? QString() : QStringLiteral("%1에서 넣습니다.").arg(entry.menuPath));
-    line->addWidget(state, 0, Qt::AlignVCenter);
+    words->addWidget(state);
+    line->addLayout(words, 1);
     auto* setup = new QPushButton(QStringLiteral("설정"), row);
     setup->setObjectName(QStringLiteral("startConnectionSetup"));
     setup->setCursor(Qt::PointingHandCursor);
@@ -134,7 +153,7 @@ void KaHomeConnectionCard::setInputs(const KaHomeStatus::Inputs& inputs) {
     const AccountStatus::Source source = entry.source;
     connect(setup, &QPushButton::clicked, this, [this, source]() { emit configureRequested(source); });
     line->addWidget(setup, 0, Qt::AlignVCenter);
-    m_rows->addWidget(row);
+    m_rows->addWidget(row, 1);
   }
   // proj.db and the survey folder speak only when something is wrong.
   const QVector<KaHomeStatus::Line> lines = KaHomeStatus::describe(inputs);

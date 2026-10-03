@@ -19,6 +19,7 @@ QMainWindow, QDialog, QMessageBox, QInputDialog, QColorDialog, QDialogButtonBox 
   font-family: "Malgun Gothic", "Segoe UI";
   font-size: @uiFontSize@px;
 }
+QMainWindow { background: @chrome@; }
 QWidget#startPage {
   font-family: "Malgun Gothic", "Segoe UI";
   font-size: @uiFontSize@px;
@@ -49,12 +50,12 @@ QPushButton#startNewBtn, QPushButton#startOpenBtn {
   padding: 0 18px;
   border-radius: 8px;
 }
-QPushButton#startNewBtn { background: @surface@; color: @rail@; border: 1px solid @surface@; }
-QPushButton#startNewBtn:enabled:hover { background: @hover@; border-color: @hover@; }
-QPushButton#startNewBtn:enabled:pressed { background: @pressed@; border-color: @pressed@; }
+QPushButton#startNewBtn { background: @heroButton@; color: @heroButtonText@; border: 1px solid @heroButton@; }
+QPushButton#startNewBtn:enabled:hover { background: @heroButtonHover@; border-color: @heroButtonHover@; }
+QPushButton#startNewBtn:enabled:pressed { background: @heroButtonPressed@; border-color: @heroButtonPressed@; }
 QPushButton#startOpenBtn { background: transparent; color: @railText@; border: 1px solid @railMuted@; }
-QPushButton#startOpenBtn:enabled:hover { background: @accentDeep@; }
-QPushButton#startOpenBtn:enabled:pressed { background: @rail@; }
+QPushButton#startOpenBtn:enabled:hover { background: @heroGhostHover@; }
+QPushButton#startOpenBtn:enabled:pressed { background: @heroGhostPressed@; }
 QFrame#startContinueCard { background: @surface@; border: none; border-radius: 12px; }
 QLabel#startContinueTag { color: @inkMuted@; font-size: 11px; }
 QLabel#startContinueName { color: @ink@; font-size: 20px; font-weight: 700; }
@@ -144,38 +145,39 @@ QPushButton {
   min-height: 34px;
   padding: 8px 16px;
   border: 1px solid @border@;
-  border-bottom: 2px solid @borderStrong@;
+  border-bottom: @buttonEdge@px solid @borderStrong@;
   border-radius: 8px;
   background: @surface@;
 }
-QPushButton:enabled:hover { background: @hover@; border-color: @borderStrong@; border-bottom: 2px solid @borderStrong@; }
+QPushButton:enabled:hover { background: @hover@; border-color: @borderStrong@; border-bottom: @buttonEdge@px solid @borderStrong@; }
 QPushButton:enabled:pressed { background: @pressed@; border-bottom: 1px solid @borderStrong@; }
 QPushButton:enabled:checked {
   background: @selected@;
   color: @accentDeep@;
   border-color: @accent@;
-  border-bottom: 2px solid @accentDeep@;
+  border-bottom: @buttonEdge@px solid @accentDeep@;
 }
+/* The main button has its own tokens: the accent steps in the stock look, slate in 새 모양. */
 QPushButton:default, QPushButton#btnAdjustDone, QPushButton.primary, QPushButton#btnPrimary {
-  background: @accent@;
-  color: @surface@;
+  background: @primary@;
+  color: @primaryText@;
   font-weight: 700;
-  border: 1px solid @accent@;
-  border-bottom: 2px solid @accentDeep@;
+  border: 1px solid @primary@;
+  border-bottom: @buttonEdge@px solid @primaryPressed@;
 }
 QPushButton:default:enabled:hover, QPushButton#btnAdjustDone:enabled:hover, QPushButton.primary:enabled:hover, QPushButton#btnPrimary:enabled:hover {
-  background: @accentHover@;
-  border-bottom: 2px solid @accentDeep@;
+  background: @primaryHover@;
+  border-bottom: @buttonEdge@px solid @primaryPressed@;
 }
 QPushButton:default:enabled:checked, QPushButton#btnAdjustDone:enabled:checked,
 QPushButton.primary:enabled:checked, QPushButton#btnPrimary:enabled:checked {
-  background: @accentDeep@;
-  color: @surface@;
+  background: @primaryPressed@;
+  color: @primaryText@;
 }
 QPushButton:default:enabled:pressed, QPushButton#btnAdjustDone:enabled:pressed,
 QPushButton.primary:enabled:pressed, QPushButton#btnPrimary:enabled:pressed {
-  background: @accentDeep@;
-  color: @surface@;
+  background: @primaryPressed@;
+  color: @primaryText@;
 }
 QPushButton:disabled {
   background: @disabledSurface@;
@@ -227,7 +229,7 @@ QToolButton#btnPrimary:enabled:checked {
 }
 
 QToolBar {
-  background: @surface@;
+  background: @chrome@;
   border: none;
   spacing: 1px;
   padding: 4px 8px;
@@ -243,7 +245,7 @@ QToolBar#mainToolbar::separator {
   margin: 10px 8px;
 }
 QToolBar#mainToolbar, QToolBar#studioToolbar {
-  background: @surface@;
+  background: @chrome@;
   border-bottom: 1px solid @border@;
 }
 QToolBar#studioToolbar QToolButton {
@@ -253,7 +255,7 @@ QToolBar#studioToolbar QToolButton {
   color: @inkMuted@;
 }
 QToolBar#subToolbar {
-  background: @surface@;
+  background: @chrome@;
   border-top: 1px solid @border@;
   border-bottom: 1px solid @border@;
 }
@@ -280,7 +282,7 @@ QToolBar#mainToolbar {
 QToolBar#mainToolbar QToolButton {
   padding: @buttonPadding@px;
   font-size: @ribbonFontSize@px;
-  background: @surface@;
+  background: @chrome@;
   border: 2px solid transparent;
   border-radius: 0;
 }
@@ -328,7 +330,7 @@ QLabel#ribbonGroupCaption {
 QWidget#beginnerRibbon QToolButton {
   margin: 0;
   padding: @buttonPadding@px;
-  background: @surface@;
+  background: @chrome@;
   color: @ribbonLabelInk@;
   font-size: @ribbonFontSize@px;
   border: 1px solid transparent;
@@ -655,16 +657,16 @@ QFrame#studioOutputBar QToolButton:enabled:hover,
 QFrame#itemInspector QToolButton#btnPrint:enabled:hover { background: @hover@; }
 QFrame#studioOutputBar QToolButton#btnPrimary,
 QFrame#itemInspector QToolButton#btnPrimary {
-  color: @surface@;
-  background: @accent@;
-  border: 1px solid @accent@;
-  border-bottom: 2px solid @accentDeep@;
+  color: @primaryText@;
+  background: @primary@;
+  border: 1px solid @primary@;
+  border-bottom: @buttonEdge@px solid @primaryPressed@;
   font-weight: 700;
 }
 QFrame#studioOutputBar QToolButton#btnPrimary:enabled:hover,
-QFrame#itemInspector QToolButton#btnPrimary:enabled:hover { background: @accentHover@; }
+QFrame#itemInspector QToolButton#btnPrimary:enabled:hover { background: @primaryHover@; }
 QFrame#studioOutputBar QToolButton#btnPrimary:enabled:pressed,
-QFrame#itemInspector QToolButton#btnPrimary:enabled:pressed { background: @accentDeep@; }
+QFrame#itemInspector QToolButton#btnPrimary:enabled:pressed { background: @primaryPressed@; }
 QToolButton.sampleTile {
   /* Width comes from QWidget::setMinimumWidth. min-width:0 overrode it. */
   min-height: 0;
@@ -953,7 +955,7 @@ QMenu::item:selected { background: @selected@; color: @ink@; }
 QMenu::item:disabled { color: @inkDisabled@; }
 
 QStatusBar {
-  background: @surface@;
+  background: @chrome@;
   color: @inkMuted@;
   font-weight: 400;
   border-top: 1px solid @border@;
@@ -962,7 +964,7 @@ QStatusBar QLabel { color: @inkMuted@; }
 
 /* ---- Status bar instrument panel ---- */
 QStatusBar#kaStatusBar {
-  background: @surface@;
+  background: @chrome@;
   color: @inkMuted@;
   min-height: 34px;
   padding: 0 6px;
@@ -1127,8 +1129,8 @@ QPushButton:default:enabled:checked:pressed,
 QPushButton#btnAdjustDone:enabled:checked:pressed,
 QPushButton.primary:enabled:checked:pressed,
 QPushButton#btnPrimary:enabled:checked:pressed {
-  background: @accentDeep@;
-  color: @surface@;
+  background: @primaryPressed@;
+  color: @primaryText@;
 }
 
 /* ---- 파일함 「상위」: an accent-tinted chip. Font size stays per-widget (fitShortcutFonts). ---- */
@@ -1153,7 +1155,7 @@ QFrame#filesCard QToolButton#btnBrowseUp:disabled {
    startup-notice blue; the compact size and 상세 보기 fold are set in C++. ---- */
 QDialog[kaDownloadWindow="true"] { background: @desk@; }
 QDialog[kaDownloadWindow="true"] QFrame#downloadHeader {
-  background: @accentDeep@;
+  background: @band@;
   border: none;
   border-radius: 12px;
 }
@@ -1192,7 +1194,7 @@ QProgressDialog QLabel { color: @ink@; }
    keyboard navigation. Last in the file so it wins ties with hover and checked. ---- */
 QPushButton:enabled:focus:!default { border-color: @focusRing@; }
 QPushButton#btnPrimary:enabled:focus:!default, QPushButton.primary:enabled:focus:!default,
-QPushButton#btnAdjustDone:enabled:focus:!default { border-color: @ink@; }
+QPushButton#btnAdjustDone:enabled:focus:!default { border-color: @primaryFocus@; }
 /* Home hero buttons: a 2 px ring on the navy band, 1 px taken from the padding. */
 QPushButton#startNewBtn:enabled:focus { border: 2px solid @focusRing@; padding: 0 17px; min-height: 34px; }
 QPushButton#startOpenBtn:enabled:focus { border: 2px solid @railText@; padding: 0 17px; min-height: 34px; }
@@ -1260,9 +1262,11 @@ QLabel#startStepDone { color: @ok@; }
 QLabel#startStepTodo { color: @inkMuted@; }
 QFrame#startSubmitReady { background: @altRow@; border: 1px solid @border@; border-radius: 8px; padding: 6px 12px; }
 QLabel#startConnName { color: @ink@; font-size: 13px; }
+QLabel#startConnState { font-size: 12px; }
 QLabel#startConnState[ready="true"] { color: @ok@; font-weight: 700; }
 QLabel#startConnState[ready="false"] { color: @inkMuted@; }
-QWidget#startConnRow { border-bottom: 1px solid @desk@; }
+QPushButton#startEnvInternet { min-height: 32px; padding: 0 12px; }
+QFrame#startConnRow { background: @altRow@; border-radius: 8px; }
 QPushButton#startConnectionSetup { min-height: 32px; min-width: 56px; padding: 0 12px; font-weight: 700;
   border: 1px solid @border@; border-radius: 6px; background: @surface@; }
 QPushButton#startConnectionSetup:enabled:hover { background: @hover@; border-color: @borderStrong@; }
@@ -1317,3 +1321,10 @@ QWidget#drawGuideBand QToolButton:enabled:pressed { background: @pressed@; }
 QWidget#drawGuideBand QToolButton:enabled:focus { border-color: @focusRing@; }
 QWidget#drawGuideBand QToolButton:disabled { background: @disabledSurface@; border-color: @border@; }
 QStatusBar#kaStatusBar QLabel[kaChip="true"] { margin: 0 4px; }
+/* ---- [새 모양] names and headings (append-only). The stock look resolves these to what the rules above
+   already say (body stack at 700, the Segoe UI wordmark at 600, 15 and 20 px), so nothing moves there;
+   새 모양 leads with Noto Serif KR at 500 and sets names a step larger. ---- */
+QLabel#startHeroName { font-family: @wordmarkFont@; font-weight: @wordmarkWeight@; }
+QLabel#startContinueName { font-family: @titleFont@; font-weight: @titleWeight@; font-size: @bigNameSize@px; }
+QLabel#startRecentTitle { font-family: @titleFont@; font-weight: @titleWeight@; font-size: @nameSize@px; }
+QLabel#kaFeatureCardName { font-family: @titleFont@; font-weight: @titleWeight@; font-size: @nameSize@px; }

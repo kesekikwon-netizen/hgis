@@ -6,8 +6,8 @@ class QApplication;
 class QMenu;
 class QWidget;
 
-// Opt-in 「화면 보기」 options: 고대비 화면 and 큰 글씨. The stock Strata look
-// stays the default; nothing changes until the user ticks an option.
+// 「화면 보기」 options: 새 모양, 고대비 화면 and 큰 글씨. KaTheme itself defaults to the stock Strata
+// look; the app starts in 새 모양 (the look on trial) until the user ticks or unticks it once.
 namespace KaTheme {
 
 DisplayOptions savedDisplayOptions();
