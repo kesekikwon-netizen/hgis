@@ -110,7 +110,7 @@ QWidget* KaStartPage::buildHero() {
   actions->setSpacing(12);
   auto* btnNew = new QPushButton(QStringLiteral("새 조사"), hero);
   btnNew->setObjectName(QStringLiteral("startNewBtn"));
-  btnNew->setIcon(KaIcons::icon(QStringLiteral("new"), t.rail));
+  btnNew->setIcon(KaIcons::icon(QStringLiteral("new"), t.heroButtonText));
   btnNew->setIconSize(QSize(18, 18));
   auto* btnOpen = new QPushButton(QStringLiteral("조사 열기"), hero);
   btnOpen->setObjectName(QStringLiteral("startOpenBtn"));

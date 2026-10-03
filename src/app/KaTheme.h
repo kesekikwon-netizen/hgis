@@ -32,6 +32,15 @@ struct Tokens {
   QColor focusRing;
   // Ribbon (mockup): chip labels, the chosen tool's label, and the group names under the chips.
   QColor ribbonLabelInk, ribbonActiveInk, ribbonGroupInk;
+  // The main (default) button, and chrome: the face of the window, toolbars, tab row and status bar.
+  // Stock: the accent steps and the surface, so nothing moves until a look changes them.
+  QColor primary, primaryHover, primaryPressed, primaryText, chrome;
+  // Home hero: the filled 「새 조사」 button and the outline button's hover and pressed fills; band is
+  // the header strip of the download windows.
+  QColor heroButton, heroButtonText, heroButtonHover, heroButtonPressed, heroGhostHover, heroGhostPressed, band;
+  // Ribbon icon tiles (KaIconsMockupEngine): plain, hovered, chosen (+ its border), disabled, and the
+  // solid 저장-unsaved tile; glyph inks for a plain and a chosen tile.
+  QColor tile, tileHover, tileOn, tileOnBorder, tileDisabled, tileStrong, glyph, glyphOn;
 
   // Legacy aliases (same values as above). Do not use in new code.
   QColor sky0, sky1, sky2, sky3, sky4, sky5, sky6;
@@ -51,6 +60,7 @@ struct DisplayOptions {
   bool highContrast = false;  // stronger borders, muted text and state washes
   bool largeText = false;     // 13 px body text becomes 15 px
   bool bundledFonts = false;  // IBM Plex Sans KR / Mono from data/fonts when registered
+  bool paperLook = false;     // 새 모양: paper ground, slate ink, one clay accent (KaThemePaper.h)
   bool operator==(const DisplayOptions&) const = default;
 };
 
@@ -99,6 +109,12 @@ struct ButtonMetrics {
 const ButtonMetrics& buttonMetrics();
 // Body text size for the active display options (13 px, or 15 px for large text).
 int uiFontSize();
+// Title face for names and headings: a quoted family list for the sheet, and its weight. Stock: the
+// body stack at 700. 새 모양: Noto Serif KR first (Batang, then Malgun Gothic where it is missing) at 500.
+QString titleFontFamilies();
+int titleFontWeight();
+// Width of a push button's lower edge: 2 px in the stock look, 1 px (flat) in 새 모양.
+int buttonEdgeWidth();
 // WCAG 2 contrast between two opaque colors: 1.0 (same) to 21.0 (black on white).
 double contrastRatio(const QColor& first, const QColor& second);
 

@@ -2,6 +2,7 @@
 // dot at the size a widget asks for, so a 32 px ribbon chip, a 150 % screen and a 16 px
 // chip all get crisp edges instead of a scaled bake. Colours come from lookFor().
 #include "KaIconsMockup.h"
+#include "KaTheme.h"
 
 #include <QFile>
 #include <QHash>
@@ -109,8 +110,10 @@ class MockupIconEngine : public QIconEngine {
   // size is logical (QIcon::pixmap passes it with the screen scale); the result has size * scale pixels.
   QPixmap scaledPixmap(const QSize& size, QIcon::Mode mode, QIcon::State state, qreal scale) override {
     const int px = qMax(1, qRound(qMin(size.width(), size.height()) * scale));
+    // The tile colour is part of the key: a look chosen in 「화면 보기」 repaints the icon.
     const QString key = QString::number(px) + QLatin1Char('/') + QString::number(int(mode)) + QLatin1Char('/') +
-                        QString::number(int(state));
+                        QString::number(int(state)) + QLatin1Char('/') +
+                        QString::number(lookFor(mode, state, m_strong).tile.rgb(), 16);
     const auto found = m_cache.constFind(key);
     if (found != m_cache.constEnd()) return *found;
     const QPixmap pm = QPixmap::fromImage(render(px, mode, state));
@@ -146,22 +149,24 @@ class MockupIconEngine : public QIconEngine {
 }  // namespace
 
 Look lookFor(QIcon::Mode mode, QIcon::State state, bool strong) {
+  // The measured mockup colours live in the theme tokens (KaTheme.cpp), so a look can restate them.
+  const KaTheme::Tokens& t = KaTheme::tokens();
   Look look;
-  look.tile = rgb(0xE4EAED);
-  look.glyph = rgb(0x2B4858);
+  look.tile = t.tile;
+  look.glyph = t.glyph;
   if (mode == QIcon::Disabled) {
-    look.tile = rgb(0xEEF1F3);
+    look.tile = t.tileDisabled;
     look.glyphOpacity = 0.45;
   } else if (strong) {
-    look.tile = rgb(0x206CB0);
+    look.tile = t.tileStrong;
     look.glyph = Qt::white;
     look.dot = true;
   } else if (state == QIcon::On) {
-    look.tile = rgb(0xE0ECF8);
-    look.tileBorder = rgb(0x1A68B0);
-    look.glyph = rgb(0x105088);
+    look.tile = t.tileOn;
+    look.tileBorder = t.tileOnBorder;
+    look.glyph = t.glyphOn;
   } else if (mode == QIcon::Active) {
-    look.tile = rgb(0xD9E2E7);
+    look.tile = t.tileHover;
   }
   return look;
 }

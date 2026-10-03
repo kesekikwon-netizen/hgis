@@ -43,6 +43,11 @@ QHash<QString, QString> replacementTable() {
       {"railText", c.railText}, {"railMuted", c.railMuted}, {"progressFill", c.progressFill},
       {"focusRing", c.focusRing}, {"ribbonLabelInk", c.ribbonLabelInk}, {"ribbonActiveInk", c.ribbonActiveInk},
       {"ribbonGroupInk", c.ribbonGroupInk},
+      {"primary", c.primary}, {"primaryHover", c.primaryHover}, {"primaryPressed", c.primaryPressed},
+      {"primaryText", c.primaryText}, {"chrome", c.chrome}, {"heroButton", c.heroButton},
+      {"heroButtonText", c.heroButtonText}, {"heroButtonHover", c.heroButtonHover},
+      {"heroButtonPressed", c.heroButtonPressed}, {"heroGhostHover", c.heroGhostHover},
+      {"heroGhostPressed", c.heroGhostPressed}, {"band", c.band},
       // Legacy placeholders, kept so older sheets still resolve.
       {"glossMiddle", c.glossMiddle}, {"glossBottom", c.glossBottom}, {"hoverTop", c.hoverTop},
       {"hoverBottom", c.hoverBottom}, {"pressedTop", c.pressedTop}, {"pressedBottom", c.pressedBottom},
@@ -56,6 +61,17 @@ QHash<QString, QString> replacementTable() {
   // font-family overrides at the end of ka-hgis.qss.
   values.insert(QStringLiteral("uiFont"), quotedFamilies(uiFontStack()));
   values.insert(QStringLiteral("monoFont"), quotedFamilies(monoFontStack()));
+  // Names and headings (the last block of ka-hgis.qss). The stock values repeat what the sheet's
+  // literal rules say; 새 모양 swaps in the serif title face and sets names a step larger.
+  const bool paper = displayOptions().paperLook;
+  values.insert(QStringLiteral("titleFont"), titleFontFamilies());
+  values.insert(QStringLiteral("titleWeight"), QString::number(titleFontWeight()));
+  values.insert(QStringLiteral("wordmarkFont"),
+                paper ? titleFontFamilies() : quotedFamilies({QStringLiteral("Segoe UI"), QStringLiteral("Malgun Gothic")}));
+  values.insert(QStringLiteral("wordmarkWeight"), paper ? QStringLiteral("500") : QStringLiteral("600"));
+  values.insert(QStringLiteral("buttonEdge"), QString::number(buttonEdgeWidth()));
+  values.insert(QStringLiteral("nameSize"), paper ? QStringLiteral("19") : QStringLiteral("15"));
+  values.insert(QStringLiteral("bigNameSize"), paper ? QStringLiteral("24") : QStringLiteral("20"));
   return values;
 }
 

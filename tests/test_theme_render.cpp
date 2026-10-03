@@ -53,6 +53,7 @@ private slots:
   void downloadWindowIsFlatAndReadable();
   void progressBarTextReadableOnChunk();
   void radioIndicatorUsesAccent();
+  void paperLook_mainButtonIsSlateAndBandIsPaper();
 };
 
 void TestThemeRender::initTestCase() {
@@ -162,6 +163,36 @@ void TestThemeRender::radioIndicatorUsesAccent() {
     for (int x = 0; x < qMin(image.width(), 24); ++x)
       if (near(image.pixelColor(x, y), KaTheme::tokens().accent, 24)) ++accent;
   QVERIFY2(accent >= 8, qPrintable(QStringLiteral("accent pixels %1").arg(accent)));
+}
+
+// 새 모양: the main button turns slate with paper text, and the download header becomes a paper band
+// with slate text. The stock look keeps its accent button and blue header.
+void TestThemeRender::paperLook_mainButtonIsSlateAndBandIsPaper() {
+  QPushButton main(QStringLiteral("등고선 만들기"));
+  main.setDefault(true);
+  main.resize(180, 40);
+  main.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&main));
+  const auto face = [&main]() { return at(main.grab().toImage(), 6, main.height() / 2); };
+  QVERIFY2(near(face(), KaTheme::tokens().accent), qPrintable(face().name()));
+  KaTheme::DisplayOptions paper;
+  paper.paperLook = true;
+  KaTheme::setDisplayOptions(qApp, paper);
+  const KaTheme::Tokens t = KaTheme::tokens();
+  QCoreApplication::processEvents();
+  const QColor slate = face();
+  KaDownloadProgressDialog dialog(QStringLiteral("지적도 다운로드"), QStringLiteral("조사 주변 5 km의 지적도 자료를 받습니다."));
+  dialog.show();
+  const bool shown = QTest::qWaitForWindowExposed(&dialog);
+  auto* header = dialog.findChild<QFrame*>(QStringLiteral("downloadHeader"));
+  auto* title = dialog.findChild<QLabel*>(QStringLiteral("downloadTitle"));
+  const QColor band = header ? at(header->grab().toImage(), header->width() / 2, 3) : QColor();
+  const QColor titleInk = title ? title->palette().color(title->foregroundRole()) : QColor();
+  KaTheme::setDisplayOptions(qApp, KaTheme::DisplayOptions());  // restore before any check can return early
+  QVERIFY(shown && header && title);
+  QVERIFY2(near(slate, t.primary), qPrintable(slate.name()));
+  QVERIFY2(near(band, t.rail), qPrintable(band.name()));
+  QVERIFY2(contrast(titleInk, band) >= 4.5, qPrintable(titleInk.name()));
 }
 
 QTEST_MAIN(TestThemeRender)

@@ -13,6 +13,7 @@ public:
 protected:
   void paintEvent(QPaintEvent* event) override;
   void resizeEvent(QResizeEvent* event) override;
+  void changeEvent(QEvent* event) override;
 
 private:
   QPixmap m_texture;  // contour lines at the current size, rebuilt after a resize

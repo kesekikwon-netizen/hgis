@@ -1773,7 +1773,9 @@ endif()
 
 # ---- [P1 design-system] KaChip + KaThemeFonts (append-only block; design section 3, P1) ----
 set(_ka_p1_chip_sources ${CMAKE_SOURCE_DIR}/src/app/KaChip.cpp ${CMAKE_SOURCE_DIR}/src/app/KaChip.h)
-set(_ka_p1_font_sources ${CMAKE_SOURCE_DIR}/src/app/KaThemeFonts.cpp ${CMAKE_SOURCE_DIR}/src/app/KaThemeFonts.h)
+# KaThemePaper (새 모양 tokens) rides along: every target that compiles KaTheme.cpp needs it too.
+set(_ka_p1_font_sources ${CMAKE_SOURCE_DIR}/src/app/KaThemeFonts.cpp ${CMAKE_SOURCE_DIR}/src/app/KaThemeFonts.h
+  ${CMAKE_SOURCE_DIR}/src/app/KaThemePaper.cpp ${CMAKE_SOURCE_DIR}/src/app/KaThemePaper.h)
 target_sources(ka-hgis PRIVATE ${_ka_p1_chip_sources} ${_ka_p1_font_sources})
 # Bundled IBM Plex (OFL) travels next to the executable like the QSS copy; only files that exist.
 file(GLOB _ka_p1_font_files "${CMAKE_SOURCE_DIR}/data/fonts/*.ttf" "${CMAKE_SOURCE_DIR}/data/fonts/LICENSE-*.txt")

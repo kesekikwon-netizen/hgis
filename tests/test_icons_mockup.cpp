@@ -90,6 +90,7 @@ private slots:
   void disabledIsFaded();
   void hoverTileIsDarker();
   void pixmapHonoursDevicePixelRatio();
+  void paperLook_tilesFollowTokens();
   void mockupIconIsCrispAtDpr150();
   void paintIsCrispAtDpr150();
   void kaIconsUsesMockupAndFallsBackToOutline();
@@ -234,6 +235,27 @@ void TestIconsMockup::kaIconsUsesMockupAndFallsBackToOutline() {
   // The legacy style keeps its look behind the switch.
   KaIcons::setGlyphStyle(KaIcons::GlyphStyle::Outline);
   QCOMPARE(IconPixels::render(QStringLiteral("new")).pixelColor(8, 32).alpha(), 0);
+}
+
+// 새 모양 changes the tile and glyph colours through the theme tokens, and an icon made before the
+// switch repaints in the new colours (the engine's cache is keyed by them).
+void TestIconsMockup::paperLook_tilesFollowTokens() {
+  KaIcons::setGlyphStyle(KaIcons::GlyphStyle::Mockup);
+  const QIcon icon = KaIconsMockup::mockupIcon(QStringLiteral("save"), false);
+  const auto tileOf = [&icon](QIcon::State state) {
+    return icon.pixmap(QSize(32, 32), 1.0, QIcon::Normal, state).toImage().convertToFormat(QImage::Format_ARGB32);
+  };
+  VERIFY_NEAR(tileOf(QIcon::Off), 4, 16, kTile, 6);
+  KaTheme::DisplayOptions paper;
+  paper.paperLook = true;
+  KaTheme::setDisplayOptions(nullptr, paper);
+  const QImage off = tileOf(QIcon::Off);
+  const QImage on = tileOf(QIcon::On);
+  KaTheme::setDisplayOptions(nullptr, KaTheme::DisplayOptions());  // restore before a check can return early
+  VERIFY_NEAR(off, 4, 16, QColor(0xF0, 0xEE, 0xE6), 6);
+  VERIFY_NEAR(on, 1, 16, QColor(0xB5, 0x57, 0x3A), 10);
+  VERIFY_NEAR(on, 4, 16, QColor(0xF4, 0xE3, 0xDA), 6);
+  VERIFY_NEAR(tileOf(QIcon::Off), 4, 16, kTile, 6);
 }
 
 QTEST_MAIN(TestIconsMockup)
