@@ -47,7 +47,7 @@
 
 - Work in the session worktree (in `A:\qgis` itself, in place); never create another. Message `type(scope): 한국어 요약`, Korean body with a test-result line, Co-Authored-By. Commit from the Bash tool.
 - Every verified commit (2026-10-03): rebase onto main if it moved and rerun the touched tests, then `git -C A:/qgis merge --ff-only <sha>` and `git -C A:/qgis push origin main`. Never cancel, disable or wait on GitHub CI; check its last run once at the next task. PRs only when asked. If memory names a newer line the user calls the current app, say so in the first report.
-- `.claude/hooks/commit-gate.mjs` blocks commits touching src/, tests/, cmake/, data/, CMakeLists.txt until the build and a later ctest prove them, and test-weakening commits without `시험 변경:`. Follow its reason; no bypass.
+- `.claude/hooks/commit-gate.mjs` blocks commits touching src/, tests/, cmake/, data/, CMakeLists.txt until the build and a later ctest prove them, test-weakening commits without `시험 변경:`, and C++ files past the CI line limit (raising docs/quality/line-limit-baseline.txt needs `길이 기준 변경:`). Follow its reason; no bypass.
 - Worktree-only work is lost when a desktop session is deleted. Lost-work report: check `git -C A:/qgis for-each-ref refs/snapshots` first.
 - Never force-push, run scripts/auto-git-push.ps1 or scripts/commit.ps1, or commit secrets, *.gpkg/*.qgz or a portable's config.
 - 「포터블」 only when asked: skill `portable-release`; say first it is ~1 GB and C: is nearly full.

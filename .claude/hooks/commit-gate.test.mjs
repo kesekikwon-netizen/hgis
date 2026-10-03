@@ -1,6 +1,6 @@
 // node --test .claude/hooks/commit-gate.test.mjs
 // Each test builds a throwaway git repo with fake build and ctest evidence, stages a change and asks
-// the hook about `git commit`. Only the test-weakening check is covered here.
+// the hook about `git commit`. Only the test-weakening check and the line limit are covered here.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -24,6 +24,8 @@ const TEST_CPP = [
   '',
 ].join('\n');
 const CMAKE = 'project(x)\nka_add_qtest(adds ka_adds_tests)\nka_add_qtest_filter(save_open_x ka_adds_tests\n  adds\n  more)\n';
+const BASELINE = 'docs/quality/line-limit-baseline.txt';
+const linesOf = (n, eol = '\n') => `${Array.from({ length: n }, (_, i) => `// line ${i + 1}`).join(eol)}${eol}`;
 
 function repoWith(t) {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-gate-'));
@@ -32,13 +34,17 @@ function repoWith(t) {
   fs.mkdirSync(path.join(repo, 'tests'));
   fs.writeFileSync(path.join(repo, 'CMakeLists.txt'), CMAKE);
   fs.writeFileSync(path.join(repo, 'tests', 'test_adds.cpp'), TEST_CPP);
+  fs.mkdirSync(path.join(repo, 'src'));
+  fs.writeFileSync(path.join(repo, 'src', 'big.cpp'), linesOf(310));
+  fs.mkdirSync(path.join(repo, 'docs', 'quality'), { recursive: true });
+  fs.writeFileSync(path.join(repo, BASELINE), '# C++ files already over the 300-line limit\n310 src/big.cpp\n');
   git('init', '-q');
   git('add', '-A');
   git('commit', '-q', '-m', 'base');
   return { repo, git };
 }
 
-// Build and ctest evidence newer than every change, so only the weakening check can deny.
+// Build and ctest evidence newer than every change, so only the weakening check or the line limit can deny.
 function evidence(repo) {
   const release = path.join(repo, 'build', 'Release');
   fs.mkdirSync(path.join(repo, 'build', 'Testing', 'Temporary'), { recursive: true });
@@ -177,4 +183,40 @@ test('a failure in a former baseline test blocks the commit', (t) => {
 test('moving or re-indenting an assertion unchanged is not weakening', (t) => {
   const repo = change(t, editTest('    QCOMPARE(1 + 1, 2);\n    QVERIFY(true);', '    QVERIFY(true);\n      QCOMPARE(1 + 1, 2);'));
   assert.equal(ask(repo, 'git commit -m "style: 순서"'), null);
+});
+
+// Line limit (docs/intent/2026-10-03-line-limit-precommit.md): the same rule as
+// scripts/scorecard.ps1 -LineLimitOnly, checked before the commit instead of only on GitHub.
+const writeSrc = (rel, text) => (repo) => fs.writeFileSync(path.join(repo, ...rel.split('/')), text);
+
+test('growing a file past its recorded length is blocked', (t) => {
+  const repo = change(t, writeSrc('src/big.cpp', linesOf(312)));
+  const reason = ask(repo, 'git commit -m "fix: 고침"') ?? '';
+  assert.match(reason, /src\/big\.cpp/);
+  assert.match(reason, /312/);
+});
+
+test('a new C++ file over 300 lines is blocked, at 300 it passes', (t) => {
+  assert.match(ask(change(t, writeSrc('src/new.cpp', linesOf(301))), 'git commit -m "feat: 새 파일"') ?? '', /src\/new\.cpp/);
+  assert.equal(ask(change(t, writeSrc('src/new.cpp', linesOf(300, '\r\n'))), 'git commit -m "feat: 새 파일"'), null);
+});
+
+test('blank lines at the end count as on GitHub', (t) => {
+  const reason = ask(change(t, writeSrc('src/new.cpp', `${linesOf(299)}\n\n`)), 'git commit -m "feat: 새 파일"') ?? '';
+  assert.match(reason, /src\/new\.cpp: 301줄/);
+});
+
+test('editing a recorded file without growing it passes', (t) => {
+  assert.equal(ask(change(t, writeSrc('src/big.cpp', linesOf(305))), 'git commit -m "refactor: 줄임"'), null);
+});
+
+test('raising a recorded length needs a reason line', (t) => {
+  const raise = (repo) => {
+    writeSrc('src/big.cpp', linesOf(312))(repo);
+    writeSrc(BASELINE, '# C++ files already over the 300-line limit\n312 src/big.cpp\n')(repo);
+  };
+  assert.match(ask(change(t, raise), 'git commit -m "fix: 고침"') ?? '', /길이 기준 변경:/);
+  assert.equal(ask(change(t, raise), 'git commit -m "fix: 고침" -m "길이 기준 변경: 다른 대화의 수정으로 늘었다"'), null);
+  const onlyBaseline = (repo) => writeSrc(BASELINE, '# C++ files already over the 300-line limit\n320 src/big.cpp\n')(repo);
+  assert.match(ask(change(t, onlyBaseline), 'git commit -m "docs: 기준"') ?? '', /길이 기준 변경:/);
 });

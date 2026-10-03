@@ -16,6 +16,11 @@
 //       excused since 2026-10-03: the former four pass locally and in CI).
 // No build/ at all -> deny with the first-build command.
 //
+// Line limit, for every commit (docs-only too): a C++ file under src/ or tests/ in the commit may
+// pass 300 lines only when docs/quality/line-limit-baseline.txt lists it, and not past the listed
+// count (the CI rule of scripts/scorecard.ps1 -LineLimitOnly). A commit that raises or adds a
+// baseline entry needs a `길이 기준 변경: <이유>` line in its message.
+//
 // Evidence source: LastTest.log is rewritten by every ctest run, including a
 // run that matched zero tests (then it has no "Test:" block, so zero tests
 // never count as tested). LastTestsFailed.log is NOT used: ctest leaves a stale
@@ -96,18 +101,19 @@ function emitDeny(reason) {
   );
 }
 
-function git(args, cwd) {
-  return execFileSync('git', args, {
+function git(args, cwd, raw = false) {
+  const out = execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
     maxBuffer: 16 * 1024 * 1024,
-  }).trim();
+  });
+  return raw ? out : out.trim();
 }
-function tryGit(args, cwd) {
+function tryGit(args, cwd, raw = false) {
   try {
-    return git(args, cwd);
+    return git(args, cwd, raw);
   } catch {
     return null;
   }
@@ -575,6 +581,18 @@ function changedFiles(top, form) {
   return [...set];
 }
 
+// A file's content in the commit: the index for a plain commit, the work tree when -a, pathspecs or
+// an earlier `git add` in the chain take it from there. Untrimmed, so blank lines still count; null
+// when the commit deletes the file.
+function committedText(top, form, f) {
+  if (!(form.all || form.untracked || form.pathspecs.length || (form.stageGroups || []).length)) return tryGit(['show', `:${f}`], top, true);
+  try {
+    return fs.readFileSync(path.join(top, f), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 // Test lock (user decision 2026-10-03, docs/intent/2026-10-03-dev-setup-gaps.md): a commit that
 // weakens a test that already exists needs a `시험 변경: <이유>` line in its message.
 const ASSERT_RE = /\b(?:QCOMPARE|QVERIFY2?|QTRY_COMPARE(?:_WITH_TIMEOUT)?|QTRY_VERIFY2?(?:_WITH_TIMEOUT)?|QFAIL|QVERIFY_THROWS_\w+|QTest::newRow|QTest::addRow)\s*\(/g;
@@ -617,16 +635,8 @@ function weakenedTests(top, form, files) {
   const base = commitBase(top, form);
   const targets = files.filter((f) => f.startsWith('tests/') || path.posix.basename(f) === 'CMakeLists.txt');
   if (base === null || !targets.length) return [];
-  const fromIndex = !(form.all || form.untracked || form.pathspecs.length || (form.stageGroups || []).length);
   const before = (f) => tryGit(['show', `${base}:${f}`], top);
-  const after = (f) => {
-    if (fromIndex) return tryGit(['show', `:${f}`], top);
-    try {
-      return fs.readFileSync(path.join(top, f), 'utf8');
-    } catch {
-      return null;
-    }
-  };
+  const after = (f) => committedText(top, form, f);
   const count = (list) => list.reduce((m, s) => m.set(s, (m.get(s) || 0) + 1), new Map());
   const take = (m, s) => (m.get(s) > 0 ? (m.set(s, m.get(s) - 1), true) : false);
   const findings = [];
@@ -653,6 +663,71 @@ function weakenedTests(top, form, files) {
     }
   }
   return findings;
+}
+
+// Line limit (user decision 2026-10-03, docs/intent/2026-10-03-line-limit-precommit.md): the CI rule
+// of scripts/scorecard.ps1 -LineLimitOnly for the C++ files in the commit, and a reason line for
+// raising the baseline, like the test lock.
+const LINE_LIMIT = 300;
+const LINE_LIMIT_BASELINE = 'docs/quality/line-limit-baseline.txt';
+const LIMIT_REASON_RE = /^\s*길이 기준 변경\s*:\s*(?!없음\s*$)\S/m;
+
+// Lines as Get-Content counts them in scorecard.ps1: CRLF, LF or CR ends a line, and a final line
+// end does not start another one.
+function countLines(text) {
+  const lines = text.split(/\r\n|\r|\n/);
+  if (lines[lines.length - 1] === '') lines.pop();
+  return lines.length;
+}
+
+// "<count> <path>" lines of the baseline -> Map(path -> count); # comments do not match.
+function parseBaseline(text) {
+  const map = new Map();
+  for (const line of (text || '').split(/\r\n|\r|\n/)) {
+    const m = /^\s*(\d+)\s+(\S.*)$/.exec(line);
+    if (m) map.set(m[2].trim(), Number(m[1]));
+  }
+  return map;
+}
+
+function lineLimitProblems(top, form, files, message) {
+  const base = commitBase(top, form);
+  const baseBaseline = () => (base === null ? null : tryGit(['show', `${base}:${LINE_LIMIT_BASELINE}`], top));
+  const baselineChanged = files.includes(LINE_LIMIT_BASELINE);
+  const allowed = parseBaseline(baselineChanged ? committedText(top, form, LINE_LIMIT_BASELINE) : baseBaseline());
+  const problems = [];
+
+  const over = [];
+  for (const f of files.filter((x) => /^(?:src|tests)\/.+\.(?:cpp|h|hpp)$/i.test(x))) {
+    const text = committedText(top, form, f);
+    if (text === null) continue; // deleted in this commit
+    const lines = countLines(text);
+    if (lines <= LINE_LIMIT) continue;
+    if (!allowed.has(f)) over.push(`${f}: ${lines}줄 (기준 파일에 없는 파일은 ${LINE_LIMIT}줄까지)`);
+    else if (lines > allowed.get(f)) over.push(`${f}: ${lines}줄, 기준 ${allowed.get(f)}줄보다 늘었다`);
+  }
+  if (over.length) {
+    problems.push(
+      `C++ 파일이 길이 제한을 넘는다 (GitHub 검사 「Source line limit」와 같은 기준):\n    - ${over.join('\n    - ')}\n` +
+        `  파일을 줄이거나 나눈다. 꼭 늘려야 하면 ${LINE_LIMIT_BASELINE} 의 줄 수를 올리고(새 파일은 줄을 더하고) 커밋 메시지에 \`길이 기준 변경: <이유>\` 줄을 넣는다.`,
+    );
+  }
+
+  if (baselineChanged && !LIMIT_REASON_RE.test(message)) {
+    const old = parseBaseline(baseBaseline());
+    const raised = [];
+    for (const [f, lines] of allowed) {
+      if (!old.has(f)) raised.push(`${f}: ${lines}줄로 새로 넣음`);
+      else if (lines > old.get(f)) raised.push(`${f}: ${old.get(f)} → ${lines}줄`);
+    }
+    if (raised.length) {
+      problems.push(
+        `${LINE_LIMIT_BASELINE} 에서 줄 수를 올리거나 파일을 새로 넣었다:\n    - ${raised.join('\n    - ')}\n` +
+          '  정말 필요하면 커밋 메시지에 `길이 기준 변경: <이유>` 줄을 넣는다. 아니면 기준이 아니라 파일을 줄인다.',
+      );
+    }
+  }
+  return problems;
 }
 
 // The commit message: -m/--message values, heredoc bodies (`-F -`), a -F/--file file, and for an
@@ -702,9 +777,8 @@ function newest(list) {
   return list.reduce((a, b) => (a === null || b.ms > a.ms ? b : a), null);
 }
 
-function evaluate(top, form) {
+function evaluate(top, form, files) {
   const problems = [];
-  const files = changedFiles(top, form);
   const relevant = files.filter(isBuildRelevant);
   if (!relevant.length) return { gated: false, files };
 
@@ -837,13 +911,15 @@ function main() {
       continue; // not a repository: git itself refuses the commit
     }
     if (!fs.existsSync(path.join(top, 'CMakeLists.txt'))) continue; // not a CMake project: nothing to build
+    const files = changedFiles(top, c.form);
     let r;
     try {
-      r = evaluate(top, c.form);
+      r = evaluate(top, c.form, files);
     } catch (e) {
       r = { gated: true, files: [], problems: [`게이트 내부 오류: ${e.stack || e.message}`] };
     }
-    if (r.gated && !REASON_RE.test(messageText(command, c.dir, top, c.form))) {
+    const message = messageText(command, c.dir, top, c.form);
+    if (r.gated && !REASON_RE.test(message)) {
       const weak = weakenedTests(top, c.form, r.files);
       if (weak.length) {
         const shownWeak = weak.slice(0, 8).join('\n    - ') + (weak.length > 8 ? `\n    - 외 ${weak.length - 8}개` : '');
@@ -853,12 +929,13 @@ function main() {
         );
       }
     }
-    if (!r.gated || !r.problems.length) continue;
+    const problems = [...(r.problems || []), ...lineLimitProblems(top, c.form, files, message)];
+    if (!problems.length) continue;
     const shown = r.files.slice(0, 12).join(', ') + (r.files.length > 12 ? ` 외 ${r.files.length - 12}개` : '');
     reasons.push(
       `[commit-gate] 커밋 차단 (${top}${c.note ? `; ${c.note}` : ''}${c.form.amend ? '; --amend' : ''})\n` +
-        `빌드 대상 파일이 커밋에 들어 있다: ${shown}\n` +
-        `빠진 것:\n- ${r.problems.join('\n- ')}\n` +
+        (r.gated ? `빌드 대상 파일이 커밋에 들어 있다: ${shown}\n` : '') +
+        `막은 이유:\n- ${problems.join('\n- ')}\n` +
         `모두 갖춘 뒤 같은 git commit 을 다시 실행한다. 이 게이트를 건너뛰는 옵션은 없다. 문서(.md)·.claude/·scripts/ 만 바꾼 커밋은 막지 않는다.`,
     );
   }
