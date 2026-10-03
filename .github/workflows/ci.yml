@@ -83,6 +83,8 @@ jobs:
     name: Windows build and tests
     runs-on: windows-2022
     timeout-minutes: 330
+    outputs:
+      osgeo4w-key: ${{ steps.osgeo4w-cache.outputs.cache-primary-key }}
     env:
       OSGEO4W_ROOT: C:\OSGeo4W
     steps:
@@ -167,28 +169,21 @@ jobs:
           . .\scripts\dev-env.ps1
           cmake --build build --config Release --parallel -- /p:CL_MPCount=2
 
-      # Two tests at a time keep the timing-sensitive groups steady on a 4-core runner. Failed
-      # tests get one more run; scripts/ci/flaky-gate.mjs names any that pass it and keeps the job
-      # red unless docs/quality/flaky-quarantine.txt lists them. perf budgets scale against the
-      # reference PC's calibration (TEST_INFRA.md).
-      - name: CTest
-        timeout-minutes: 150
-        shell: pwsh
-        env:
-          KA_PERF_CALIBRATION_REF_MS: '14'
-          # The polygon calibration is fast here, but A3 PDF export swings far more than on the
-          # reference PC (2026-10-02: medians 33 and 77 ms against 27 ms). Only that gate gets a
-          # CI ceiling against gross regressions; the other budgets stay as they are.
-          KA_PERF_BUDGET_A3_PDF_EXPORT: '160'
-        run: |
-          . .\scripts\dev-env.ps1
-          ctest --test-dir build -C Release -j2 --output-on-failure
-          if ($LASTEXITCODE -eq 0) { exit 0 }
-          $failed = Join-Path $env:RUNNER_TEMP 'first-run-failed.log'
-          Copy-Item -LiteralPath build/Testing/Temporary/LastTestsFailed.log -Destination $failed
-          ctest --test-dir build -C Release --output-on-failure --rerun-failed
-          node scripts/ci/flaky-gate.mjs --failed $failed --rerun-exit $LASTEXITCODE --quarantine docs/quality/flaky-quarantine.txt
-          exit $LASTEXITCODE
+      # The CTest groups run in the three "CTest k/3" jobs below on other runners (about 23 min in
+      # one job before 2026-10-03). They get the executables, data copies and CTestTestfile.cmake;
+      # paths stay valid because every runner checks out to the same workspace.
+      - name: Pack the build for the CTest jobs
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-build
+          path: |
+            build/Release
+            build/CTestTestfile.cmake
+            !build/Release/**/*.pdb
+            !build/Release/**/*.lib
+            !build/Release/**/*.exp
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Start and quit the app
         timeout-minutes: 5
@@ -256,3 +251,134 @@ jobs:
           path: build/test-logs
           if-no-files-found: ignore
           overwrite: true
+
+  # The CTest groups on three runners at once: every third test from position 1, 2 or 3
+  # (ctest -I k,,3), on the build the job above packed and the OSGeo4W install it saved.
+  tests:
+    name: CTest ${{ matrix.shard }}/3
+    needs: windows
+    runs-on: windows-2022
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    env:
+      OSGEO4W_ROOT: C:\OSGeo4W
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Restore OSGeo4W
+        uses: actions/cache/restore@v6
+        with:
+          path: C:\OSGeo4W
+          key: ${{ needs.windows.outputs.osgeo4w-key }}
+          fail-on-cache-miss: true
+
+      - name: Get the build
+        uses: actions/download-artifact@v8
+        with:
+          name: release-build
+          path: build
+
+      # Two tests at a time keep the timing-sensitive groups steady on a 4-core runner. Failed tests
+      # get one more run; scripts/ci/flaky-gate.mjs names any that pass it and keeps the job red
+      # unless docs/quality/flaky-quarantine.txt lists them. perf budgets scale against the
+      # reference PC's calibration (TEST_INFRA.md).
+      - name: CTest
+        timeout-minutes: 100
+        shell: pwsh
+        env:
+          KA_PERF_CALIBRATION_REF_MS: '14'
+          # The polygon calibration is fast here, but A3 PDF export swings far more than on the
+          # reference PC (2026-10-02: medians 33 and 77 ms against 27 ms). Only that gate gets a
+          # CI ceiling against gross regressions; the other budgets stay as they are.
+          KA_PERF_BUDGET_A3_PDF_EXPORT: '160'
+        run: |
+          . .\scripts\dev-env.ps1
+          $k = ${{ matrix.shard }}
+          $total = @(ctest --test-dir build -C Release -N | Select-String -Pattern '^\s*Test\s+#').Count
+          $mine = @(ctest --test-dir build -C Release -N -I "$k,,3" | Select-String -Pattern '^\s*Test\s+#').Count
+          $expected = [math]::Ceiling(($total - $k + 1) / 3)
+          Write-Output "CTest $k/3: $mine of $total tests"
+          if ($mine -eq 0 -or $mine -ne $expected) { throw "split broken: $mine tests here, expected $expected of $total" }
+          ctest --test-dir build -C Release -j2 --output-on-failure -I "$k,,3"
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          $failed = Join-Path $env:RUNNER_TEMP 'first-run-failed.log'
+          Copy-Item -LiteralPath build/Testing/Temporary/LastTestsFailed.log -Destination $failed
+          ctest --test-dir build -C Release -j2 --output-on-failure --rerun-failed
+          node scripts/ci/flaky-gate.mjs --failed $failed --rerun-exit $LASTEXITCODE --quarantine docs/quality/flaky-quarantine.txt
+          exit $LASTEXITCODE
+
+      - name: Upload test logs
+        if: ${{ failure() || cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-logs-${{ matrix.shard }}
+          path: build/test-logs
+          if-no-files-found: ignore
+          overwrite: true
+
+  # Experiment that never decides the result (docs/intent/2026-10-03-dev-speed-and-flaky.md): the
+  # same build with Ninja, ccache and /Z7 debug info (no compiler cache can keep /Zi), to measure
+  # what a cache saves here. The job summary shows the build time and the ccache statistics.
+  build-speed-experiment:
+    name: Build speed experiment (Ninja + ccache)
+    needs: windows
+    runs-on: windows-2022
+    continue-on-error: true
+    timeout-minutes: 150
+    env:
+      OSGEO4W_ROOT: C:\OSGeo4W
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Restore OSGeo4W
+        uses: actions/cache/restore@v6
+        with:
+          path: C:\OSGeo4W
+          key: ${{ needs.windows.outputs.osgeo4w-key }}
+          fail-on-cache-miss: true
+
+      # The cache follows the OSGeo4W install: a new qgis-dev changes the QGIS headers anyway.
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: ninja-release-${{ needs.windows.outputs.osgeo4w-key }}
+          max-size: 3G
+
+      - name: Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v6
+
+      - name: MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+        with:
+          arch: x64
+
+      - name: Configure (Ninja, ccache, /Z7)
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          . .\scripts\dev-env.ps1
+          cmake -S . -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Release -DKA_HGIS_BUILD_TESTS=ON "-DOSGEO4W_ROOT=$env:OSGEO4W_ROOT" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DKA_HGIS_EMBEDDED_DEBUG_INFO=ON
+
+      # Three compiles at a time keep the 16 GB runner clear of out-of-memory errors (C1060).
+      - name: Build (timed)
+        timeout-minutes: 120
+        shell: pwsh
+        run: |
+          . .\scripts\dev-env.ps1
+          ccache --zero-stats
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          cmake --build build-ninja --parallel 3
+          $code = $LASTEXITCODE
+          $minutes = [math]::Round($clock.Elapsed.TotalMinutes, 1)
+          $stats = (ccache --show-stats) -join "`n"
+          Write-Output "build $minutes min, exit $code"
+          Write-Output $stats
+          "## Build speed experiment`n`nNinja + ccache + /Z7: $minutes min, exit $code`n`n``````text`n$stats`n``````" >> $env:GITHUB_STEP_SUMMARY
+          exit $code

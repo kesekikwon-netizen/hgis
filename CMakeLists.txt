@@ -249,6 +249,7 @@ add_library(ka_core STATIC
   src/core/SubmitShp.h
   src/core/SubmitReadme.h
   src/core/LayoutService.h
+  src/core/LayerFeatures.h
   src/core/LayerOps.h
   src/core/LayerRole.h
   src/core/LayerStyleDefaults.h
@@ -593,12 +594,27 @@ set_target_properties(ka-hgis PROPERTIES WIN32_EXECUTABLE TRUE)
 
 # 릴리스에도 PDB를 만들어 크래시 로그(KaCrashGuard)가 함수명·줄번호까지 심볼화하게 한다.
 # /FS: 병렬 컴파일에서 같은 PDB에 안전하게 쓰도록(C1041 방지).
+# KA_HGIS_EMBEDDED_DEBUG_INFO: GitHub 검사의 캐시 실험용. 컴파일러 캐시는 /Zi를 담지 못해 /Z7(디버그
+# 정보를 .obj 안에)로 바꾼다. 링크의 /DEBUG가 그대로 ka-hgis.pdb를 만든다.
+option(KA_HGIS_EMBEDDED_DEBUG_INFO "Release debug info as /Z7 so a compiler cache can keep it" OFF)
+set(KA_HGIS_RELEASE_DEBUG_INFO /Zi)
+if(KA_HGIS_EMBEDDED_DEBUG_INFO)
+  set(KA_HGIS_RELEASE_DEBUG_INFO /Z7)
+endif()
 if(MSVC)
-  target_compile_options(ka_core PRIVATE "$<$<CONFIG:Release>:/Zi>" "$<$<CONFIG:Release>:/FS>")
-  target_compile_options(ka-hgis PRIVATE /utf-8 "$<$<CONFIG:Release>:/Zi>" "$<$<CONFIG:Release>:/FS>")
+  target_compile_options(ka_core PRIVATE "$<$<CONFIG:Release>:${KA_HGIS_RELEASE_DEBUG_INFO}>" "$<$<CONFIG:Release>:/FS>")
+  target_compile_options(ka-hgis PRIVATE /utf-8 "$<$<CONFIG:Release>:${KA_HGIS_RELEASE_DEBUG_INFO}>" "$<$<CONFIG:Release>:/FS>")
   target_link_options(ka-hgis PRIVATE
     "$<$<CONFIG:Release>:/DEBUG>" "$<$<CONFIG:Release>:/OPT:REF>" "$<$<CONFIG:Release>:/OPT:ICF>")
 endif()
+
+# 가장 많이 쓰는 Qt·표준·QGIS 헤더를 미리 컴파일한다(docs/intent/2026-10-03-dev-speed-and-flaky.md).
+set(KA_HGIS_PCH_CORE <QDir> <QFile> <QFileInfo> <QSet> <QString> <QVariant> <algorithm> <cmath> <memory>
+    <qgscoordinatereferencesystem.h> <qgscoordinatetransform.h> <qgsfeature.h> <qgsgeometry.h> <qgsproject.h>
+    <qgsvectorlayer.h>)
+target_precompile_headers(ka_core PRIVATE ${KA_HGIS_PCH_CORE})
+target_precompile_headers(ka-hgis PRIVATE ${KA_HGIS_PCH_CORE} <QAction> <QHBoxLayout> <QLabel> <QLineEdit>
+    <QPushButton> <QTimer> <QToolButton> <QVBoxLayout> <qgsmapcanvas.h>)
 
 
 add_custom_command(TARGET ka-hgis POST_BUILD
