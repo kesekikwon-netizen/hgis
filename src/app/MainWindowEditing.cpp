@@ -815,6 +815,7 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
       if (kindIdx >= 0) feat.setAttribute(kindIdx, QStringLiteral("미분류"));
       if (statusIdx >= 0) feat.setAttribute(statusIdx, QStringLiteral("가설"));
     }
+    if (m_featureCard) m_featureCard->commitTyping();  // a value still typed is its own step, on its own record
     // 도형과 이름·번호를 되돌리기 한 단계로 묶는다(Ctrl+Z 한 번). 「겹친 곳 지우기」는 따로 한 단계다.
     KaUndoGroup drawStep(layer, QStringLiteral("도형 그리기"));
     if (!layer->addFeature(feat)) {

@@ -156,6 +156,7 @@ void KaFeatureCard::setFeature(QgsVectorLayer* layer, QgsFeatureId fid) {
     refresh();  // same feature again: keep the editors (and anything being typed)
     return;
   }
+  commitTyping();  // a value still being typed belongs to the record on view, not the next one
   if (layer != m_layer) {
     clear();
     watchLayer(layer);
@@ -187,6 +188,20 @@ void KaFeatureCard::watchLayer(QgsVectorLayer* layer) {
   m_connections << connect(layer, &QgsMapLayer::willBeDeleted, this, [this] { clear(); });
 }
 
+void KaFeatureCard::commitTyping() {
+  QWidget* focus = window() ? window()->focusWidget() : nullptr;
+  if (!m_body || !focus || !m_body->isAncestorOf(focus)) return;
+  const auto owns = [focus](QWidget* editor) { return editor && (editor == focus || editor->isAncestorOf(focus)); };
+  if (owns(m_number)) commitEditor(m_numberField, m_number);
+  else if (owns(m_kind)) commitEditor(QStringLiteral("kind"), m_kind);
+  else if (owns(m_period)) commitEditor(QStringLiteral("period"), m_period);
+  else if (owns(m_note)) commitEditor(QStringLiteral("note"), m_note);
+  else
+    for (const auto& [field, edit] : std::as_const(m_textEdits))
+      if (owns(edit)) commitEditor(field, edit);
+  focus->clearFocus();
+}
+
 void KaFeatureCard::dropEditors() {
   if (m_body) {
     // Deleted later: this may run inside a signal of one of these editors.
@@ -202,7 +217,7 @@ void KaFeatureCard::dropEditors() {
   m_numberNote = nullptr;
   m_kind = m_period = nullptr;
   m_note = nullptr;
-  m_nameEdits.clear();
+  m_textEdits.clear();
   m_area = m_perimeter = nullptr;
 }
 
@@ -227,9 +242,10 @@ void KaFeatureCard::refresh() {
   const QString kind = value(QStringLiteral("kind"));
   const QString number = m_numberField.isEmpty() ? QString() : value(m_numberField);
   QString header = number.isEmpty() ? kind : kind.isEmpty() ? number : number + QLatin1Char(' ') + kind;
-  for (const auto& [field, edit] : std::as_const(m_nameEdits)) {
+  const bool area = LayerOps::layerKeyOf(m_layer) == QLatin1String("survey_area");
+  for (const auto& [field, edit] : std::as_const(m_textEdits)) {
     showText(edit, value(field));
-    if (header.isEmpty()) header = value(field);  // a survey area is named by its 조사명
+    if (area && header.isEmpty()) header = value(field);  // a survey area is named by its 조사명
   }
   m_name->setText(header.isEmpty() ? QStringLiteral("이름 없음") : header);
   showText(m_number, number);

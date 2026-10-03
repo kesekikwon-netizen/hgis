@@ -19,7 +19,8 @@ class QToolButton;
 class QgsVectorLayer;
 
 // 「선택한 유구」 card: the record of ONE selected feature. A header line (「1호 주거지」
-// with the layer kind 「유구 면」 at the right), the editors (번호, 종류, 시대, 메모),
+// with the layer kind 「유구 면」 at the right), the editors (번호, 종류, 시대, 조사 상태·조사자·조사일, 메모;
+// a survey area's 조사명·유적명; editable while drawing too),
 // read-only 「자동 계산」 boxes for 면적·둘레, one state chip (「변경됨 · 아직 저장 안 됨」
 // warn / 「저장된 값입니다」 neutral) and 「조사카드 열기」. It never commits: each edit
 // goes into the layer's edit buffer as one undoable command, and Ctrl+S stays the only
@@ -38,6 +39,9 @@ public:
   // False for a record shown directly (a shape just drawn): emptying the selection keeps it.
   bool followsSelection() const { return m_followsSelection; }
   void clear();
+  // Writes the value still being typed in a box into the record on view (before another is shown).
+  void commitTyping();
+  bool isReadOnly() const { return m_readOnly; }
 
   QgsVectorLayer* layer() const;
   QgsFeatureId featureId() const { return m_fid; }
@@ -65,6 +69,8 @@ signals:
   void featureChanged();
   // 「조사카드 열기」: the window opens the full attribute form for this feature.
   void formRequested(QgsVectorLayer* layer, QgsFeatureId fid);
+  // Enter in a box: the value is in; while drawing the window hands the keys back to the map.
+  void valueEntered();
 
 protected:
   bool eventFilter(QObject* watched, QEvent* event) override;  // 메모 commits on focus-out
@@ -98,7 +104,8 @@ private:
   QWidget* m_kind = nullptr;
   QWidget* m_period = nullptr;
   QPlainTextEdit* m_note = nullptr;
-  QList<QPair<QString, QLineEdit*>> m_nameEdits;  // survey area: 조사명·유적명 (a separate area layer: 이름)
+  // Plain text rows: a survey area's 조사명·유적명 (a separate area layer: 이름), a record's 조사 상태·조사자·조사일.
+  QList<QPair<QString, QLineEdit*>> m_textEdits;
   QLabel* m_area = nullptr;
   QLabel* m_perimeter = nullptr;
   KaChip* m_state = nullptr;

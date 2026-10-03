@@ -2821,10 +2821,40 @@ private slots:
     captureAndDismissForm(capture, QgsGeometry::fromRect(QgsRectangle(190070, 560010, 190090, 560030)));
     QCOMPARE(poly->featureCount(), 1);
     QVERIFY2(card->hasFeature() && card->layer() == poly, "그린 도형의 기록이 오른쪽 속성에 나와야 합니다.");
+    QVERIFY2(card->isEnabled(), "그리는 중에도 기록을 고칠 수 있어야 합니다(2026-10-03 「진행」).");
     // Shown, not selected: 겹친 곳 지우기·폴리곤 나누기·Delete must not pick it up (code review).
     QVERIFY(poly->selectedFeatureIds().isEmpty());
     QVERIFY(QMetaObject::invokeMethod(&window, "startSelectTool", Qt::DirectConnection));
     QVERIFY2(card->hasFeature(), "그리기를 내려놓아도 방금 그린 기록이 남아야 합니다.");
+  }
+  // Keys typed in a card box while drawing leave the sketch alone (user 2026-10-03 「진행」, code review).
+  void cardKeysLeaveTheSketchAlone() {
+    const QString path = makeSurvey(QStringLiteral("card_keys"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    QVERIFY(QMetaObject::invokeMethod(&window, "startEditFeaturePoly", Qt::DirectConnection));
+    auto* capture = window.findChild<KaCaptureMapTool*>();
+    auto* poly = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("feature_poly"));
+    auto* card = window.findChild<KaFeatureCard*>();
+    QVERIFY(capture && poly && card);
+    captureAndDismissForm(capture, QgsGeometry::fromRect(QgsRectangle(190070, 560010, 190090, 560030)));
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    window.resize(1280, 900);
+    window.show();
+    canvas->setExtent(QgsRectangle(189950, 559950, 190150, 560150));
+    QApplication::processEvents();
+    QTest::mouseClick(canvas->viewport(), Qt::LeftButton, Qt::NoModifier, QPoint(300, 300));
+    QTest::mouseClick(canvas->viewport(), Qt::LeftButton, Qt::NoModifier, QPoint(360, 300));
+    const int sketched = capture->pointCount();
+    QVERIFY(sketched >= 2);
+    auto* box = card->findChild<QLineEdit*>(QStringLiteral("kaFeatureCardNumber"));
+    QVERIFY(box && box->isEnabled());
+    box->setFocus();
+    for (Qt::Key key : {Qt::Key_Return, Qt::Key_Escape, Qt::Key_Backspace}) QTest::keyClick(box, key);
+    QCOMPARE(capture->pointCount(), sketched);
+    QCOMPARE(poly->featureCount(), 1);
   }
   // An area that is already there is continued without a window (user 2026-10-03 「추천진행」).
   void surveyAreaDrawingContinuesTheExistingAreaWithoutAWindow() {

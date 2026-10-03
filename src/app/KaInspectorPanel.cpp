@@ -142,7 +142,10 @@ void KaInspectorPanel::syncAttributeState() {
   const bool has = m_card && m_card->hasFeature();
   if (m_card) m_card->setVisible(has);
   QString text;
-  if (m_drawing) text = QStringLiteral("그리는 동안에는 기록을 고치지 않습니다. 도형을 마치면 여기서 이어집니다.");
+  if (m_drawing)
+    text = !has                  ? QStringLiteral("도형을 다 그리면 그 기록이 여기에 나옵니다.")
+           : m_card->isReadOnly() ? QStringLiteral("그리는 중입니다. 이 기록은 참조 자료라 고치지 않습니다.")
+                                  : QStringLiteral("그리는 중에도 여기서 바로 고칠 수 있습니다. 지도를 누르면 이어서 그립니다.");
   else if (!has) text = QStringLiteral("지도에서 도형 하나를 고르면 기록이 여기에 나옵니다.");
   m_sentence->setText(text);
   m_sentence->setVisible(!text.isEmpty());

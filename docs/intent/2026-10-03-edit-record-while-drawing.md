@@ -1,7 +1,7 @@
 # 요청 기록: 오른쪽 「선택한 유구」 판에서 기록을 바로 고치기(그리는 중에도)
 
 - 날짜: 2026-10-03
-- 상태: 확정
+- 상태: 완료
 - 관련 문서: docs/intent/2026-10-03-draw-dialog-and-inspector-tabs.md
 
 ## 요청 원문
@@ -41,4 +41,10 @@
 - Ctrl+Z 로 방금 고친 값이 한 단계씩 돌아간다.
 
 ## 결과
-(완료 때 적는다)
+- 그리는 중에도 오른쪽 판의 기록 칸이 잠기지 않는다: 시험 `save_open_edit`(drawnShapeShowsItsRecordInTheInspector 의 isEnabled 확인) 통과.
+- 칸에 조사 상태·조사자·조사일이 더 나오고 고쳐진다: `feature_card_fields`(surveyStatusSurveyorAndDateAreOnTheCard) 통과.
+- 칸에서 Enter 는 그 칸만 반영하고 열쇠를 지도로 돌려준다: `feature_card_fields`(enterFinishesOnlyThatBox), 칸에서 Enter·Esc·Backspace 를 눌러도 그리던 점이 그대로다: `save_open_edit`(cardKeysLeaveTheSketchAlone) 통과.
+- 치던 글자는 다른 기록으로 넘어갈 때도 그 기록에 들어간다(코드 검토 지적): `feature_card_fields`(typedTextStaysWithItsRecord) — 고치기 전 실패, 고친 뒤 통과.
+- Ctrl+Z 로 칸 값이 한 단계씩 돌아간다: 기존 `feature_card` 시험 통과.
+- 참조 자료 기록은 그리는 중에도 「참조 자료라 고치지 않습니다」 문장이 나온다: `inspector_panel`(emptyAndDrawingSentences) — 고치기 전 실패, 고친 뒤 통과.
+- 빌드 0, 시험 10묶음(feature_card_fields·feature_card·inspector_panel·inspector_style·save_open_edit·save_open_erase·workflow_engine·shell_chrome·shell_widgets·shell_focus) 통과, smoke 0, 앱 홈 화면 정상(스크린샷). 그리는 중 화면을 직접 눌러 보는 확인은 하지 않았다(앱 조작 허락 없음).

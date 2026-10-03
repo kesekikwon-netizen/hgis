@@ -107,11 +107,15 @@ class TestInspectorPanel : public QObject {
     panel.show();
     QCOMPARE(panel.sentence(), QStringLiteral("지도에서 도형 하나를 고르면 기록이 여기에 나옵니다."));
     panel.setDrawing(true);
-    QCOMPARE(panel.sentence(), QStringLiteral("그리는 동안에는 기록을 고치지 않습니다. 도형을 마치면 여기서 이어집니다."));
+    QCOMPARE(panel.sentence(), QStringLiteral("도형을 다 그리면 그 기록이 여기에 나옵니다."));
     auto layer = houseLayer();
     card->setFeature(layer.get(), firstId(layer.get()));
     QVERIFY(!card->isHidden());  // the card is never hidden for drawing
-    QVERIFY(panel.sentence().startsWith(QStringLiteral("그리는 동안")));
+    QCOMPARE(panel.sentence(), QStringLiteral("그리는 중에도 여기서 바로 고칠 수 있습니다. 지도를 누르면 이어서 그립니다."));
+    auto reference = houseLayer();  // a reference record is shown while drawing, never edited
+    LayerOps::markReferenceLayer(reference.get());
+    card->setFeature(reference.get(), firstId(reference.get()));
+    QCOMPARE(panel.sentence(), QStringLiteral("그리는 중입니다. 이 기록은 참조 자료라 고치지 않습니다."));
     panel.setDrawing(false);
     QCOMPARE(panel.sentence(), QString());
   }
@@ -128,7 +132,7 @@ class TestInspectorPanel : public QObject {
     QSignalSpy edited(card, &KaFeatureCard::edited);
     note->setFocus();
     note->setPlainText(QStringLiteral("북벽 교란"));
-    card->setEnabled(false);  // the drawing lock (MainWindow::syncFeatureCard) while the note still has the focus
+    card->setEnabled(false);  // a disabled card (the old drawing lock) while the note still has the focus
     // Qt disables the editor before its FocusOut arrives; an offscreen window may deliver none, so send what Qt would.
     if (edited.isEmpty()) {
       QFocusEvent leave(QEvent::FocusOut, Qt::OtherFocusReason);

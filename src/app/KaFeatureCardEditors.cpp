@@ -77,6 +77,9 @@ void KaFeatureCard::buildEditors() {
     } else if (auto* edit = qobject_cast<QLineEdit*>(editor)) {
       connect(edit, &QLineEdit::editingFinished, this, [this, field, editor] { commitEditor(field, editor); });
     }
+    auto* combo = qobject_cast<QComboBox*>(editor);
+    if (auto* line = combo ? combo->lineEdit() : qobject_cast<QLineEdit*>(editor))
+      connect(line, &QLineEdit::returnPressed, this, &KaFeatureCard::valueEntered);  // Enter: this box only
   };
   m_numberField = FeatureNumbering::fieldsOf(m_layer).numberName;
   if (!m_numberField.isEmpty()) {
@@ -100,16 +103,18 @@ void KaFeatureCard::buildEditors() {
       if (!next.isEmpty()) setValue(m_numberField, next);
     });
   }
+  const auto addTextRow = [&](const char* field, const char* label) {
+    auto* edit = new QLineEdit(m_body);
+    m_form->addRow(QString::fromUtf8(label), edit);
+    watch(QString::fromLatin1(field), edit);
+    m_textEdits.append({QString::fromLatin1(field), edit});
+    return edit;
+  };
   // A survey area has no number, kind or period: its record is 조사명·유적명 (user 2026-10-03).
   const std::pair<const char*, const char*> nameRows[] = {{"survey_name", "조사명"}, {"site_name", "유적명"}, {"name", "이름"}};
   if (LayerOps::layerKeyOf(m_layer) == QLatin1String("survey_area"))
     for (const auto& [field, label] : nameRows)
-      if (has(field)) {
-        auto* edit = new QLineEdit(m_body);
-        m_form->addRow(QString::fromUtf8(label), edit);
-        watch(QString::fromLatin1(field), edit);
-        m_nameEdits.append({QString::fromLatin1(field), edit});
-      }
+      if (has(field)) addTextRow(field, label);
   if (has("kind")) {
     m_kind = KaFeatureFormDialog::createValueEditor(m_body, m_layer, QStringLiteral("kind"), QString());
     m_form->addRow(QStringLiteral("종류"), m_kind);
@@ -120,6 +125,10 @@ void KaFeatureCard::buildEditors() {
     m_form->addRow(QStringLiteral("시대"), m_period);
     watch(QStringLiteral("period"), m_period);
   }
+  // 조사 상태·조사자·조사일 too, without opening the 조사카드 (user 2026-10-03, answer 「진행」).
+  if (has("status")) addTextRow("status", "조사 상태");
+  if (has("surveyor")) addTextRow("surveyor", "조사자");
+  if (has("surv_date")) addTextRow("surv_date", "조사일")->setPlaceholderText(QStringLiteral("예: 2026-10-03"));
   const Qgis::GeometryType gt = m_layer->geometryType();
   if (gt == Qgis::GeometryType::Polygon) m_form->addRow(QStringLiteral("면적"), measureField(&m_area));
   if (gt == Qgis::GeometryType::Polygon || gt == Qgis::GeometryType::Line)
@@ -139,7 +148,7 @@ void KaFeatureCard::buildEditors() {
   for (QWidget* editor : {static_cast<QWidget*>(m_number), static_cast<QWidget*>(m_nextNumber), m_kind, m_period,
                           static_cast<QWidget*>(m_note)})
     if (editor) editor->setEnabled(!m_readOnly);
-  for (const auto& [field, edit] : std::as_const(m_nameEdits)) edit->setEnabled(!m_readOnly);
+  for (const auto& [field, edit] : std::as_const(m_textEdits)) edit->setEnabled(!m_readOnly);
 }
 
 bool KaFeatureCard::eventFilter(QObject* watched, QEvent* event) {

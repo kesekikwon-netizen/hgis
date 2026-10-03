@@ -41,7 +41,7 @@ QString KaFeatureCard::rowText(const QString& row) const {
   if (row == QLatin1String("perimeter")) return shownText(m_perimeter);
   if (row == QLatin1String("state")) return shownText(m_state);
   if (row == QLatin1String("note_number")) return m_numberNote && !m_numberNote->isHidden() ? m_numberNote->text() : QString();
-  for (const auto& [field, edit] : m_nameEdits)
+  for (const auto& [field, edit] : m_textEdits)
     if (row == field) return shownText(edit);
   return {};
 }
@@ -88,8 +88,8 @@ bool KaFeatureCard::setValue(const QString& field, const QString& text, QString*
 }
 
 void KaFeatureCard::commitEditor(const QString& field, QWidget* editor) {
-  // m_readOnly, not editor->isEnabled(): when the card is locked for drawing, Qt disables the
-  // editor before its FocusOut arrives, and that last typed value must still reach the buffer.
+  // m_readOnly, not editor->isEnabled(): when the card is disabled, Qt disables the editor before
+  // its FocusOut arrives, and that last typed value must still reach the buffer.
   if (!hasFeature() || !editor || m_readOnly) return;
   // Kind/period come back in the survey's own spelling (combo); others as typed.
   const auto* plain = qobject_cast<const QPlainTextEdit*>(editor);

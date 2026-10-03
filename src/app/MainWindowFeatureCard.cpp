@@ -1,9 +1,9 @@
 // 「선택한 유구」 card in the inspector panel (evaluation F044; P6 moved it from the layer panel).
 // The card shows exactly ONE selected feature. It is part of the right panel, never a popup.
-// While the drawing tool is active the card keeps its record but is disabled, and the
-// inspector says so in one sentence; a shape just drawn is shown at once without being selected
-// (user 2026-10-03 「속성도 안나오고」; erase/split/Delete act on selections). Nothing single
-// selected shows the inspector's sentence.
+// A shape just drawn is shown at once without being selected (user 2026-10-03 「속성도 안나오고」;
+// erase/split/Delete act on selections), and its record can be edited while the drawing tool stays
+// on (user 2026-10-03 「선택한 유구의 속성정보를 수정할수있게하라」); a click on the map draws on.
+// Nothing single selected shows the inspector's sentence.
 // Every card edit is one undoable command in the layer's edit buffer; Ctrl+S stays the only save.
 #include "MainWindow.h"
 
@@ -13,7 +13,6 @@
 #include "KaInspectorPanel.h"
 #include "core/LayerOps.h"
 
-#include <QApplication>
 #include <QBoxLayout>
 #include <QTimer>
 
@@ -31,7 +30,7 @@ void MainWindow::setupFeatureCard(QWidget* host, QBoxLayout* layout) {
   layout->addWidget(m_featureCard, 0);
 
   connect(m_canvas, &QgsMapCanvas::selectionChanged, this, &MainWindow::syncFeatureCard);
-  // Picking the drawing tool hides the card; leaving it reads the current selection again.
+  // Picking or leaving the drawing tool reads the current selection again.
   connect(m_canvas, &QgsMapCanvas::mapToolSet, this, [this](QgsMapTool*, QgsMapTool*) {
     if (!m_featureCard) return;
     QgsMapLayer* layer = m_featureCard->layer();
@@ -56,8 +55,12 @@ void MainWindow::setupFeatureCard(QWidget* host, QBoxLayout* layout) {
             QgsProject::instance()->setDirty(true);  // title ' *'; Ctrl+S remains the only save
             updateUndoRedoActions();
             LayerOps::applyDomainDrawStyle(layer, LayerOps::layerKeyOf(layer));
-            if (m_canvas) m_canvas->refresh();
+            LayerOps::refreshCanvasIfIdle(m_canvas);  // a draw may be running: never refresh into it
           });
+  // Enter in a card box while drawing: the keys go back to the map (Enter/Esc/Ctrl+Z act on the sketch).
+  connect(m_featureCard, &KaFeatureCard::valueEntered, this, [this] {
+    if (m_canvas && m_captureTool && m_canvas->mapTool() == m_captureTool) m_canvas->setFocus(Qt::OtherFocusReason);
+  });
   // [P6] 「조사카드 열기」: the full attribute form of the feature on the card.
   connect(m_featureCard, &KaFeatureCard::formRequested, this, [this](QgsVectorLayer* layer, QgsFeatureId fid) {
     if (layer) editFeatureAttributes(layer, layer->getFeature(fid));
@@ -67,14 +70,9 @@ void MainWindow::setupFeatureCard(QWidget* host, QBoxLayout* layout) {
 void MainWindow::syncFeatureCard(QgsMapLayer* layer) {
   if (!m_featureCard) return;
   const bool drawing = m_captureTool && m_canvas && m_canvas->mapTool() == m_captureTool;
-  // [P6] Drawing keeps the record on view (the inspector sentence explains) but does not
-  // edit it; the selection is read again once the tool is put down.
+  // [P6] Drawing keeps the record on view, editable (the inspector sentence says so); the
+  // selection is read again once the tool is put down.
   if (m_inspector) m_inspector->setDrawing(drawing);
-  // Commit before locking: the ribbon chips are TabFocus, so a value still being typed in the
-  // card leaves the box only here, and it must leave into the edit buffer, not be dropped.
-  if (drawing)
-    if (QWidget* focus = QApplication::focusWidget(); focus && m_featureCard->isAncestorOf(focus)) focus->clearFocus();
-  m_featureCard->setEnabled(!drawing);
   if (drawing) return;
   // Another layer's selection emptying must not clear the card showing this layer's feature,
   // nor an empty selection the record of a shape just drawn.
