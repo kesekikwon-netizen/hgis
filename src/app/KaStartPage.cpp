@@ -66,9 +66,8 @@ KaStartPage::KaStartPage(QWidget* parent) : QWidget(parent) {
   lower->addWidget(m_recentCard, 1);
   lower->addWidget(buildRightColumn(), 0);
   root->addLayout(lower, 1);
-  m_connection = new KaHomeConnectionCard(this);  // one row under both cards: the five sources in view at once
+  m_connection = new KaHomeConnectionCard(this);  // applyWindowMetrics puts it under both cards or into the column
   connect(m_connection, &KaHomeConnectionCard::configureRequested, this, &KaStartPage::configureRequested);
-  root->addWidget(m_connection);
   applyWindowMetrics();
   reload();
 }
@@ -181,8 +180,7 @@ QWidget* KaStartPage::buildHero() {
 }
 
 QWidget* KaStartPage::buildRightColumn() {
-  // 작업 순서 (≈200) fits under a compact hero; on a shorter window the column scrolls
-  // (vertical bar only) instead of squeezing the card.
+  // 작업 순서, and 연결 상태 on a short window: the column scrolls (vertical bar only) instead of squeezing them.
   auto* scroll = new QScrollArea(this);
   scroll->setObjectName(QStringLiteral("startRightColumn"));
   scroll->setWidgetResizable(true);
@@ -207,6 +205,8 @@ QWidget* KaStartPage::buildRightColumn() {
 void KaStartPage::applyWindowMetrics() {
   if (m_hero) m_hero->setFixedHeight(heroHeightFor(window()->height()));
   if (m_rightColumn) m_rightColumn->setFixedWidth(rightColumnWidthFor(window()->width()));
+  const bool strip = window()->height() >= kCompactWindowHeight;  // 연결 상태: one row under both cards; a short window (1366x768) keeps 최근 조사 its rows
+  if (m_connection && m_rightColumn) m_connection->placeIn(qobject_cast<QBoxLayout*>(strip ? layout() : m_rightColumn->widget()->layout()), strip);
 }
 
 void KaStartPage::resizeEvent(QResizeEvent* event) {

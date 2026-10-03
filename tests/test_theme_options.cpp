@@ -219,6 +219,10 @@ void TestThemeOptions::paperLook_isOptInAndKeepsStock() {
   QCOMPARE(KaTheme::tokens().accent, stock.accent);
   QCOMPARE(KaTheme::tokens().tile, stock.tile);
   QVERIFY(!qApp->styleSheet().contains(t.chrome.name()));
+  KaTheme::DisplayOptions glare;  // 고대비 alone: the home button still follows that profile's hover and pressed
+  glare.highContrast = true;
+  KaTheme::setDisplayOptions(qApp, glare);
+  QVERIFY(KaTheme::tokens().heroButtonHover == KaTheme::tokens().hover && KaTheme::tokens().heroButtonPressed == KaTheme::tokens().pressed);
 }
 
 void TestThemeOptions::paperLook_inksStayReadable() {
@@ -261,6 +265,11 @@ void TestThemeOptions::paperLook_sheetResolves() {
   QCOMPARE(KaTheme::buttonEdgeWidth(), 1);
   QVERIFY(KaTheme::titleFontFamilies().startsWith(QStringLiteral("\"Noto Serif KR\"")));
   QVERIFY(KaTheme::titleFontFamilies().endsWith(QStringLiteral("\"Malgun Gothic\"")));
+  // A main button's keyboard-focus ring is never the button's own colour.
+  const QString ringRule = QStringLiteral("QPushButton#btnAdjustDone:enabled:focus:!default { border-color: ");
+  const int ringAt = qApp->styleSheet().indexOf(ringRule);
+  QVERIFY(ringAt >= 0);
+  QVERIFY(KaTheme::contrastRatio(QColor(qApp->styleSheet().mid(ringAt + ringRule.size(), 7)), KaTheme::tokens().primary) >= 3.0);
 }
 
 // 「화면 보기」 carries the look as a third tick. Until the user has ticked or unticked it once, the

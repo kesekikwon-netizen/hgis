@@ -82,6 +82,7 @@ void KaSurveyAreaDialog::setupUi() {
   for (int i = 0; i < m_paletteColors.size(); ++i) {
     auto* btn = new QPushButton(m_colorNames[i], this);
     btn->setObjectName(QStringLiteral("surveyAreaColor"));
+    btn->setAutoDefault(false);  // Enter and the main-button paint stay with 「그리기 시작」
     btn->setFixedSize(52, 28);
     btn->setCursor(Qt::PointingHandCursor);
     connect(btn, &QPushButton::clicked, this, [this, i]() { selectColorIndex(i); });
@@ -97,6 +98,7 @@ void KaSurveyAreaDialog::setupUi() {
   for (const auto& p : presets) {
     auto* btn = new QPushButton(p.first, this);
     btn->setFixedHeight(28);
+    btn->setAutoDefault(false);
     btn->setStyleSheet(QStringLiteral("QPushButton { min-height: 0px; padding: 2px 8px; }"));
     btn->setCheckable(true);
     btn->setChecked(p.second == 1.5);

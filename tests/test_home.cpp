@@ -278,6 +278,7 @@ private slots:
     page.refreshConnections();
     QVERIFY(!before.isNull());  // the row (and its emitting button) survive until the next turn
     QTRY_COMPARE(vworldState()->text(), QStringLiteral("설정됨"));
+    page.resize(1600, 900); page.show(); QTRY_VERIFY(page.findChild<KaHomeConnectionCard*>()->parentWidget() == &page && page.findChildren<QWidget*>(QStringLiteral("startConnRow")).size() == 5 && page.findChildren<QWidget*>(QStringLiteral("startConnRow")).last()->x() > 800 && page.findChildren<QWidget*>(QStringLiteral("startConnRow")).last()->y() == page.findChildren<QWidget*>(QStringLiteral("startConnRow")).first()->y());  // a tall window: 연결 상태 is one row of five under both cards
   }
 };
 

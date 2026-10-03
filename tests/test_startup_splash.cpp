@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QImage>
+#include <QPainter>
 #include <QSignalSpy>
 #include <QTimer>
 #include <QtTest>
@@ -216,7 +217,8 @@ private slots:
     const QImage frame = splash.grab().toImage();
     const QRectF card = splash.cardRect();
     const double unit = card.height() / 400.0;
-    const auto at = [&](double x, double y) { return frame.pixelColor(int(card.left() + x * unit), int(card.top() + y * unit)); };
+    const double dpr = frame.devicePixelRatio();
+    const auto at = [&](double x, double y) { return frame.pixelColor(int((card.left() + x * unit) * dpr), int((card.top() + y * unit) * dpr)); };
     QCOMPARE(at(672, 380), KaSplashStrata::bedrock());  // beside the notice lines
     QVERIFY(inkContrast(KaSplashStrata::noticeInk(), KaSplashStrata::bedrock()) >= 4.5);
     QCOMPARE(at(350, 20), KaSplashStrata::paper());
@@ -241,13 +243,25 @@ private slots:
       saveFrame(splash, QStringLiteral("startup-strata-motion-%1.png").arg(QLatin1String(reduced)));
       const QRectF card = splash.cardRect();
       const double unit = card.height() / 400.0;
-      return splash.grab().toImage().pixelColor(int(card.left() + 610 * unit), int(card.top() + 219 * unit));
+      const QImage frame = splash.grab().toImage();
+      return frame.pixelColor(int((card.left() + 610 * unit) * frame.devicePixelRatio()), int((card.top() + 219 * unit) * frame.devicePixelRatio()));
     };
     const QColor waiting = markerEdge("0");
     const QColor finished = markerEdge("1");
     qunsetenv("KA_HGIS_REDUCED_MOTION");
     QCOMPARE(waiting, KaSplashStrata::paper());
     QVERIFY2(finished.isValid() && finished.lightness() < 110, qPrintable(finished.name()));
+  }
+
+  // A small screen shrinks the notice and its card becomes wider than 700:400: the strata still reach
+  // the right edge (no stripe of paper beside the bedrock).
+  void strataReachTheRightEdgeOfAWiderCard() {
+    QImage image(760, 400, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    KaSplashStrata::paint(painter, QRectF(0, 0, 760, 400), 16, QPixmap(), KaSplashStrata::Frame());
+    painter.end();
+    QCOMPARE(image.pixelColor(750, 372), KaSplashStrata::bedrock());
   }
 
   void reducedMotionKeepsTheDotsStill() {

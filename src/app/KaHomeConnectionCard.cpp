@@ -55,11 +55,12 @@ KaHomeConnectionCard::KaHomeConnectionCard(QWidget* parent) : QFrame(parent) {
   head->setSpacing(6);
   head->addWidget(label(QStringLiteral("연결 상태"), "startRecentTitle", this));
   head->addSpacing(8);
-  auto* lock = new QLabel(this);
-  lock->setPixmap(KaIcons::glyphPixmap(QStringLiteral("lock"), KaTheme::tokens().inkMuted, 14, devicePixelRatioF()));
-  lock->setFixedSize(14, 14);
-  head->addWidget(lock, 0, Qt::AlignVCenter);
-  head->addWidget(label(QStringLiteral("비밀값은 표시되지 않습니다"), "startPrivacyNote", this), 0, Qt::AlignVCenter);
+  m_lock = new QLabel(this);
+  m_lock->setPixmap(KaIcons::glyphPixmap(QStringLiteral("lock"), KaTheme::tokens().inkMuted, 14, devicePixelRatioF()));
+  m_lock->setFixedSize(14, 14);
+  head->addWidget(m_lock, 0, Qt::AlignVCenter);
+  m_privacy = label(QStringLiteral("비밀값은 표시되지 않습니다"), "startPrivacyNote", this);
+  head->addWidget(m_privacy, 0, Qt::AlignVCenter);
   head->addStretch(1);
   m_internet = label(QStringLiteral("인터넷 · 확인 안 함"), "startStepBody", this);
   m_internet->setTextFormat(Qt::RichText);
@@ -77,6 +78,21 @@ KaHomeConnectionCard::KaHomeConnectionCard(QWidget* parent) : QFrame(parent) {
   m_problems = new QVBoxLayout;
   m_problems->setSpacing(6);
   col->addLayout(m_problems);
+}
+
+void KaHomeConnectionCard::placeIn(QBoxLayout* layout, bool strip) {
+  if (!layout || m_home == layout)
+    return;
+  if (m_home)
+    m_home->removeWidget(this);
+  m_home = layout;
+  if (strip)
+    layout->addWidget(this);
+  else
+    layout->insertWidget(1, this);
+  m_rows->setDirection(strip ? QBoxLayout::LeftToRight : QBoxLayout::TopToBottom);
+  m_lock->setVisible(strip);  // the column is too narrow for the note beside the internet check
+  m_privacy->setVisible(strip);
 }
 
 QString KaHomeConnectionCard::displayName(const AccountStatus::Entry& entry) {

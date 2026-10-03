@@ -1194,7 +1194,7 @@ QProgressDialog QLabel { color: @ink@; }
    keyboard navigation. Last in the file so it wins ties with hover and checked. ---- */
 QPushButton:enabled:focus:!default { border-color: @focusRing@; }
 QPushButton#btnPrimary:enabled:focus:!default, QPushButton.primary:enabled:focus:!default,
-QPushButton#btnAdjustDone:enabled:focus:!default { border-color: @ink@; }
+QPushButton#btnAdjustDone:enabled:focus:!default { border-color: @primaryFocus@; }
 /* Home hero buttons: a 2 px ring on the navy band, 1 px taken from the padding. */
 QPushButton#startNewBtn:enabled:focus { border: 2px solid @focusRing@; padding: 0 17px; min-height: 34px; }
 QPushButton#startOpenBtn:enabled:focus { border: 2px solid @railText@; padding: 0 17px; min-height: 34px; }

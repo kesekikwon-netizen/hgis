@@ -80,8 +80,8 @@ private slots:
     page.show();
     QVERIFY(QTest::qWaitForWindowExposed(&page));
     QTRY_VERIFY(page.findChild<QLabel*>(QStringLiteral("startConnState")));  // showEvent refresh ran
-    auto* strip = page.findChild<KaHomeConnectionCard*>(); const auto cells = strip->findChildren<QWidget*>(QStringLiteral("startConnRow"));
-    QTRY_VERIFY(strip->parentWidget() == &page && strip->width() == page.width() - 40 && cells.size() == 5 && cells.last()->isVisible() && cells.last()->x() > cells.first()->x() && cells.last()->y() == cells.first()->y() && cells.last()->geometry().right() < strip->width());  // 연결 상태: one row under both cards, all five in view
+    auto* right = page.findChild<QScrollArea*>(QStringLiteral("startRightColumn"));
+    QTRY_VERIFY(right->widget()->height() > right->viewport()->height());  // both cards: the column scrolls, never squeezes
     const QString out = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");  // three chips, dots, both cards
     if (!out.isEmpty()) QVERIFY(page.grab().save(QDir(out).filePath(QStringLiteral("home-1366.png"))));
   }

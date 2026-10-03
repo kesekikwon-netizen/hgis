@@ -90,6 +90,7 @@ Tokens strataTokens() {
   t.primaryHover = t.accentHover;
   t.primaryPressed = t.accentDeep;
   t.primaryText = t.surface;
+  t.primaryFocus = t.ink;
   t.chrome = t.surface;
   t.heroButton = t.surface;
   t.heroButtonText = t.rail;
@@ -120,6 +121,8 @@ Tokens highContrastTokens() {
   t.hover = QColor(0xE6, 0xF0, 0xFA);
   t.selected = QColor(0xD6, 0xE6, 0xF6);
   t.pressed = QColor(0xCC, 0xDF, 0xF2);
+  t.heroButtonHover = t.hover;
+  t.heroButtonPressed = t.pressed;
   t.border = QColor(0x7D, 0x8A, 0x96);
   t.borderStrong = QColor(0x6B, 0x78, 0x85);
   t.warn = QColor(0x5C, 0x37, 0x00);         // 9.2:1 on warnSurface

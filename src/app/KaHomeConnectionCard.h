@@ -6,6 +6,7 @@
 #include <QFrame>
 #include <QMetaType>
 
+class QBoxLayout;
 class QHBoxLayout;
 class QLabel;
 class QLayout;
@@ -28,6 +29,9 @@ public:
   // Runs the local checks again (cheap; no network).
   void refresh();
   void setInputs(const KaHomeStatus::Inputs& inputs);
+  // Moves the card into layout: as the strip (one row of five cells, the last item), or for a short
+  // window into the narrow column with the cells stacked (second item, under 작업 순서).
+  void placeIn(QBoxLayout* layout, bool strip);
   // Row wording: 「VWorld 키」, 「수치지형도 계정」, 「문화재 인트라넷」; the rest keep Entry::label.
   static QString displayName(const AccountStatus::Entry& entry);
   static QString stateText(bool ready);  // 「설정됨」 / 「설정 필요」
@@ -40,6 +44,9 @@ private:
   void clear(QLayout* layout);
 
   QHBoxLayout* m_rows = nullptr;
+  QBoxLayout* m_home = nullptr;
+  QLabel* m_lock = nullptr;
+  QLabel* m_privacy = nullptr;
   QVBoxLayout* m_problems = nullptr;
   QLabel* m_internet = nullptr;
   QPushButton* m_internetButton = nullptr;

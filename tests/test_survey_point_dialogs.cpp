@@ -167,6 +167,8 @@ void TestSurveyPointDialogs::surveyAreaStartIsTheThemedMainButton() {
   for (QPushButton* button : dialog.findChildren<QPushButton*>())
     if (button->text() == QStringLiteral("취소")) cancel = button;
   QVERIFY(cancel);
+  for (QPushButton* button : dialog.findChildren<QPushButton*>())  // picking a colour or a width never takes Enter or the main paint
+    QVERIFY2(button == start || button == cancel || !button->autoDefault(), qPrintable(button->text()));
   dialog.setAttribute(Qt::WA_DontShowOnScreen);
   dialog.show();
   QApplication::processEvents();

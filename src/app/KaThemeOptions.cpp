@@ -46,8 +46,8 @@ private:
   static void tint(QWidget* window) {
 #ifdef Q_OS_WIN
     const HWND handle = reinterpret_cast<HWND>(window->internalWinId());  // 0 until the window exists
-    if (!handle)
-      return;
+    if (!handle || QGuiApplication::platformName() != QLatin1String("windows"))
+      return;  // the offscreen platform's window id is not an HWND
     const bool paper = displayOptions().paperLook;
     const auto ref = [](const QColor& c) { return COLORREF(RGB(c.red(), c.green(), c.blue())); };
     const COLORREF face = paper ? ref(tokens().chrome) : COLORREF(0xFFFFFFFF);  // DWMWA_COLOR_DEFAULT

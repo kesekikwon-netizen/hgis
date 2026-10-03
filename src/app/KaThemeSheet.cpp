@@ -44,7 +44,7 @@ QHash<QString, QString> replacementTable() {
       {"focusRing", c.focusRing}, {"ribbonLabelInk", c.ribbonLabelInk}, {"ribbonActiveInk", c.ribbonActiveInk},
       {"ribbonGroupInk", c.ribbonGroupInk},
       {"primary", c.primary}, {"primaryHover", c.primaryHover}, {"primaryPressed", c.primaryPressed},
-      {"primaryText", c.primaryText}, {"chrome", c.chrome}, {"heroButton", c.heroButton},
+      {"primaryText", c.primaryText}, {"primaryFocus", c.primaryFocus}, {"chrome", c.chrome}, {"heroButton", c.heroButton},
       {"heroButtonText", c.heroButtonText}, {"heroButtonHover", c.heroButtonHover},
       {"heroButtonPressed", c.heroButtonPressed}, {"heroGhostHover", c.heroGhostHover},
       {"heroGhostPressed", c.heroGhostPressed}, {"band", c.band},

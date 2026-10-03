@@ -16,6 +16,8 @@ namespace {
 
 // Everything is laid out on the notice's 700 x 400 card and scaled with it.
 constexpr double kWidth = 700.0, kHeight = 400.0;
+// A notice shrunk for a small screen has a card wider than 700:400; the strata run on past the edge.
+constexpr double kOverhang = 120.0;
 
 const QColor kPaper(0xFA, 0xF9, 0xF5);
 const QColor kSlate(0x14, 0x14, 0x13);
@@ -73,7 +75,8 @@ void paintSection(QPainter& painter, double seconds) {
   // Topsoil first, so each lower stratum covers the foot of the one above it.
   for (int i = int(kStrata.size()) - 1; i >= 0; --i) {
     QPainterPath body = edgePath(kStrata[size_t(i)].edge);
-    body.lineTo(kWidth, kHeight);
+    body.lineTo(kWidth + kOverhang, body.currentPosition().y());
+    body.lineTo(kWidth + kOverhang, kHeight);
     body.lineTo(0, kHeight);
     body.closeSubpath();
     painter.fillPath(body, kStrata[size_t(i)].fill);
@@ -96,7 +99,8 @@ void paintSection(QPainter& painter, double seconds) {
     painter.setOpacity(1.0);
   }
   if (const double drawn = groundLineReveal(seconds); drawn > 0.0) {
-    const QPainterPath ground = edgePath(kStrata.back().edge);
+    QPainterPath ground = edgePath(kStrata.back().edge);
+    ground.lineTo(kWidth + kOverhang, ground.currentPosition().y());
     QPen pen(kSlate, 1.8, Qt::SolidLine, Qt::RoundCap);
     const double length = ground.length() / pen.widthF();  // dash lengths are in pen widths
     pen.setDashPattern({length * drawn, length * 4.0});

@@ -34,6 +34,7 @@ void applyPaperLook(Tokens& t, bool highContrast) {
   t.railMuted = t.inkMuted;
   t.progressFill = QColor(0xD9, 0x77, 0x57);  // clay: ink 5.9:1 on it, 3.1:1 against white
   t.focusRing = t.accent;
+  t.primaryFocus = t.accent;  // a clay ring: the slate main button would swallow an ink one
   t.ribbonLabelInk = t.ink;
   t.ribbonActiveInk = QColor(0x9C, 0x4A, 0x2F);  // 5.8:1 on the paper chrome
   t.ribbonGroupInk = t.inkMuted;
