@@ -126,7 +126,8 @@ function tryGit(args, cwd) {
 // ---------------------------------------------------------------- tokenizing
 
 // Removes POSIX heredoc bodies (<<EOF ... EOF) so text inside them is not read as commands.
-function stripHeredocs(text) {
+// The removed body lines go to `bodies` when given (a commit message fed by `-F -`).
+function stripHeredocs(text, bodies) {
   const out = [];
   let terminator = null;
   let stripTabs = false;
@@ -134,6 +135,7 @@ function stripHeredocs(text) {
     if (terminator !== null) {
       const probe = (stripTabs ? line.replace(/^\t+/, '') : line).replace(/\r$/, '');
       if (probe === terminator) terminator = null;
+      else if (bodies) bodies.push(line);
       continue;
     }
     out.push(line);
@@ -555,27 +557,134 @@ function fmt(ms) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+// The commit the new one is compared with (HEAD, or HEAD~1 for --amend); null when there is none.
+function commitBase(top, form) {
+  const base = form.amend ? 'HEAD~1' : 'HEAD';
+  return tryGit(['rev-parse', '--verify', '--quiet', base], top) !== null ? base : null;
+}
+
 // Files the commit will contain, relative to the repo top.
 function changedFiles(top, form) {
-  let base = 'HEAD';
-  if (form.amend) base = tryGit(['rev-parse', '--verify', '--quiet', 'HEAD~1'], top) ? 'HEAD~1' : null;
-  const hasBase = base !== null && tryGit(['rev-parse', '--verify', '--quiet', base], top) !== null;
+  const base = commitBase(top, form);
+  const hasBase = base !== null;
   const set = new Set();
   const add = (out) => {
     if (out === null) return;
     for (const f of out.split('\n')) if (f.trim()) set.add(f.trim());
   };
-  add(hasBase ? tryGit(['diff', '--cached', '--name-only', base], top) : tryGit(['diff', '--cached', '--name-only'], top));
-  if (form.all) add(tryGit(['diff', '--name-only'], top)); // -a / --include: tracked worktree changes too
+  add(hasBase ? tryGit(['diff', '--cached', '--no-renames', '--name-only', base], top) : tryGit(['diff', '--cached', '--no-renames', '--name-only'], top));
+  if (form.all) add(tryGit(['diff', '--no-renames', '--name-only'], top)); // -a / --include: tracked worktree changes too
   if (form.untracked) add(tryGit(['ls-files', '--others', '--exclude-standard'], top)); // git add -A before commit in one chain
   for (const g of form.stageGroups || []) {
     // `git add <specs>` earlier in the chain: only what those pathspecs match (repo-top-relative output)
     const d = fs.existsSync(g.dir) ? g.dir : top;
-    add(tryGit(['diff', '--name-only', '--', ...g.specs], d));
+    add(tryGit(['diff', '--no-renames', '--name-only', '--', ...g.specs], d));
     add(tryGit(['ls-files', '--full-name', '--others', '--exclude-standard', '--', ...g.specs], d));
   }
-  if (form.pathspecs.length) add(tryGit(['diff', '--name-only', ...(hasBase ? [base] : []), '--', ...form.pathspecs], top));
+  if (form.pathspecs.length) add(tryGit(['diff', '--no-renames', '--name-only', ...(hasBase ? [base] : []), '--', ...form.pathspecs], top));
   return [...set];
+}
+
+// Test lock (user decision 2026-10-03, docs/intent/2026-10-03-dev-setup-gaps.md): a commit that
+// weakens a test that already exists needs a `시험 변경: <이유>` line in its message.
+const ASSERT_RE = /\b(?:QCOMPARE|QVERIFY2?|QTRY_COMPARE(?:_WITH_TIMEOUT)?|QTRY_VERIFY2?(?:_WITH_TIMEOUT)?|QFAIL|QVERIFY_THROWS_\w+|QTest::newRow|QTest::addRow)\s*\(/g;
+const SKIP_RE = /\b(?:QSKIP|QEXPECT_FAIL)\s*\(/g;
+const REGISTER_RE = /\bka_add_qtest(?:_filter)?\s*\(/g;
+const REASON_RE = /^\s*시험 변경\s*:\s*(?!없음\s*$)\S/m;
+
+// Whole statements (macro to its closing parenthesis; a data row to its `;`), whitespace collapsed,
+// so an assertion spread over several lines compares as one.
+function statements(text, re) {
+  const out = [];
+  for (const m of text.matchAll(re)) {
+    const toSemicolon = /newRow|addRow/.test(m[0]);
+    let depth = 1;
+    let i = m.index + m[0].length;
+    for (; i < text.length; i++) {
+      const c = text[i];
+      if (c === '"' || c === "'") {
+        for (i++; i < text.length && text[i] !== c; i++) if (text[i] === '\\') i++;
+      } else if (c === '(') depth++;
+      else if (c === ')' && --depth === 0 && !toSemicolon) break;
+      else if (c === ';' && depth === 0) break;
+    }
+    out.push({ text: text.slice(m.index, i + 1).replace(/\s+/g, ' ').trim(), at: m.index });
+  }
+  return out;
+}
+
+// Name of the `void name(` test function a position is in, or null.
+function enclosingFunction(text, at) {
+  let name = null;
+  for (const m of text.slice(0, at).matchAll(/\bvoid\s+(\w+)\s*\(/g)) name = m[1];
+  return name;
+}
+
+// What the test files and CMakeLists.txt registrations lose against the base commit. All test files
+// are compared together, so moving an assertion or renaming a file is not weakening; a skip inside
+// a test function the base did not have belongs to a new test.
+function weakenedTests(top, form, files) {
+  const base = commitBase(top, form);
+  const targets = files.filter((f) => f.startsWith('tests/') || path.posix.basename(f) === 'CMakeLists.txt');
+  if (base === null || !targets.length) return [];
+  const fromIndex = !(form.all || form.untracked || form.pathspecs.length || (form.stageGroups || []).length);
+  const before = (f) => tryGit(['show', `${base}:${f}`], top);
+  const after = (f) => {
+    if (fromIndex) return tryGit(['show', `:${f}`], top);
+    try {
+      return fs.readFileSync(path.join(top, f), 'utf8');
+    } catch {
+      return null;
+    }
+  };
+  const count = (list) => list.reduce((m, s) => m.set(s, (m.get(s) || 0) + 1), new Map());
+  const take = (m, s) => (m.get(s) > 0 ? (m.set(s, m.get(s) - 1), true) : false);
+  const findings = [];
+
+  const names = (text) => statements(text || '', REGISTER_RE).flatMap((s) => s.text.slice(s.text.indexOf('(') + 1, -1).split(/\s+/).filter(Boolean));
+  for (const f of targets.filter((t) => path.posix.basename(t) === 'CMakeLists.txt')) {
+    const now = count(names(after(f)));
+    for (const name of names(before(f))) if (!take(now, name)) findings.push(`${f}: 시험 등록에서 빠짐 \`${name}\``);
+  }
+
+  const code = targets.filter((t) => t.startsWith('tests/'));
+  const old = code.map((f) => ({ f, text: before(f) || '' }));
+  const neu = code.map((f) => ({ f, text: after(f) || '' }));
+  const oldFunctions = new Set(old.flatMap(({ text }) => [...text.matchAll(/\bvoid\s+(\w+)\s*\(/g)].map((m) => m[1])));
+  const nowAsserts = count(neu.flatMap(({ text }) => statements(text, ASSERT_RE).map((s) => s.text)));
+  for (const { f, text } of old) for (const s of statements(text, ASSERT_RE)) if (!take(nowAsserts, s.text)) findings.push(`${f}: 지우거나 바꿈 \`${s.text}\``);
+  const oldSkips = count(old.flatMap(({ text }) => statements(text, SKIP_RE).map((s) => s.text)));
+  for (const { f, text } of neu) {
+    for (const s of statements(text, SKIP_RE)) {
+      if (take(oldSkips, s.text)) continue;
+      const fn = enclosingFunction(text, s.at);
+      if (fn && !oldFunctions.has(fn)) continue;
+      findings.push(`${f}: 건너뛰게 함 \`${s.text}\``);
+    }
+  }
+  return findings;
+}
+
+// The commit message: -m/--message values, heredoc bodies (`-F -`), a -F/--file file, and for an
+// --amend without a new message the message being amended.
+function messageText(command, cwd, top, form) {
+  const parts = [];
+  stripHeredocs(command, parts);
+  for (const m of command.matchAll(/(?:^|\s)(?:-[a-zA-Z]*m|--message=?)\s*("(?:[^"\\]|\\.)*"|'[^']*'|[^\s;&|]+)/g)) {
+    parts.push(m[1].replace(/^(["'])([\s\S]*)\1$/, '$2'));
+  }
+  const files = [...command.matchAll(/(?:^|\s)(?:-F|--file)(?:=|\s+)("[^"]+"|'[^']+'|[^\s;&|]+)/g)];
+  for (const m of files) {
+    const name = m[1].replace(/^["']|["']$/g, '');
+    if (name === '-') continue;
+    try {
+      parts.push(fs.readFileSync(path.resolve(cwd, name), 'utf8'));
+    } catch {}
+  }
+  if (form.amend && !files.length && !/(?:^|\s)(?:-[a-zA-Z]*m|--message)/.test(command)) {
+    parts.push(tryGit(['log', '-1', '--format=%B'], top) || '');
+  }
+  return parts.join('\n');
 }
 
 // ctest LastTest.log -> { complete, tests: [{ name, result }] }
@@ -769,6 +878,16 @@ function main() {
       r = evaluate(top, c.form);
     } catch (e) {
       r = { gated: true, files: [], problems: [`게이트 내부 오류: ${e.stack || e.message}`] };
+    }
+    if (r.gated && !REASON_RE.test(messageText(command, c.dir, top, c.form))) {
+      const weak = weakenedTests(top, c.form, r.files);
+      if (weak.length) {
+        const shownWeak = weak.slice(0, 8).join('\n    - ') + (weak.length > 8 ? `\n    - 외 ${weak.length - 8}개` : '');
+        r.problems.push(
+          `원래 있던 시험을 약하게 바꿨다 (기댓값을 바꾸거나 지우거나 건너뛰게 함):\n    - ${shownWeak}\n` +
+            '  정말 바꿔야 하면 커밋 메시지에 `시험 변경: <이유>` 줄을 넣고, 보고 맨 위에 「바꾼 시험」으로 사용자에게 알린다. 아니면 시험이 아니라 코드를 고친다.',
+        );
+      }
     }
     if (!r.gated || !r.problems.length) continue;
     const shown = r.files.slice(0, 12).join(', ') + (r.files.length > 12 ? ` 외 ${r.files.length - 12}개` : '');

@@ -9,9 +9,9 @@ import path from 'node:path';
 
 // Written as facts about the repo, not as orders: the hook docs warn that text framed as
 // out-of-band system commands can trip prompt-injection defenses. Same rule as CLAUDE.md
-// 「superpowers 사용 방식」 1·3·5.
+// 「일하는 방식」 1·3·6.
 const REMINDER = [
-  'Strata 저장소의 작업 방식(CLAUDE.md 「superpowers 사용 방식」, 사용자가 2026-10-03에 「해당 시 적극 사용」으로 바꿈): 해당 단계가 되면 스킬을 Skill 도구로 실제로 불러 적극 사용한다. 앞에서 읽었거나 대화 요약 전에 부른 것으로 대신하지 않고, 단계마다 다시 부른다.',
+  'Strata 저장소의 작업 방식(CLAUDE.md 「일하는 방식」, 사용자가 2026-10-03에 「해당 시 적극 사용」으로 바꿈): 해당 단계가 되면 스킬을 Skill 도구로 실제로 불러 적극 사용한다. 앞에서 읽었거나 대화 요약 전에 부른 것으로 대신하지 않고, 단계마다 다시 부른다.',
   '- 증상·버그 신고·스크린샷·「안 돼요」·「예전으로 돌아갔다」는 superpowers:systematic-debugging으로 원인부터 찾는다.',
   '- 코드 수정은 superpowers:test-driven-development로 시험을 먼저 쓴다.',
   '- 화면이 바뀌는 수정은 run-strata 스킬로 실제 앱 화면을 찍어 확인한다.',

@@ -8,10 +8,10 @@ $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 $db = Join-Path $Root "build\compile_commands.json"
 if (-not (Test-Path -LiteralPath $db)) {
-  throw "build/compile_commands.json is missing. Run scripts/gen-compile-commands.ps1 first."
+  throw "build/compile_commands.json is missing. Build once (scripts/compile-commands.mjs writes it)."
 }
-if (-not (Select-String -LiteralPath $db -Pattern '/I"' -Quiet)) {
-  throw "compile_commands.json has no MSVC include flags. Run scripts/gen-compile-commands.ps1."
+if (-not (Select-String -LiteralPath $db -Pattern '/vctoolsdir' -SimpleMatch -Quiet)) {
+  throw "compile_commands.json does not pin the MSVC toolset. Rebuild so scripts/compile-commands.mjs rewrites it."
 }
 $tidy = "C:\Program Files\LLVM\bin\clang-tidy.exe"
 $diffPy = "C:\Program Files\LLVM\share\clang\clang-tidy-diff.py"

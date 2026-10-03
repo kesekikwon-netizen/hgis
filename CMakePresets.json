@@ -13,19 +13,6 @@
         "OSGEO4W_ROOT": "$env{OSGEO4W_ROOT}",
         "KA_HGIS_BUILD_TESTS": "ON"
       }
-    },
-    {
-      "name": "compiledb",
-      "displayName": "Ninja — compile_commands.json 생성 전용",
-      "description": "scripts/gen-compile-commands.ps1이 SDK와 MSVC 환경을 설정해 생성한다.",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build-clangd",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "OSGEO4W_ROOT": "$env{OSGEO4W_ROOT}",
-        "KA_HGIS_BUILD_TESTS": "ON",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
-      }
     }
   ],
   "buildPresets": [

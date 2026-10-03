@@ -316,6 +316,17 @@ add_library(ka_core STATIC
   src/core/CadDrawingStore.h
   src/core/CadDrawingLayers.h
 )
+# clangd (C++ code tool): the Visual Studio generator writes no compile_commands.json, so leave a
+# CMake file-API codemodel query (answered by every later cmake run) and convert the reply whenever
+# ka_core builds. docs/intent/2026-10-03-dev-setup-gaps.md
+file(WRITE "${CMAKE_BINARY_DIR}/.cmake/api/v1/query/codemodel-v2" "")
+find_program(KA_NODE_EXECUTABLE node)
+if(KA_NODE_EXECUTABLE)
+  add_custom_target(ka_compile_commands
+    COMMAND "${KA_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/compile-commands.mjs" "${CMAKE_BINARY_DIR}" "${CMAKE_CXX_COMPILER}"
+    VERBATIM)
+  add_dependencies(ka_core ka_compile_commands)
+endif()
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
 target_link_libraries(ka_core PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::PrintSupport Qt6::Pdf Qt6::Network Qt6::Svg qgis_core qgis_gui gdal_i)

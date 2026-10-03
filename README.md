@@ -44,7 +44,7 @@ cd <클론한 폴더>
 .\scripts\build-all.ps1
 ```
 포함: cmake build → ctest → smoke-quit → e2e. 포터블 생성은 별도 요청 시에만 실행한다.
-clangd용 실제 컴파일 DB는 `.\scripts\gen-compile-commands.ps1`로 생성한다.
+clangd용 컴파일 DB(`build\compile_commands.json`)는 빌드가 만든다(`scripts/compile-commands.mjs`).
 clangd 탐색·Graft 검색·Archify 구조도 설정과 사용 범위는 [`docs/developer-tools.md`](docs/developer-tools.md)를 따른다(하네스는 Cursor, `.cursor/hooks.json`).
 
 ## 수동 빌드

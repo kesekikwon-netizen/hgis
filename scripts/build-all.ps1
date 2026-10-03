@@ -14,16 +14,6 @@ if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
 & cmake --build build --config Release --parallel
 if ($LASTEXITCODE -ne 0) { throw "build failed" }
 
-# Best-effort: refresh clangd compile_commands.json (never fail the main pipeline)
-try {
-  & "$PSScriptRoot\gen-compile-commands.ps1"
-  if ($LASTEXITCODE -ne 0) {
-    Write-Host "WARN: clangd compile_commands refresh exited $LASTEXITCODE"
-  }
-} catch {
-  Write-Host "WARN: clangd compile_commands refresh failed: $_"
-}
-
 & ctest --test-dir build -C Release --output-on-failure --parallel
 if ($LASTEXITCODE -ne 0) { throw "ctest failed" }
 

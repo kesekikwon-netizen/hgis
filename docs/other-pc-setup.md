@@ -136,10 +136,9 @@ ctest --test-dir build -C Release --output-on-failure
 ```powershell
 .\scripts\setup-dev-paths.ps1
 .\scripts\build-now.ps1
-.\scripts\gen-compile-commands.ps1
 ```
 
-일반 앱 빌드는 VS 2022 x64의 `build\Release`를 사용한다. 별도 `build-clangd` Ninja 구성은 컴파일 DB 생성용이다. 생성 스크립트는 VS 개발 환경을 자동으로 읽고 실제 MSVC/Windows SDK include 경로를 `build\compile_commands.json`에 기록하므로 일반 편집기에서도 표준 헤더를 찾을 수 있다. SDK나 소스 구성이 바뀌면 다시 실행한다. 절대 경로가 들어가는 생성 DB는 Git에서 제외한다. `compile_flags.txt`는 최소 C++ fallback이며 전체 GIS 분석에는 생성 DB가 필요하다.
+일반 앱 빌드는 VS 2022 x64의 `build\Release`를 사용한다. 빌드가 CMake 빌드 정보로 `build\compile_commands.json`을 만들고(`scripts/compile-commands.mjs`), 빌드에 쓰는 MSVC를 `/vctoolsdir`로 적어 두므로 일반 편집기의 clangd도 같은 표준 헤더를 읽는다. 구성이 바뀌면 다음 빌드가 다시 쓴다. 절대 경로가 들어가는 생성 DB는 Git에서 제외한다. `compile_flags.txt`는 최소 C++ fallback이며 전체 GIS 분석에는 생성 DB가 필요하다.
 
 ---
 

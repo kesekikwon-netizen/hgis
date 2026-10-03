@@ -18,7 +18,7 @@
 
 Graft는 저장소 `.cursor/mcp.json`이 아니라 USER-level `%USERPROFILE%\.cursor\mcp.json`의 서버 `hgis_graft`로 Cursor에 연결한다. `.codex/config.toml`은 호환용이며 체크아웃 경로가 들어가므로 커밋하지 않는다. 둘 다 `scripts/setup-dev-paths.ps1`이 이 폴더로 쓴다. 다른 MCP 서버는 유지한다.
 
-clangd는 Cursor clangd 확장과 저장소 `.clangd`의 `CompilationDatabase: build`를 사용한다. Archify는 `scripts/archify.ps1`로 실행한다. CMake는 `CMakePresets.json`의 `vs`(Visual Studio 17 2022 x64)와 기존 `build/`를 유지한다. 워크스페이스 `.vscode/settings.json`은 `cmake.useCMakePresets: always`이고, 폴더를 열 때 자동 구성하지 않는다. `compiledb` 프리셋만 `build-clangd`에 Ninja를 쓴다.
+clangd는 Cursor clangd 확장과 저장소 `.clangd`의 `CompilationDatabase: build`를 사용한다. Archify는 `scripts/archify.ps1`로 실행한다. CMake는 `CMakePresets.json`의 `vs`(Visual Studio 17 2022 x64)와 기존 `build/`를 유지한다. 워크스페이스 `.vscode/settings.json`은 `cmake.useCMakePresets: always`이고, 폴더를 열 때 자동 구성하지 않는다. clangd 컴파일 DB는 빌드가 `build/compile_commands.json`으로 만든다(`scripts/compile-commands.mjs`).
 
 ## Graft 설치와 재현
 
