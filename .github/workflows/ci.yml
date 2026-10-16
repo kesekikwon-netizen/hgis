@@ -69,16 +69,10 @@ jobs:
           set -euo pipefail
           python3 scripts/secret-scan.py
 
-      # F213: no new C++ file over 300 lines; files already over (docs/quality/line-limit-baseline.txt)
-      # may shrink but not grow.
-      - name: Source line limit
-        shell: pwsh
-        run: ./scripts/scorecard.ps1 -LineLimitOnly
-
   # Full build, every CTest group and an app start on GitHub's free Windows runner (the
   # repository is public). windows-latest now ships only Visual Studio 2026, while the "vs"
   # preset and the reference PC use Visual Studio 2022, so the job stays on windows-2022.
-  # It runs next to the sanity job, so a line-count or JSON slip never hides the build result.
+  # It runs next to the sanity job, so a JSON slip never hides the build result.
   windows:
     name: Windows build and tests
     runs-on: windows-2022
@@ -324,71 +318,3 @@ jobs:
           path: build/test-logs
           if-no-files-found: ignore
           overwrite: true
-
-  # Experiment that never decides the result (docs/intent/2026-10-03-dev-speed-and-flaky.md): the
-  # same build with Ninja, ccache and /Z7 debug info (no compiler cache can keep /Zi), to measure
-  # what a cache saves here. The job summary shows the build time and the ccache statistics.
-  # Pushes only, so pull requests do not add cache entries. ccache keeps precompiled-header
-  # compiles only with pch_defines,time_macros sloppiness; CCACHE_BASEDIR is left out (the
-  # workspace path never changes, and ccache before 4.14 mangles /Yu paths with it); the git hash
-  # define is fixed to "unknown" so it does not change every compile command on every commit.
-  build-speed-experiment:
-    name: Build speed experiment (Ninja + ccache)
-    needs: windows
-    if: ${{ !cancelled() && needs.windows.outputs.packed != '' && github.event_name != 'pull_request' }}
-    runs-on: windows-2022
-    continue-on-error: true
-    timeout-minutes: 150
-    env:
-      OSGEO4W_ROOT: C:\OSGeo4W
-      CCACHE_COMPILERCHECK: content
-      CCACHE_SLOPPINESS: pch_defines,time_macros
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Restore OSGeo4W
-        uses: actions/cache/restore@v6
-        with:
-          path: C:\OSGeo4W
-          key: ${{ needs.windows.outputs.osgeo4w-key }}
-          fail-on-cache-miss: true
-
-      # The cache follows the OSGeo4W install: a new qgis-dev changes the QGIS headers anyway.
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2.24
-        with:
-          key: ninja-release-${{ needs.windows.outputs.osgeo4w-key }}
-          max-size: 3G
-
-      - name: Ninja
-        uses: seanmiddleditch/gha-setup-ninja@v6
-
-      - name: MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1.13.0
-        with:
-          arch: x64
-
-      - name: Configure (Ninja, ccache, /Z7)
-        timeout-minutes: 15
-        shell: pwsh
-        run: |
-          . .\scripts\dev-env.ps1
-          cmake -S . -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Release -DKA_HGIS_BUILD_TESTS=ON "-DOSGEO4W_ROOT=$env:OSGEO4W_ROOT" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DKA_HGIS_EMBEDDED_DEBUG_INFO=ON -DCMAKE_DISABLE_FIND_PACKAGE_Git=ON
-
-      # Three compiles at a time keep the 16 GB runner clear of out-of-memory errors (C1060).
-      - name: Build (timed)
-        timeout-minutes: 120
-        shell: pwsh
-        run: |
-          . .\scripts\dev-env.ps1
-          ccache --zero-stats
-          $clock = [Diagnostics.Stopwatch]::StartNew()
-          cmake --build build-ninja --parallel 3
-          $code = $LASTEXITCODE
-          $minutes = [math]::Round($clock.Elapsed.TotalMinutes, 1)
-          $stats = (ccache --show-stats) -join "`n"
-          Write-Output "build $minutes min, exit $code"
-          Write-Output $stats
-          "## Build speed experiment`n`nNinja + ccache + /Z7: $minutes min, exit $code`n`n``````text`n$stats`n``````" >> $env:GITHUB_STEP_SUMMARY
-          exit $code

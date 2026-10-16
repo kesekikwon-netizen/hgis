@@ -6,14 +6,13 @@
 
 | 문서 | 용도 |
 | --- | --- |
-| [AGENTS.md](../AGENTS.md) | Cursor 작업 규칙·제품 불변식 |
+| [AGENTS.md](../AGENTS.md) | 작업 규칙·제품 불변식 (CLAUDE.md가 그대로 불러옴) |
 | [.codex/NOW.md](../.codex/NOW.md) | 최근 세션 상태 |
 | [HANDOFF.md](HANDOFF.md) | 제품 현황 정본 (루트 HANDOFF.md는 안내만) |
-| [developer-tools.md](developer-tools.md) | 여섯 도구 루프 |
+| [developer-tools.md](developer-tools.md) | 개발 도구 |
 | [testing-map.md](testing-map.md) | 축 A–J 자동 시험 |
 | [network-download-timeout-checklist.md](network-download-timeout-checklist.md) | 내려받기 취소·시간 제한·재시도·오프라인 문구 |
 | [clangd-navigation.md](clangd-navigation.md) | 선언·정의 조회 |
-| [archify-setup.md](archify-setup.md) | 구조도 설치·실행 |
 
 ## 설계
 
@@ -47,10 +46,9 @@
 ## 그 밖
 
 - [research/](research/) 조사 메모(현재 UI 아님, 문서 머리의 표기 참고)
-- [quality/line-limit-baseline.txt](quality/line-limit-baseline.txt) 300줄 넘는 C++ 파일 기준(`scripts/scorecard.ps1 -LineLimitOnly`)
+- [quality/line-limit-baseline.txt](quality/line-limit-baseline.txt) 300줄 넘는 C++ 파일 기록(`scripts/scorecard.ps1 -LineLimitOnly`, 참고용, 커밋·CI를 막지 않음)
 - [recovery/](recovery/) 장애 복구 기록
 - [superpowers/](superpowers/) 옛 스펙·플랜 (현행 계획이 아님)
-- [COMMIT_STATUS.md](COMMIT_STATUS.md) 훅이 갱신. 손으로 고치지 않는다.
 - [ERROR_REGRESSION.md](ERROR_REGRESSION.md) 회귀 메모
 - [archive/](archive/README.md) 폐기된 목표·세션 상세, 옛 초심자 IA·와이어프레임·작업 카드(설계 기록, 현재 UI 아님)
 - [design/](design/) 2026-08-15 하늘색 3D 설계서는 **Superseded by Strata**(옛 기록). [ui/](ui/)·`ui-mockup-viewer.html` 은 목업

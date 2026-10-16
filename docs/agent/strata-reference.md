@@ -1,34 +1,31 @@
 # Strata 작업 참고 (필요할 때만 읽는다)
 
-CLAUDE.md에서 옮긴 내용이다(2026-10-03, docs/intent/2026-10-03-dev-setup-gaps.md). CLAUDE.md가 이 문서의 절을 가리킬 때 읽는다.
+작업 지침(AGENTS.md, CLAUDE.md가 불러옴)에서 옮긴 내용이다. 지침이 이 문서의 절을 가리킬 때 읽는다.
 
 ## 바탕화면 바로가기 (앱 빌드가 성공할 때마다, 사용자의 상시 요청)
 
-Run the smoke, then create or repoint `%USERPROFILE%\Desktop\Strata (개발).lnk` (this PC: `C:\Users\권을\Desktop`; old PC: `C:\Users\kwonyoungin1\Desktop`) with WScript.Shell (`CreateShortcut` + `Save` makes it when missing):
-- TargetPath `<worktree>\scripts\start-ka-hgis.vbs`, WorkingDirectory `<worktree>`, IconLocation `<worktree>\build\Release\ka-hgis.exe,0`, Description `Strata 개발 빌드 (워크트리 <name>)`.
-- Then call `SHChangeNotify(0x08000000)` so the icon refreshes, and tell the user which worktree it now opens.
-- 「고고학 전용 HGIS.lnk」 ran `A:\qgis\build` (exe from 2026-09-28): touch or recreate it only when asked. On the `D:\hgis` PC the user asked (2026-10-11) for it to open `D:\hgis\build\Release`; there the desktop is `OneDrive\바탕 화면` (`[Environment]::GetFolderPath('Desktop')`).
+Run the smoke, then `scripts/build-and-shortcut.ps1 -ShortcutOnly`: it (re)creates 「고고학 전용 HGIS.lnk」 on `[Environment]::GetFolderPath('Desktop')` (may be `OneDrive\바탕 화면`), target `wscript //nologo scripts\start-ka-hgis.vbs` → `launch.ps1` → `build\Release\ka-hgis.exe` of this checkout, icon `data\theme\ka-hgis.ico`, then refreshes the icon cache. The older 「Strata (개발).lnk」 per-worktree shortcut is no longer made.
 - Explorer keeps showing an old icon cached for the same exe path after a rebuild. Pointing IconLocation at `data\theme\ka-hgis.ico,0` (the file the exe embeds) plus `SHChangeNotify` and `ie4uinit.exe -show` makes the new icon show.
 - If the app is open, rename the running exe before rebuilding; close it only if its title has no " *".
 
 ## Code map
 
-- `src/app` (UI): MainWindow is split over 16 files (`MainWindow.cpp` + `MainWindow{Align,Cadastral,ContextMenus,Downloads,Editing,Erase,Export,Files,Offline,Overlay,Ribbon,Session,SurveyContour,Topographic,Undo}.cpp`), `KaApplication` (startup, `--smoke-quit`, rendering settings), Ka* widgets and map tools, `KaDrawingStudio` (도면). (단면도 화면은 2026-10-10에 삭제.)
+- `src/app` (UI): MainWindow is split over 18 files (`MainWindow.cpp` + `MainWindow{Align,Cadastral,Chrome,ContextMenus,Downloads,Editing,Erase,Export,FeatureCard,Files,Offline,Overlay,Ribbon,Session,SurveyContour,Topographic,Undo}.cpp`), `KaApplication` (startup, `--smoke-quit`, rendering settings), Ka* widgets and map tools, `KaDrawingStudio` (도면). (단면도 화면은 2026-10-10에 삭제.)
 - `src/core` (static lib `ka_core`): LayerOps, BasemapOps, SurveyStorage/SurveySession/SurveyProjectFactory, ExportService, LayoutService, ChecklistEngine (+ data/rules/drawing_checklist.v1.json), ProjectStateBuilder, Heritage*, Topographic*, Cadastral*, PolygonErase, FeaturePick.
 
 ## Test baseline history
 
-- Baseline at a6eb712 (main 9f3992c, 71 tests) was 67/71 with 4 known failures: workflow_engine `shapeEditing_livesInsideSelectTool`, cadastral `referenceLayerHasOutlineAndOptionalJibunLabels`, storage_safety `persistWorkspace_writeExceptionKeepsPreviousGeneration`, save_open_portable `oldVersionSurveysStillOpen`. On 2026-10-03 all four passed locally (ctest 4/4) and in CI (146/146), so CLAUDE.md and the commit gate stopped excusing them.
+- Baseline at a6eb712 (main 9f3992c, 71 tests) was 67/71 with 4 known failures: workflow_engine `shapeEditing_livesInsideSelectTool`, cadastral `referenceLayerHasOutlineAndOptionalJibunLabels`, storage_safety `persistWorkspace_writeExceptionKeepsPreviousGeneration`, save_open_portable `oldVersionSurveysStillOpen`. On 2026-10-03 all four passed locally (ctest 4/4) and in CI (146/146), so the guidance and the commit gate stopped excusing them.
 - The 10-01 merge line (`claude/strata-merge-20261001`, de0414f, 124 tests) was measured 117-118/120 at -j4 on 09-30 (closeSave flake, memory `strata-visual-redesign.md`). It was fast-forwarded into main on 2026-10-03. Replace this with a fresh measurement when one is taken.
 
 ## Worktrees
 
-- The desktop app runs each session in `<main>\.claude\worktrees\<name>` (`<main>`: CLAUDE.md 「Git」) on a `claude/<session>` branch. Once the desktop reuses a folder, the folder and branch names differ, so read `git branch --show-current` instead of assuming.
+- The desktop app runs each session in `<main>\.claude\worktrees\<name>` (`<main>`: AGENTS.md 「5. Git」) on a `claude/<session>` branch. Once the desktop reuses a folder, the folder and branch names differ, so read `git branch --show-current` instead of assuming.
 - New desktop sessions start from origin/main.
 
 ## Stale docs
 
-docs/HANDOFF.md, docs/README.md and TEST_INFRA.md still mention D:\hgis, D:\OSGeo4W, C:\CMake, AGENTS.md, .codex/NOW.md, publish-desktop after every build and a Codex section. Real paths: repo `<main>` (CLAUDE.md 「Git」; old PC A:\qgis), OSGeo4W C:\OSGeo4W on this PC (old PC A:\OSGeo4W) (QGIS 4.3 master, Qt 6.11), CMake C:\Program Files\CMake\bin, VS 2022 BuildTools. CLAUDE.md wins over those docs. docs/COMMIT_STATUS.md is stale; leave it.
+docs/HANDOFF.md and TEST_INFRA.md still mention C:\CMake, .codex/NOW.md, publish-desktop after every build and a Codex section. Real paths: repo `<main>` (AGENTS.md 「5. Git」; old PC A:\qgis), OSGeo4W C:\OSGeo4W on this PC (old PC A:\OSGeo4W) (QGIS 4.3 master, Qt 6.11), CMake C:\Program Files\CMake\bin, VS 2022 BuildTools. AGENTS.md wins over those docs. docs/COMMIT_STATUS.md and its Git hooks were removed on 2026-10-16.
 
 ## Why some rules exist
 

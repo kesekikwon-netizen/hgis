@@ -1,6 +1,6 @@
 // node --test .claude/hooks/commit-gate.test.mjs
 // Each test builds a throwaway git repo with fake build and ctest evidence, stages a change and asks
-// the hook about `git commit`. Only the test-weakening check and the line limit are covered here.
+// the hook about `git commit`. Only the test-weakening check is covered here, plus that file length never denies.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -44,7 +44,7 @@ function repoWith(t) {
   return { repo, git };
 }
 
-// Build and ctest evidence newer than every change, so only the weakening check or the line limit can deny.
+// Build and ctest evidence newer than every change, so only the weakening check can deny.
 function evidence(repo) {
   const release = path.join(repo, 'build', 'Release');
   fs.mkdirSync(path.join(repo, 'build', 'Testing', 'Temporary'), { recursive: true });
@@ -185,73 +185,10 @@ test('moving or re-indenting an assertion unchanged is not weakening', (t) => {
   assert.equal(ask(repo, 'git commit -m "style: 순서"'), null);
 });
 
-// Line limit (docs/intent/2026-10-03-line-limit-precommit.md): the same rule as
-// scripts/scorecard.ps1 -LineLimitOnly, checked before the commit instead of only on GitHub.
+// No line limit (2026-10-16): long files are not split to fit a count, so the gate never denies for length.
 const writeSrc = (rel, text) => (repo) => fs.writeFileSync(path.join(repo, ...rel.split('/')), text);
 
-test('growing a file past its recorded length is blocked', (t) => {
-  const repo = change(t, writeSrc('src/big.cpp', linesOf(312)));
-  const reason = ask(repo, 'git commit -m "fix: 고침"') ?? '';
-  assert.match(reason, /src\/big\.cpp/);
-  assert.match(reason, /312/);
-});
-
-test('a new C++ file over 300 lines is blocked, at 300 it passes', (t) => {
-  assert.match(ask(change(t, writeSrc('src/new.cpp', linesOf(301))), 'git commit -m "feat: 새 파일"') ?? '', /src\/new\.cpp/);
-  assert.equal(ask(change(t, writeSrc('src/new.cpp', linesOf(300, '\r\n'))), 'git commit -m "feat: 새 파일"'), null);
-});
-
-test('blank lines at the end count as on GitHub', (t) => {
-  const reason = ask(change(t, writeSrc('src/new.cpp', `${linesOf(299)}\n\n`)), 'git commit -m "feat: 새 파일"') ?? '';
-  assert.match(reason, /src\/new\.cpp: 301줄/);
-});
-
-test('editing a recorded file without growing it passes', (t) => {
-  assert.equal(ask(change(t, writeSrc('src/big.cpp', linesOf(305))), 'git commit -m "refactor: 줄임"'), null);
-});
-
-test('raising a recorded length needs a reason line', (t) => {
-  const raise = (repo) => {
-    writeSrc('src/big.cpp', linesOf(312))(repo);
-    writeSrc(BASELINE, '# C++ files already over the 300-line limit\n312 src/big.cpp\n')(repo);
-  };
-  assert.match(ask(change(t, raise), 'git commit -m "fix: 고침"') ?? '', /길이 기준 변경:/);
-  assert.equal(ask(change(t, raise), 'git commit -m "fix: 고침" -m "길이 기준 변경: 다른 대화의 수정으로 늘었다"'), null);
-  const onlyBaseline = (repo) => writeSrc(BASELINE, '# C++ files already over the 300-line limit\n320 src/big.cpp\n')(repo);
-  assert.match(ask(change(t, onlyBaseline), 'git commit -m "docs: 기준"') ?? '', /길이 기준 변경:/);
-});
-
-test('adding a new baseline entry needs a reason line', (t) => {
-  const add = writeSrc(BASELINE, '# C++ files already over the 300-line limit\n310 src/big.cpp\n400 src/later.cpp\n');
-  assert.match(ask(change(t, add), 'git commit -m "docs: 기준"') ?? '', /src\/later\.cpp/);
-  assert.equal(ask(change(t, add), 'git commit -m "docs: 기준" -m "길이 기준 변경: 곧 나눌 파일"'), null);
-});
-
-test('a header under tests/ over 300 lines is blocked', (t) => {
-  assert.match(ask(change(t, writeSrc('tests/helper.h', linesOf(301))), 'git commit -m "test: 도우미"') ?? '', /tests\/helper\.h: 301줄/);
-});
-
-test('a lone CR ends a line as on GitHub', (t) => {
-  assert.match(ask(change(t, writeSrc('src/new.cpp', linesOf(301, '\r'))), 'git commit -m "feat: 새 파일"') ?? '', /src\/new\.cpp: 301줄/);
-});
-
-test('-a counts the work tree, a plain commit counts what is staged', (t) => {
-  const repo = change(t, writeSrc('src/big.cpp', linesOf(305)));
-  writeSrc('src/big.cpp', linesOf(312))(repo); // grown again but not staged
-  assert.match(ask(repo, 'git commit -a -m "fix: 고침"') ?? '', /src\/big\.cpp: 312줄/);
-  assert.equal(ask(repo, 'git commit -m "fix: 고침"'), null);
-});
-
-test('lowering, dropping or deleting the baseline checks the listed file even outside the commit', (t) => {
-  const lower = writeSrc(BASELINE, '# C++ files already over the 300-line limit\n305 src/big.cpp\n');
-  assert.match(ask(change(t, lower), 'git commit -m "docs: 기준"') ?? '', /src\/big\.cpp: 310줄/);
-  const drop = writeSrc(BASELINE, '# C++ files already over the 300-line limit\n');
-  assert.match(ask(change(t, drop), 'git commit -m "docs: 기준"') ?? '', /src\/big\.cpp: 310줄/);
-  const remove = (repo) => fs.rmSync(path.join(repo, ...BASELINE.split('/')));
-  assert.match(ask(change(t, remove), 'git commit -m "docs: 기준"') ?? '', /src\/big\.cpp: 310줄/);
-  const shrinkBoth = (repo) => {
-    writeSrc('src/big.cpp', linesOf(305))(repo);
-    lower(repo);
-  };
-  assert.equal(ask(change(t, shrinkBoth), 'git commit -m "refactor: 줄임"'), null);
+test('file length never blocks a verified commit', (t) => {
+  assert.equal(ask(change(t, writeSrc('src/big.cpp', linesOf(312))), 'git commit -m "fix: 고침"'), null);
+  assert.equal(ask(change(t, writeSrc('src/new.cpp', linesOf(301))), 'git commit -m "feat: 새 파일"'), null);
 });
