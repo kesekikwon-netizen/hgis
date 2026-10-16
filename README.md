@@ -110,7 +110,5 @@ GNU GPLv2 or later (QGIS 링크 파생물). 고지 `LICENSE`, 전문 `COPYING`, 
 
 현재 브랜치/HEAD/원격 동기화/최근 커밋 목록:
 
-- 파일: `docs/COMMIT_STATUS.md` (훅을 설치한 PC 에서만 갱신된다. 날짜가 오래됐으면 그 PC 에 훅이 없다는 뜻이다. 최신 상태는 `git log` 가 정본)
-- 수동 갱신: `.\scripts\update-commit-status.ps1`
-- 훅 설치(한 번): `.\scripts\install-git-hooks.ps1`  → 이후 그 PC 의 커밋마다 갱신
-- 헬퍼 커밋: `.\scripts\commit.ps1 -Message "..." -Path path1,path2 -Push`
+- `git status`, `git log --oneline -10`, `git fetch origin main` 후 `git status -sb`
+- GitHub 의 main (`kesekikwon-netizen/hgis`) 이 정본이다.

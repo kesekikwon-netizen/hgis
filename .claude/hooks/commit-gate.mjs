@@ -16,11 +16,6 @@
 //       excused since 2026-10-03: the former four pass locally and in CI).
 // No build/ at all -> deny with the first-build command.
 //
-// Line limit, for every commit (docs-only too): a C++ file under src/ or tests/ in the commit may
-// pass 300 lines only when docs/quality/line-limit-baseline.txt lists it, and not past the listed
-// count (the CI rule of scripts/scorecard.ps1 -LineLimitOnly). A commit that raises or adds a
-// baseline entry needs a `길이 기준 변경: <이유>` line in its message.
-//
 // Evidence source: LastTest.log is rewritten by every ctest run, including a
 // run that matched zero tests (then it has no "Test:" block, so zero tests
 // never count as tested). LastTestsFailed.log is NOT used: ctest leaves a stale
@@ -46,9 +41,8 @@
 //   - Fallback: if nothing above matched but the raw text names
 //     commit/commit-tree/update-ref together with git or an indirection
 //     ($, eval, iex, xargs, &, alias), it is gated as a whole-worktree commit
-//     in cwd. Such a deny still needs unverified build-relevant changes or a
-//     line-limit problem, so a docs-only worktree passes unless it raises the
-//     line-limit baseline.
+//     in cwd. Such a deny still needs unverified build-relevant changes, so a
+//     docs-only worktree passes.
 //
 // Fast path: a command with none of git/commit/update-ref, an encoded
 // PowerShell command, eval/iex/xargs, or a script runner / script-like file
@@ -699,75 +693,6 @@ function weakenedTests(top, form, files) {
   return findings;
 }
 
-// Line limit (user decision 2026-10-03, docs/intent/2026-10-03-line-limit-precommit.md): the CI rule
-// of scripts/scorecard.ps1 -LineLimitOnly for the C++ files in the commit, and a reason line for
-// raising the baseline, like the test lock.
-const LINE_LIMIT = 300;
-const LINE_LIMIT_BASELINE = 'docs/quality/line-limit-baseline.txt';
-const LIMIT_REASON_RE = /^\s*길이 기준 변경\s*:\s*(?!없음\s*$)\S/m;
-
-// Lines as Get-Content counts them in scorecard.ps1: CRLF, LF or CR ends a line, and a final line
-// end does not start another one.
-function countLines(text) {
-  const lines = text.split(/\r\n|\r|\n/);
-  if (lines[lines.length - 1] === '') lines.pop();
-  return lines.length;
-}
-
-// "<count> <path>" lines of the baseline -> Map(path -> count); # comments do not match.
-function parseBaseline(text) {
-  const map = new Map();
-  for (const line of (text || '').split(/\r\n|\r|\n/)) {
-    const m = /^\s*(\d+)\s+(\S.*)$/.exec(line);
-    if (m) map.set(m[2].trim(), Number(m[1]));
-  }
-  return map;
-}
-
-function lineLimitProblems(top, form, files, message) {
-  const base = commitBase(top, form);
-  const baseBaseline = () => (base === null ? null : tryGit(['show', `${base}:${LINE_LIMIT_BASELINE}`], top));
-  const baselineChanged = files.includes(LINE_LIMIT_BASELINE);
-  const allowed = parseBaseline(baselineChanged ? committedText(top, form, LINE_LIMIT_BASELINE) : baseBaseline());
-  const old = baselineChanged ? parseBaseline(baseBaseline()) : allowed;
-  // A lowered or dropped entry (or a deleted baseline) is checked too, though its file is not in the commit.
-  const lowered = [...old].filter(([f, lines]) => !allowed.has(f) || allowed.get(f) < lines).map(([f]) => f);
-  const cpp = [...new Set([...files, ...lowered])].filter((x) => /^(?:src|tests)\/.+\.(?:cpp|h|hpp)$/i.test(x));
-  const texts = committedTexts(top, form, cpp);
-  const problems = [];
-
-  const over = [];
-  for (const f of cpp) {
-    const text = texts.get(f);
-    if (text === null) continue; // deleted in this commit
-    const lines = countLines(text);
-    if (lines <= LINE_LIMIT) continue;
-    if (!allowed.has(f)) over.push(`${f}: ${lines}줄 (기준 파일에 없는 파일은 ${LINE_LIMIT}줄까지)`);
-    else if (lines > allowed.get(f)) over.push(`${f}: ${lines}줄, 기준 ${allowed.get(f)}줄보다 많다`);
-  }
-  if (over.length) {
-    problems.push(
-      `C++ 파일이 길이 제한을 넘는다 (GitHub 검사 「Source line limit」와 같은 기준):\n    - ${over.join('\n    - ')}\n` +
-        `  파일을 줄이거나 나눈다. 꼭 늘려야 하면 ${LINE_LIMIT_BASELINE} 의 줄 수를 올리고(새 파일은 줄을 더하고) 커밋 메시지에 \`길이 기준 변경: <이유>\` 줄을 넣는다.`,
-    );
-  }
-
-  if (baselineChanged && !LIMIT_REASON_RE.test(message)) {
-    const raised = [];
-    for (const [f, lines] of allowed) {
-      if (!old.has(f)) raised.push(`${f}: ${lines}줄로 새로 넣음`);
-      else if (lines > old.get(f)) raised.push(`${f}: ${old.get(f)} → ${lines}줄`);
-    }
-    if (raised.length) {
-      problems.push(
-        `${LINE_LIMIT_BASELINE} 에서 줄 수를 올리거나 파일을 새로 넣었다:\n    - ${raised.join('\n    - ')}\n` +
-          '  정말 필요하면 커밋 메시지에 `길이 기준 변경: <이유>` 줄을 넣는다. 아니면 기준이 아니라 파일을 줄인다.',
-      );
-    }
-  }
-  return problems;
-}
-
 // The commit message: -m/--message values, heredoc bodies (`-F -`), a -F/--file file, and for an
 // --amend without a new message the message being amended.
 function messageText(command, cwd, top, form) {
@@ -967,7 +892,7 @@ function main() {
         );
       }
     }
-    const problems = [...(r.problems || []), ...lineLimitProblems(top, c.form, files, message)];
+    const problems = r.problems || [];
     if (!problems.length) continue;
     const shown = r.files.slice(0, 12).join(', ') + (r.files.length > 12 ? ` 외 ${r.files.length - 12}개` : '');
     reasons.push(

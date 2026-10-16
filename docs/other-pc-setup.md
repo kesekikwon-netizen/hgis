@@ -167,7 +167,6 @@ git push
 | `HANDOFF.md` | 제품 SSOT 요약 (`.codex/NOW.md`와 현재 코드 우선) |
 | `docs/vendor/qgis-manual-3.44/` | PyQGIS Cookbook PDF (git) + User Guide 다운로드 스크립트 |
 | `docs/domain/data-model.md` | 도메인 레이어/필드 |
-| `docs/COMMIT_STATUS.md` | 최근 커밋 장부 |
 
 대용량 Desktop User Guide PDF:
 
