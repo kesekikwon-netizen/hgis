@@ -1,6 +1,7 @@
 // 도형선택에서 Ctrl+C · Ctrl+V 로 지적 필지를 같은 자리에
 // 복사한다(docs/intent/2026-10-10-cadastral-own-section-copy-paste.md). 복사·붙이기 자체는 test_parcel_copy.cpp.
 #include <QApplication>
+#include <QElapsedTimer>
 #include <QKeyEvent>
 #include <QtTest>
 
@@ -189,6 +190,61 @@ class ParcelCopyKeysTest : public QObject {
       QVERIFY(code.contains(QLatin1String("actSnapToLines")) && code.contains(QStringLiteral("가까운 선에 붙이기")));
       QVERIFY(code.contains(QLatin1String("actSnapTrace")) && code.contains(QStringLiteral("선 따라 자동채움")));
       QVERIFY(code.contains(QLatin1String("actSnapPreview")) && code.contains(QStringLiteral("근접 자석점 표시")));
+    }
+    canvas.setLayers({});
+    project->clear();
+  }
+
+  // 시 전체 지적(필지 수만 개)을 띄운 채 그리기 도구로 마우스를 움직여도 화면이 멎지 않아야 한다
+  // (2026-10-16 「최신 포터블이 심하게 버벅인다」). 근접 자석점 표시·선 따라 자동채움은 마우스가
+  // 움직일 때마다 돈다. 고치기 전: 1 px = 0.5 m 에서 30 ms, 2 m 에서 48 ms, 8 m 에서 98 ms.
+  void snapTraceMouseMoveStaysFastOverDenseCadastral() {
+    QgsProject* project = QgsProject::instance();
+    project->clear();
+    auto* cad = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("지적"),
+                                   QStringLiteral("memory"));
+    LayerOps::markCadastralLayer(cad);
+    QgsFeatureList parcels;
+    const double x0 = 200000, y0 = 450000, cell = 12.0;
+    for (int i = 0; i < 160; ++i)
+      for (int j = 0; j < 160; ++j) {
+        QgsFeature f(cad->fields());
+        const double x = x0 + i * cell, y = y0 + j * cell;
+        f.setGeometry(QgsGeometry::fromPolygonXY({{QgsPointXY(x, y), QgsPointXY(x + cell, y),
+                                                   QgsPointXY(x + cell, y + cell * 0.5), QgsPointXY(x + cell, y + cell),
+                                                   QgsPointXY(x, y + cell), QgsPointXY(x, y)}}));
+        parcels << f;
+      }
+    cad->dataProvider()->addFeatures(parcels);
+    cad->dataProvider()->createSpatialIndex();  // 지적 GPKG처럼 공간 색인이 있다
+    cad->updateExtents();
+    project->addMapLayer(cad);
+
+    QgsMapCanvas canvas;
+    canvas.setRenderFlag(false);
+    canvas.setDestinationCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+    canvas.resize(1600, 1000);
+    canvas.mapSettings().setOutputSize(QSize(1600, 1000));
+    canvas.setLayers({cad});
+    const QgsPointXY mid(x0 + 960, y0 + 960);
+
+    // 그리는 축척(1 px = 0.1~2 m)은 20 ms, 시 전체를 넓게 본 화면(1 px = 8 m)은 70 ms 안. 여유를 둔 기준이다.
+    for (const double mupp : {8.0, 2.0, 0.5, 0.1}) {
+      canvas.setExtent(QgsRectangle(mid.x() - 800 * mupp, mid.y() - 500 * mupp, mid.x() + 800 * mupp,
+                                    mid.y() + 500 * mupp));
+      QElapsedTimer t;
+      t.start();
+      for (int k = 0; k < 10; ++k) {
+        const QgsPointXY cur(mid.x() + k * 3.1, mid.y() + k * 1.7);
+        SnapTraceOps::nearbyVertices(&canvas, cur);
+        SnapTraceOps::traceBetween(&canvas, QgsPointXY(mid.x() - 400 * mupp, mid.y()), cur);
+      }
+      const qint64 perMoveMs = t.elapsed() / 10;
+      const qint64 limitMs = mupp > 4.0 ? 70 : 20;
+      QVERIFY2(perMoveMs <= limitMs, qPrintable(QStringLiteral("마우스 한 번 움직임에 %1 ms (1 px = %2 m, 기준 %3 ms)")
+                                                    .arg(perMoveMs)
+                                                    .arg(mupp)
+                                                    .arg(limitMs)));
     }
     canvas.setLayers({});
     project->clear();

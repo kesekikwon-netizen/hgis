@@ -21,6 +21,8 @@ QVector<QgsPointXY> nearbyVertices(QgsMapCanvas* canvas, const QgsPointXY& curso
                          cursorMapPt.y() + radiusMap);
   const QgsCoordinateReferenceSystem canvasCrs = canvas->mapSettings().destinationCrs();
   QVector<QPair<double, QgsPointXY>> cands;
+  const double dedup = std::sqrt(dedupSq);
+  detail::PointGrid seen{dedup, {}};
   for (QgsVectorLayer* vl : eligibleLayers(canvas)) {
     QVector<QgsGeometry> geoms;
     if (!toCanvasAndFetch(vl, box, canvasCrs, nullptr, FID_NULL, geoms)) continue;
@@ -29,8 +31,12 @@ QVector<QgsPointXY> nearbyVertices(QgsMapCanvas* canvas, const QgsPointXY& curso
         const QgsPointXY pt((*vit).x(), (*vit).y());
         const double dSq = cursorMapPt.sqrDist(pt);
         if (dSq > radiusSq || (activeSnapPt && activeSnapPt->sqrDist(pt) <= dedupSq)) continue;
-        if (!std::any_of(cands.begin(), cands.end(), [&](const auto& c) { return c.second.sqrDist(pt) <= dedupSq; }))
-          cands.append({dSq, pt});
+        const QgsRectangle around(pt.x() - dedup, pt.y() - dedup, pt.x() + dedup, pt.y() + dedup);
+        const QVector<int> near = seen.candidates(around);
+        if (std::any_of(near.begin(), near.end(), [&](int i) { return cands[i].second.sqrDist(pt) <= dedupSq; }))
+          continue;
+        seen.insert(pt, cands.size());
+        cands.append({dSq, pt});
       }
     }
   }
@@ -80,8 +86,13 @@ QVector<QgsPointXY> traceBetween(QgsMapCanvas* canvas, const QgsPointXY& fromMap
   const QgsCoordinateReferenceSystem canvasCrs = canvas->mapSettings().destinationCrs();
   BoundaryGraph graph{mergeTol, mergeTol * mergeTol, {}, {}, {}};
   for (QgsVectorLayer* vl : eligibleLayers(canvas)) {
-    QVector<QgsGeometry> geoms;
-    if (toCanvasAndFetch(vl, box, canvasCrs, nullptr, FID_NULL, geoms)) graph.addGeometries(geoms, box);
+    // Stop reading once the graph is full: the rest would be skipped anyway (넓게 본 시 전체 지적).
+    const int seen = detail::forEachInCanvasBox(vl, box, canvasCrs, nullptr, FID_NULL, [&](const QgsGeometry& g) {
+      if (graph.full()) return false;
+      graph.addGeometry(g, box);
+      return true;
+    });
+    if (seen > 0) graph.linkTJunctions();
   }
   return graph.trace(fromMapPt, toMapPt, snapTol, vTol, skipSq, maxIntermediate);
 }

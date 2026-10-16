@@ -4,9 +4,12 @@
 #include "core/LayerOps.h"
 
 #include <algorithm>
+#include <functional>
 #include <cmath>
 #include <limits>
 #include <queue>
+
+#include <QHash>
 
 #include <qgsabstractgeometry.h>
 #include <qgscoordinatetransform.h>
@@ -49,10 +52,11 @@ inline QList<QgsVectorLayer*> eligibleLayers(QgsMapCanvas* canvas, QgsVectorLaye
   return cadRef;
 }
 
-inline bool toCanvasAndFetch(QgsVectorLayer* vl, const QgsRectangle& canvasBox,
-                             const QgsCoordinateReferenceSystem& canvasCrs, QgsVectorLayer* exLayer, QgsFeatureId exFid,
-                             QVector<QgsGeometry>& out) {
-  if (!vl) return false;
+// Hands each geometry in canvasBox (in canvas CRS) to visit until it returns false. Returns how many it saw.
+inline int forEachInCanvasBox(QgsVectorLayer* vl, const QgsRectangle& canvasBox,
+                              const QgsCoordinateReferenceSystem& canvasCrs, QgsVectorLayer* exLayer,
+                              QgsFeatureId exFid, const std::function<bool(const QgsGeometry&)>& visit) {
+  if (!vl) return 0;
   QgsRectangle reqBox = canvasBox;
   const bool needXf = canvasCrs.isValid() && vl->crs().isValid() && vl->crs() != canvasCrs;
   QgsCoordinateTransform toLayer, toCanvas;
@@ -69,6 +73,7 @@ inline bool toCanvasAndFetch(QgsVectorLayer* vl, const QgsRectangle& canvasBox,
       KA_LOG_EXCEPT();
     }
   }
+  int seen = 0;
   QgsFeature feat;
   QgsFeatureIterator it = vl->getFeatures(QgsFeatureRequest().setFilterRect(reqBox).setNoAttributes());
   while (it.nextFeature(feat)) {
@@ -82,10 +87,48 @@ inline bool toCanvasAndFetch(QgsVectorLayer* vl, const QgsRectangle& canvasBox,
         continue;
       }
     }
-    out.append(g);
+    ++seen;
+    if (!visit(g)) break;
   }
+  return seen;
+}
+
+inline bool toCanvasAndFetch(QgsVectorLayer* vl, const QgsRectangle& canvasBox,
+                             const QgsCoordinateReferenceSystem& canvasCrs, QgsVectorLayer* exLayer, QgsFeatureId exFid,
+                             QVector<QgsGeometry>& out) {
+  forEachInCanvasBox(vl, canvasBox, canvasCrs, exLayer, exFid, [&out](const QgsGeometry& g) { out.append(g); return true; });
   return !out.isEmpty();
 }
+
+// Points by square cell: "within r of p" reads nearby cells, not every point (마우스마다 돌므로).
+struct PointGrid {
+  double cell = 0.0;
+  QHash<quint64, QVector<int>> cells;
+  static quint64 keyOf(qint64 cx, qint64 cy) {
+    return (static_cast<quint64>(static_cast<quint32>(cx)) << 32) | static_cast<quint32>(cy);
+  }
+  qint64 cellOf(double v) const { return static_cast<qint64>(std::floor(v / cell)); }
+  void insert(const QgsPointXY& p, int index) { cells[keyOf(cellOf(p.x()), cellOf(p.y()))].append(index); }
+  // Indices of points that may lie in rect (callers grow it). Ascending, no repeats. A long side (km 단위
+  // 경계선) can span more cells than are filled: then the filled ones are walked instead.
+  QVector<int> candidates(const QgsRectangle& rect) const {
+    QVector<int> out;
+    const qint64 x0 = cellOf(rect.xMinimum()), x1 = cellOf(rect.xMaximum());
+    const qint64 y0 = cellOf(rect.yMinimum()), y1 = cellOf(rect.yMaximum());
+    if (static_cast<double>(x1 - x0 + 1) * static_cast<double>(y1 - y0 + 1) > cells.size()) {
+      for (auto it = cells.constBegin(); it != cells.constEnd(); ++it) {
+        const qint64 cx = static_cast<qint32>(it.key() >> 32), cy = static_cast<qint32>(it.key() & 0xffffffffu);
+        if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) out += it.value();
+      }
+    } else {
+      for (qint64 cx = x0; cx <= x1; ++cx)
+        for (qint64 cy = y0; cy <= y1; ++cy) out += cells.value(keyOf(cx, cy));
+    }
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+  }
+};
 
 inline QgsPointXY projectOnSegment(const QgsPointXY& p, const QgsPointXY& a, const QgsPointXY& b) {
   const double dx = b.x() - a.x(), dy = b.y() - a.y(), lenSq = dx * dx + dy * dy;
@@ -95,16 +138,32 @@ inline QgsPointXY projectOnSegment(const QgsPointXY& p, const QgsPointXY& a, con
 }
 
 struct BoundaryGraph {
+  static constexpr int kMaxNodes = 900;
   double mergeTol = 0.01, mergeSq = 0.0001;
   QVector<QgsPointXY> nodes;
   QVector<QVector<QPair<int, double>>> adj;
   QVector<QPair<int, int>> segs;
+  PointGrid grid;  // nodes by cell; the cell is never smaller than mergeTol
 
-  int addNode(const QgsPointXY& p) {
-    for (int i = 0; i < nodes.size(); ++i)
+  bool full() const { return nodes.size() >= kMaxNodes; }
+  void ensureGrid(const QgsRectangle* box) {
+    if (grid.cell > 0.0) return;
+    const double span = box ? std::max(box->width(), box->height()) : 0.0;
+    grid.cell = std::max(mergeTol * 2.0, std::isfinite(span) ? span / 128.0 : 0.0);
+  }
+  // The lowest-index node within mergeTol of p, as a scan over all nodes would find; -1 if none.
+  int findNode(const QgsPointXY& p) const {
+    const QgsRectangle around(p.x() - mergeTol, p.y() - mergeTol, p.x() + mergeTol, p.y() + mergeTol);
+    for (int i : grid.candidates(around))
       if (nodes[i].sqrDist(p) <= mergeSq) return i;
+    return -1;
+  }
+  int addNode(const QgsPointXY& p) {
+    ensureGrid(nullptr);
+    if (const int i = findNode(p); i >= 0) return i;
     nodes.append(p);
     adj.emplaceBack();
+    grid.insert(p, nodes.size() - 1);
     return nodes.size() - 1;
   }
   void addEdge(int u, int v) {
@@ -114,23 +173,27 @@ struct BoundaryGraph {
     adj[v].append({u, w});
     segs.append({u, v});
   }
-  void addGeometries(const QVector<QgsGeometry>& geoms, const QgsRectangle& box) {
-    for (const QgsGeometry& geom : geoms) {
-      if (nodes.size() >= 900) break;
-      const QgsAbstractGeometry* ag = geom.constGet();
-      if (!ag) continue;
-      for (int p = 0; p < ag->partCount(); ++p)
-        for (int r = 0; r < ag->ringCount(p); ++r)
-          for (int v = 0, n = ag->vertexCount(p, r); v + 1 < n; ++v) {
-            const QgsPoint p0 = ag->vertexAt(QgsVertexId(p, r, v)), p1 = ag->vertexAt(QgsVertexId(p, r, v + 1));
-            const QgsPointXY a(p0.x(), p0.y()), b(p1.x(), p1.y());
-            if (box.contains(a) || box.contains(b)) addEdge(addNode(a), addNode(b));
-          }
-    }
+  void addGeometry(const QgsGeometry& geom, const QgsRectangle& box) {
+    ensureGrid(&box);
+    const QgsAbstractGeometry* ag = geom.constGet();
+    if (!ag) return;
+    for (int p = 0; p < ag->partCount(); ++p)
+      for (int r = 0; r < ag->ringCount(p); ++r)
+        for (int v = 0, n = ag->vertexCount(p, r); v + 1 < n; ++v) {
+          const QgsPoint p0 = ag->vertexAt(QgsVertexId(p, r, v)), p1 = ag->vertexAt(QgsVertexId(p, r, v + 1));
+          const QgsPointXY a(p0.x(), p0.y()), b(p1.x(), p1.y());
+          if (box.contains(a) || box.contains(b)) addEdge(addNode(a), addNode(b));
+        }
+  }
+  // A corner of one parcel lying on another parcel's side joins that side (T-junction).
+  void linkTJunctions() {
+    const double reach = mergeTol * 2.0;  // sqrt(mergeSq * 4)
     const int origSegs = segs.size();
     for (int s = 0; s < origSegs; ++s) {
       const auto [u, v] = segs[s];
-      for (int w = 0; w < nodes.size(); ++w) {
+      QgsRectangle around(nodes[u], nodes[v]);
+      around.grow(reach);
+      for (int w : grid.candidates(around)) {
         if (w == u || w == v) continue;
         if (projectOnSegment(nodes[w], nodes[u], nodes[v]).sqrDist(nodes[w]) <= mergeSq * 4.0) {
           addEdge(u, w);
@@ -138,6 +201,13 @@ struct BoundaryGraph {
         }
       }
     }
+  }
+  void addGeometries(const QVector<QgsGeometry>& geoms, const QgsRectangle& box) {
+    for (const QgsGeometry& geom : geoms) {
+      if (full()) break;
+      addGeometry(geom, box);
+    }
+    linkTJunctions();
   }
   QgsPointXY snapPoint(const QgsPointXY& target, double vTol, double sTol, bool* moved) {
     int bestN = -1, bestS = -1;

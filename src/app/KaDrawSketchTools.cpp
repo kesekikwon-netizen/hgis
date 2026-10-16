@@ -17,10 +17,12 @@
 
 #include <QAction>
 #include <QLabel>
+#include <QMenu>
 #include <QSignalBlocker>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QToolBar>
+#include <QToolButton>
 
 #if KA_HGIS_HAS_QGIS
 #include <qgsmapcanvas.h>
@@ -32,18 +34,11 @@
 void MainWindow::addDrawSketchButtons() {
 #if KA_HGIS_HAS_QGIS
   if (!m_subToolbar) return;
-  if (!property("kaSnapTraceInit").toBool()) {
-    setProperty("kaSnapTraceInit", true);
-    setProperty("kaSnapTrace", true);
-    setProperty("kaSnapPreview", true);
-  }
+  if (!property("kaSnapTraceInit").toBool())  // both snap helpers start on
+    for (const char* name : {"kaSnapTraceInit", "kaSnapTrace", "kaSnapPreview"}) setProperty(name, true);
   QAction* easyAct = nullptr;
-  for (QAction* act : m_subToolbar->actions()) {
-    if (act && act->property("kaSubTool").toString() == QLatin1String("easy")) {
-      easyAct = act;
-      break;
-    }
-  }
+  for (QAction* act : m_subToolbar->actions())
+    if (!easyAct && act && act->property("kaSubTool").toString() == QLatin1String("easy")) easyAct = act;
   auto runSnapToLines = [this]() -> bool {
     QString msg;
     const int n = SnapTraceOps::snapCanvasShapesToNearestLines(m_canvas, m_lastDrawnLayer, m_lastDrawnFid, &msg);
@@ -52,21 +47,29 @@ void MainWindow::addDrawSketchButtons() {
     if (!msg.isEmpty()) statusBar()->showMessage(msg, 6000);
     return n > 0;
   };
-  auto* snapNowAct = new QAction(QStringLiteral("가까운 선에 붙이기"), m_subToolbar);
+  // 자석 보조 셋은 「자석」 옆 좁은 ▾(눌러서 여는 메뉴)에: 글자 단추 셋(409 px)이면 1904 px 창에서 줄 글자가 다 숨었다.
+  auto* assist = new QToolButton(m_subToolbar);
+  assist->setObjectName(QStringLiteral("btnSnapAssist"));
+  assist->setArrowType(Qt::DownArrow);
+  assist->setStyleSheet(QStringLiteral("QToolButton { padding-left: 2px; padding-right: 2px; }"));
+  assist->setToolTip(QStringLiteral("자석 보조 — 선 따라 자동채움 · 근접 자석점 표시 · 가까운 선에 붙이기"));
+  auto* assistMenu = new QMenu(assist);
+  assistMenu->setToolTipsVisible(true);
+  connect(assist, &QToolButton::clicked, assistMenu, [assist, assistMenu] { assistMenu->popup(assist->mapToGlobal(QPoint(0, assist->height()))); });
+  (easyAct ? m_subToolbar->insertWidget(easyAct, assist) : m_subToolbar->addWidget(assist))->setProperty("kaSnapAssist", true);
+  auto* snapNowAct = new QAction(QStringLiteral("가까운 선에 붙이기"), assistMenu);
   snapNowAct->setObjectName(QStringLiteral("actSnapToLines"));
-  easyAct ? m_subToolbar->insertAction(easyAct, snapNowAct) : m_subToolbar->addAction(snapNowAct);
   snapNowAct->setToolTip(QStringLiteral(
       "지적도·사업자 도면 위에 그린 도형(방금 그린 도형 또는 선택한 도형)을\n"
       "가장 가까운 지적선·도면선에 자동으로 붙이고 빠진 사이 꺾임점도 채웁니다 (Ctrl+Z 되돌리기 가능)."));
   connect(snapNowAct, &QAction::triggered, this, runSnapToLines);
   auto addSnapToggle = [&](const QString& text, const char* objName, const char* propName, bool isTrace,
                            const QString& tip, const QString& onMsg) {
-    auto* act = new QAction(text, m_subToolbar);
+    auto* act = new QAction(text, assistMenu);
     act->setObjectName(QString::fromLatin1(objName));
     act->setProperty(propName, true);
     act->setCheckable(true);
-    easyAct ? m_subToolbar->insertAction(easyAct, act) : m_subToolbar->addAction(act);
-    if (QWidget* toggle = m_subToolbar->widgetForAction(act)) toggle->setProperty("kaToggle", true);
+    assistMenu->addAction(act);
     act->setToolTip(tip);
     connect(act, &QAction::toggled, this, [this, propName, isTrace, text, onMsg, runSnapToLines](bool on) {
       setProperty(propName, on);
@@ -80,8 +83,7 @@ void MainWindow::addDrawSketchButtons() {
       statusBar()->showMessage(on ? onMsg : (text + QStringLiteral(" 꺼짐")), 5000);
     });
   };
-  addSnapToggle(
-      QStringLiteral("선 따라 자동채움"), "actSnapTrace", "kaSnapTrace", true,
+  addSnapToggle(QStringLiteral("선 따라 자동채움"), "actSnapTrace", "kaSnapTrace", true,
       QStringLiteral("1번 기능(선 따라 빠진 사이 자석점 자동 채우기)\n"
                      "· 그릴 때 자석점 한두 칸을 건너뛰어도 사이 꼭짓점을 선을 따라 자동으로 채우며,\n"
                      "  이미 그린 도형이 있을 때 누르면 가장 가까운 선에 바로 붙입니다."),
@@ -90,6 +92,7 @@ void MainWindow::addDrawSketchButtons() {
                 QStringLiteral("3번 기능(마우스가 가까이 갔을 때만 주변 자석점 미리 표시)\n"
                                "· 마우스가 선·꼭짓점에 가까이 갔을 때만 주변 자석점을 미리 보여 줍니다."),
                 QStringLiteral("근접 자석점 표시 켜짐 — 마우스가 가까이 갔을 때만 주변 자석점을 미리 보여 줍니다."));
+  assistMenu->addAction(snapNowAct);
   auto* finishAct = m_subToolbar->addAction(KaIcons::icon(QStringLiteral("check")), QStringLiteral("완료"));
   finishAct->setProperty("kaSketch", QStringLiteral("finish"));
   finishAct->setToolTip(QStringLiteral("그리던 도형을 마칩니다. 우클릭·Enter·더블클릭과 같습니다."));
@@ -142,14 +145,14 @@ void MainWindow::syncDrawSketchButtons() {
       m_captureTool && m_canvas && m_canvas->mapTool() == m_captureTool && m_captureTool->hasSketch();
   for (QAction* action : m_subToolbar->actions()) {
     if (!action) continue;
-    if (action->property("kaSnapTrace").toBool()) {
-      const QSignalBlocker block(action);
-      action->setChecked(snapTrace);
-      continue;
-    }
-    if (action->property("kaSnapPreview").toBool()) {
-      const QSignalBlocker block(action);
-      action->setChecked(snapPreview);
+    if (action->property("kaSnapAssist").toBool()) {  // the ▾ menu next to 「자석」
+      auto* assist = qobject_cast<QToolButton*>(m_subToolbar->widgetForAction(action));
+      auto* menu = assist ? assist->findChild<QMenu*>() : nullptr;
+      for (QAction* item : menu ? menu->actions() : QList<QAction*>()) {
+        const QSignalBlocker block(item);
+        if (item->property("kaSnapTrace").toBool()) item->setChecked(snapTrace);
+        if (item->property("kaSnapPreview").toBool()) item->setChecked(snapPreview);
+      }
       continue;
     }
     const QString id = action->property("kaSketch").toString();
